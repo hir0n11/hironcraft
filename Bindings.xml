@@ -1,0 +1,17 @@
+<Bindings>
+  <Binding name="HIRONCRAFT_SCAN_TOGGLE" category="HironCraftScan">
+    HironCraftScanScannerMenu.PageButton:OnClick();
+  </Binding>
+  <Binding name="HIRONCRAFT_SCAN_CONFIG_TOGGLE" category="HironCraftScan">
+    HironCraftScanConfigPage:ToggleVisibility()
+  </Binding>
+  <Binding name="HIRONCRAFT_SCAN_GREET_CURRENT_CUSTOMER" category="HironCraftScan">
+    HironCraftScanScannerMenu.AlertBGButton:OnClick("LeftButton");
+  </Binding>
+  <Binding name="HIRONCRAFT_SCAN_CHAT_CURRENT_CUSTOMER" category="HironCraftScan">
+    HironCraftScanScannerMenu.AlertBGButton:OnClick("MiddleButton");
+  </Binding>
+  <Binding name="HIRONCRAFT_SCAN_DISMISS_CURRENT_CUSTOMER" category="HironCraftScan">
+    HironCraftScanScannerMenu.AlertBGButton:OnClick("RightButton");
+  </Binding>
+</Bindings>

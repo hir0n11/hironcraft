@@ -1,0 +1,162 @@
+## Interface: 120100
+## Title: |cffffd200HironCraft|r
+## Version: 0.1.0
+## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
+## Author: Hiron
+## Category: Professions
+## SavedVariables: HironCraftScan_DB, HironCraftProfit_DB, HironCraftProfit_Config, HironCraftProfit_PriceDB
+## SavedVariablesPerCharacter: HironCraftProfit_CharConfig
+## OptionalDeps: CraftScan, AhUI, AhUI_Buttons, AhUI_GoldDeposit, AhUI_Orders, AhUI_QuestShopping, AhUI_Shop, AhUI_StackAssist, LibSharedMedia-3.0
+## IconTexture: Interface\AddOns\HironCraft\ProfitHub\Core\Media\logo.tga
+
+Bootstrap.lua
+
+# Shared libraries
+embeds.xml
+Libs\classic.lua
+Libs\LibSerialize.lua
+Libs\LibDeflate.lua
+Libs\RobotsDotTxtClient.lua
+
+ProfitHub\Core\Libs\LibStub\LibStub.lua
+ProfitHub\Core\Libs\LibAHTab\LibAHTab.lua
+ProfitHub\Core\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+ProfitHub\Core\Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+ProfitHub\Core\Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+# Profit workflow core
+ProfitHub\Core\Core\Core.lua
+ProfitHub\Core\Core\Prices.lua
+ProfitHub\Core\Core\EscClose.lua
+
+ProfitHub\Core\CraftEngine\Engine.lua
+ProfitHub\Core\CraftEngine\EnchantData.lua
+ProfitHub\Core\CraftEngine\SpecCal.lua
+
+ProfitHub\Core\Locales\enUS.lua
+ProfitHub\Core\Locales\ruRU.lua
+
+ProfitHub\Core\UI\Dropdown.lua
+ProfitHub\Core\UI\Tooltip.lua
+ProfitHub\Core\UI\Welcome.lua
+ProfitHub\Core\Core\Professions.lua
+ProfitHub\Core\Core\Data.lua
+ProfitHub\Core\Core\Tracker.lua
+ProfitHub\Core\Core\SkinningCheck_Core.lua
+ProfitHub\Core\Core\ConcentrationData.lua
+ProfitHub\Core\Core\AccountOverview.lua
+ProfitHub\Core\Core\AccountOverview_Data.lua
+
+ProfitHub\Core\DB\DF.lua
+ProfitHub\Core\DB\TWW.lua
+ProfitHub\Core\DB\MID.lua
+ProfitHub\Core\DB\SpecMap_DF.lua
+ProfitHub\Core\DB\SpecMap_TWW.lua
+ProfitHub\Core\DB\SpecMap_MID.lua
+
+ProfitHub\Core\UI\Minimap.lua
+ProfitHub\Core\UI\Fonts.lua
+ProfitHub\Core\UI\Concentration.lua
+ProfitHub\Core\UI\AccountOverview_UI.lua
+ProfitHub\Core\UI\FirstCraft.lua
+ProfitHub\Core\UI\UI.lua
+ProfitHub\Core\UI\AtlasGallery.lua
+ProfitHub\Core\UI\SkinningCheck_UI.lua
+ProfitHub\Core\UI\SkinningTargets.lua
+ProfitHub\Core\Core\MapPins.lua
+ProfitHub\Core\UI\MapPins.xml
+ProfitHub\Core\Settings\Settings.lua
+ProfitHub\Core\Settings\Customization.lua
+
+# Buttons
+ProfitHub\Buttons\Locale.lua
+ProfitHub\Buttons\ConfirmButtons.lua
+ProfitHub\Buttons\ConfirmButtons_Settings.lua
+
+# Gold Deposit
+ProfitHub\GoldDeposit\Locale.lua
+ProfitHub\GoldDeposit\GoldDepositor.lua
+
+# Shop (loaded before Orders and QuestShopping)
+ProfitHub\Shop\Locale.lua
+ProfitHub\Shop\Core\ShoppingList_Core.lua
+ProfitHub\Shop\Core\ShoppingList_Selling.lua
+ProfitHub\Shop\Core\ShoppingList_Cancelling.lua
+ProfitHub\Shop\UI\ShoppingList_UI.lua
+ProfitHub\Shop\UI\ShoppingList_Selling_UI.lua
+ProfitHub\Shop\UI\ShoppingList_Cancelling_UI.lua
+
+# Orders
+ProfitHub\Orders\Locale.lua
+ProfitHub\Orders\Core\CraftingOrders_Core.lua
+ProfitHub\Orders\CraftingOrders\Table.lua
+ProfitHub\Orders\CraftingOrders\State.lua
+ProfitHub\Orders\CraftingOrders\QualityReagents.lua
+ProfitHub\Orders\CraftingOrders\Rows.lua
+ProfitHub\Orders\CraftingOrders\ExpansionQuest.lua
+ProfitHub\Orders\CraftingOrders\QueueShopping.lua
+ProfitHub\Orders\CraftingOrders\Panel.lua
+ProfitHub\Orders\CraftingOrders\Actions.lua
+ProfitHub\Orders\CraftingOrders\CustomList.lua
+ProfitHub\Orders\CraftingOrders\HooksEvents.lua
+ProfitHub\Orders\CraftingOrders\OneButton.lua
+
+# Quest Shopping
+ProfitHub\QuestShopping\Locale.lua
+ProfitHub\QuestShopping\QuestShopping.lua
+ProfitHub\QuestShopping\QuestShopping_Settings.lua
+
+# Stack Assist
+ProfitHub\StackAssist\Locale.lua
+ProfitHub\StackAssist\Core\StackAssist.lua
+
+# Chat scanner
+Consts.lua
+
+Locales\enUS.lua
+Locales\deDE.lua
+Locales\itIT.lua
+Locales\ruRU.lua
+Locales\ptBR.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\koKR.lua
+Locales\zhTW.lua
+Locales\zhCN.lua
+Locales\Localization.lua
+
+Utils\Debug.lua
+Utils\EventBus.lua
+Utils\DoOnce.lua
+Utils\Utils.xml
+Utils\ReleaseNotes.xml
+Utils\Dialog.xml
+Utils\TimeSlice.lua
+Utils\Tooltip.lua
+Utils\TooltipPlot.lua
+Utils\WaitGroup.lua
+Utils\Comm.lua
+Utils\FStrings.lua
+
+Config\RecipeSchematicMenu.xml
+
+Customer\AlertIcon.xml
+Customer\ChatScanner.lua
+Customer\OrderFulfillment.lua
+Customer\QuickReplies.lua
+Customer\OrderTableTemplate.xml
+Customer\AnalyticsTableTemplate.xml
+Customer\OrderPage.xml
+
+Settings\Settings.xml
+Customer\CustomerPage.xml
+
+Config\Concentration.lua
+Config\ConfigPage.xml
+Config\BasicTemplates.xml
+Config\QuickRepliesPanel.lua
+Config\RecipeConfigPanel.xml
+Config\ProfessionConfigPanel.xml
+Config\GeneralConfigPanel.xml
+Config\SubstitutionTagPanel.xml
