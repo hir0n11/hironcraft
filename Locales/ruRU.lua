@@ -479,6 +479,7 @@ L["Crafting order status claimed"] = "Ремесленный заказ прин
 L["Crafting order status crafted"] = "Предмет изготовлен и ожидает сдачи заказа."
 L["Crafting order status fulfilled"] = "Ремесленный заказ выполнен и сдан."
 L["Crafting order status failed"] = "Последняя попытка сдать ремесленный заказ завершилась ошибкой."
+L["Crafting order status rejected"] = "Заказ отклонён: заказчик приложил не все обязательные реагенты."
 L["Crafting order crafter"] = "Крафтер: %s"
 L["Crafting order updated"] = "Обновлено: %s"
 L["Crafting order sync pending"] = "Сохранено локально. Ожидается подтверждение связанного аккаунта."

@@ -61,6 +61,7 @@ HironCraftScanComm.Operations = {
     OrderStatusAck = 'order_status_ack',
     ShareOrderCompletion = 'share_order_completion',
     ShareOrderCompletionRepair = 'share_order_completion_repair',
+    ShareOrderOutcome = 'share_order_outcome',
     ShareAnalytics = 'share_analytics',
     Ping = 'ping',
     FindCrafter = 'fc',
@@ -305,6 +306,18 @@ local function ShareCharacterData_(state, target)
 
     local revisions = CreateRevisions()
     local peers = MyPeers()
+    local orderCompletions = {}
+    local orderOutcomes = {}
+    if HironCraftScan.OrderFulfillment then
+        for key, notice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
+            if notice.status == HironCraftScan.OrderFulfillment.Status.Rejected then
+                orderOutcomes[key] = HironCraftScan.Utils.DeepCopy(notice)
+            else
+                orderCompletions[key] = HironCraftScan.Utils.DeepCopy(notice)
+            end
+        end
+    end
+
     local data = {
         revisions = revisions,
         peers = peers,
@@ -313,8 +326,8 @@ local function ShareCharacterData_(state, target)
         quick_replies_revision = QuickRepliesRevision(),
         order_statuses = HironCraftScan.OrderFulfillment
             and HironCraftScan.Utils.DeepCopy(HironCraftScan.OrderFulfillment:GetStatuses()),
-        order_completions = HironCraftScan.OrderFulfillment
-            and HironCraftScan.Utils.DeepCopy(HironCraftScan.OrderFulfillment:GetCompletionNotices()),
+        order_completions = orderCompletions,
+        order_outcomes = orderOutcomes,
         state = state,
     }
     SendShareCharacterData(target, data)
@@ -430,6 +443,10 @@ local function ReceiveShareCharacterData(sender, data, senderID)
 
     if data.order_completions and HironCraftScan.OrderFulfillment then
         HironCraftScan.OrderFulfillment:ApplyRemoteCompletionNotices(data.order_completions)
+    end
+
+    if data.order_outcomes and HironCraftScan.OrderFulfillment then
+        HironCraftScan.OrderFulfillment:ApplyRemoteCompletionNotices(data.order_outcomes)
     end
 
     if data.state ~= SharingState.ResponseData then
@@ -634,7 +651,14 @@ HironCraftScan.Events:Register('CHARACTER_ENABLED', function(ctxt)
     HironCraftScanComm:ShareCharacterModification(ctxt.name, ctxt.ppInfo.professionID)
 end)
 
-function HironCraftScanComm:ShareCustomerOrder(message, customer, customerGuid, lastChatFrameMessage)
+function HironCraftScanComm:ShareCustomerOrder(
+    message,
+    customer,
+    customerGuid,
+    lastChatFrameMessage,
+    requestToken,
+    restartTerminalRequest
+)
     if not LinkedAccountsConfigured() then
         return
     end
@@ -650,6 +674,8 @@ function HironCraftScanComm:ShareCustomerOrder(message, customer, customerGuid, 
         customer = customer,
         customerGuid = customerGuid,
         lastChatFrameMessage = HironCraftScan.Utils.DeepCopy(lastChatFrameMessage),
+        requestToken = requestToken,
+        restartTerminalRequest = restartTerminalRequest == true,
     }
 
     -- Trying to send a function crashes serialization. Only seen this in testing at args[9]
@@ -691,7 +717,16 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
     -- have all the same config on this side, so we can process it in the same
     -- way. This is more work on this side, but it minimizes both the sent data and
     -- the differences between a received message and a naturally detected message.
-    HironCraftScan.OnMessage('CHAT_MSG_CHANNEL', data.message, data.customer, data.customerGuid)
+    HironCraftScan.OnMessage(
+        'CHAT_MSG_CHANNEL',
+        data.message,
+        data.customer,
+        data.customerGuid,
+        {
+            requestToken = data.requestToken,
+            restartTerminalRequest = data.restartTerminalRequest == true,
+        }
+    )
 
     HironCraftScanComm.applying_remote_state = false
 end
@@ -990,7 +1025,9 @@ function HironCraftScanComm:ShareOrderCompletion(notice)
     local recentStatuses = {}
     if HironCraftScan.OrderFulfillment then
         for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
-            table.insert(recent, storedNotice)
+            if storedNotice.status ~= HironCraftScan.OrderFulfillment.Status.Rejected then
+                table.insert(recent, storedNotice)
+            end
         end
         table.sort(recent, function(lhs, rhs)
             return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
@@ -1036,6 +1073,48 @@ function HironCraftScanComm:ShareOrderCompletion(notice)
                 TransmitToFullLinkedAccounts(
                     notice,
                     HironCraftScanComm.Operations.ShareOrderCompletion
+                )
+            end
+        end)
+    end
+end
+
+
+function HironCraftScanComm:ShareOrderOutcome(notice)
+    if not LinkedAccountsConfigured() or HironCraftScanComm.applying_remote_state then
+        return
+    end
+
+    local recent = {}
+    if HironCraftScan.OrderFulfillment then
+        for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
+            if storedNotice.status == HironCraftScan.OrderFulfillment.Status.Rejected then
+                table.insert(recent, storedNotice)
+            end
+        end
+        table.sort(recent, function(lhs, rhs)
+            return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
+        end)
+        while #recent > 12 do
+            table.remove(recent)
+        end
+    end
+
+    local payload = {
+        notice = HironCraftScan.Utils.DeepCopy(notice),
+        recent = HironCraftScan.Utils.DeepCopy(recent),
+    }
+    TransmitToFullLinkedAccounts(
+        payload,
+        HironCraftScanComm.Operations.ShareOrderOutcome
+    )
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(2, function()
+            if LinkedAccountsConfigured() then
+                TransmitToFullLinkedAccounts(
+                    payload,
+                    HironCraftScanComm.Operations.ShareOrderOutcome
                 )
             end
         end)
@@ -1735,6 +1814,7 @@ local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareOrderStatus] = true,
     [HironCraftScanComm.Operations.OrderStatusAck] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletion] = true,
+    [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
     [HironCraftScanComm.Operations.Ping] = true,
     [HironCraftScanComm.Operations.RequestCraft] = true,
 }
@@ -2028,6 +2108,8 @@ local function ReceiveDeserialized(msg, sender)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderStatusAck then
             ReceiveOrderStatusAck(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderCompletion then
+            ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderOutcome then
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
         elseif
             hasFull

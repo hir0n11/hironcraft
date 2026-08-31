@@ -959,6 +959,17 @@ function CO:GetRowAction(orderID, fallbackOrder)
         return "fulfilling", T("COA_ACTION_FULFILLING", "Completing"), order, false
     end
 
+    local rejectedKey = OrderKey(orderID)
+    local rejectedUntil = rejectedKey
+        and self.rejectedOrderIDs
+        and self.rejectedOrderIDs[rejectedKey]
+    if rejectedUntil then
+        if rejectedUntil > (GetTime and GetTime() or 0) then
+            return "rejecting", T("COA_ACTION_REJECTING", "Declining"), order, false
+        end
+        self.rejectedOrderIDs[rejectedKey] = nil
+    end
+
     if self.craftedOrderID and SameOrderID(self.craftedOrderID, orderID) then
         if claimed and SameOrderID(claimed.orderID, orderID) then
             return "fulfill", T("COA_ACTION_FULFILL", "Complete"), order or claimed, true
@@ -973,6 +984,10 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
 
     if IsOrderCreated(order) then
+        local shouldReject = self:ShouldRejectForMissingCustomerReagents(order)
+        if shouldReject then
+            return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
+        end
         return "claim", T("COA_ACTION_CLAIM", "Claim"), order, true
     end
 
@@ -1488,7 +1503,11 @@ function CO:UpdateConcentrationRequiredBorder(row, order)
 end
 
 function GetCompactActionText(action, actionText, order)
-    if action == "claim" then
+    if action == "reject" then
+        return T("COA_ACTION_REJECT_SHORT", "Decline")
+    elseif action == "rejecting" then
+        return T("COA_ACTION_REJECTING_SHORT", "...")
+    elseif action == "claim" then
         return T("COA_ACTION_CLAIM_SHORT", "Claim")
     elseif action == "craft" then
         if order and order.isRecraft then
@@ -2852,6 +2871,34 @@ function CO:BuildDisplayReagents(order)
     end
 
     return list
+end
+
+function CO:ShouldRejectForMissingCustomerReagents(order)
+    if not order or not order.orderID or not order.spellID then
+        return false
+    end
+
+    local personalType = Enum
+        and Enum.CraftingOrderType
+        and Enum.CraftingOrderType.Personal
+    if personalType == nil or order.orderType ~= personalType then
+        return false
+    end
+
+    if IsOrderReagentStateAllProvided(order) then
+        return false
+    end
+
+    -- BuildDisplayReagents contains only the missing quantity from required
+    -- basic/automatic schematic slots. Optional, modifying and finishing slots
+    -- are excluded. Do not decline when Blizzard has not supplied a schematic:
+    -- an unknown answer must never become a destructive action.
+    local missing = self:BuildDisplayReagents(order)
+    if type(missing) ~= "table" or missing.ahuiSchematicReady ~= true then
+        return false
+    end
+
+    return #missing > 0, missing
 end
 
 function CO:GetReagentCandidates(order, reagentEntry)

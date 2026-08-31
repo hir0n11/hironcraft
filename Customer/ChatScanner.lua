@@ -6,6 +6,34 @@ local function L(id)
 end
 
 local saved = HironCraftScan.Utils.saved
+local requestTokenSerial = 0
+
+local function NewRequestToken(customer, responseID, chatEntry)
+    local args = chatEntry and chatEntry.args
+    local lineID = args and args[11]
+    if lineID ~= nil and not (issecretvalue and issecretvalue(lineID)) then
+        return table.concat({
+            'chat',
+            tostring(customer),
+            tostring(responseID),
+            tostring(lineID),
+        }, ':')
+    end
+
+    requestTokenSerial = requestTokenSerial + 1
+    local origin = HironCraftScan.DB
+        and HironCraftScan.DB.settings
+        and HironCraftScan.DB.settings.my_uuid
+        or HironCraftScan.GetPlayerName(true)
+        or 'local'
+    local precise = GetTimePreciseSec and GetTimePreciseSec() or GetTime()
+    return table.concat({
+        tostring(origin),
+        tostring(time()),
+        string.format('%.3f', precise or 0),
+        tostring(requestTokenSerial),
+    }, ':')
+end
 
 HironCraftScan.MessageType = EnumUtil.MakeEnum('General', 'Whisper')
 
@@ -1254,7 +1282,40 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local responses = saved(customerInfo, 'responses', {})
     local response = saved(responses, responseID, {})
     local firstInteraction = not next(response)
-    if response.greeting_sent and not needsResultCallbackOnly then
+    local restartingTerminalRequest = overrides
+        and overrides.restartTerminalRequest == true
+        or false
+    if
+        overrides
+        and overrides.existingCustomerRequest
+        and HironCraftScan.OrderFulfillment
+    then
+        local existingStatus = HironCraftScan.OrderFulfillment:GetStatus({
+            customerName = customer,
+            responseID = responseID,
+        })
+        local status = existingStatus and existingStatus.status
+        restartingTerminalRequest = status == HironCraftScan.OrderFulfillment.Status.Fulfilled
+            or status == HironCraftScan.OrderFulfillment.Status.Rejected
+            or status == HironCraftScan.OrderFulfillment.Status.Failed
+    end
+    if
+        restartingTerminalRequest
+        and response.responseID ~= nil
+        and response.responseID ~= responseID
+    then
+        -- A recipe-specific response is also aliased under its profession ID.
+        -- A later profession-only request must get a fresh response instead of
+        -- mutating the old completed recipe row through that alias.
+        response = {}
+        responses[responseID] = response
+        firstInteraction = true
+    end
+    if
+        response.greeting_sent
+        and not needsResultCallbackOnly
+        and not restartingTerminalRequest
+    then
         -- We already messaged the customer about this craft
         return
     end
@@ -1284,7 +1345,18 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
     response.message = SplitResponse(greeting)
     local chat_history = saved(customerInfo, 'chat_history', {})
-    table.insert(chat_history, MakeChatHistoryEntryDefault(customer, message))
+    local requestChatEntry
+    if not (overrides and overrides.chatHistoryAlreadyStored) then
+        requestChatEntry = MakeChatHistoryEntryDefault(customer, message)
+        table.insert(chat_history, requestChatEntry)
+    else
+        requestChatEntry = chat_history[#chat_history]
+    end
+
+    if firstInteraction or restartingTerminalRequest then
+        response.requestToken = overrides and overrides.requestToken
+            or NewRequestToken(customer, responseID, requestChatEntry)
+    end
 
     -- Save the request at higher granularities as well so that we don't
     -- respond to someone a second time for something more generic. E.g. we
@@ -1297,7 +1369,9 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         table.insert(children, profID)
     end
 
-    local greeting_queued = not alt_craft and HironCraftScan.auto_replies_enabled
+    local greeting_queued = not alt_craft
+        and HironCraftScan.auto_replies_enabled
+        and not (overrides and overrides.existingCustomerRequest)
     if greeting_queued then
         C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
             HironCraftScan.Utils.SendResponses(response.message, customer)
@@ -1322,6 +1396,18 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
     if customerStartedInteraction then
         response.customer_answered = true
+    end
+
+
+    if restartingTerminalRequest then
+        local order = {
+            customerName = customer,
+            responseID = responseID,
+        }
+        -- The visual row is intentionally reused, but its request token and
+        -- timestamp now identify a new job. Old green/yellow status entries no
+        -- longer apply to it.
+        HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
     end
 
     if firstInteraction then
@@ -1373,7 +1459,9 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         message,
         customer,
         customerInfo.guid,
-        chat_history[#chat_history]
+        chat_history[#chat_history],
+        response.requestToken,
+        restartingTerminalRequest
     )
 end
 
@@ -1388,6 +1476,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     end
 
     local customerInfo = HironCraftScan.DB.customers[customer]
+    local crafterInfo, itemID, recipeInfo
 
     if event == 'CHAT_MSG_WHISPER_INFORM' then
         if customerInfo then
@@ -1412,7 +1501,22 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             end
             HironCraftScanCraftingOrderPage:ShowGeneric()
             FlashClientIcon()
-            return false
+
+            -- Follow-up questions stay in the current conversation. Only a
+            -- message that independently matches the craft scanner continues
+            -- below, where a terminal row can be reopened as a new request.
+            overrides = overrides or {}
+            crafterInfo, itemID, recipeInfo = GetCrafterForMessage(
+                customer,
+                message,
+                overrides
+            )
+            if not crafterInfo then
+                return false
+            end
+            overrides.customerStartedInteraction = true
+            overrides.existingCustomerRequest = true
+            overrides.chatHistoryAlreadyStored = true
         end
         if not overrides then
             overrides = {}
@@ -1424,7 +1528,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         overrides.customerStartedInteraction = true
     end
 
-    local crafterInfo, itemID, recipeInfo = GetCrafterForMessage(customer, message, overrides)
+    if not crafterInfo then
+        crafterInfo, itemID, recipeInfo = GetCrafterForMessage(customer, message, overrides)
+    end
     if not crafterInfo then
         return false
     end

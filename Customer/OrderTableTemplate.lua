@@ -300,6 +300,7 @@ local ORDER_STATUS_COLORS = {
     [HironCraftScan.OrderFulfillment.Status.Crafted] = { 1, 0.85, 0.1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Fulfilled] = { 1, 1, 1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Failed] = { 1, 1, 1, 1 },
+    [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 0.82, 0, 1 },
 }
 local ORDER_STATUS_PENDING_COLOR = { 1, 0.82, 0, 1 }
 
@@ -314,6 +315,7 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
         and HironCraftScan.OrderFulfillment:IsDeliveryPending(entry)
     local isIncomplete = status == HironCraftScan.OrderFulfillment.Status.Unknown
         or status == HironCraftScan.OrderFulfillment.Status.Failed
+        or status == HironCraftScan.OrderFulfillment.Status.Rejected
     local atlas = isIncomplete and "common-icon-redx" or "common-icon-checkmark"
     local color = deliveryPending and status == HironCraftScan.OrderFulfillment.Status.Fulfilled
         and ORDER_STATUS_PENDING_COLOR
@@ -351,6 +353,8 @@ function HironCraftScanCraftingOrderStatusButtonMixin:OnEnter()
         statusText = L("Crafting order status fulfilled")
     elseif status == HironCraftScan.OrderFulfillment.Status.Failed then
         statusText = L("Crafting order status failed")
+    elseif status == HironCraftScan.OrderFulfillment.Status.Rejected then
+        statusText = L("Crafting order status rejected")
     end
 
     GameTooltip:ClearLines()

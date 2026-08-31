@@ -279,6 +279,85 @@ function CO:ReleaseOrder(order, pageFrame)
     return ok
 end
 
+function CO:RejectOrder(order, pageFrame)
+    pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
+    if not order or not order.orderID then
+        self:SetStatus(T("COA_STATUS_NO_ORDER", "Select an order first."))
+        return false
+    end
+
+    if not self:IsAtUsableCraftingOrderTable(pageFrame) then
+        self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
+        return false
+    end
+
+    local personalType = Enum
+        and Enum.CraftingOrderType
+        and Enum.CraftingOrderType.Personal
+    if
+        personalType == nil
+        or order.orderType ~= personalType
+        or not C_CraftingOrders
+        or type(C_CraftingOrders.RejectOrder) ~= "function"
+    then
+        self:SetStatus(T("COA_STATUS_REJECT_UNAVAILABLE", "This order cannot be declined."))
+        return false
+    end
+
+    local shouldReject = self.ShouldRejectForMissingCustomerReagents
+        and self:ShouldRejectForMissingCustomerReagents(order)
+    if not shouldReject then
+        self:SetStatus(T("COA_STATUS_REJECT_NOT_NEEDED", "The customer provided all required reagents."))
+        return false
+    end
+
+    local profession = GetProfessionFromPage(pageFrame)
+    if not profession then
+        self:SetStatus(T("COA_STATUS_NO_PROFESSION", "Profession is not available."))
+        return false
+    end
+
+    local key = OrderKey(order.orderID)
+    self.rejectedOrderIDs = self.rejectedOrderIDs or {}
+    self.rejectedOrderIDs[key] = (GetTime and GetTime() or 0) + 5
+    self:SetStatus(T("COA_STATUS_REJECTING_MISSING_REAGENTS", "Declining order: customer reagents are missing..."))
+    self:RefreshVisibleRows()
+
+    local ok = SafeCall("RejectOrder", function()
+        C_CraftingOrders.RejectOrder(order.orderID, "", profession)
+    end)
+    if not ok then
+        self.rejectedOrderIDs[key] = nil
+        self:SetStatus(T("COA_STATUS_REJECT_FAILED", "Could not decline the order."))
+        self:RefreshVisibleRowsSoon()
+        return false
+    end
+
+    self.selectedOrders[key] = nil
+    self.orderIssues[key] = nil
+    if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
+        self.currentQueueOrderID = nil
+    end
+
+    local recordRejected = _G.HironCraft
+        and _G.HironCraft.RecordRejectedCraftingOrder
+    if type(recordRejected) == "function" then
+        local recorded, err = pcall(
+            recordRejected,
+            order,
+            "missing_customer_reagents"
+        )
+        if not recorded then
+            self:DActionPrint("CraftScan rejection status failed:", err)
+        end
+    end
+
+    self:SetStatus(T("COA_STATUS_REJECTED_MISSING_REAGENTS", "Order declined: customer reagents were missing."))
+    self:UpdateControlPanel()
+    self:RefreshPageSoon(0.35, not self:HasSelectedOrders())
+    return true
+end
+
 function CO:ClaimOrder(order, pageFrame)
     if not order or not order.orderID then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
@@ -512,6 +591,11 @@ function CO:RunRowButtonAction(btn)
         self:SetStatus(T("COA_STATUS_NO_ACTION", "No available action."))
         self:DiagnoseRowAction(btn)
         self:RefreshHoveredRowButtonTooltip(btn)
+        return
+    end
+
+    if action == "reject" then
+        self:RejectOrder(order, btn.pageFrame)
         return
     end
 

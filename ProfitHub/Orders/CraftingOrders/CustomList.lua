@@ -1136,7 +1136,9 @@ function CL:PopulateRow(row, order)
 
     local action, _, _, enabled = CO.GetRowAction and CO:GetRowAction(order.orderID, order)
     local actionLabel = "—"
-    if action == "claim" then actionLabel = L("COA_ACTION_CLAIM", "Claim")
+    if action == "reject" then actionLabel = L("COA_ACTION_REJECT", "Decline")
+    elseif action == "rejecting" then actionLabel = "..."
+    elseif action == "claim" then actionLabel = L("COA_ACTION_CLAIM", "Claim")
     elseif action == "craft" then actionLabel = order.isRecraft and L("COA_ACTION_RECRAFT", "Recraft") or L("COA_ACTION_CRAFT", "Craft")
     elseif action == "fulfill" then actionLabel = L("COA_ACTION_FULFILL", "Complete")
     elseif action == "pending" or action == "claiming" then actionLabel = "..."

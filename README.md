@@ -12,6 +12,12 @@ Included modules:
 - Shop
 - StackAssist
 
+Personal orders that are missing any customer-provided required reagent are
+offered as `Decline` instead of `Claim`. The matching chat row receives a yellow
+cross; a later successfully completed order replaces it with the green check.
+Completion state is scoped to an individual customer request, so an older job
+does not mark a later request from the same customer as complete.
+
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
 ## First start and settings migration

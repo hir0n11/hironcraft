@@ -470,6 +470,7 @@ HironCraftScan.L = {
     ['Crafting order status crafted'] = 'The item has been crafted and is waiting to be fulfilled.',
     ['Crafting order status fulfilled'] = 'The crafting order has been fulfilled.',
     ['Crafting order status failed'] = 'The last attempt to fulfill the crafting order failed.',
+    ['Crafting order status rejected'] = 'The order was declined because the customer did not provide all required reagents.',
     ['Crafting order crafter'] = 'Crafter: %s',
     ['Crafting order updated'] = 'Updated: %s',
     ['Crafting order sync pending'] = 'Saved locally. Waiting for linked-account confirmation.',

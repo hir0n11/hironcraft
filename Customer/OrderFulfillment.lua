@@ -9,6 +9,7 @@ OrderFulfillment.Status = {
     Crafted = 'crafted',
     Fulfilled = 'fulfilled',
     Failed = 'failed',
+    Rejected = 'rejected',
 }
 
 local MAX_STATUS_AGE = 30 * 24 * 60 * 60
@@ -219,6 +220,7 @@ local function SanitizeEntry(entry)
         [OrderFulfillment.Status.Crafted] = true,
         [OrderFulfillment.Status.Fulfilled] = true,
         [OrderFulfillment.Status.Failed] = true,
+        [OrderFulfillment.Status.Rejected] = true,
     }
     if not allowed[entry.status] then
         return nil
@@ -238,6 +240,13 @@ local function SanitizeEntry(entry)
         updatedAt = tonumber(entry.updatedAt) or 0,
         automatic = entry.automatic ~= false,
     }
+
+    if type(entry.requestToken) == 'string' then
+        clean.requestToken = entry.requestToken:sub(1, 192)
+    end
+    if type(entry.requestTime) == 'number' then
+        clean.requestTime = entry.requestTime
+    end
 
     if type(entry.craftingOrderID) == 'number' then
         clean.craftingOrderID = entry.craftingOrderID
@@ -268,7 +277,14 @@ local function SanitizeCompletionNotice(notice)
     local clean = {
         customerName = notice.customerName,
         updatedAt = tonumber(notice.updatedAt) or 0,
+        status = notice.status or OrderFulfillment.Status.Fulfilled,
     }
+    if
+        clean.status ~= OrderFulfillment.Status.Fulfilled
+        and clean.status ~= OrderFulfillment.Status.Rejected
+    then
+        return nil
+    end
     if clean.updatedAt <= 0 then
         return nil
     end
@@ -290,6 +306,12 @@ local function SanitizeCompletionNotice(notice)
     if type(notice.origin) == 'string' then
         clean.origin = notice.origin:sub(1, 128)
     end
+    if type(notice.requestToken) == 'string' then
+        clean.requestToken = notice.requestToken:sub(1, 192)
+    end
+    if type(notice.requestTime) == 'number' then
+        clean.requestTime = notice.requestTime
+    end
 
     return clean
 end
@@ -301,6 +323,7 @@ local function CompletionNoticeKey(notice)
         tostring(BaseName(notice.customerName) or ''),
         tostring(notice.spellID or ''),
         tostring(notice.itemID or ''),
+        tostring(notice.status or OrderFulfillment.Status.Fulfilled),
     }, ':')
 end
 
@@ -322,11 +345,22 @@ local function CompletionNoticeMatchesOrder(notice, order)
         return false
     end
 
-    local responseTime = tonumber(response.time)
-    -- A customer can return with a new request later. Never let an older
-    -- customer-level completion make that newer row look fulfilled.
-    if responseTime and (notice.updatedAt or 0) < responseTime - 60 then
-        return false
+    local responseRequestToken = response.requestToken
+    if type(responseRequestToken) == 'string' then
+        -- The same customer/profession pair is deliberately reused by
+        -- CraftScan. A per-request token prevents an old completion or
+        -- rejection from being painted onto that reused row.
+        if notice.requestToken ~= responseRequestToken then
+            return false
+        end
+    else
+        local responseTime = tonumber(response.time)
+        -- Legacy rows do not have request tokens. In that case require the
+        -- status event to be no older than the request; the former 60-second
+        -- grace window allowed an old green check to leak onto a new request.
+        if responseTime and (notice.updatedAt or 0) < responseTime then
+            return false
+        end
     end
 
     local responseRecipeID = tonumber(response.recipeID)
@@ -350,7 +384,15 @@ local function FindCompletionNotice(order)
     for _, notice in pairs(EnsureCompletionStorage()) do
         if
             CompletionNoticeMatchesOrder(notice, order)
-            and (not newest or (notice.updatedAt or 0) > (newest.updatedAt or 0))
+            and (
+                not newest
+                or (notice.updatedAt or 0) > (newest.updatedAt or 0)
+                or (
+                    (notice.updatedAt or 0) == (newest.updatedAt or 0)
+                    and notice.status == OrderFulfillment.Status.Fulfilled
+                    and newest.status ~= OrderFulfillment.Status.Fulfilled
+                )
+            )
         then
             newest = notice
         end
@@ -511,6 +553,19 @@ end
 
 function OrderFulfillment:GetStatus(order)
     local entry = EnsureStorage()[HironCraftScan.OrderToOrderID(order)]
+    local response = ResponseForOrder(order)
+    if entry and response then
+        if type(response.requestToken) == 'string' then
+            if entry.requestToken ~= response.requestToken then
+                entry = nil
+            end
+        elseif
+            response.time
+            and (tonumber(entry.updatedAt) or 0) < tonumber(response.time)
+        then
+            entry = nil
+        end
+    end
     local notice = FindCompletionNotice(order)
     if entry and (not notice or (entry.updatedAt or 0) >= (notice.updatedAt or 0)) then
         if entry.status == self.Status.Unknown then
@@ -520,7 +575,7 @@ function OrderFulfillment:GetStatus(order)
     end
     if notice then
         return {
-            status = self.Status.Fulfilled,
+            status = notice.status or self.Status.Fulfilled,
             crafterFullName = notice.crafterFullName,
             updatedAt = notice.updatedAt,
             automatic = true,
@@ -657,8 +712,11 @@ function OrderFulfillment:FindGenericOrders(orderInfo)
     return matches
 end
 
-local function MayTransition(current, status, craftingOrderID)
+local function MayTransition(current, status, craftingOrderID, requestToken)
     if not current or current.status == OrderFulfillment.Status.Unknown then
+        return true
+    end
+    if requestToken and current.requestToken ~= requestToken then
         return true
     end
     if
@@ -693,8 +751,13 @@ function OrderFulfillment:SetStatus(order, status, options)
     local key = HironCraftScan.OrderToOrderID(order)
     local current = statuses[key]
     local craftingOrderID = options.craftingOrderID
+    local response = ResponseForOrder(order)
 
-    if not options.force and not MayTransition(current, status, craftingOrderID) then
+    local requestToken = response and response.requestToken
+    if
+        not options.force
+        and not MayTransition(current, status, craftingOrderID, requestToken)
+    then
         return current, false
     end
 
@@ -710,6 +773,10 @@ function OrderFulfillment:SetStatus(order, status, options)
         rev = (current and current.rev or 0) + 1,
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
     }
+    if response then
+        entry.requestToken = response.requestToken
+        entry.requestTime = tonumber(response.time)
+    end
 
     if HironCraftScanComm and HironCraftScanComm.PrepareOrderStatusDelivery then
         HironCraftScanComm:PrepareOrderStatusDelivery(entry)
@@ -800,7 +867,7 @@ function OrderFulfillment:ApplyRemoteCompletionNotices(remoteNotices)
     return changed
 end
 
-function OrderFulfillment:RecordCompletion(orderInfo, craftingOrderID)
+function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
     if type(orderInfo) ~= 'table' or not orderInfo.customerName then
         return false
     end
@@ -814,15 +881,28 @@ function OrderFulfillment:RecordCompletion(orderInfo, craftingOrderID)
         crafterFullName = HironCraftScan.GetPlayerName(true),
         updatedAt = time(),
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
+        status = status or self.Status.Fulfilled,
+        requestToken = orderInfo.requestToken,
+        requestTime = tonumber(orderInfo.requestTime),
     }
 
     if not self:ApplyRemoteCompletion(notice) then
         return false
     end
-    if HironCraftScanComm and HironCraftScanComm.ShareOrderCompletion then
+    if
+        notice.status == self.Status.Rejected
+        and HironCraftScanComm
+        and HironCraftScanComm.ShareOrderOutcome
+    then
+        HironCraftScanComm:ShareOrderOutcome(notice)
+    elseif HironCraftScanComm and HironCraftScanComm.ShareOrderCompletion then
         HironCraftScanComm:ShareOrderCompletion(notice)
     end
     return true
+end
+
+function OrderFulfillment:RecordCompletion(orderInfo, craftingOrderID)
+    return self:RecordNotice(orderInfo, craftingOrderID, self.Status.Fulfilled)
 end
 
 local function OrderInfoFromHironCraftScanOrder(order, craftingOrderID)
@@ -833,6 +913,8 @@ local function OrderInfoFromHironCraftScanOrder(order, craftingOrderID)
         spellID = ok and response and response.recipeID,
         itemID = ok and response and response.itemID,
         parentProfessionID = ok and response and response.parentProfID,
+        requestToken = ok and response and response.requestToken,
+        requestTime = ok and response and tonumber(response.time),
     }
 end
 
@@ -855,6 +937,14 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
         orderInfo = OrderInfoFromHironCraftScanOrder(order, craftingOrderID)
     end
 
+    if order and orderInfo then
+        local response = ResponseForOrder(order)
+        if response then
+            orderInfo.requestToken = response.requestToken
+            orderInfo.requestTime = tonumber(response.time)
+        end
+    end
+
     local matched = order ~= nil
     if order then
         OrderFulfillment:SetStatus(order, status, {
@@ -864,9 +954,22 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
         })
     end
 
-    if status == OrderFulfillment.Status.Fulfilled and orderInfo then
+    if
+        (
+            status == OrderFulfillment.Status.Fulfilled
+            or status == OrderFulfillment.Status.Rejected
+        )
+        and orderInfo
+    then
         for _, genericOrder in ipairs(OrderFulfillment:FindGenericOrders(orderInfo)) do
             matched = true
+            if not orderInfo.requestToken then
+                local genericResponse = ResponseForOrder(genericOrder)
+                if genericResponse then
+                    orderInfo.requestToken = genericResponse.requestToken
+                    orderInfo.requestTime = tonumber(genericResponse.time)
+                end
+            end
             OrderFulfillment:SetStatus(genericOrder, status, {
                 craftingOrderID = craftingOrderID or orderInfo.orderID,
                 automatic = true,
@@ -875,10 +978,25 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
         end
 
         matched = true
-        OrderFulfillment:RecordCompletion(orderInfo, craftingOrderID)
+        OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
     end
 
     return matched
+end
+
+function OrderFulfillment:RecordRejection(orderInfo, craftingOrderID, reason)
+    if type(orderInfo) ~= 'table' or type(orderInfo.customerName) ~= 'string' then
+        return false
+    end
+
+    local snapshot = SnapshotOrderInfo(orderInfo, craftingOrderID or orderInfo.orderID)
+        or orderInfo
+    return TrackOrderInfo(
+        self.Status.Rejected,
+        craftingOrderID or orderInfo.orderID,
+        reason or 'missing_customer_reagents',
+        snapshot
+    )
 end
 
 local function TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot)
@@ -1095,3 +1213,15 @@ HironCraftScan.Utils.onLoad(function()
     end
     RegisterEvents()
 end)
+
+-- ProfitHUB's selected Orders module is loaded earlier in the same addon. The
+-- bridge lets its safe reject action feed the CraftScan status journal without
+-- coupling either module to the other's private Lua environment.
+_G.HironCraft = _G.HironCraft or {}
+_G.HironCraft.RecordRejectedCraftingOrder = function(orderInfo, reason)
+    return OrderFulfillment:RecordRejection(
+        orderInfo,
+        orderInfo and orderInfo.orderID,
+        reason
+    )
+end
