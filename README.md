@@ -36,3 +36,5 @@ Commands:
 Only update or replace the `HironCraft` folder. Updates to `CraftScan`, `AhUI` or the old ProfitHUB module folders do not change this addon.
 
 Run `scripts/Build.ps1` to create a clean versioned ZIP without repository and development files.
+
+The editable high-resolution icon source is kept in `artwork/`; the game uses the optimized `Media/HironCraftIcon.tga` version. A PNG preview is stored beside it.

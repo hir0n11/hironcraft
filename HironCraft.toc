@@ -1,13 +1,13 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.1.0
+## Version: 0.1.1
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
 ## SavedVariables: HironCraftScan_DB, HironCraftProfit_DB, HironCraftProfit_Config, HironCraftProfit_PriceDB
 ## SavedVariablesPerCharacter: HironCraftProfit_CharConfig
 ## OptionalDeps: CraftScan, AhUI, AhUI_Buttons, AhUI_GoldDeposit, AhUI_Orders, AhUI_QuestShopping, AhUI_Shop, AhUI_StackAssist, LibSharedMedia-3.0
-## IconTexture: Interface\AddOns\HironCraft\ProfitHub\Core\Media\logo.tga
+## IconTexture: Interface\AddOns\HironCraft\Media\HironCraftIcon.tga
 
 Bootstrap.lua
 

@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Path $stagingAddon -Force | Out-Null
 
 try {
     Get-ChildItem -LiteralPath $projectRoot -Force |
-        Where-Object { $_.Name -notin @(".git", ".build", "dist", "scripts") } |
+        Where-Object { $_.Name -notin @(".git", ".build", "artwork", "dist", "scripts") } |
         Copy-Item -Destination $stagingAddon -Recurse -Force
 
     $archive = Join-Path $OutputDirectory ("HironCraft-" + $version + ".zip")

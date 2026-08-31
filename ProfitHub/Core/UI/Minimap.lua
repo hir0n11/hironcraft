@@ -6,7 +6,7 @@ local LDBIcon = LibStub("LibDBIcon-1.0")
 local broker = LDB:NewDataObject("HironCraftProfit", {
     type = "data source",
     text = "HironCraft",
-    icon = "Interface\\AddOns\\HironCraft\\ProfitHub\\Core\\media\\logo.tga",
+    icon = "Interface\\AddOns\\HironCraft\\Media\\HironCraftIcon.tga",
 
 OnClick = function(self, button)
     if button == "LeftButton" then
