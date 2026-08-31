@@ -234,7 +234,7 @@ function CO:GetOrderEngine(pageFrame, order)
     return orderView
 end
 
-function CO:ReleaseOrder(order, pageFrame)
+function CO:ReleaseOrder(order, pageFrame, continuation)
     order = order or self:GetClaimedOrder()
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
@@ -260,6 +260,10 @@ function CO:ReleaseOrder(order, pageFrame)
     end
 
     self.pendingReleaseOrderID = order.orderID
+    self.pendingReleaseContinuation = type(continuation) == "function" and {
+        orderID = order.orderID,
+        callback = continuation,
+    } or nil
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
     self.pendingFulfillOrderID = nil
@@ -273,13 +277,14 @@ function CO:ReleaseOrder(order, pageFrame)
 
     if not ok then
         self.pendingReleaseOrderID = nil
+        self.pendingReleaseContinuation = nil
         self:RefreshVisibleRowsSoon()
     end
 
     return ok
 end
 
-function CO:RejectOrder(order, pageFrame)
+function CO:RejectOrder(order, pageFrame, releasedForReject)
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
         self:SetStatus(T("COA_STATUS_NO_ORDER", "Select an order first."))
@@ -311,6 +316,14 @@ function CO:RejectOrder(order, pageFrame)
     if not profession then
         self:SetStatus(T("COA_STATUS_NO_PROFESSION", "Profession is not available."))
         return false
+    end
+
+    local claimed = self:GetClaimedOrder()
+    if not releasedForReject and claimed and SameOrderID(claimed.orderID, order.orderID) then
+        self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT", "Releasing order before declining it..."))
+        return self:ReleaseOrder(order, pageFrame, function()
+            CO:RejectOrder(order, pageFrame, true)
+        end)
     end
 
     local key = OrderKey(order.orderID)
@@ -364,6 +377,15 @@ function CO:ClaimOrder(order, pageFrame)
     if self:GetRecipeKnownState(order) == false then
         self:SetStatus(T("COA_STATUS_UNKNOWN_RECIPE", "This recipe is not known by this character."))
         return false
+    end
+
+    -- Keep the destructive safety rule at the API boundary as well as in the
+    -- row label. Queue refreshes and stale button state must never be able to
+    -- claim an order that should have been declined.
+    if self.ShouldRejectForMissingCustomerReagents
+        and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
+    then
+        return self:RejectOrder(order, pageFrame)
     end
 
     local profession = GetProfessionFromPage(pageFrame)

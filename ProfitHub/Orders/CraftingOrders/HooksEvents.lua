@@ -442,6 +442,11 @@ function CO:OnEvent(event, ...)
 
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED" then
         local orderID = self.pendingReleaseOrderID or self.pendingFulfillOrderID
+        local continuation = self.pendingReleaseContinuation
+        if continuation and (not orderID or not SameOrderID(continuation.orderID, orderID)) then
+            continuation = nil
+        end
+        self.pendingReleaseContinuation = nil
         if orderID and self.rowStates[orderID] then
             self.rowStates[orderID].order = nil
         end
@@ -474,6 +479,9 @@ function CO:OnEvent(event, ...)
         self:StopRowProgress()
         self:UpdateControlPanel()
         self:RefreshPageSoon(0.35, not self:HasSelectedOrders())
+        if continuation and type(continuation.callback) == "function" then
+            C_Timer.After(0.1, continuation.callback)
+        end
         return
     end
 

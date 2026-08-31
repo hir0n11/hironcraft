@@ -983,11 +983,14 @@ function CO:GetRowAction(orderID, fallbackOrder)
         return "blocked", T("COA_ACTION_BUSY", "Busy"), order, false
     end
 
+    local shouldReject = order
+        and order.isFulfillable ~= true
+        and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
+    if shouldReject and (IsOrderCreated(order) or (claimed and SameOrderID(claimed.orderID, orderID))) then
+        return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
+    end
+
     if IsOrderCreated(order) then
-        local shouldReject = self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
-        if shouldReject then
-            return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
-        end
         return "claim", T("COA_ACTION_CLAIM", "Claim"), order, true
     end
 
@@ -2777,13 +2780,13 @@ function BuildOrderReagentCacheSignature(order)
     return table.concat(parts, "|")
 end
 
-function CO:BuildDisplayReagents(order)
+function CO:BuildDisplayReagents(order, forceAnalyze)
     local list = {}
     if not order or not order.spellID then return list end
 
     local orderKey = OrderKey(order.orderID)
     local reagentSignature = BuildOrderReagentCacheSignature(order)
-    if orderKey then
+    if orderKey and not forceAnalyze then
         local cache = self.displayReagentsCache and self.displayReagentsCache[orderKey]
         local now = CacheNow()
         if cache
@@ -2834,7 +2837,7 @@ function CO:BuildDisplayReagents(order)
     local schematicReady = type(schematicSlots) == "table"
     list.ahuiSchematicReady = schematicReady
 
-    if schematicReady and not IsOrderReagentStateAllProvided(order) then
+    if schematicReady and (forceAnalyze or not IsOrderReagentStateAllProvided(order)) then
         local providedByItemID = GetOrderProvidedReagentQuantities(order)
 
         for index, slotSchematic in ipairs(schematicSlots) do
@@ -2861,7 +2864,7 @@ function CO:BuildDisplayReagents(order)
     end
 
 
-    if orderKey and (schematicReady or IsOrderReagentStateAllProvided(order) or #list > 0) then
+    if orderKey and not forceAnalyze and (schematicReady or IsOrderReagentStateAllProvided(order) or #list > 0) then
         self.displayReagentsCache[orderKey] = {
             spellID = order.spellID,
             isRecraft = order.isRecraft,
@@ -2902,15 +2905,33 @@ function CO:ShouldRejectForMissingCustomerReagents(order, pageFrame)
         return false
     end
 
-    if IsOrderReagentStateAllProvided(order) then
-        return false
+    -- In a crafter order row, order.reagents contains the materials actually
+    -- attached by the customer. This is the strongest signal for the common
+    -- broken order: an entirely empty table. Check it before reagentState,
+    -- because recraft rows can transiently report All while carrying no
+    -- supplied materials at all.
+    if type(order.reagents) == "table" and #order.reagents == 0 then
+        return true, {}
+    end
+
+    local reagentTypes = Enum and Enum.CraftingOrderReagentsType
+    if reagentTypes then
+        if reagentTypes.None ~= nil and order.reagentState == reagentTypes.None then
+            return true, {}
+        end
+        if reagentTypes.Some ~= nil and order.reagentState == reagentTypes.Some then
+            return true, {}
+        end
+        if reagentTypes.All ~= nil and order.reagentState == reagentTypes.All then
+            return false
+        end
     end
 
     -- BuildDisplayReagents contains only the missing quantity from required
     -- basic/automatic schematic slots. Optional, modifying and finishing slots
     -- are excluded. Do not decline when Blizzard has not supplied a schematic:
     -- an unknown answer must never become a destructive action.
-    local missing = self:BuildDisplayReagents(order)
+    local missing = self:BuildDisplayReagents(order, true)
     if type(missing) ~= "table" or missing.ahuiSchematicReady ~= true then
         return false
     end
