@@ -984,7 +984,7 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
 
     if IsOrderCreated(order) then
-        local shouldReject = self:ShouldRejectForMissingCustomerReagents(order)
+        local shouldReject = self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
         if shouldReject then
             return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
         end
@@ -2830,13 +2830,14 @@ function CO:BuildDisplayReagents(order)
         return true
     end
 
-    local schematicReady = schematic and schematic.reagentSlotSchematics
-    list.ahuiSchematicReady = schematicReady == true
+    local schematicSlots = schematic and schematic.reagentSlotSchematics
+    local schematicReady = type(schematicSlots) == "table"
+    list.ahuiSchematicReady = schematicReady
 
     if schematicReady and not IsOrderReagentStateAllProvided(order) then
         local providedByItemID = GetOrderProvidedReagentQuantities(order)
 
-        for index, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
+        for index, slotSchematic in ipairs(schematicSlots) do
             if IsRequiredCraftingOrderReagentSlot(slotSchematic) then
                 local choices = GetSchematicReagentChoices(slotSchematic)
                 local firstChoice, firstItemID = GetFirstSchematicChoice(slotSchematic)
@@ -2873,15 +2874,31 @@ function CO:BuildDisplayReagents(order)
     return list
 end
 
-function CO:ShouldRejectForMissingCustomerReagents(order)
+function CO:IsPersonalCraftingOrder(order, pageFrame)
+    local personalType = Enum
+        and Enum.CraftingOrderType
+        and Enum.CraftingOrderType.Personal
+    if personalType == nil then
+        return false
+    end
+
+    -- Crafter order rows normally contain orderType, but the client can omit
+    -- it while refreshing the list. The active Personal tab remains an
+    -- authoritative fallback in that short window.
+    if order and order.orderType ~= nil then
+        return order.orderType == personalType
+    end
+
+    pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
+    return pageFrame and pageFrame.orderType == personalType or false
+end
+
+function CO:ShouldRejectForMissingCustomerReagents(order, pageFrame)
     if not order or not order.orderID or not order.spellID then
         return false
     end
 
-    local personalType = Enum
-        and Enum.CraftingOrderType
-        and Enum.CraftingOrderType.Personal
-    if personalType == nil or order.orderType ~= personalType then
+    if not self:IsPersonalCraftingOrder(order, pageFrame) then
         return false
     end
 

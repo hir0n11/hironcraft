@@ -346,19 +346,17 @@ local function CompletionNoticeMatchesOrder(notice, order)
     end
 
     local responseRequestToken = response.requestToken
-    if type(responseRequestToken) == 'string' then
-        -- The same customer/profession pair is deliberately reused by
-        -- CraftScan. A per-request token prevents an old completion or
-        -- rejection from being painted onto that reused row.
-        if notice.requestToken ~= responseRequestToken then
-            return false
-        end
-    else
+    local requestTokensMatch = type(responseRequestToken) == 'string'
+        and type(notice.requestToken) == 'string'
+        and notice.requestToken == responseRequestToken
+    if not requestTokensMatch then
+        -- A chat line ID produces the same token on linked clients, but WoW
+        -- does not provide one for every whisper event. The fallback token is
+        -- intentionally local and therefore must not reject a valid outcome
+        -- received from another account. Timestamps still prevent an older
+        -- completion/rejection from leaking onto a newer request row.
         local responseTime = tonumber(response.time)
-        -- Legacy rows do not have request tokens. In that case require the
-        -- status event to be no older than the request; the former 60-second
-        -- grace window allowed an old green check to leak onto a new request.
-        if responseTime and (notice.updatedAt or 0) < responseTime then
+        if responseTime and (tonumber(notice.updatedAt) or 0) < responseTime then
             return false
         end
     end
@@ -555,12 +553,11 @@ function OrderFulfillment:GetStatus(order)
     local entry = EnsureStorage()[HironCraftScan.OrderToOrderID(order)]
     local response = ResponseForOrder(order)
     if entry and response then
-        if type(response.requestToken) == 'string' then
-            if entry.requestToken ~= response.requestToken then
-                entry = nil
-            end
-        elseif
-            response.time
+        local requestTokensMatch = type(response.requestToken) == 'string'
+            and type(entry.requestToken) == 'string'
+            and entry.requestToken == response.requestToken
+        if not requestTokensMatch
+            and response.time
             and (tonumber(entry.updatedAt) or 0) < tonumber(response.time)
         then
             entry = nil

@@ -291,12 +291,8 @@ function CO:RejectOrder(order, pageFrame)
         return false
     end
 
-    local personalType = Enum
-        and Enum.CraftingOrderType
-        and Enum.CraftingOrderType.Personal
     if
-        personalType == nil
-        or order.orderType ~= personalType
+        not self:IsPersonalCraftingOrder(order, pageFrame)
         or not C_CraftingOrders
         or type(C_CraftingOrders.RejectOrder) ~= "function"
     then
@@ -305,7 +301,7 @@ function CO:RejectOrder(order, pageFrame)
     end
 
     local shouldReject = self.ShouldRejectForMissingCustomerReagents
-        and self:ShouldRejectForMissingCustomerReagents(order)
+        and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
     if not shouldReject then
         self:SetStatus(T("COA_STATUS_REJECT_NOT_NEEDED", "The customer provided all required reagents."))
         return false
