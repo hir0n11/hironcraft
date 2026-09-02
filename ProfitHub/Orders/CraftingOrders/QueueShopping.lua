@@ -62,8 +62,39 @@ function CO:GetQueueOptions()
     if q.autoQueueOnOpen == nil then q.autoQueueOnOpen = false end
     if q.autoShoppingOnOpen == nil then q.autoShoppingOnOpen = false end
     if q.autoTool == nil then q.autoTool = false end
+    if q.autoFinishingEnabled == nil then q.autoFinishingEnabled = false end
+    q.autoFinishingMaxSkill = tonumber(q.autoFinishingMaxSkill) or 5
 
     return q
+end
+
+function CO:IsAutoFinishingEnabled()
+    return self:GetQueueOptions().autoFinishingEnabled == true
+end
+
+function CO:SetAutoFinishingEnabled(value)
+    self:GetQueueOptions().autoFinishingEnabled = value == true
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+end
+
+function CO:GetAutoFinishingMaxSkillBonus()
+    return math.max(0, tonumber(self:GetQueueOptions().autoFinishingMaxSkill) or 5)
+end
+
+function CO:SetAutoFinishingMaxSkillBonus(value)
+    value = math.max(0, math.floor((tonumber(value) or 5) + 0.5))
+    self:GetQueueOptions().autoFinishingMaxSkill = value
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+end
+
+function CO:GetAutoFinishingLabel()
+    if not self:IsAutoFinishingEnabled() then
+        return T("COA_FINISHER_OFF", "Выкл")
+    end
+    return string.format(
+        T("COA_FINISHER_LIMIT_FMT", "до +%d"),
+        self:GetAutoFinishingMaxSkillBonus()
+    )
 end
 
 function CO:IsAutoToolOn()

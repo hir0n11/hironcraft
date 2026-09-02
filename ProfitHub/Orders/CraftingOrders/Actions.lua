@@ -284,7 +284,7 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     return ok
 end
 
-function CO:RejectOrder(order, pageFrame, releasedForReject)
+function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
         self:SetStatus(T("COA_STATUS_NO_ORDER", "Select an order first."))
@@ -305,10 +305,25 @@ function CO:RejectOrder(order, pageFrame, releasedForReject)
         return false
     end
 
-    local shouldReject = self.ShouldRejectForMissingCustomerReagents
-        and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
+    rejectionReason = rejectionReason or "missing_customer_reagents"
+    local qualityRejection = rejectionReason == "insufficient_quality"
+    local shouldReject
+    if qualityRejection then
+        -- A quality rejection is armed only by a fresh, authoritative check of
+        -- the claimed order's transaction. This prevents a stale row or a
+        -- direct button action from declining a valid customer order.
+        shouldReject = self.IsOrderReadyForQualityRejection
+            and self:IsOrderReadyForQualityRejection(order)
+    else
+        shouldReject = self.ShouldRejectForMissingCustomerReagents
+            and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
+    end
     if not shouldReject then
-        self:SetStatus(T("COA_STATUS_REJECT_NOT_NEEDED", "The customer provided all required reagents."))
+        if qualityRejection then
+            self:SetStatus(T("COA_STATUS_REJECT_NOT_NEEDED_QUALITY", "The order no longer requires a quality rejection."))
+        else
+            self:SetStatus(T("COA_STATUS_REJECT_NOT_NEEDED", "The customer provided all required reagents."))
+        end
         return false
     end
 
@@ -320,16 +335,24 @@ function CO:RejectOrder(order, pageFrame, releasedForReject)
 
     local claimed = self:GetClaimedOrder()
     if not releasedForReject and claimed and SameOrderID(claimed.orderID, order.orderID) then
-        self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT", "Releasing order before declining it..."))
+        if qualityRejection then
+            self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT_QUALITY", "Releasing order before declining it for insufficient quality..."))
+        else
+            self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT", "Releasing order before declining it..."))
+        end
         return self:ReleaseOrder(order, pageFrame, function()
-            CO:RejectOrder(order, pageFrame, true)
+            CO:RejectOrder(order, pageFrame, true, rejectionReason)
         end)
     end
 
     local key = OrderKey(order.orderID)
     self.rejectedOrderIDs = self.rejectedOrderIDs or {}
     self.rejectedOrderIDs[key] = (GetTime and GetTime() or 0) + 5
-    self:SetStatus(T("COA_STATUS_REJECTING_MISSING_REAGENTS", "Declining order: customer reagents are missing..."))
+    if qualityRejection then
+        self:SetStatus(T("COA_STATUS_REJECTING_QUALITY", "Declining order: the requested quality is unavailable within the finishing-reagent limit..."))
+    else
+        self:SetStatus(T("COA_STATUS_REJECTING_MISSING_REAGENTS", "Declining order: customer reagents are missing..."))
+    end
     self:RefreshVisibleRows()
 
     local ok = SafeCall("RejectOrder", function()
@@ -354,14 +377,21 @@ function CO:RejectOrder(order, pageFrame, releasedForReject)
         local recorded, err = pcall(
             recordRejected,
             order,
-            "missing_customer_reagents"
+            rejectionReason
         )
         if not recorded then
             self:DActionPrint("CraftScan rejection status failed:", err)
         end
     end
 
-    self:SetStatus(T("COA_STATUS_REJECTED_MISSING_REAGENTS", "Order declined: customer reagents were missing."))
+    if self.ClearOrderQualityRejection then
+        self:ClearOrderQualityRejection(order)
+    end
+    if qualityRejection then
+        self:SetStatus(T("COA_STATUS_REJECTED_QUALITY", "Order declined: the requested quality required a stronger finishing reagent."))
+    else
+        self:SetStatus(T("COA_STATUS_REJECTED_MISSING_REAGENTS", "Order declined: customer reagents were missing."))
+    end
     self:UpdateControlPanel()
     self:RefreshPageSoon(0.35, not self:HasSelectedOrders())
     return true
@@ -491,6 +521,23 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     self:ApplySelectedReagentsToEngine(engine, order)
     local useConcentration = self.useConcentration[OrderKey(order.orderID)] == true
     self:SetEngineConcentration(engine, useConcentration)
+
+    if self.PrepareAutoFinishingReagent then
+        local finisherResult, finisher = self:PrepareAutoFinishingReagent(
+            engine,
+            order,
+            useConcentration,
+            pageFrame
+        )
+        if finisherResult == "reject" then
+            return self:RejectOrder(order, pageFrame, false, "insufficient_quality")
+        elseif finisherResult == "applied" and finisher then
+            self:SetStatus(string.format(
+                T("COA_STATUS_FINISHER_APPLIED", "Finishing reagent +%d selected."),
+                finisher.skillBonus or 0
+            ))
+        end
+    end
 
     self.pendingCraftOrderID = order.orderID
     self.orderIssues[OrderKey(order.orderID)] = nil

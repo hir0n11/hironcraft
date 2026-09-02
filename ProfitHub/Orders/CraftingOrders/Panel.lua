@@ -1135,22 +1135,11 @@ function CO:UpdatePageBackground(pageFrame)
     if not pageFrame then return end
     local container = pageFrame.ahuiCustomList
     if not container or not container.profBg then return end
-    local suffix = IsFantasyDesign() and self:GetProfessionBgSuffix(pageFrame) or nil
-    local atlas = suffix and ("Professions-Specializations-Background-" .. suffix)
-    local applied = false
-    if atlas then
-        pcall(function() container.profBg:SetAtlas(atlas, false) end)
-        applied = container.profBg:GetAtlas() == atlas
-    end
-    if applied then
-        container.profBg:Show()
-        if container.tile then container.tile:Hide() end
-        if container.SetBackdropColor then container:SetBackdropColor(0, 0, 0, 0) end
-    else
-        container.profBg:Hide()
-        if container.tile then container.tile:Show() end
-        if container.SetBackdropColor then container:SetBackdropColor(0, 0, 0, 0.92) end
-    end
+    -- Keep the custom rows transparent over Blizzard's original crafting-order
+    -- background. The old ProfitHUB logo tile obscured the default artwork.
+    container.profBg:Hide()
+    if container.tile then container.tile:Hide() end
+    if container.SetBackdropColor then container:SetBackdropColor(0, 0, 0, 0) end
 end
 
 function CO:UpdateSegmentedControl(holder)
@@ -1236,6 +1225,47 @@ function CO:UpdateQueueSettingWidgets()
     if panel.kpValueInput and panel.kpValueInput.RefreshValue then
         panel.kpValueInput:RefreshValue()
     end
+
+    if panel.finisherButton and panel.finisherButton.text then
+        panel.finisherButton.text:SetText(self:GetAutoFinishingLabel())
+    end
+end
+
+function CO:OpenAutoFinishingMenu(owner)
+    if not owner or not PT.Dropdown or not PT.Dropdown.Show then return end
+
+    local enabled = self:IsAutoFinishingEnabled()
+    local currentLimit = self:GetAutoFinishingMaxSkillBonus()
+    local items = {
+        {
+            text = T("COA_FINISHER_MENU_TITLE", "Автофинишеры"),
+            header = true,
+        },
+        {
+            text = T("COA_FINISHER_ENABLE", "Использовать автоматически"),
+            checked = enabled,
+            onClick = function()
+                CO:SetAutoFinishingEnabled(not enabled)
+            end,
+        },
+        {
+            text = T("COA_FINISHER_LIMIT_HEADER", "Максимальное усиление навыка"),
+            header = true,
+        },
+    }
+
+    for _, limit in ipairs({ 5, 10, 20, 50 }) do
+        local selectedLimit = limit
+        items[#items + 1] = {
+            text = string.format(T("COA_FINISHER_LIMIT_OPTION_FMT", "До +%d навыка"), selectedLimit),
+            checked = currentLimit == selectedLimit,
+            onClick = function()
+                CO:SetAutoFinishingMaxSkillBonus(selectedLimit)
+            end,
+        }
+    end
+
+    PT.Dropdown:Show({ owner = owner, items = items })
 end
 
 function CO:AnchorControlPanelToOrderList(panel, pageFrame)
@@ -1361,6 +1391,34 @@ function CO:EnsureControlPanel(pageFrame)
       tipTitle = T("COA_CONC_TIP_TITLE", "Концентрация в очереди"),
       tipDesc = T("COA_CONC_TIP_DESC", "Выкл — не тратить концентрацию. Разр. — тратить, только если без неё нужное качество недостижимо. Прин. — тратить всегда для повышения качества.") })
     panel.concSeg:SetPoint("TOPLEFT", PADX, y)
+    y = y - 26
+
+    -- Automatic finishing reagents. The menu separates the master switch from
+    -- the maximum skill bonus the queue may consume before declining an order.
+    local finisherHeader = panel:CreateFontString(nil, "OVERLAY")
+    ApplyFont(finisherHeader, 11, "OUTLINE")
+    finisherHeader:SetPoint("TOPLEFT", PADX, y - 4)
+    finisherHeader:SetTextColor(1, 0.82, 0.35, 1)
+    finisherHeader:SetText(T("COA_FINISHER_HEADER", "Финишеры"))
+    panel.finisherButton = self:CreateTextButton(
+        panel,
+        nil,
+        62,
+        20,
+        self:GetAutoFinishingLabel()
+    )
+    panel.finisherButton:SetPoint("TOPRIGHT", -PADX, y)
+    panel.finisherButton:SetScript("OnClick", function(self)
+        CO:OpenAutoFinishingMenu(self)
+    end)
+    panel.finisherButton:SetScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_FINISHER_TOOLTIP_TITLE", "Автоматические финишеры"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_FINISHER_TOOLTIP_DESC", "Перед крафтом выбирает самый слабый имеющийся финишер, который гарантирует заказанное качество. Если нужен финишер сильнее разрешённого, персональный заказ отклоняется."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.finisherButton:SetScript("OnLeave", HideStyledTooltip)
     y = y - 26
 
     -- Min profit
@@ -1660,6 +1718,7 @@ function CO:EnsureControlPanel(pageFrame)
         panel.selectAllButton, panel.knowledgeButton, panel.selectAllOrdersButton,
         panel.shopButton, panel.clearSelectedButton, panel.runActionButton,
         panel.bindButton, panel.clearButton, panel.expansionButton, panel.weeklyQuestIndicator,
+        panel.finisherButton,
     }) do
         if w then self:StyleWidget(w, variant, false, BTN_ATLAS) end
     end

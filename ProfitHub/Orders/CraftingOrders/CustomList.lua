@@ -546,9 +546,7 @@ function CL:EnsureScrollFrame(pageFrame)
 
     local tile = container:CreateTexture(nil, "BACKGROUND", nil, 1)
     tile:SetAllPoints()
-    tile:SetTexture("Interface\\AddOns\\HironCraft\\ProfitHub\\Core\\media\\logo.tga")
-    tile:SetAlpha(0.07)
-    tile:SetVertexColor(0.7, 0.6, 0.85)
+    tile:Hide()
     container.tile = tile
 
     local profBg = container:CreateTexture(nil, "BACKGROUND", nil, 0)
