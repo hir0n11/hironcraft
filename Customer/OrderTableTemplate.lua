@@ -302,7 +302,6 @@ local ORDER_STATUS_COLORS = {
     [HironCraftScan.OrderFulfillment.Status.Failed] = { 1, 1, 1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 0.82, 0, 1 },
 }
-local ORDER_STATUS_PENDING_COLOR = { 1, 0.82, 0, 1 }
 
 function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
     HironCraftScan.OrderFulfillment:RegisterStatusButton(self)
@@ -317,16 +316,13 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
         or status == HironCraftScan.OrderFulfillment.Status.Failed
         or status == HironCraftScan.OrderFulfillment.Status.Rejected
     local atlas = isIncomplete and "common-icon-redx" or "common-icon-checkmark"
-    local color = deliveryPending and status == HironCraftScan.OrderFulfillment.Status.Fulfilled
-        and ORDER_STATUS_PENDING_COLOR
-        or ORDER_STATUS_COLORS[status]
+    local color = ORDER_STATUS_COLORS[status]
 
     self.entry = entry
     self.deliveryPending = deliveryPending
     self.Icon:SetAtlas(atlas)
     self.Icon:SetDesaturated(
-        deliveryPending
-            or status ~= HironCraftScan.OrderFulfillment.Status.Fulfilled
+        status ~= HironCraftScan.OrderFulfillment.Status.Fulfilled
             and status ~= HironCraftScan.OrderFulfillment.Status.Failed
     )
     self.Icon:SetVertexColor(unpack(color))

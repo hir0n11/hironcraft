@@ -402,7 +402,6 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
     scrollBox:Show();
 
     local dataProvider = CreateDataProvider();
-    scrollBox:SetDataProvider(dataProvider);
 
     local orders = {}
     for _, order in pairs(HironCraftScan.DB.listed_orders) do
@@ -436,7 +435,13 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
             contextMenu = self.BrowseFrame.OrderList.ContextMenu
         });
     end
-    scrollBox:SetDataProvider(dataProvider);
+    -- Most ShowGeneric calls are status/age refreshes. Preserve the user's
+    -- current position through those provider replacements; a genuinely new
+    -- order is moved into view explicitly below.
+    scrollBox:SetDataProvider(
+        dataProvider,
+        ScrollBoxConstants and ScrollBoxConstants.RetainScrollPosition
+    );
 
     if hasNewOrder and #orders > 0 then
         ScrollOrderListToEnd(scrollBox)

@@ -179,6 +179,23 @@ local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
 end
 
+local function IsAlreadyFulfilledResult(result)
+    if result == nil or IsSecret(result) then
+        return false
+    end
+
+    -- A second FulfillOrder can race the first successful request during fast
+    -- queue clicking. Blizzard then reports NotClaimed because the completed
+    -- order has already left the claimed slot. Treat that response as
+    -- idempotent success instead of replacing the recorded completion with a
+    -- red failure. 36 is the current enum value and covers clients where the
+    -- named enum member is unavailable during early loading.
+    local notClaimed = Enum
+        and Enum.CraftingOrderResult
+        and Enum.CraftingOrderResult.NotClaimed
+    return result == notClaimed or (notClaimed == nil and result == 36)
+end
+
 local function ResultForStorage(result)
     if result == nil or IsSecret(result) then
         return nil
@@ -564,6 +581,27 @@ function OrderFulfillment:GetStatus(order)
         end
     end
     local notice = FindCompletionNotice(order)
+    if
+        entry
+        and entry.status == self.Status.Failed
+        and IsAlreadyFulfilledResult(entry.result)
+        and notice
+        and notice.status == self.Status.Fulfilled
+        and entry.craftingOrderID
+        and notice.orderID
+        and tostring(entry.craftingOrderID) == tostring(notice.orderID)
+    then
+        -- Repair statuses written by older builds that interpreted the
+        -- duplicate NotClaimed response as failure even though the durable
+        -- completion journal already proves the same order was fulfilled.
+        local repaired = {}
+        for key, value in pairs(entry) do
+            repaired[key] = value
+        end
+        repaired.status = self.Status.Fulfilled
+        repaired.repairedDuplicateFulfill = true
+        return repaired
+    end
     if entry and (not notice or (entry.updatedAt or 0) >= (notice.updatedAt or 0)) then
         if entry.status == self.Status.Unknown then
             return nil
@@ -1182,12 +1220,48 @@ local function RegisterEvents()
     HironCraftScanScannerMenu:RegisterEventCallback(
         'CRAFTINGORDERS_FULFILL_ORDER_RESPONSE',
         function(_, result, orderID)
-            local status = IsSuccessfulResult(result) and OrderFulfillment.Status.Fulfilled
-                or OrderFulfillment.Status.Failed
-            -- Force the server result over the optimistic state recorded at the
-            -- FulfillOrder call. This also refreshes the durable revision and
-            -- sends a corrective status immediately if the request failed.
-            TrackWithRetry(status, orderID or pendingFulfillOrderID, result, true, true)
+            local fulfillOrderID = orderID or pendingFulfillOrderID
+            if IsSuccessfulResult(result) or IsAlreadyFulfilledResult(result) then
+                -- A successful response is authoritative and refreshes the
+                -- durable revision created by the optimistic submission mark.
+                TrackWithRetry(
+                    OrderFulfillment.Status.Fulfilled,
+                    fulfillOrderID,
+                    result,
+                    true,
+                    true
+                )
+            else
+                -- Some clients emit a late/ambiguous non-OK response after the
+                -- claimed order has already disappeared successfully. Only
+                -- turn the optimistic green mark into a red failure while the
+                -- exact order is still demonstrably claimed.
+                local claimedOrder = GetClaimedOrder()
+                local claimedOrderID = claimedOrder and claimedOrder.orderID
+                if
+                    fulfillOrderID
+                    and claimedOrderID
+                    and tostring(fulfillOrderID) == tostring(claimedOrderID)
+                then
+                    TrackWithRetry(
+                        OrderFulfillment.Status.Failed,
+                        fulfillOrderID,
+                        result,
+                        true,
+                        true
+                    )
+                end
+            end
+
+            if
+                pendingFulfillOrderID
+                and (
+                    not orderID
+                    or tostring(orderID) == tostring(pendingFulfillOrderID)
+                )
+            then
+                pendingFulfillOrderID = nil
+            end
         end
     )
 
@@ -1209,6 +1283,7 @@ local function RegisterEvents()
                     true,
                     true
                 )
+                pendingFulfillOrderID = nil
             end
         end
     )
