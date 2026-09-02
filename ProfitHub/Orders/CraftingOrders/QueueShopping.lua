@@ -660,6 +660,14 @@ end
 function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
     if not order or not order.orderID then return false end
 
+    -- Do not let background quality warming rebuild the live transaction after
+    -- the first click has staged a finishing reagent for this order.
+    if self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+    then
+        return true
+    end
+
     pageFrame = self:FindOrderPageFrame(pageFrame) or self:FindOrderPageFrame(self.activePageFrame)
     if not pageFrame or not self:CanPrepareOrderView(pageFrame) then return false end
 
@@ -684,11 +692,7 @@ function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
         engine = self:GetOrderEngine(pageFrame, order)
     end
 
-    if engine and engine.SetOrder then
-        SafeCall("SetOrder", function()
-            engine:SetOrder(order)
-        end)
-        self:InvalidateOrderCaches(order.orderID)
+    if engine then
         self:ApplySelectedReagentsToEngine(engine, order)
         self:SetEngineConcentration(engine, false)
     end

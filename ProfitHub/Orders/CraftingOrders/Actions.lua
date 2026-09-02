@@ -209,14 +209,33 @@ function CO:GetOrderEngine(pageFrame, order)
         return nil, T("COA_STATUS_NO_ENGINE", "Crafting order view is not available.")
     end
 
+    -- Selecting a finishing reagent changes the live transaction owned by the
+    -- order view. Calling SetOrder() again on the following hardware click can
+    -- rebuild that transaction and discard the allocation before CraftOrder()
+    -- sees it. Preserve the already-bound view only for this explicitly staged
+    -- order; all ordinary order changes still receive a fresh SetOrder().
+    local preservePreparedFinisher = self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+        and orderView.order
+        and SameOrderID(orderView.order.orderID, order.orderID)
+
+    if self.preparedFinisherOrderID
+        and not SameOrderID(self.preparedFinisherOrderID, order.orderID)
+    then
+        self.preparedFinisherOrderID = nil
+    end
+
     local browseShown = pageFrame.BrowseFrame and pageFrame.BrowseFrame:IsShown()
     local orderShown = orderView:IsShown()
 
-    local ok = SafeCall("SetOrder", function()
-        orderView:SetOrder(order)
-    end)
+    local ok = true
+    if not preservePreparedFinisher then
+        ok = SafeCall("SetOrder", function()
+            orderView:SetOrder(order)
+        end)
+    end
 
-    if ok then
+    if ok and not preservePreparedFinisher then
         self:InvalidateOrderCaches(order.orderID)
     end
 
@@ -267,6 +286,7 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
     self.pendingFulfillOrderID = nil
+    self.preparedFinisherOrderID = nil
     self:SetStatus(T("COA_STATUS_RELEASING", "Releasing order..."))
     self:StopRowProgress()
     self:RefreshVisibleRows()
@@ -428,6 +448,7 @@ function CO:ClaimOrder(order, pageFrame)
     self.rowStates[order.orderID].order = order
     self.rowStates[order.orderID].pageFrame = pageFrame
     self.orderIssues[OrderKey(order.orderID)] = nil
+    self.preparedFinisherOrderID = nil
     self.currentQueueOrderID = order.orderID
     self.pendingClaimOrderID = order.orderID
     self.activeOrderID = order.orderID
@@ -530,14 +551,43 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             pageFrame
         )
         if finisherResult == "reject" then
+            self.preparedFinisherOrderID = nil
             return self:RejectOrder(order, pageFrame, false, "insufficient_quality")
         elseif finisherResult == "applied" and finisher then
+            -- The Blizzard transaction needs one UI update before its protected
+            -- craft action reliably accepts a newly allocated finishing reagent.
+            -- Do not enter the blocking "crafting" state yet. The next user
+            -- press reuses this transaction and performs the actual craft.
+            self.preparedFinisherOrderID = order.orderID
+            self.activeOrderID = order.orderID
+            self.activePageFrame = pageFrame
             self:SetStatus(string.format(
-                T("COA_STATUS_FINISHER_APPLIED", "Finishing reagent +%d selected."),
+                T("COA_STATUS_FINISHER_READY", "Finishing reagent +%d selected. Press Action again to craft."),
                 finisher.skillBonus or 0
             ))
+            self:RefreshVisibleRowsSoon(0.01)
+            return true
         end
     end
+
+    if self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+        and engine.CreateButton
+        and type(engine.CreateButton.IsEnabled) == "function"
+        and not engine.CreateButton:IsEnabled()
+    then
+        -- The allocation exists, but Blizzard has not enabled the protected
+        -- create button yet. Keep the row actionable instead of starting a
+        -- pending craft that can only be released by the watchdog.
+        self:SetStatus(T(
+            "COA_STATUS_FINISHER_WAITING",
+            "Finishing reagent is being applied. Press Action again."
+        ))
+        self:RefreshVisibleRowsSoon(0.01)
+        return true
+    end
+
+    self.preparedFinisherOrderID = nil
 
     self.pendingCraftOrderID = order.orderID
     self.orderIssues[OrderKey(order.orderID)] = nil

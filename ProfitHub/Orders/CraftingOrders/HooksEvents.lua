@@ -306,6 +306,7 @@ function CO:OnEvent(event, ...)
     if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
         local interactionType = ...
         if self:IsCraftingOrderInteractionType(interactionType) then
+            self.preparedFinisherOrderID = nil
             self:SetOrderTablePresence(false)
             self:RefreshVisibleRowsSoon(0.05)
         end
@@ -322,6 +323,7 @@ function CO:OnEvent(event, ...)
 
     if event == "TRADE_SKILL_CLOSE" then
         self.qualityWarmSerial = (tonumber(self.qualityWarmSerial) or 0) + 1
+        self.preparedFinisherOrderID = nil
         if self.StopPageProtector then self:StopPageProtector() end
         if self.StopRowProgress then self:StopRowProgress() end
         self:SetOrderTablePresence(false)
