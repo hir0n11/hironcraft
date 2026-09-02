@@ -1209,6 +1209,13 @@ HironCraftScan.Utils.onLoad(function()
         RememberCraftingOrder(entry)
     end
     RegisterEvents()
+
+    -- ShareCharacterData normally starts this replay during PLAYER_LOGIN. Keep
+    -- this second, throttled trigger as a safety net for unusual addon load
+    -- ordering so the previous character's last order is still sent promptly.
+    if HironCraftScanComm and HironCraftScanComm.ReplayRecentOrderHistory then
+        HironCraftScanComm:ReplayRecentOrderHistory()
+    end
 end)
 
 -- ProfitHUB's selected Orders module is loaded earlier in the same addon. The

@@ -97,9 +97,11 @@ local remoteTargets = nil
 local SendPing
 local StartHeartbeat
 local SendOrderStatusAcks
+local lastRecentOrderReplayAt = nil
 local FRESH_TARGET_SECONDS = 15
 local HEARTBEAT_SECONDS = 10
 local PING_ATTEMPT_TIMEOUT_SECONDS = 6
+local RECENT_ORDER_REPLAY_THROTTLE_SECONDS = 2
 
 local function HaveTarget()
     if remoteTargets then
@@ -552,6 +554,12 @@ function HironCraftScanComm:ShareCharacterData()
     end
 
     StartHeartbeat()
+
+    -- A full login snapshot can contain hundreds of historic orders and is
+    -- intentionally sent at BULK priority. Replay the compact recent journal
+    -- first so an order saved just before a character switch is visible on the
+    -- linked client without waiting for that snapshot to finish.
+    self:ReplayRecentOrderHistory()
 
     -- Discover one live character with a tiny ping before sending the full
     -- login snapshot. Sending the snapshot to every known alt makes AceComm
@@ -1011,6 +1019,85 @@ local function SendPendingOrderStatuses(accountID, target)
             )
         end
     end
+end
+
+local function CreateRecentOrderJournal()
+    if not HironCraftScan.OrderFulfillment then
+        return nil
+    end
+
+    local recent = {}
+    for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
+        table.insert(recent, storedNotice)
+    end
+    table.sort(recent, function(lhs, rhs)
+        return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
+    end)
+    while #recent > 12 do
+        table.remove(recent)
+    end
+
+    local statuses = {}
+    for _, storedStatus in pairs(HironCraftScan.OrderFulfillment:GetStatuses()) do
+        table.insert(statuses, storedStatus)
+    end
+    table.sort(statuses, function(lhs, rhs)
+        return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
+    end)
+    while #statuses > 20 do
+        table.remove(statuses)
+    end
+
+    return {
+        recent = HironCraftScan.Utils.DeepCopy(recent),
+        statuses = HironCraftScan.Utils.DeepCopy(statuses),
+    }
+end
+
+local function SendRecentOrderJournal(target)
+    local journal = CreateRecentOrderJournal()
+    if not journal or (#journal.recent == 0 and #journal.statuses == 0) then
+        return false
+    end
+
+    -- Use the completion operation rather than the repair operation here. The
+    -- receiver accepts the same journal payload, while ALERT priority lets this
+    -- small login replay overtake the much larger BULK character snapshot.
+    HironCraftScanComm:Transmit(
+        journal,
+        HironCraftScanComm.Operations.ShareOrderCompletion,
+        target
+    )
+    return true
+end
+
+function HironCraftScanComm:ReplayRecentOrderHistory()
+    if not LinkedAccountsConfigured() or not HironCraftScan.OrderFulfillment then
+        return false
+    end
+
+    local now = GetTime and GetTime() or time()
+    if
+        lastRecentOrderReplayAt
+        and now - lastRecentOrderReplayAt < RECENT_ORDER_REPLAY_THROTTLE_SECONDS
+    then
+        return false
+    end
+    lastRecentOrderReplayAt = now
+
+    StartHeartbeat()
+    remoteTargets = remoteTargets or {}
+
+    local queued = false
+    for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts) do
+        if HironCraftScan.Utils.Contains(account.permissions, HironCraftScanComm.Permissions.Full) then
+            SendPing(accountID, function(_, sender)
+                SendRecentOrderJournal(sender)
+            end)
+            queued = true
+        end
+    end
+    return queued
 end
 
 function HironCraftScanComm:ShareOrderCompletion(notice)
@@ -2007,6 +2094,16 @@ function HironCraftScanComm:Transmit(data, operation, target)
 
     HironCraftScan.Utils.printTable('Sending msg', msg)
 
+    local priority = PriorityForOperation(operation)
+    if priority == 'ALERT' then
+        -- Critical order updates are small. Serialize them immediately so the
+        -- addon queues the whisper in the same frame as the fulfillment event;
+        -- an instant logout can otherwise happen before SerializeAsync gets its
+        -- first OnUpdate callback.
+        TransmitSerialized(LibSerialize:Serialize(msg), target, priority)
+        return
+    end
+
     local handler = LibSerialize:SerializeAsync(msg)
 
     local processing = asyncPool:Acquire()
@@ -2015,7 +2112,7 @@ function HironCraftScanComm:Transmit(data, operation, target)
         if completed then
             processing:SetScript('OnUpdate', nil)
             asyncPool:Release(processing)
-            TransmitSerialized(serialized, target, PriorityForOperation(operation))
+            TransmitSerialized(serialized, target, priority)
         end
     end)
 
