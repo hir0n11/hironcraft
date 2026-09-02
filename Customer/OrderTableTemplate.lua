@@ -300,7 +300,7 @@ local ORDER_STATUS_COLORS = {
     [HironCraftScan.OrderFulfillment.Status.Crafted] = { 1, 0.85, 0.1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Fulfilled] = { 1, 1, 1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Failed] = { 1, 1, 1, 1 },
-    [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 0.82, 0, 1 },
+    [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 0.95, 0.1, 1 },
 }
 
 function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
@@ -315,6 +315,7 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
     local isIncomplete = status == HironCraftScan.OrderFulfillment.Status.Unknown
         or status == HironCraftScan.OrderFulfillment.Status.Failed
         or status == HironCraftScan.OrderFulfillment.Status.Rejected
+    local isRejected = status == HironCraftScan.OrderFulfillment.Status.Rejected
     local atlas = isIncomplete and "common-icon-redx" or "common-icon-checkmark"
     local color = ORDER_STATUS_COLORS[status]
 
@@ -326,6 +327,10 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
             and status ~= HironCraftScan.OrderFulfillment.Status.Failed
     )
     self.Icon:SetVertexColor(unpack(color))
+    -- The yellow rejection mark was easy to lose against the dark order list.
+    -- Additive blending lifts only this state without changing the normal red
+    -- crosses or green check marks.
+    self.Icon:SetBlendMode(isRejected and "ADD" or "BLEND")
 end
 
 function HironCraftScanCraftingOrderStatusButtonMixin:OnClick(button)
