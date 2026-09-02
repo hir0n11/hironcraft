@@ -128,18 +128,7 @@ local chatTooltip = HironCraftScan.Utils.ChatHistoryTooltip:new();
 function HironCraftScanCrafterOrderListElementMixin:OnLineEnter()
     self.HighlightTexture:Show();
 
-    -- If the request has a specific item, toss up the item tooltip just like
-    -- the real crafting order page.
-    local response = HironCraftScan.OrderToResponse(self.order)
-    if response.recipeID then
-        local reagents = {};
-        local qualityIDs = C_TradeSkillUI.GetQualitiesForRecipe(response.recipeID);
-        local qualityIdx = qualityIDs and #qualityIDs or 0;
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-        securecall(GameTooltip.SetRecipeResultItem, GameTooltip, response.recipeID, reagents, nil, nil, qualityIDs and qualityIDs[qualityIdx]);
-    end
-
-    -- In addition, pop up a tooltip that looks like the chat window. We copy
+    -- Pop up a tooltip that looks like the chat window. We copy
     -- the chat window width (up to a limit that fits over the crafting window),
     -- and the primary chat window's font settings. This seems to make the text
     -- wrapping match and overall it looks pretty close to the real chat window
