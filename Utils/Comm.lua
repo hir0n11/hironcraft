@@ -1091,8 +1091,19 @@ function HironCraftScanComm:ReplayRecentOrderHistory()
     local queued = false
     for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts) do
         if HironCraftScan.Utils.Contains(account.permissions, HironCraftScanComm.Permissions.Full) then
+            -- On a character switch the linked account usually stayed on the
+            -- same character. Send the tiny durable journal to that cached
+            -- target immediately instead of making the UI wait for discovery.
+            -- Discovery still runs in parallel and repairs a stale cached name.
+            local cachedTarget = account.last_active_char
+            if type(cachedTarget) == 'string' and cachedTarget ~= '' then
+                SendRecentOrderJournal(cachedTarget)
+                queued = true
+            end
             SendPing(accountID, function(_, sender)
-                SendRecentOrderJournal(sender)
+                if sender ~= cachedTarget then
+                    SendRecentOrderJournal(sender)
+                end
             end)
             queued = true
         end

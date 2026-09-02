@@ -232,6 +232,9 @@ end
 
 function HironCraftScanCraftingOrderPageMixin:OnShow()
     HironCraftScanScannerMenu:ClearPulses()
+    -- Opening the page starts at the newest request. Subsequent refreshes only
+    -- move the list when another order actually appears.
+    self.renderedOrderIDs = nil
     self:ShowGeneric()
 
     local icon = HironCraftScan.Utils.GetCurrentProfessionIcon();
@@ -339,6 +342,41 @@ local function SortItemsByComparator(items, keys, comparator)
     end);
 end
 
+local function ScrollOrderListToEnd(scrollBox)
+    if not scrollBox or not C_Timer or not C_Timer.After then
+        return
+    end
+
+    -- SetDataProvider lays out the ScrollBox on the next frame. Waiting one
+    -- frame makes the final extent available and avoids landing one row above
+    -- the newest order when the list has just crossed the visible-page limit.
+    C_Timer.After(0, function()
+        if not scrollBox or (scrollBox.IsShown and not scrollBox:IsShown()) then
+            return
+        end
+
+        if scrollBox.HasScrollableExtent then
+            local ok, hasExtent = pcall(scrollBox.HasScrollableExtent, scrollBox)
+            if ok and not hasExtent then
+                return
+            end
+        end
+
+        if scrollBox.ScrollToEnd then
+            local ok = pcall(scrollBox.ScrollToEnd, scrollBox)
+            if ok then
+                return
+            end
+        end
+
+        -- Compatibility fallback for ScrollBox implementations that predate
+        -- ScrollToEnd but still expose the normalized scroll percentage API.
+        if scrollBox.SetScrollPercentage then
+            pcall(scrollBox.SetScrollPercentage, scrollBox, 1)
+        end
+    end)
+end
+
 function HironCraftScanCraftingOrderPageMixin:DisableAnalytics()
     self.BrowseFrame.AnalyticsTable:Hide();
     self.BrowseFrame.ResizeButton:Hide();
@@ -373,6 +411,17 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
 
     SortItemsByComparator(orders, self, ApplySortOrder);
 
+    local orderIDs = {}
+    local hasNewOrder = self.renderedOrderIDs == nil
+    for _, order in ipairs(orders) do
+        local orderID = HironCraftScan.OrderToOrderID(order)
+        orderIDs[orderID] = true
+        if self.renderedOrderIDs and not self.renderedOrderIDs[orderID] then
+            hasNewOrder = true
+        end
+    end
+    self.renderedOrderIDs = orderIDs
+
     if #orders == 0 then
         self.BrowseFrame.OrderList.ResultsText:SetText(PROFESSIONS_CUSTOMER_NO_ORDERS);
         self.BrowseFrame.OrderList.ResultsText:Show();
@@ -388,6 +437,10 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
         });
     end
     scrollBox:SetDataProvider(dataProvider);
+
+    if hasNewOrder and #orders > 0 then
+        ScrollOrderListToEnd(scrollBox)
+    end
 
     ScrollUtil.AddManagedScrollBarVisibilityBehavior(scrollBox, self.BrowseFrame.OrderList.ScrollBar, nil, nil);
 

@@ -925,7 +925,7 @@ local function FreshLastSnapshot()
     return nil
 end
 
-local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, genericOnly)
+local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, genericOnly, force)
     local order = FindStoredOrder(craftingOrderID)
     if not order and orderInfo and not genericOnly then
         order = OrderFulfillment:FindMatchingOrder(orderInfo)
@@ -948,6 +948,7 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
             craftingOrderID = craftingOrderID or (orderInfo and orderInfo.orderID),
             automatic = true,
             result = result,
+            force = force == true,
         })
     end
 
@@ -971,6 +972,7 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
                 craftingOrderID = craftingOrderID or orderInfo.orderID,
                 automatic = true,
                 result = result,
+                force = force == true,
             })
         end
 
@@ -996,7 +998,7 @@ function OrderFulfillment:RecordRejection(orderInfo, craftingOrderID, reason)
     )
 end
 
-local function TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot)
+local function TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot, force)
     local liveOrderInfo = GetClaimedOrder()
     if liveOrderInfo and not craftingOrderID then
         craftingOrderID = liveOrderInfo.orderID
@@ -1012,19 +1014,35 @@ local function TrackClaimedOrder(status, craftingOrderID, result, allowLastSnaps
         end
     end
 
-    return TrackOrderInfo(status, craftingOrderID, result, orderInfo)
+    return TrackOrderInfo(status, craftingOrderID, result, orderInfo, false, force)
 end
 
-local function TrackWithRetry(status, craftingOrderID, result, allowLastSnapshot)
-    if TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot) then
+local function TrackWithRetry(status, craftingOrderID, result, allowLastSnapshot, force)
+    if TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot, force) then
         return
     end
 
     if C_Timer and C_Timer.After then
         C_Timer.After(0.2, function()
-            TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot)
+            TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot, force)
         end)
     end
+end
+
+local function TrackFulfillmentIntent(craftingOrderID)
+    pendingFulfillOrderID = craftingOrderID or pendingFulfillOrderID
+
+    -- FulfillOrder is only available after the item has been crafted. Persist
+    -- the intended successful transition before yielding back to the game so an
+    -- instant character logout cannot leave the durable state at "claimed".
+    -- The authoritative response below forcibly replaces this optimistic state
+    -- if Blizzard rejects the fulfillment request.
+    return TrackClaimedOrder(
+        OrderFulfillment.Status.Fulfilled,
+        pendingFulfillOrderID,
+        'fulfill_requested',
+        true
+    )
 end
 
 local function OrderInfoFromDisplayedItem(customerName, itemName, craftingOrderID)
@@ -1096,6 +1114,7 @@ local function RegisterEvents()
                 if orderInfo then
                     SnapshotOrderInfo(orderInfo, orderID)
                 end
+                TrackFulfillmentIntent(orderID)
             end)
         end
 
@@ -1165,7 +1184,32 @@ local function RegisterEvents()
         function(_, result, orderID)
             local status = IsSuccessfulResult(result) and OrderFulfillment.Status.Fulfilled
                 or OrderFulfillment.Status.Failed
-            TrackWithRetry(status, orderID or pendingFulfillOrderID, result, true)
+            -- Force the server result over the optimistic state recorded at the
+            -- FulfillOrder call. This also refreshes the durable revision and
+            -- sends a corrective status immediately if the request failed.
+            TrackWithRetry(status, orderID or pendingFulfillOrderID, result, true, true)
+        end
+    )
+
+    -- Removal of the claimed order is another server-backed success signal and
+    -- can arrive before the detailed fulfillment response/message. Recording it
+    -- closes the small window between clicking Complete and changing character.
+    HironCraftScanScannerMenu:RegisterEventCallback(
+        'CRAFTINGORDERS_CLAIMED_ORDER_REMOVED',
+        function(_, orderID)
+            local fulfillOrderID = pendingFulfillOrderID
+            if
+                fulfillOrderID
+                and (not orderID or tostring(orderID) == tostring(fulfillOrderID))
+            then
+                TrackWithRetry(
+                    OrderFulfillment.Status.Fulfilled,
+                    orderID or fulfillOrderID,
+                    nil,
+                    true,
+                    true
+                )
+            end
         end
     )
 
