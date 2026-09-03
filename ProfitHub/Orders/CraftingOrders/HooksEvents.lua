@@ -287,7 +287,14 @@ function CO:MarkOrderCraftedReady(orderID)
 
     self.craftedOrderID = orderID
     self.pendingCraftOrderID = nil
+    self.pendingCraftSpellID = nil
     self.pendingCraftButton = nil
+    if self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, orderID)
+    then
+        self.preparedFinisherOrderID = nil
+        self.preparedFinisherReadyAt = nil
+    end
     self:StopRowProgress()
     self:InvalidateOrderCaches(orderID)
     self:SetStatus(T("COA_STATUS_CRAFTED_READY", "Order crafted. Complete it."))
@@ -307,6 +314,7 @@ function CO:OnEvent(event, ...)
         local interactionType = ...
         if self:IsCraftingOrderInteractionType(interactionType) then
             self.preparedFinisherOrderID = nil
+            self.preparedFinisherReadyAt = nil
             self:SetOrderTablePresence(false)
             self:RefreshVisibleRowsSoon(0.05)
         end
@@ -324,6 +332,7 @@ function CO:OnEvent(event, ...)
     if event == "TRADE_SKILL_CLOSE" then
         self.qualityWarmSerial = (tonumber(self.qualityWarmSerial) or 0) + 1
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReadyAt = nil
         if self.StopPageProtector then self:StopPageProtector() end
         if self.StopRowProgress then self:StopRowProgress() end
         self:SetOrderTablePresence(false)
@@ -432,11 +441,9 @@ function CO:OnEvent(event, ...)
             self:InvalidateOrderCaches(orderID)
         end
 
-        if not isCurrentCraftUpdate then
-            self.pendingCraftOrderID = nil
-            self.pendingFulfillOrderID = nil
-            self:StopRowProgress()
-        end
+        -- Updates for a different row are common while the list refreshes.
+        -- They must not cancel a protected craft that is already in flight;
+        -- its response/spell events or watchdog own that state.
 
         self:RefreshVisibleRowsSoon()
         return
@@ -466,6 +473,7 @@ function CO:OnEvent(event, ...)
             end
             if self.pendingCraftOrderID and SameOrderID(self.pendingCraftOrderID, orderID) then
                 self.pendingCraftOrderID = nil
+                self.pendingCraftSpellID = nil
             end
             if self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID) then
                 self.pendingFulfillOrderID = nil
@@ -475,6 +483,10 @@ function CO:OnEvent(event, ...)
             end
             if self.craftedOrderID and SameOrderID(self.craftedOrderID, orderID) then
                 self.craftedOrderID = nil
+            end
+            if self.preparedFinisherOrderID and SameOrderID(self.preparedFinisherOrderID, orderID) then
+                self.preparedFinisherOrderID = nil
+                self.preparedFinisherReadyAt = nil
             end
         end
         self:SetStatus(T("COA_STATUS_DONE", "Order completed or released."))
@@ -495,8 +507,12 @@ function CO:OnEvent(event, ...)
             if not IsResultOk(result) then
                 self:SetStatus(T("COA_STATUS_CRAFT_FAILED", "Could not craft the order."))
                 self.pendingCraftOrderID = nil
+                self.pendingCraftSpellID = nil
                 self.pendingCraftButton = nil
                 self:StopRowProgress()
+                if self.preparedFinisherOrderID then
+                    self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
+                end
             else
                 local pendingID = self.pendingCraftOrderID
                 if self.pendingCraftButton then
@@ -506,6 +522,7 @@ function CO:OnEvent(event, ...)
                     local name = UnitCastingInfo("player") or UnitChannelInfo("player")
                     if not name and CO.pendingCraftOrderID and pendingID and SameOrderID(CO.pendingCraftOrderID, pendingID) then
                         CO.pendingCraftOrderID = nil
+                        CO.pendingCraftSpellID = nil
                         CO.pendingCraftButton = nil
                         CO:StopRowProgress()
                         CO:RefreshVisibleRowsSoon()
@@ -547,8 +564,12 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "UNIT_SPELLCAST_START" then
-        local unit = ...
-        if unit == "player" then
+        local unit, _, spellID = ...
+        local expectedSpellID = tonumber(self.pendingCraftSpellID)
+        if unit == "player"
+            and self.pendingCraftOrderID
+            and (not expectedSpellID or not spellID or tonumber(spellID) == expectedSpellID)
+        then
             local btn = self.pendingCraftButton or self.progressButton
             local orderID = self.pendingCraftOrderID or self.progressOrderID or (btn and btn.orderID)
             if orderID and (not btn) then
@@ -564,9 +585,12 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
-        local unit = ...
+        local unit, _, spellID = ...
         if unit ~= "player" then return end
-        local orderID = self.pendingCraftOrderID or self.progressOrderID or (self.pendingCraftButton and self.pendingCraftButton.orderID)
+        if not self.pendingCraftOrderID then return end
+        local expectedSpellID = tonumber(self.pendingCraftSpellID)
+        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
+        local orderID = self.pendingCraftOrderID
         if orderID then
             C_Timer.After(0.20, function()
                 CO:MarkOrderCraftedReady(orderID)
@@ -577,20 +601,30 @@ function CO:OnEvent(event, ...)
 
     if event == "UNIT_SPELLCAST_INTERRUPTED"
     or event == "UNIT_SPELLCAST_FAILED" then
-        local unit = ...
+        local unit, _, spellID = ...
         if unit ~= "player" then return end
+        local expectedSpellID = tonumber(self.pendingCraftSpellID)
+        if not self.pendingCraftOrderID then return end
+        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
         C_Timer.After(0.25, function()
             CO:StopRowProgress()
             CO.pendingCraftButton = nil
             CO.pendingCraftOrderID = nil
+            CO.pendingCraftSpellID = nil
+            if CO.preparedFinisherOrderID then
+                CO.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
+            end
             CO:RefreshVisibleRowsSoon()
         end)
         return
     end
 
     if event == "UNIT_SPELLCAST_STOP" then
-        local unit = ...
+        local unit, _, spellID = ...
         if unit ~= "player" then return end
+        if not self.pendingCraftOrderID then return end
+        local expectedSpellID = tonumber(self.pendingCraftSpellID)
+        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
         local pendingID = self.pendingCraftOrderID or self.progressOrderID
         C_Timer.After(0.25, function()
             CO:StopRowProgress()
@@ -599,6 +633,7 @@ function CO:OnEvent(event, ...)
                     if CO.pendingCraftOrderID and SameOrderID(CO.pendingCraftOrderID, pendingID) then
                         CO.pendingCraftButton = nil
                         CO.pendingCraftOrderID = nil
+                        CO.pendingCraftSpellID = nil
                         CO:RefreshVisibleRowsSoon()
                     end
                 end)
@@ -616,6 +651,7 @@ function CO:OnEvent(event, ...)
             if not pendingID then
                 CO.pendingCraftButton = nil
                 CO.pendingCraftOrderID = nil
+                CO.pendingCraftSpellID = nil
             end
             CO:RefreshVisibleRowsSoon()
         end)

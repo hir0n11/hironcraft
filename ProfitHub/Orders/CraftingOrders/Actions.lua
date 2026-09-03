@@ -223,6 +223,7 @@ function CO:GetOrderEngine(pageFrame, order)
         and not SameOrderID(self.preparedFinisherOrderID, order.orderID)
     then
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReadyAt = nil
     end
 
     local browseShown = pageFrame.BrowseFrame and pageFrame.BrowseFrame:IsShown()
@@ -285,8 +286,10 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     } or nil
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
+    self.pendingCraftSpellID = nil
     self.pendingFulfillOrderID = nil
     self.preparedFinisherOrderID = nil
+    self.preparedFinisherReadyAt = nil
     self:SetStatus(T("COA_STATUS_RELEASING", "Releasing order..."))
     self:StopRowProgress()
     self:RefreshVisibleRows()
@@ -449,6 +452,7 @@ function CO:ClaimOrder(order, pageFrame)
     self.rowStates[order.orderID].pageFrame = pageFrame
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.preparedFinisherOrderID = nil
+    self.preparedFinisherReadyAt = nil
     self.currentQueueOrderID = order.orderID
     self.pendingClaimOrderID = order.orderID
     self.activeOrderID = order.orderID
@@ -543,6 +547,20 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     local useConcentration = self.useConcentration[OrderKey(order.orderID)] == true
     self:SetEngineConcentration(engine, useConcentration)
 
+    local preparedFinisherSettling = self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+        and (tonumber(self.preparedFinisherReadyAt) or 0) > (GetTime and GetTime() or 0)
+    if preparedFinisherSettling then
+        -- Do this before reevaluating candidates. Repeated clicks inside the
+        -- settle window must not allocate the same reagent again and keep
+        -- moving the ready time forward forever.
+        self:SetStatus(T(
+            "COA_STATUS_FINISHER_WAITING",
+            "Finishing reagent is being applied. Press Action again."
+        ))
+        return true
+    end
+
     if self.PrepareAutoFinishingReagent then
         local finisherResult, finisher = self:PrepareAutoFinishingReagent(
             engine,
@@ -552,6 +570,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         )
         if finisherResult == "reject" then
             self.preparedFinisherOrderID = nil
+            self.preparedFinisherReadyAt = nil
             return self:RejectOrder(order, pageFrame, false, "insufficient_quality")
         elseif finisherResult == "applied" and finisher then
             -- The Blizzard transaction needs one UI update before its protected
@@ -559,6 +578,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             -- Do not enter the blocking "crafting" state yet. The next user
             -- press reuses this transaction and performs the actual craft.
             self.preparedFinisherOrderID = order.orderID
+            self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
             self.activeOrderID = order.orderID
             self.activePageFrame = pageFrame
             self:SetStatus(string.format(
@@ -570,8 +590,10 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         end
     end
 
-    if self.preparedFinisherOrderID
+    local craftingWithPreparedFinisher = self.preparedFinisherOrderID
         and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+
+    if craftingWithPreparedFinisher
         and engine.CreateButton
         and type(engine.CreateButton.IsEnabled) == "function"
         and not engine.CreateButton:IsEnabled()
@@ -587,9 +609,8 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         return true
     end
 
-    self.preparedFinisherOrderID = nil
-
     self.pendingCraftOrderID = order.orderID
+    self.pendingCraftSpellID = order.spellID
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.activeOrderID = order.orderID
     self.activePageFrame = pageFrame
@@ -611,6 +632,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
                    and co.pendingCraftOrderID and SameOrderID(co.pendingCraftOrderID, watchID) then
                     co:DActionPrint("craft watchdog: clearing stuck 'crafting' state for order", watchID)
                     co.pendingCraftOrderID = nil
+                    co.pendingCraftSpellID = nil
                     co.pendingCraftButton = nil
                     if co.progressOrderID and SameOrderID(co.progressOrderID, watchID) then
                         co.progressOrderID = nil
@@ -625,9 +647,25 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
 
     local ok
-    if order.isRecraft and engine.RecraftOrder then
+    -- A staged finishing reagent belongs to the Blizzard Create button's live
+    -- transaction. Invoke that button's own handler first so the exact reagent
+    -- table we just prepared is submitted. Calling the higher-level view method
+    -- can rebuild or ignore that transaction on some client builds.
+    if craftingWithPreparedFinisher
+        and engine.CreateButton
+        and type(engine.CreateButton.GetScript) == "function"
+    then
+        local script = engine.CreateButton:GetScript("OnClick")
+        if script then
+            ok = SafeCall("Prepared finishing reagent craft", function()
+                script(engine.CreateButton, "LeftButton")
+            end)
+        end
+    end
+
+    if not ok and order.isRecraft and engine.RecraftOrder then
         ok = SafeCall("RecraftOrder", function() engine:RecraftOrder() end)
-    elseif engine.CraftOrder then
+    elseif not ok and engine.CraftOrder then
         ok = SafeCall("CraftOrder", function() engine:CraftOrder() end)
     end
 
@@ -660,6 +698,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
     if not ok then
         self.pendingCraftOrderID = nil
+        self.pendingCraftSpellID = nil
         self.pendingCraftButton = nil
         self:StopRowProgress()
         self:SetStatus(T("COA_STATUS_NO_ENGINE", "Crafting order view is not available."))
@@ -698,6 +737,15 @@ end
 
 function CO:RunRowButtonAction(btn)
     if not btn or not btn.orderID then return end
+
+    -- Repeated presses while the protected craft is already pending must not
+    -- rebuild bindings or re-enter the order state machine. This also removes
+    -- the misleading "No available action" spam during the cast.
+    if self.pendingCraftOrderID
+        and SameOrderID(self.pendingCraftOrderID, btn.orderID)
+    then
+        return
+    end
 
     self:SetActiveRowButton(btn)
 

@@ -19,6 +19,7 @@ if not setfenv then
 end
 
 local CO = {}
+local now = 100
 local E = setmetatable({
     PT = {},
     CO = CO,
@@ -29,6 +30,7 @@ local E = setmetatable({
         local ok = pcall(callback)
         return ok
     end,
+    GetTime = function() return now end,
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
@@ -73,11 +75,18 @@ assert(CO.preparedFinisherOrderID == nil)
 -- CraftOrderFromRow must stop after selecting the finisher, remain actionable,
 -- and craft on the following press instead of entering a stuck pending state.
 local craftCalls = 0
+local createButtonCalls = 0
 local prepareCalls = 0
 local createEnabled = false
 local engine = {
     CreateButton = {
         IsEnabled = function() return createEnabled end,
+        GetScript = function(_, scriptName)
+            if scriptName ~= "OnClick" then return nil end
+            return function()
+                createButtonCalls = createButtonCalls + 1
+            end
+        end,
     },
     CraftOrder = function()
         craftCalls = craftCalls + 1
@@ -115,15 +124,20 @@ assert(CO.preparedFinisherOrderID == order.orderID)
 assert(CO.pendingCraftOrderID == nil)
 assert(craftCalls == 0)
 
+-- Rapid clicks during the transaction-settle window are absorbed.
 assert(CO:CraftOrderFromRow(order, page, button) == true)
 assert(CO.preparedFinisherOrderID == order.orderID)
 assert(CO.pendingCraftOrderID == nil)
 assert(craftCalls == 0)
+assert(prepareCalls == 1, "rapid click reapplied the finishing reagent")
 
+now = now + 0.30
 createEnabled = true
 assert(CO:CraftOrderFromRow(order, page, button) == true)
-assert(CO.preparedFinisherOrderID == nil)
+assert(CO.preparedFinisherOrderID == order.orderID)
 assert(CO.pendingCraftOrderID == order.orderID)
-assert(craftCalls == 1)
+assert(CO.pendingCraftSpellID == order.spellID)
+assert(createButtonCalls == 1, "prepared transaction did not use Blizzard's Create button")
+assert(craftCalls == 0, "prepared transaction fell back to the rebuilding view method")
 
 print("Finisher craft staging tests passed.")
