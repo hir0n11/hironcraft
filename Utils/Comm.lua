@@ -106,6 +106,25 @@ local FRESH_TARGET_SECONDS = 15
 local HEARTBEAT_SECONDS = 10
 local PING_ATTEMPT_TIMEOUT_SECONDS = 6
 local RECENT_ORDER_REPLAY_THROTTLE_SECONDS = 2
+local RECENT_ORDER_NOTICE_LIMIT = 12
+local RECENT_ORDER_STATUS_LIMIT = 20
+local PENDING_ORDER_BATCH_LIMIT = 20
+
+local function NewestOrderEntries(entries, limit, predicate)
+    local result = {}
+    for _, entry in pairs(entries or {}) do
+        if type(entry) == 'table' and (not predicate or predicate(entry)) then
+            table.insert(result, entry)
+        end
+    end
+    table.sort(result, function(lhs, rhs)
+        return (tonumber(lhs.updatedAt) or 0) > (tonumber(rhs.updatedAt) or 0)
+    end)
+    while limit and #result > limit do
+        table.remove(result)
+    end
+    return result
+end
 
 local function HaveTarget()
     if remoteTargets then
@@ -170,12 +189,6 @@ local function TransmitToFullLinkedAccounts(data, operation)
         end
     end
     return queued
-end
-
-local function EntryHasPendingDelivery(entry)
-    return type(entry) == 'table'
-        and type(entry.deliveryPending) == 'table'
-        and next(entry.deliveryPending) ~= nil
 end
 
 function HironCraftScanComm:PrepareOrderStatusDelivery(entry)
@@ -322,14 +335,23 @@ local function ShareCharacterData_(state, target)
     local peers = MyPeers()
     local orderCompletions = {}
     local orderOutcomes = {}
+    local orderStatuses = {}
     if HironCraftScan.OrderFulfillment then
-        for key, notice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
+        local recentNotices = NewestOrderEntries(
+            HironCraftScan.OrderFulfillment:GetCompletionNotices(),
+            RECENT_ORDER_NOTICE_LIMIT
+        )
+        for _, notice in ipairs(recentNotices) do
             if notice.status == HironCraftScan.OrderFulfillment.Status.Rejected then
-                orderOutcomes[key] = HironCraftScan.Utils.DeepCopy(notice)
+                table.insert(orderOutcomes, HironCraftScan.Utils.DeepCopy(notice))
             else
-                orderCompletions[key] = HironCraftScan.Utils.DeepCopy(notice)
+                table.insert(orderCompletions, HironCraftScan.Utils.DeepCopy(notice))
             end
         end
+        orderStatuses = HironCraftScan.Utils.DeepCopy(NewestOrderEntries(
+            HironCraftScan.OrderFulfillment:GetStatuses(),
+            RECENT_ORDER_STATUS_LIMIT
+        ))
     end
 
     local data = {
@@ -338,8 +360,7 @@ local function ShareCharacterData_(state, target)
         greeting_revision = GreetingRevision(),
         explanations_revision = ExplanationsRevision(),
         quick_replies_revision = QuickRepliesRevision(),
-        order_statuses = HironCraftScan.OrderFulfillment
-            and HironCraftScan.Utils.DeepCopy(HironCraftScan.OrderFulfillment:GetStatuses()),
+        order_statuses = orderStatuses,
         order_completions = orderCompletions,
         order_outcomes = orderOutcomes,
         state = state,
@@ -817,19 +838,11 @@ local function ReceiveShareQuickReplies(sender, data, senderID)
     ReceiveShareQuickReplies_(data)
 end
 
-local function DiscoverAndSendOrderStatus(accountID, entry)
-    SendPing(accountID, function(_, sender)
-        if
-            type(entry.deliveryPending) == 'table'
-            and entry.deliveryPending[accountID]
-        then
-            HironCraftScanComm:Transmit(
-                HironCraftScan.Utils.DeepCopy(entry),
-                HironCraftScanComm.Operations.ShareOrderStatus,
-                sender
-            )
-        end
-    end)
+local function DiscoverOrderStatusTarget(accountID)
+    -- The ping response flushes every currently pending order update in one
+    -- bounded packet. Avoid attaching one callback per revision: during a busy
+    -- session those callbacks and their direct retries could outpace AceComm.
+    SendPing(accountID)
 end
 
 function HironCraftScanComm:ShareOrderStatus(entry)
@@ -843,7 +856,8 @@ function HironCraftScanComm:ShareOrderStatus(entry)
     -- Send immediately to a recently verified character, but do not wait for
     -- the periodic heartbeat to notice that the account changed characters.
     -- If the direct delivery does not get an ACK within one second, discover
-    -- the live character and deliver this exact revision to the responder.
+    -- the live character. Its ping response flushes the latest pending state
+    -- as a batch, superseding any obsolete intermediate revisions.
     for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts or {}) do
         if
             type(entry.deliveryPending) == 'table'
@@ -867,48 +881,13 @@ function HironCraftScanComm:ShareOrderStatus(entry)
                             type(entry.deliveryPending) == 'table'
                             and entry.deliveryPending[deliveryAccountID]
                         then
-                            DiscoverAndSendOrderStatus(deliveryAccountID, entry)
+                            DiscoverOrderStatusTarget(deliveryAccountID)
                         end
                     end)
                 end
             else
-                DiscoverAndSendOrderStatus(accountID, entry)
+                DiscoverOrderStatusTarget(accountID)
             end
-        end
-    end
-
-    -- Delivery is idempotent. Retry only while at least one linked account has
-    -- not acknowledged this exact revision.
-    if EntryHasPendingDelivery(entry) and C_Timer and C_Timer.After then
-        for _, delay in ipairs({ 2, 5 }) do
-            C_Timer.After(delay, function()
-                if EntryHasPendingDelivery(entry) then
-                    -- A stale target already has this exact update queued on
-                    -- its discovery request. Only retry direct sends here so
-                    -- we do not stack duplicate callbacks while an account is
-                    -- offline.
-                    for accountID, account in pairs(
-                        HironCraftScan.DB.realm.linked_accounts or {}
-                    ) do
-                        if
-                            entry.deliveryPending[accountID]
-                            and HironCraftScan.Utils.Contains(
-                                account.permissions,
-                                HironCraftScanComm.Permissions.Full
-                            )
-                        then
-                            local target = FreshTargetForAccount(accountID)
-                            if target then
-                                HironCraftScanComm:Transmit(
-                                    HironCraftScan.Utils.DeepCopy(entry),
-                                    HironCraftScanComm.Operations.ShareOrderStatus,
-                                    target
-                                )
-                            end
-                        end
-                    end
-                end
-            end)
         end
     end
 end
@@ -1067,37 +1046,55 @@ local function SendPendingOrderStatuses(accountID, target)
         return
     end
 
-    for _, entry in pairs(HironCraftScan.OrderFulfillment:GetStatuses()) do
-        if
-            type(entry) == 'table'
-            and type(entry.deliveryPending) == 'table'
+    local statuses = {}
+    local notices = {}
+    local count = 0
+    local function Flush()
+        if count == 0 then
+            return
+        end
+        HironCraftScanComm:Transmit(
+            { statuses = statuses, recent = notices },
+            HironCraftScanComm.Operations.ShareOrderCompletion,
+            target
+        )
+        statuses = {}
+        notices = {}
+        count = 0
+    end
+
+    local function PendingForAccount(entry)
+        return type(entry.deliveryPending) == 'table'
             and entry.deliveryPending[accountID]
-        then
-            HironCraftScanComm:Transmit(
-                HironCraftScan.Utils.DeepCopy(entry),
-                HironCraftScanComm.Operations.ShareOrderStatus,
-                target
-            )
+    end
+
+    -- Outcomes draw the final green/red mark and matter most to the operator,
+    -- so put newest notices at the front of the ALERT queue. Exact state rows
+    -- follow, also newest first, instead of relying on undefined pairs order.
+    for _, notice in ipairs(NewestOrderEntries(
+        HironCraftScan.OrderFulfillment:GetCompletionNotices(),
+        nil,
+        PendingForAccount
+    )) do
+        table.insert(notices, HironCraftScan.Utils.DeepCopy(notice))
+        count = count + 1
+        if count >= PENDING_ORDER_BATCH_LIMIT then
+            Flush()
         end
     end
 
-
-    for _, notice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
-        if
-            type(notice) == 'table'
-            and type(notice.deliveryPending) == 'table'
-            and notice.deliveryPending[accountID]
-        then
-            local operation = notice.status == HironCraftScan.OrderFulfillment.Status.Rejected
-                    and HironCraftScanComm.Operations.ShareOrderOutcome
-                or HironCraftScanComm.Operations.ShareOrderCompletion
-            HironCraftScanComm:Transmit(
-                HironCraftScan.Utils.DeepCopy(notice),
-                operation,
-                target
-            )
+    for _, entry in ipairs(NewestOrderEntries(
+        HironCraftScan.OrderFulfillment:GetStatuses(),
+        nil,
+        PendingForAccount
+    )) do
+        table.insert(statuses, HironCraftScan.Utils.DeepCopy(entry))
+        count = count + 1
+        if count >= PENDING_ORDER_BATCH_LIMIT then
+            Flush()
         end
     end
+    Flush()
 end
 
 local function CreateRecentOrderJournal()
@@ -1105,27 +1102,14 @@ local function CreateRecentOrderJournal()
         return nil
     end
 
-    local recent = {}
-    for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
-        table.insert(recent, storedNotice)
-    end
-    table.sort(recent, function(lhs, rhs)
-        return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
-    end)
-    while #recent > 12 do
-        table.remove(recent)
-    end
-
-    local statuses = {}
-    for _, storedStatus in pairs(HironCraftScan.OrderFulfillment:GetStatuses()) do
-        table.insert(statuses, storedStatus)
-    end
-    table.sort(statuses, function(lhs, rhs)
-        return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
-    end)
-    while #statuses > 20 do
-        table.remove(statuses)
-    end
+    local recent = NewestOrderEntries(
+        HironCraftScan.OrderFulfillment:GetCompletionNotices(),
+        RECENT_ORDER_NOTICE_LIMIT
+    )
+    local statuses = NewestOrderEntries(
+        HironCraftScan.OrderFulfillment:GetStatuses(),
+        RECENT_ORDER_STATUS_LIMIT
+    )
 
     return {
         recent = HironCraftScan.Utils.DeepCopy(recent),
@@ -1198,62 +1182,10 @@ function HironCraftScanComm:ShareOrderCompletion(notice)
         return
     end
 
-    local recent = {}
-    local recentStatuses = {}
-    if HironCraftScan.OrderFulfillment then
-        for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
-            if storedNotice.status ~= HironCraftScan.OrderFulfillment.Status.Rejected then
-                table.insert(recent, storedNotice)
-            end
-        end
-        table.sort(recent, function(lhs, rhs)
-            return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
-        end)
-        while #recent > 12 do
-            table.remove(recent)
-        end
-
-        for _, storedStatus in pairs(HironCraftScan.OrderFulfillment:GetStatuses()) do
-            table.insert(recentStatuses, storedStatus)
-        end
-        table.sort(recentStatuses, function(lhs, rhs)
-            return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
-        end)
-        while #recentStatuses > 20 do
-            table.remove(recentStatuses)
-        end
-    end
-
-    -- Keep sending the current notice in the original wire format so a linked
-    -- client that has not installed this patch yet remains compatible.
+    -- Send only the current result. The durable pending flag and heartbeat ACK
+    -- path retry it when needed; replaying the entire recent journal after every
+    -- craft caused a steadily growing AceComm BULK queue during rush periods.
     TransmitToFullLinkedAccounts(notice, HironCraftScanComm.Operations.ShareOrderCompletion)
-
-    -- Also include a small recent journal. If one addon whisper is dropped or
-    -- delayed, the next completed order repairs the missing mark. Older addon
-    -- versions safely ignore this separate operation.
-    local repairPayload = {
-        notice = HironCraftScan.Utils.DeepCopy(notice),
-        recent = HironCraftScan.Utils.DeepCopy(recent),
-        statuses = HironCraftScan.Utils.DeepCopy(recentStatuses),
-    }
-    TransmitToFullLinkedAccounts(
-        repairPayload,
-        HironCraftScanComm.Operations.ShareOrderCompletionRepair
-    )
-
-    -- AceComm normally delivers reliably, but two WoW clients can briefly
-    -- change the character selected for a linked account. Re-send the small
-    -- idempotent current notice after target discovery has settled.
-    if C_Timer and C_Timer.After then
-        C_Timer.After(2, function()
-            if LinkedAccountsConfigured() then
-                TransmitToFullLinkedAccounts(
-                    notice,
-                    HironCraftScanComm.Operations.ShareOrderCompletion
-                )
-            end
-        end)
-    end
 end
 
 
@@ -1320,40 +1252,10 @@ function HironCraftScanComm:ShareOrderOutcome(notice)
         return
     end
 
-    local recent = {}
-    if HironCraftScan.OrderFulfillment then
-        for _, storedNotice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
-            if storedNotice.status == HironCraftScan.OrderFulfillment.Status.Rejected then
-                table.insert(recent, storedNotice)
-            end
-        end
-        table.sort(recent, function(lhs, rhs)
-            return (lhs.updatedAt or 0) > (rhs.updatedAt or 0)
-        end)
-        while #recent > 12 do
-            table.remove(recent)
-        end
-    end
-
-    local payload = {
-        notice = HironCraftScan.Utils.DeepCopy(notice),
-        recent = HironCraftScan.Utils.DeepCopy(recent),
-    }
     TransmitToFullLinkedAccounts(
-        payload,
+        notice,
         HironCraftScanComm.Operations.ShareOrderOutcome
     )
-
-    if C_Timer and C_Timer.After then
-        C_Timer.After(2, function()
-            if LinkedAccountsConfigured() then
-                TransmitToFullLinkedAccounts(
-                    payload,
-                    HironCraftScanComm.Operations.ShareOrderOutcome
-                )
-            end
-        end)
-    end
 end
 
 local function ReceiveShareOrderCompletion(sender, data, senderID)
@@ -1536,21 +1438,21 @@ local function ReceivePing(sender, data, senderID)
             return
         end
         todosByAccount[senderID] = nil
-        local heartbeatOnly = #todos == 0
         for _, todo in ipairs(todos) do
             todo(senderID, sender)
         end
-        if heartbeatOnly then
-            local account = HironCraftScan.DB.realm.linked_accounts[senderID]
-            if
-                account
-                and HironCraftScan.Utils.Contains(
-                    account.permissions,
-                    HironCraftScanComm.Permissions.Full
-                )
-            then
-                SendPendingOrderStatuses(senderID, sender)
-            end
+        -- A response proves which character currently represents the linked
+        -- account. Flush its complete pending order state even when this ping
+        -- also carried another callback, so discoveries cannot strand updates.
+        local account = HironCraftScan.DB.realm.linked_accounts[senderID]
+        if
+            account
+            and HironCraftScan.Utils.Contains(
+                account.permissions,
+                HironCraftScanComm.Permissions.Full
+            )
+        then
+            SendPendingOrderStatuses(senderID, sender)
         end
     end
 end
@@ -2109,8 +2011,10 @@ end
 -- another logs in, it will tell us and we'll save that. The only time we need
 -- to ping multiple remote targets is on login when we are announcing ourselves
 -- and waiting for replies.
-local IgnoreOfflineMessages = {}
-IgnoreOfflineMessages.__index = IgnoreOfflineMessages
+local OFFLINE_FILTER_TTL_SECONDS = 180
+local offlineExactMessages = {}
+local offlineTargetNames = {}
+local offlineFilterInstalled = false
 
 local function EscapeLuaPattern(text)
     return (text:gsub('(%W)', '%%%1'))
@@ -2137,66 +2041,61 @@ local function BaseCharacterName(name)
     return (name:match('^([^-]+)') or name):lower()
 end
 
-function IgnoreOfflineMessages:new(targets, encoded)
-    local self = setmetatable({}, IgnoreOfflineMessages)
+local function OfflineMessageFilter(_, _, msg)
+    local now = GetTime and GetTime() or time()
+    local exactExpiry = offlineExactMessages[msg]
+    if exactExpiry then
+        if exactExpiry >= now then
+            return true
+        end
+        offlineExactMessages[msg] = nil
+    end
 
-    for _, accountTargets in pairs(targets) do
-        for target, _ in pairs(accountTargets) do
-            -- If we've messaged a target successfully already, we try that
-            -- target first and test for success before sending to others.
-            self.filtered = self.filtered or {}
-            self.targetNames = self.targetNames or {}
-            self.targetNames[BaseCharacterName(target)] = true
+    -- Blizzard can independently strip the realm from a whisper target on
+    -- connected realms. Match the localized error's player field as fallback.
+    local missingName = BaseCharacterName(MissingPlayerName(msg))
+    local nameExpiry = missingName and offlineTargetNames[missingName]
+    if nameExpiry then
+        if nameExpiry >= now then
+            return true
+        end
+        offlineTargetNames[missingName] = nil
+    end
+end
 
-            local filter = ERR_CHAT_PLAYER_NOT_FOUND_S:gsub('%%s', target)
-            self.filtered[target] = { filter }
+local function RegisterOfflineTargets(targets)
+    local now = GetTime and GetTime() or time()
+    local expiry = now + OFFLINE_FILTER_TTL_SECONDS
 
-            -- On non-connected realms, something below us auto-removes the
-            -- realm name from the target. It even happens on connected
-            -- realms if the the characters are on the same realm, so we do
-            -- this unconditionally.
-            filter = ERR_CHAT_PLAYER_NOT_FOUND_S:gsub('%%s', target:match('^([^-]+)') or target)
-            table.insert(self.filtered[target], filter)
+    if not offlineFilterInstalled then
+        ChatFrame_AddMessageEventFilter('CHAT_MSG_SYSTEM', OfflineMessageFilter)
+        offlineFilterInstalled = true
+    end
+
+    for message, messageExpiry in pairs(offlineExactMessages) do
+        if messageExpiry < now then
+            offlineExactMessages[message] = nil
+        end
+    end
+    for name, nameExpiry in pairs(offlineTargetNames) do
+        if nameExpiry < now then
+            offlineTargetNames[name] = nil
         end
     end
 
-    local function CreateOfflineChatFilter(filtered, targetNames)
-        HironCraftScan.Utils.printTable('Created chat filter. Ignoring', filtered)
-        return function(self, event, msg)
-            if filtered then
-                for char, filter in pairs(filtered) do
-                    for _, f in ipairs(filter) do
-                        if msg == f then
-                            return true
-                        end
-                    end
-                end
-
-                -- Blizzard can independently strip the realm from a whisper
-                -- target on connected realms. Match the localized error's
-                -- player field as a fallback instead of relying only on the
-                -- exact formatted strings above.
-                local missingName = BaseCharacterName(MissingPlayerName(msg))
-                if missingName and targetNames[missingName] then
-                    return true
-                end
+    for _, accountTargets in pairs(targets) do
+        for target in pairs(accountTargets) do
+            local baseName = BaseCharacterName(target)
+            if baseName then
+                offlineTargetNames[baseName] = expiry
+            end
+            if type(ERR_CHAT_PLAYER_NOT_FOUND_S) == 'string' then
+                offlineExactMessages[ERR_CHAT_PLAYER_NOT_FOUND_S:gsub('%%s', target)] = expiry
+                local shortTarget = target:match('^([^-]+)') or target
+                offlineExactMessages[ERR_CHAT_PLAYER_NOT_FOUND_S:gsub('%%s', shortTarget)] = expiry
             end
         end
     end
-
-    self.filter = CreateOfflineChatFilter(self.filtered, self.targetNames)
-
-    ChatFrame_AddMessageEventFilter('CHAT_MSG_SYSTEM', self.filter)
-
-    return self
-end
-
-function IgnoreOfflineMessages:Clear()
-    -- Large serialized syncs are split and throttled by AceComm, so their
-    -- offline errors can arrive well after the first chunk was queued.
-    C_Timer.After(180, function()
-        ChatFrame_RemoveMessageEventFilter('CHAT_MSG_SYSTEM', self.filter)
-    end)
 end
 
 local function TransmitSerialized(serialized, target, priority)
@@ -2238,7 +2137,7 @@ local function TransmitSerialized(serialized, target, priority)
 
     HironCraftScan.Utils.printTable('targets', targets)
 
-    local filter = IgnoreOfflineMessages:new(targets, encoded)
+    RegisterOfflineTargets(targets)
 
     for _, accountTargets in pairs(targets) do
         for target, _ in pairs(accountTargets) do
@@ -2247,7 +2146,6 @@ local function TransmitSerialized(serialized, target, priority)
         end
     end
 
-    filter:Clear()
 end
 
 local function IsPublicOperation(op)
