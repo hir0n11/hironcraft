@@ -457,9 +457,9 @@ local function UpgradeRealmStorage()
         then
             realms[key] = value
 
-            -- Transitioning linked_accounts from a global to a per-realm
-            -- variable since you have to establish initial communication on
-            -- each realm anyway.
+            -- Preserve legacy account-wide links while moving old realm data.
+            -- They are normalized back to one account-wide table after the
+            -- current realm has been selected.
             realms[key].linked_accounts = HironCraftScan_DB.settings
                 and HironCraftScan_DB.settings.linked_accounts
 
@@ -484,9 +484,6 @@ local function UpgradeRealmStorage()
 
             HironCraftScan_DB[key] = nil
         end
-    end
-    if HironCraftScan_DB.settings then
-        HironCraftScan_DB.settings.linked_accounts = nil
     end
 end
 
@@ -583,6 +580,83 @@ local function UpgradeCrossRealmSupport(realmNames)
         end
     end
     return realmID
+end
+
+local function MergeLinkedAccountInfo(target, source)
+    if target == source or type(source) ~= 'table' then
+        return
+    end
+
+    -- Preserve any fields added by CraftScan or HironCraft versions that this
+    -- migration does not know about. Current account-wide values win when both
+    -- copies contain a value.
+    for key, value in pairs(source) do
+        if target[key] == nil then
+            target[key] = value
+        end
+    end
+
+    target.backup_chars = target.backup_chars or {}
+    for _, character in ipairs(source.backup_chars or {}) do
+        if not HironCraftScan.Utils.Contains(target.backup_chars, character) then
+            table.insert(target.backup_chars, character)
+        end
+    end
+
+    if
+        source.last_analytics_share
+        and (not target.last_analytics_share or source.last_analytics_share > target.last_analytics_share)
+    then
+        target.last_analytics_share = source.last_analytics_share
+    end
+end
+
+local function UpgradeAccountWideLinkedAccounts(currentRealmDB)
+    -- A link identifies a WoW account, not a character, faction, or realm. Old
+    -- CraftScan storage kept copies under individual realm groups. That works
+    -- only while every realm already has a copy and breaks after a clean reset:
+    -- a character on another faction/realm cannot announce that it came online.
+    local accountWide = HironCraftScan.Utils.saved(
+        HironCraftScan.DB.settings,
+        'linked_accounts',
+        {}
+    )
+
+    local function MergeRealm(realmDB)
+        if type(realmDB) ~= 'table' then
+            return
+        end
+        for accountID, info in pairs(realmDB.linked_accounts or {}) do
+            if type(info) == 'table' then
+                if not accountWide[accountID] then
+                    accountWide[accountID] = info
+                else
+                    MergeLinkedAccountInfo(accountWide[accountID], info)
+                end
+            end
+        end
+    end
+
+    -- Prefer the realm being loaded, then merge any useful character endpoints
+    -- learned on other realms by older versions.
+    MergeRealm(currentRealmDB)
+    for _, realmDB in pairs(HironCraftScan_DB.realms or {}) do
+        if realmDB ~= currentRealmDB then
+            MergeRealm(realmDB)
+        end
+    end
+
+    -- Keep the legacy realm field as an alias so existing call sites and saved
+    -- databases remain compatible. All realms point at the same table during
+    -- the session, so unlinking cannot leave a stale copy to reappear later.
+    for _, realmDB in pairs(HironCraftScan_DB.realms or {}) do
+        if type(realmDB) == 'table' then
+            realmDB.linked_accounts = accountWide
+        end
+    end
+    currentRealmDB.linked_accounts = accountWide
+
+    return accountWide
 end
 
 local function UpgradePersistentConfig()
@@ -880,6 +954,7 @@ local function doOnce()
         end
 
         local realmDB = HironCraftScan.Utils.saved(HironCraftScan_DB.realms, realmID, {})
+        UpgradeAccountWideLinkedAccounts(realmDB)
         HironCraftScan.DB.characters = HironCraftScan.Utils.saved(realmDB, 'characters', {})
         HironCraftScan.DB.listed_orders = HironCraftScan.Utils.saved(realmDB, 'listed_orders', {})
         HironCraftScan.DB.customers = HironCraftScan.Utils.saved(realmDB, 'customers', {})
