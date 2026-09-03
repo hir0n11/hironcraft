@@ -23,16 +23,19 @@ unpack = unpack or table.unpack
 
 local owned = {}
 local itemBonuses = {
-    [1005] = 5,
-    [1010] = 10,
-    [1020] = 20,
-    [1050] = 50,
+    [246447] = 5,
+    [246448] = 10,
+    [246449] = 20,
+    [246450] = 50,
 }
 local activeAllocations = {}
 local baseSkill = 408
 local enabled = true
 local maxAllowed = 5
 local invalidatedOrderID
+local operationCalls = 0
+local detailsRefreshCalls = 0
+local createRefreshCalls = 0
 
 Enum = {
     CraftingReagentType = { Finishing = 3 },
@@ -54,16 +57,19 @@ C_TradeSkillUI = {
                     dataSlotIndex = 1,
                     quantityRequired = 1,
                     reagents = {
-                        { itemID = 1005 },
-                        { itemID = 1010 },
-                        { itemID = 1020 },
-                        { itemID = 1050 },
+                        -- A non-skill finishing reagent must never be simulated.
+                        { itemID = 999999 },
+                        { itemID = 246447 },
+                        { itemID = 246448 },
+                        { itemID = 246449 },
+                        { itemID = 246450 },
                     },
                 },
             },
         }
     end,
     GetCraftingOperationInfoForOrder = function()
+        operationCalls = operationCalls + 1
         local itemID = activeAllocations[1]
         local bonus = itemBonuses[itemID] or 0
         return {
@@ -103,8 +109,8 @@ function transaction:CreateCraftingReagentInfoTbl()
     return activeAllocations
 end
 
-local form = { UpdateDetailsStats = function() end }
-local engine = { UpdateCreateButton = function() end }
+local form = { UpdateDetailsStats = function() detailsRefreshCalls = detailsRefreshCalls + 1 end }
+local engine = { UpdateCreateButton = function() createRefreshCalls = createRefreshCalls + 1 end }
 
 HironCraftProfitCraftingOrdersEnv = {
     PT = {},
@@ -120,7 +126,11 @@ function CO:GetOrderRequestedQuality(order) return order.minQuality end
 function CO:GetTransactionFromEngine() return transaction, form end
 function CO:BuildQualityInfoFromOperationInfo(_, info)
     if not info then return nil end
-    return { quality = info.craftingQuality }
+    return {
+        quality = info.craftingQuality,
+        skill = (info.baseSkill or 0) + (info.bonusSkill or 0),
+        upper = (info.baseDifficulty or 0) + (info.bonusDifficulty or 0),
+    }
 end
 function CO:InvalidateOrderCaches(orderID) invalidatedOrderID = orderID end
 
@@ -138,36 +148,47 @@ local function Reset(skill, limit)
     maxAllowed = limit
     activeAllocations = {}
     invalidatedOrderID = nil
+    operationCalls = 0
+    detailsRefreshCalls = 0
+    createRefreshCalls = 0
     for itemID in pairs(itemBonuses) do owned[itemID] = 1 end
+    owned[999999] = 1
     CO:ClearOrderQualityRejection(order)
 end
 
 Reset(408, 5)
 local result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
-assert(result == "applied" and candidate.skillBonus == 5 and activeAllocations[1] == 1005)
+assert(result == "applied" and candidate.skillBonus == 5 and activeAllocations[1] == 246447)
 assert(invalidatedOrderID == order.orderID)
+assert(operationCalls == 2, "only base and the selected +5 finisher should be evaluated")
+assert(detailsRefreshCalls == 1 and createRefreshCalls == 1, "intermediate candidates must not refresh the UI")
 
 Reset(400, 10)
 result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
-assert(result == "applied" and candidate.skillBonus == 10 and activeAllocations[1] == 1010)
+assert(result == "applied" and candidate.skillBonus == 10 and activeAllocations[1] == 246448)
+assert(operationCalls == 2, "finishers below the required skill gap must be skipped")
 
 Reset(399, 10)
 result = CO:PrepareAutoFinishingReagent(engine, order, false)
 assert(result == "reject" and activeAllocations[1] == nil)
 assert(CO:IsOrderReadyForQualityRejection(order))
+assert(operationCalls == 1, "an impossible configured limit should be rejected without simulations")
 
 Reset(390, 20)
 result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
-assert(result == "applied" and candidate.skillBonus == 20 and activeAllocations[1] == 1020)
+assert(result == "applied" and candidate.skillBonus == 20 and activeAllocations[1] == 246449)
+assert(operationCalls == 2)
 
 Reset(360, 50)
 result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
-assert(result == "applied" and candidate.skillBonus == 50 and activeAllocations[1] == 1050)
+assert(result == "applied" and candidate.skillBonus == 50 and activeAllocations[1] == 246450)
+assert(operationCalls == 2)
 
 Reset(408, 5)
-owned[1005] = 0
+owned[246447] = 0
 result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
 assert(result == "reject" and candidate.currentQuality == 4 and activeAllocations[1] == nil)
+assert(operationCalls == 1, "unowned and unrelated finishers must not be simulated")
 
 enabled = false
 Reset(408, 5)

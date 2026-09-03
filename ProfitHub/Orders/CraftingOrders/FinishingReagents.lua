@@ -9,6 +9,16 @@ if not PT or not CO then return end
 
 local QUALITY_REJECT_WINDOW_SECONDS = 30
 
+-- Midnight exposes many reagents through the finishing slot, but only these
+-- four add profession skill. Evaluating every entry by repeatedly rebuilding
+-- Blizzard's live transaction causes a visible multi-second hitch.
+local FINISHING_SKILL_BONUS_BY_ITEM_ID = {
+    [246447] = 5,  -- Apprentice's Scribbles
+    [246448] = 10, -- Artisan's Ledger
+    [246449] = 20, -- Mentor's Helpful Handiwork
+    [246450] = 50, -- Artisan's Consortium Gold Star
+}
+
 local function GetOwnedItemCount(itemID)
     if not itemID then return 0 end
 
@@ -51,13 +61,6 @@ local function GetTransactionOperationInfo(transaction, order, useConcentration)
     end
 
     return nil
-end
-
-local function GetEffectiveSkill(info)
-    if type(info) ~= "table" then return nil, nil end
-    local skill = SafeNum(info.baseSkill) + SafeNum(info.bonusSkill)
-    local difficulty = SafeNum(info.baseDifficulty) + SafeNum(info.bonusDifficulty)
-    return skill, difficulty
 end
 
 local function ClearTransactionSlot(transaction, slotIndex)
@@ -151,6 +154,7 @@ function CO:GetFinishingReagentCandidates(order)
                         slotIndex = slotIndex,
                         quantity = quantity,
                         owned = GetOwnedItemCount(itemID),
+                        skillBonus = FINISHING_SKILL_BONUS_BY_ITEM_ID[itemID],
                     }
                 end
             end
@@ -217,38 +221,43 @@ function CO:PrepareAutoFinishingReagent(engine, order, useConcentration, pageFra
     local candidates, schematicReady = self:GetFinishingReagentCandidates(order)
     if not schematicReady then return "unknown" end
 
-    local baseSkill, baseDifficulty = GetEffectiveSkill(baseInfo)
     local maxAllowed = self:GetAutoFinishingMaxSkillBonus()
-    local evaluated = {}
+    local currentSkill = tonumber(baseQuality.skill)
+    local nextQualitySkill = tonumber(baseQuality.upper)
+    local minimumSkillBonus = 1
+    if currentSkill and nextQualitySkill and nextQualitySkill > currentSkill then
+        minimumSkillBonus = math.max(1, math.ceil(nextQualitySkill - currentSkill))
+    end
+    local eligible = {}
 
     for _, candidate in ipairs(candidates) do
-        if candidate.owned >= candidate.quantity and AllocateFinishingReagent(transaction, candidate) then
-            RefreshOrderEngine(engine, form)
-            local operationInfo = GetTransactionOperationInfo(transaction, order, useConcentration)
-            local qualityInfo = self:BuildQualityInfoFromOperationInfo(order, operationInfo, useConcentration)
-            local skill, difficulty = GetEffectiveSkill(operationInfo)
-            if qualityInfo and skill and difficulty and baseSkill and baseDifficulty then
-                candidate.skillBonus = math.max(0, math.floor(
-                    ((skill - baseSkill) + (baseDifficulty - difficulty)) + 0.5
-                ))
-                candidate.quality = tonumber(qualityInfo.quality) or 0
-                candidate.sufficient = candidate.quality >= requestedQuality
-                evaluated[#evaluated + 1] = candidate
-            end
-            ClearTransactionSlot(transaction, candidate.slotIndex)
+        if candidate.skillBonus
+            and candidate.skillBonus >= minimumSkillBonus
+            and candidate.skillBonus <= maxAllowed
+            and candidate.owned >= candidate.quantity
+        then
+            eligible[#eligible + 1] = candidate
         end
     end
 
-    table.sort(evaluated, function(lhs, rhs)
+    table.sort(eligible, function(lhs, rhs)
         if lhs.skillBonus ~= rhs.skillBonus then return lhs.skillBonus < rhs.skillBonus end
         return lhs.itemID < rhs.itemID
     end)
 
     local selected
-    for _, candidate in ipairs(evaluated) do
-        if candidate.sufficient and candidate.skillBonus > 0 and candidate.skillBonus <= maxAllowed then
-            selected = candidate
-            break
+    for _, candidate in ipairs(eligible) do
+        if AllocateFinishingReagent(transaction, candidate) then
+            -- The transaction allocation is immediately reflected by
+            -- CreateCraftingReagentInfoTbl(). Refreshing the whole Blizzard
+            -- form here is unnecessary and was the source of the frame hitch.
+            local operationInfo = GetTransactionOperationInfo(transaction, order, useConcentration)
+            local qualityInfo = self:BuildQualityInfoFromOperationInfo(order, operationInfo, useConcentration)
+            if qualityInfo and (tonumber(qualityInfo.quality) or 0) >= requestedQuality then
+                selected = candidate
+            end
+            ClearTransactionSlot(transaction, candidate.slotIndex)
+            if selected then break end
         end
     end
 
@@ -259,8 +268,12 @@ function CO:PrepareAutoFinishingReagent(engine, order, useConcentration, pageFra
         return "applied", selected
     end
 
+    local clearedSlots = {}
     for _, candidate in ipairs(candidates) do
-        ClearTransactionSlot(transaction, candidate.slotIndex)
+        if candidate.slotIndex and not clearedSlots[candidate.slotIndex] then
+            clearedSlots[candidate.slotIndex] = true
+            ClearTransactionSlot(transaction, candidate.slotIndex)
+        end
     end
     RefreshOrderEngine(engine, form)
     self:MarkOrderReadyForQualityRejection(order)
