@@ -599,24 +599,67 @@ end
 
 local function CurrentResponse(option)
     local customerInfo = HironCraftScan.DB.customers[option.customer]
-    local response = customerInfo
-        and customerInfo.responses
-        and customerInfo.responses[option.responseID]
-    if response ~= option.response then
+    local responses = customerInfo and customerInfo.responses
+    if not responses or not IsListedOrder(option.customer, option.responseID) then
         return nil
     end
-    if not IsListedOrder(option.customer, option.responseID) then
-        return nil
+
+    local response = responses[option.responseID]
+    if response == option.response then
+        return response
     end
-    return response
+
+    -- A recipe response can also live under its profession ID. The direct
+    -- recipe key may disappear while the alias still owns the listed request;
+    -- table identity is the authoritative link in that case.
+    for _, stored in pairs(responses) do
+        if stored == option.response then
+            return stored
+        end
+    end
+    return nil
+end
+
+local function FindEquivalentResponse(option)
+    local customerInfo = HironCraftScan.DB.customers[option.customer]
+    for _, candidate in ipairs(QuickReplies:ResolveResponses(option.customer, customerInfo)) do
+        local reply = QuickReplies:BuildReply(option.templateKey, candidate.response)
+        if reply == option.reply and ResponseLabel(candidate.response) == option.contextLabel then
+            return candidate.response
+        end
+    end
+    return nil
+end
+
+function QuickReplies:ResolvePopupResponse(option)
+    return CurrentResponse(option) or FindEquivalentResponse(option)
+end
+
+local function SameReplyContext(lhs, rhs)
+    return lhs
+        and rhs
+        and lhs.customer == rhs.customer
+        and lhs.templateKey == rhs.templateKey
+        and lhs.reply == rhs.reply
+        and lhs.contextLabel == rhs.contextLabel
+end
+
+local function DismissEquivalentToasts(option)
+    for _, other in ipairs(toastPool) do
+        if other:IsShown() and SameReplyContext(other.option, option) then
+            other.option = nil
+            other:Hide()
+        end
+    end
+    LayoutToasts()
 end
 
 local function SendOption(toast, option)
-    local response = CurrentResponse(option)
+    local response = QuickReplies:ResolvePopupResponse(option)
     local reply = response and QuickReplies:BuildReply(option.templateKey, response) or nil
     if not reply then
         print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
-        DismissToast(toast)
+        DismissEquivalentToasts(option)
         return
     end
 
@@ -624,7 +667,7 @@ local function SendOption(toast, option)
     -- whisper path as greetings, and CHAT_MSG_WHISPER_INFORM records it in the
     -- customer's existing chat_history.
     HironCraftScan.Utils.SendResponses({ reply }, option.customer)
-    DismissToast(toast)
+    DismissEquivalentToasts(option)
 end
 
 local function SetupToast(toast, option, customerInfo, serial, optionIndex)
@@ -673,37 +716,88 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
     toast:Show()
 end
 
-local function ShowPopup(customer, message, customerInfo, responses, templateKeys)
+local function PreferPopupOption(existing, candidate)
+    local activeOrder = HironCraftScan.State.activeOrder
+    local existingIsActive = activeOrder
+        and activeOrder.customerName == existing.customer
+        and activeOrder.responseID == existing.responseID
+    local candidateIsActive = activeOrder
+        and activeOrder.customerName == candidate.customer
+        and activeOrder.responseID == candidate.responseID
+    if existingIsActive ~= candidateIsActive then
+        return candidateIsActive
+    end
+
+    local existingTime = tonumber(existing.response.time) or 0
+    local candidateTime = tonumber(candidate.response.time) or 0
+    if existingTime ~= candidateTime then
+        return candidateTime > existingTime
+    end
+    return tostring(candidate.responseID) > tostring(existing.responseID)
+end
+
+local function HasMultipleKeys(values)
+    local first = next(values)
+    return first ~= nil and next(values, first) ~= nil
+end
+
+function QuickReplies:BuildPopupOptions(customer, message, responses, templateKeys)
     local options = {}
-    local multipleResponses = #responses > 1
-    local multipleTemplates = #templateKeys > 1
+    local bySignature = {}
     for _, candidate in ipairs(responses) do
         for _, templateKey in ipairs(templateKeys) do
-            local reply = QuickReplies:BuildReply(templateKey, candidate.response)
+            local reply = self:BuildReply(templateKey, candidate.response)
             if reply then
                 local contextLabel = ResponseLabel(candidate.response)
-                local templateLabel = QuickReplies:GetTemplateLabel(templateKey)
-                local label = reply
-                if multipleResponses then
-                    label = contextLabel .. ': ' .. reply
-                end
-                if multipleTemplates then
-                    label = templateLabel .. ': ' .. label
-                end
-                table.insert(options, {
+                local option = {
                     customer = customer,
                     message = message,
                     response = candidate.response,
                     responseID = candidate.responseID,
                     templateKey = templateKey,
-                    templateLabel = templateLabel,
+                    templateLabel = self:GetTemplateLabel(templateKey),
                     reply = reply,
-                    label = label,
                     contextLabel = contextLabel,
-                })
+                }
+                local signature = table.concat({ templateKey, reply, contextLabel }, '\30')
+                local existing = bySignature[signature]
+                if not existing then
+                    bySignature[signature] = option
+                    table.insert(options, option)
+                elseif PreferPopupOption(existing, option) then
+                    for key, value in pairs(option) do
+                        existing[key] = value
+                    end
+                end
             end
         end
     end
+
+    local responseIDs = {}
+    local templateIDs = {}
+    for _, option in ipairs(options) do
+        responseIDs[tostring(option.responseID)] = true
+        templateIDs[option.templateKey] = true
+    end
+    local multipleResponses = HasMultipleKeys(responseIDs)
+    local multipleTemplates = HasMultipleKeys(templateIDs)
+    for _, option in ipairs(options) do
+        local label = option.reply
+        if multipleResponses then
+            label = option.contextLabel .. ': ' .. label
+        end
+        if multipleTemplates then
+            label = option.templateLabel .. ': ' .. label
+        end
+        option.label = label
+    end
+
+    return options
+end
+
+
+local function ShowPopup(customer, message, customerInfo, responses, templateKeys)
+    local options = QuickReplies:BuildPopupOptions(customer, message, responses, templateKeys)
 
     -- Avoid silently hiding one of several ambiguous orders. Very large sets
     -- are left to the normal order page instead of presenting a partial choice.
