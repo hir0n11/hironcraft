@@ -33,13 +33,15 @@ local function EnsureStorage()
 end
 
 local function EnsureCompletionStorage()
-    if not HironCraftScan.DB or not HironCraftScan.DB.realm then
+    if not HironCraftScan.DB or not HironCraftScan.DB.settings then
         return {}
     end
 
     -- This journal is independent of local HironCraftScan response IDs. It lets a
     -- linked account apply the completion even if its order row arrives later.
-    return HironCraftScan.Utils.saved(HironCraftScan.DB.realm, 'order_completion_notices', {})
+    -- Keep it account-wide so the next character can replay a result written
+    -- immediately before logout, including switches across factions/realms.
+    return HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'order_completion_notices', {})
 end
 
 local function BaseName(name)

@@ -659,6 +659,60 @@ local function UpgradeAccountWideLinkedAccounts(currentRealmDB)
     return accountWide
 end
 
+local function UpgradeAccountWideOrderCompletionNotices(currentRealmDB)
+    -- Completion notices must survive an immediate character switch even when
+    -- the next crafter belongs to another faction or realm group. Exact row
+    -- statuses remain realm-local, but this compact result journal is safe to
+    -- replay account-wide because its matching code also checks request time,
+    -- customer, item/recipe, and profession context.
+    local accountWide = HironCraftScan.Utils.saved(
+        HironCraftScan.DB.settings,
+        'order_completion_notices',
+        {}
+    )
+
+    local function PreferSource(source, target)
+        if type(target) ~= 'table' then
+            return true
+        end
+        local sourceTime = tonumber(source.updatedAt) or 0
+        local targetTime = tonumber(target.updatedAt) or 0
+        if sourceTime ~= targetTime then
+            return sourceTime > targetTime
+        end
+        return source.status == 'fulfilled' and target.status ~= 'fulfilled'
+    end
+
+    local function MergeRealm(realmDB)
+        if type(realmDB) ~= 'table' then
+            return
+        end
+        for key, notice in pairs(realmDB.order_completion_notices or {}) do
+            if type(notice) == 'table' and PreferSource(notice, accountWide[key]) then
+                accountWide[key] = notice
+            end
+        end
+    end
+
+    MergeRealm(currentRealmDB)
+    for _, realmDB in pairs(HironCraftScan_DB.realms or {}) do
+        if realmDB ~= currentRealmDB then
+            MergeRealm(realmDB)
+        end
+    end
+
+    -- Alias every realm to the authoritative journal for compatibility with
+    -- old call sites and to ensure ACK updates are saved consistently.
+    for _, realmDB in pairs(HironCraftScan_DB.realms or {}) do
+        if type(realmDB) == 'table' then
+            realmDB.order_completion_notices = accountWide
+        end
+    end
+    currentRealmDB.order_completion_notices = accountWide
+
+    return accountWide
+end
+
 local function UpgradePersistentConfig()
     -- As we make changes to the SavedVariable format, upgrade it here globally
     -- before anything else runs against it so we don't need conditionals
@@ -955,6 +1009,7 @@ local function doOnce()
 
         local realmDB = HironCraftScan.Utils.saved(HironCraftScan_DB.realms, realmID, {})
         UpgradeAccountWideLinkedAccounts(realmDB)
+        UpgradeAccountWideOrderCompletionNotices(realmDB)
         HironCraftScan.DB.characters = HironCraftScan.Utils.saved(realmDB, 'characters', {})
         HironCraftScan.DB.listed_orders = HironCraftScan.Utils.saved(realmDB, 'listed_orders', {})
         HironCraftScan.DB.customers = HironCraftScan.Utils.saved(realmDB, 'customers', {})
