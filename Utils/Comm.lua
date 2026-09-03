@@ -1397,6 +1397,31 @@ local function PingTargets(targetAccountID, characters)
     )
 end
 
+local function AddAccountDiscoveryCandidates(targetAccountID, account, candidates, excluded)
+    local function AddCandidate(character)
+        if type(character) == 'string' and character ~= '' and character ~= excluded then
+            candidates[character] = true
+        end
+    end
+
+    -- backup_chars contains characters that have spoken to us directly. It is
+    -- the best source for non-crafting alts and for fresh links that have not
+    -- completed a full profession sync yet.
+    for _, character in ipairs(account.backup_chars or {}) do
+        AddCandidate(character)
+    end
+
+    -- A linked account can change to any of its synced crafters. The optimized
+    -- discovery path used to omit these names and could therefore stay pinned
+    -- to the character used for linking. Probe them with the tiny Ping payload;
+    -- the full login snapshot is still sent only to the character that replies.
+    for character, characterConfig in pairs(HironCraftScan.DB.characters or {}) do
+        if type(characterConfig) == 'table' and characterConfig.sourceID == targetAccountID then
+            AddCandidate(character)
+        end
+    end
+end
+
 SendPing = function(targetAccountID, todo)
     -- This is a lightweight check to see who on the other account is online
     -- before we do a more heavy weight send. We don't want to try to send a
@@ -1456,19 +1481,13 @@ SendPing = function(targetAccountID, todo)
                 end
 
                 local fallback = {}
-                for _, char in ipairs(account.backup_chars or {}) do
-                    if char ~= preferred then
-                        fallback[char] = true
-                    end
-                end
+                AddAccountDiscoveryCandidates(targetAccountID, account, fallback, preferred)
                 PingTargets(targetAccountID, fallback)
             end)
         end
     else
         local candidates = {}
-        for _, char in ipairs(account.backup_chars or {}) do
-            candidates[char] = true
-        end
+        AddAccountDiscoveryCandidates(targetAccountID, account, candidates)
         PingTargets(targetAccountID, candidates)
     end
 end
@@ -2279,19 +2298,19 @@ end
 
 local function ReceiveRemoteTarget(senderID, sender)
     remoteTargets[senderID] = { [sender] = time() }
-    HironCraftScan.DB.realm.linked_accounts[senderID].last_active_char = sender
+    local linkedAccount = HironCraftScan.DB.realm.linked_accounts[senderID]
+    linkedAccount.last_active_char = sender
     HironCraftScan.OnLinkedAccountStateChange()
 
     -- TODO: Connected realms - does sender come with the realm name?
     --local nameAndRealm = sender .. "-" .. GetRealmName();
 
-    -- If we are receiving from a character that is not a crafter, save the name
-    -- as a backup so we can find it again during future discovery phases.
-    local backupChars = HironCraftScan.DB.realm.linked_accounts[senderID].backup_chars
-    if
-        not HironCraftScan.DB.characters[sender]
-        and not HironCraftScan.Utils.Contains(backupChars, sender)
-    then
+    -- Every character that has answered is a valid account endpoint. Persist
+    -- crafters as well as non-crafting alts so future logins can discover the
+    -- account after either side changes character.
+    linkedAccount.backup_chars = linkedAccount.backup_chars or {}
+    local backupChars = linkedAccount.backup_chars
+    if not HironCraftScan.Utils.Contains(backupChars, sender) then
         table.insert(backupChars, sender)
         HironCraftScan.Utils.printTable('Updated backupChars', backupChars)
     end
