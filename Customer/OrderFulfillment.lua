@@ -407,6 +407,13 @@ local function CompletionNoticeKey(notice)
     }, ':')
 end
 
+function OrderFulfillment:CompletionNoticeKey(notice)
+    if type(notice) ~= 'table' then
+        return nil
+    end
+    return CompletionNoticeKey(notice)
+end
+
 local function ResponseForOrder(order)
     local ok, response = pcall(HironCraftScan.OrderToResponse, order)
     if ok then
@@ -613,6 +620,31 @@ end
 
 function OrderFulfillment:GetCompletionNotices()
     return EnsureCompletionStorage()
+end
+
+function OrderFulfillment:AcknowledgeCompletion(ack, accountID)
+    if type(ack) ~= 'table' or type(accountID) ~= 'string' then
+        return false
+    end
+
+    local key = self:CompletionNoticeKey(ack)
+    local notice = key and EnsureCompletionStorage()[key]
+    if
+        not notice
+        or tostring(notice.origin or '') ~= tostring(ack.origin or '')
+        or (tonumber(notice.updatedAt) or 0) ~= (tonumber(ack.updatedAt) or 0)
+        or type(notice.deliveryPending) ~= 'table'
+        or not notice.deliveryPending[accountID]
+    then
+        return false
+    end
+
+    notice.deliveryPending[accountID] = nil
+    if not next(notice.deliveryPending) then
+        notice.deliveryPending = nil
+        notice.deliveryConfirmedAt = time()
+    end
+    return true
 end
 
 function OrderFulfillment:IsDeliveryPending(entry)
@@ -952,15 +984,37 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
     local notices = EnsureCompletionStorage()
     local key = CompletionNoticeKey(notice)
     local current = notices[key]
+
+    local function MaterializeMatchingStatuses(completion)
+        -- The crafting character may not own the CraftScan chat row (for
+        -- example, the request was detected by the other linked account). In
+        -- that case it can only publish Blizzard's durable completion notice.
+        -- As soon as a client that owns the row receives the notice, turn it
+        -- into a normal exact status so it gets the same ACK/retry guarantees
+        -- and does not have to wait for a later journal/UI reconciliation.
+        for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
+            if CompletionNoticeMatchesOrder(completion, order) then
+                self:SetStatus(order, completion.status, {
+                    craftingOrderID = completion.orderID,
+                    crafterFullName = completion.crafterFullName,
+                    automatic = true,
+                    result = 'completion_notice',
+                })
+            end
+        end
+    end
+
     if current and (current.updatedAt or 0) >= notice.updatedAt then
         -- Replayed linked-account notices are also a cheap UI repair signal.
         -- The data is already current, but the ScrollBox row may have been
         -- rebound after the original notification was handled.
+        MaterializeMatchingStatuses(current)
         ScheduleStatusRefreshes()
         return false
     end
 
     notices[key] = notice
+    MaterializeMatchingStatuses(notice)
     NotifyCompletionUpdated(notice)
     return true
 end
@@ -999,14 +1053,22 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
     if not self:ApplyRemoteCompletion(notice) then
         return false
     end
+
+    local storedNotice = EnsureCompletionStorage()[CompletionNoticeKey(notice)] or notice
     if
-        notice.status == self.Status.Rejected
+        HironCraftScanComm
+        and HironCraftScanComm.PrepareOrderCompletionDelivery
+    then
+        HironCraftScanComm:PrepareOrderCompletionDelivery(storedNotice)
+    end
+    if
+        storedNotice.status == self.Status.Rejected
         and HironCraftScanComm
         and HironCraftScanComm.ShareOrderOutcome
     then
-        HironCraftScanComm:ShareOrderOutcome(notice)
+        HironCraftScanComm:ShareOrderOutcome(storedNotice)
     elseif HironCraftScanComm and HironCraftScanComm.ShareOrderCompletion then
-        HironCraftScanComm:ShareOrderCompletion(notice)
+        HironCraftScanComm:ShareOrderCompletion(storedNotice)
     end
     return true
 end

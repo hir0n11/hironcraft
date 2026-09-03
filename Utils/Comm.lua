@@ -62,6 +62,7 @@ HironCraftScanComm.Operations = {
     OrderStatusRepair = 'order_status_repair',
     ShareOrderCompletion = 'share_order_completion',
     ShareOrderCompletionRepair = 'share_order_completion_repair',
+    OrderCompletionAck = 'order_completion_ack',
     ShareOrderOutcome = 'share_order_outcome',
     ShareAnalytics = 'share_analytics',
     Ping = 'ping',
@@ -192,6 +193,14 @@ function HironCraftScanComm:PrepareOrderStatusDelivery(entry)
     entry.deliveryPending = next(pending) and pending or nil
     entry.deliveryConfirmedAt = nil
     return entry.deliveryPending ~= nil
+end
+
+function HironCraftScanComm:PrepareOrderCompletionDelivery(notice)
+    -- Completion notices are the only proof available when the crafting
+    -- character does not have the originating CraftScan row. Keep them pending
+    -- until every full linked account confirms receipt, just like exact status
+    -- entries, so a fast logout cannot lose the green mark.
+    return self:PrepareOrderStatusDelivery(notice)
 end
 
 local function CreateInitialTargets()
@@ -1071,6 +1080,24 @@ local function SendPendingOrderStatuses(accountID, target)
             )
         end
     end
+
+
+    for _, notice in pairs(HironCraftScan.OrderFulfillment:GetCompletionNotices()) do
+        if
+            type(notice) == 'table'
+            and type(notice.deliveryPending) == 'table'
+            and notice.deliveryPending[accountID]
+        then
+            local operation = notice.status == HironCraftScan.OrderFulfillment.Status.Rejected
+                    and HironCraftScanComm.Operations.ShareOrderOutcome
+                or HironCraftScanComm.Operations.ShareOrderCompletion
+            HironCraftScanComm:Transmit(
+                HironCraftScan.Utils.DeepCopy(notice),
+                operation,
+                target
+            )
+        end
+    end
 end
 
 local function CreateRecentOrderJournal()
@@ -1230,6 +1257,64 @@ function HironCraftScanComm:ShareOrderCompletion(notice)
 end
 
 
+local function CompletionAck(notice)
+    if
+        type(notice) ~= 'table'
+        or type(notice.customerName) ~= 'string'
+        or not notice.updatedAt
+    then
+        return nil
+    end
+
+    return {
+        orderID = notice.orderID,
+        customerName = notice.customerName,
+        spellID = notice.spellID,
+        itemID = notice.itemID,
+        status = notice.status,
+        origin = notice.origin,
+        updatedAt = notice.updatedAt,
+    }
+end
+
+local function SendOrderCompletionAcks(target, notices)
+    local acknowledgements = {}
+    local myAccountID = HironCraftScan.DB.settings.my_uuid
+    for _, notice in pairs(notices or {}) do
+        local pending = type(notice) == 'table' and notice.deliveryPending
+        if type(pending) == 'table' and pending[myAccountID] then
+            local ack = CompletionAck(notice)
+            if ack then
+                table.insert(acknowledgements, ack)
+            end
+        end
+    end
+
+    if #acknowledgements > 0 then
+        HironCraftScanComm:Transmit(
+            { notices = acknowledgements },
+            HironCraftScanComm.Operations.OrderCompletionAck,
+            target
+        )
+    end
+end
+
+
+local function ReceiveOrderCompletionAck(sender, data, senderID)
+    if
+        type(data) ~= 'table'
+        or type(data.notices) ~= 'table'
+        or not HironCraftScan.OrderFulfillment
+    then
+        return
+    end
+
+    for _, ack in ipairs(data.notices) do
+        HironCraftScan.OrderFulfillment:AcknowledgeCompletion(ack, senderID)
+    end
+end
+
+
 function HironCraftScanComm:ShareOrderOutcome(notice)
     if not LinkedAccountsConfigured() or HironCraftScanComm.applying_remote_state then
         return
@@ -1276,19 +1361,26 @@ local function ReceiveShareOrderCompletion(sender, data, senderID)
         return
     end
 
+    local receivedNotices = {}
     if type(data) == 'table' and (data.notice or data.recent or data.statuses) then
         if data.statuses then
             ReceiveOrderStatuses(sender, data.statuses, true)
         end
-        if data.recent then
+        if type(data.recent) == 'table' then
             HironCraftScan.OrderFulfillment:ApplyRemoteCompletionNotices(data.recent)
+            for _, notice in pairs(data.recent) do
+                table.insert(receivedNotices, notice)
+            end
         end
-        if data.notice then
+        if type(data.notice) == 'table' then
             HironCraftScan.OrderFulfillment:ApplyRemoteCompletion(data.notice)
+            table.insert(receivedNotices, data.notice)
         end
-    else
+    elseif type(data) == 'table' then
         HironCraftScan.OrderFulfillment:ApplyRemoteCompletion(data)
+        table.insert(receivedNotices, data)
     end
+    SendOrderCompletionAcks(sender, receivedNotices)
 end
 
 local todosByAccount = {}
@@ -1964,6 +2056,7 @@ local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.OrderStatusAck] = true,
     [HironCraftScanComm.Operations.OrderStatusRepair] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletion] = true,
+    [HironCraftScanComm.Operations.OrderCompletionAck] = true,
     [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
     [HironCraftScanComm.Operations.Ping] = true,
     [HironCraftScanComm.Operations.RequestCraft] = true,
@@ -2271,6 +2364,8 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveOrderStatuses(sender, msg.data and msg.data.statuses, false)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderCompletion then
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderCompletionAck then
+            ReceiveOrderCompletionAck(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderOutcome then
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
         elseif

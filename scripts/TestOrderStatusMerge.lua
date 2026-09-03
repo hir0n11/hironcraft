@@ -161,4 +161,39 @@ assert(not batchChanged)
 assert(#batchAccepted == 1, "only the exact replay should be acknowledged")
 assert(#batchConflicts == 1 and batchConflicts[1].requestToken == "request-two")
 
+local noticeOrder = { customerName = "Asuna-Realm", responseID = 4321 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(noticeOrder)] = noticeOrder
+CraftScan.DB.customers[noticeOrder.customerName] = {
+    responses = {
+        [noticeOrder.responseID] = {
+            requestToken = "asuna-request",
+            time = 400,
+            crafterFullName = "RemoteCrafter-Realm",
+            recipeID = 9876,
+            itemID = 6789,
+        },
+    },
+}
+now = 410
+local notice = {
+    orderID = 7001,
+    customerName = "Asuna",
+    spellID = 9876,
+    itemID = 6789,
+    crafterFullName = "RemoteCrafter-Realm",
+    origin = "remote-account",
+    updatedAt = now,
+    status = "fulfilled",
+}
+assert(CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice))
+local materialized = CraftScan.OrderFulfillment:GetStatuses()[CraftScan.OrderToOrderID(noticeOrder)]
+assert(materialized and materialized.status == "fulfilled", "completion notice should materialize an exact row status")
+assert(materialized.craftingOrderID == 7001, "materialized status should retain Blizzard order ID")
+
+local noticeKey = CraftScan.OrderFulfillment:CompletionNoticeKey(notice)
+local storedNotice = CraftScan.OrderFulfillment:GetCompletionNotices()[noticeKey]
+storedNotice.deliveryPending = { ["linked-account"] = true }
+assert(CraftScan.OrderFulfillment:AcknowledgeCompletion(notice, "linked-account"))
+assert(not storedNotice.deliveryPending and storedNotice.deliveryConfirmedAt == now)
+
 print("Order status merge tests passed.")
