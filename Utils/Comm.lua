@@ -59,6 +59,7 @@ HironCraftScanComm.Operations = {
     ShareQuickReplies = 'share_quick_replies',
     ShareOrderStatus = 'share_order_status',
     OrderStatusAck = 'order_status_ack',
+    OrderStatusRepair = 'order_status_repair',
     ShareOrderCompletion = 'share_order_completion',
     ShareOrderCompletionRepair = 'share_order_completion_repair',
     ShareOrderOutcome = 'share_order_outcome',
@@ -97,6 +98,8 @@ local remoteTargets = nil
 local SendPing
 local StartHeartbeat
 local SendOrderStatusAcks
+local SendOrderStatusRepairs
+local ReceiveOrderStatuses
 local lastRecentOrderReplayAt = nil
 local FRESH_TARGET_SECONDS = 15
 local HEARTBEAT_SECONDS = 10
@@ -439,8 +442,7 @@ local function ReceiveShareCharacterData(sender, data, senderID)
     end
 
     if data.order_statuses and HironCraftScan.OrderFulfillment then
-        HironCraftScan.OrderFulfillment:ApplyRemoteStatuses(data.order_statuses)
-        SendOrderStatusAcks(sender, data.order_statuses)
+        ReceiveOrderStatuses(sender, data.order_statuses, true)
     end
 
     if data.order_completions and HironCraftScan.OrderFulfillment then
@@ -955,11 +957,61 @@ local function SendOrderStatusAck(target, entry)
     end
 end
 
+SendOrderStatusRepairs = function(target, conflicts)
+    if type(conflicts) ~= 'table' or #conflicts == 0 then
+        return
+    end
+
+    -- One bulk sync may contain many historical conflicts. Repair the newest
+    -- distinct rows first and keep this high-priority response small.
+    table.sort(conflicts, function(lhs, rhs)
+        return (tonumber(lhs.updatedAt) or 0) > (tonumber(rhs.updatedAt) or 0)
+    end)
+    local repairs = {}
+    local seen = {}
+    for _, current in ipairs(conflicts) do
+        local key = HironCraftScan.OrderToOrderID(current)
+        if key and not seen[key] then
+            seen[key] = true
+            table.insert(repairs, HironCraftScan.Utils.DeepCopy(current))
+            if #repairs >= 20 then
+                break
+            end
+        end
+    end
+
+    if #repairs > 0 then
+        HironCraftScanComm:Transmit(
+            { statuses = repairs },
+            HironCraftScanComm.Operations.OrderStatusRepair,
+            target
+        )
+    end
+end
+
+ReceiveOrderStatuses = function(sender, entries, allowRepair)
+    if not HironCraftScan.OrderFulfillment then
+        return false
+    end
+
+    local changed, accepted, conflicts =
+        HironCraftScan.OrderFulfillment:ApplyRemoteStatuses(entries)
+    SendOrderStatusAcks(sender, accepted)
+    if allowRepair then
+        SendOrderStatusRepairs(sender, conflicts)
+    end
+    return changed
+end
+
 local function ReceiveShareOrderStatus(sender, data, senderID)
     if HironCraftScan.OrderFulfillment then
-        HironCraftScan.OrderFulfillment:ApplyRemoteStatus(data)
+        local _, accepted, current = HironCraftScan.OrderFulfillment:ApplyRemoteStatus(data)
+        if accepted then
+            SendOrderStatusAck(sender, data)
+        elseif current then
+            SendOrderStatusRepairs(sender, { current })
+        end
     end
-    SendOrderStatusAck(sender, data)
 end
 
 local function ReceiveOrderStatusAck(sender, data, senderID)
@@ -1226,8 +1278,7 @@ local function ReceiveShareOrderCompletion(sender, data, senderID)
 
     if type(data) == 'table' and (data.notice or data.recent or data.statuses) then
         if data.statuses then
-            HironCraftScan.OrderFulfillment:ApplyRemoteStatuses(data.statuses)
-            SendOrderStatusAcks(sender, data.statuses)
+            ReceiveOrderStatuses(sender, data.statuses, true)
         end
         if data.recent then
             HironCraftScan.OrderFulfillment:ApplyRemoteCompletionNotices(data.recent)
@@ -1911,6 +1962,7 @@ local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareCustomerOrder] = true,
     [HironCraftScanComm.Operations.ShareOrderStatus] = true,
     [HironCraftScanComm.Operations.OrderStatusAck] = true,
+    [HironCraftScanComm.Operations.OrderStatusRepair] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletion] = true,
     [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
     [HironCraftScanComm.Operations.Ping] = true,
@@ -2215,6 +2267,8 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveShareOrderStatus(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderStatusAck then
             ReceiveOrderStatusAck(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderStatusRepair then
+            ReceiveOrderStatuses(sender, msg.data and msg.data.statuses, false)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderCompletion then
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderOutcome then

@@ -206,21 +206,84 @@ local function ResultForStorage(result)
     return tostring(result):sub(1, 64)
 end
 
+local STATUS_PROGRESS = {
+    [OrderFulfillment.Status.Unknown] = 0,
+    [OrderFulfillment.Status.Claimed] = 1,
+    [OrderFulfillment.Status.Crafted] = 2,
+    [OrderFulfillment.Status.Fulfilled] = 3,
+    [OrderFulfillment.Status.Failed] = 3,
+    [OrderFulfillment.Status.Rejected] = 3,
+}
+
+local function SameRequest(candidate, current)
+    if not candidate or not current then
+        return false
+    end
+
+    if candidate.requestToken and current.requestToken then
+        return candidate.requestToken == current.requestToken
+    end
+
+    if candidate.craftingOrderID and current.craftingOrderID then
+        return tostring(candidate.craftingOrderID) == tostring(current.craftingOrderID)
+    end
+
+    if candidate.requestTime and current.requestTime then
+        return tonumber(candidate.requestTime) == tonumber(current.requestTime)
+    end
+
+    return false
+end
+
+local function EntriesEquivalent(candidate, current)
+    return candidate
+        and current
+        and candidate.status == current.status
+        and tostring(candidate.origin or '') == tostring(current.origin or '')
+        and (tonumber(candidate.rev) or 0) == (tonumber(current.rev) or 0)
+        and (tonumber(candidate.updatedAt) or 0) == (tonumber(current.updatedAt) or 0)
+        and tostring(candidate.requestToken or '') == tostring(current.requestToken or '')
+        and tostring(candidate.craftingOrderID or '') == tostring(current.craftingOrderID or '')
+        and tostring(candidate.result or '') == tostring(current.result or '')
+end
+
 local function EntryIsNewer(candidate, current)
     if not current then
         return true
     end
 
-    local candidateRevision = tonumber(candidate.rev) or 0
-    local currentRevision = tonumber(current.rev) or 0
-    if candidateRevision ~= currentRevision then
-        return candidateRevision > currentRevision
+    local sameRequest = SameRequest(candidate, current)
+    if sameRequest then
+        -- Revisions are created independently on linked accounts and therefore
+        -- are not globally comparable. For one concrete customer request, a
+        -- terminal outcome must always beat an in-progress state, even when the
+        -- sender happened to have a smaller local revision counter.
+        local candidateProgress = STATUS_PROGRESS[candidate.status] or 0
+        local currentProgress = STATUS_PROGRESS[current.status] or 0
+        if candidateProgress ~= currentProgress then
+            return candidateProgress > currentProgress
+        end
+    else
+        -- A row can be reused when the same customer requests the same recipe
+        -- again. Prefer the newer request identity before comparing its local
+        -- revision, otherwise an old fulfilled row can hide the new job.
+        local candidateRequestTime = tonumber(candidate.requestTime) or 0
+        local currentRequestTime = tonumber(current.requestTime) or 0
+        if candidateRequestTime ~= currentRequestTime then
+            return candidateRequestTime > currentRequestTime
+        end
     end
 
     local candidateTime = tonumber(candidate.updatedAt) or 0
     local currentTime = tonumber(current.updatedAt) or 0
     if candidateTime ~= currentTime then
         return candidateTime > currentTime
+    end
+
+    local candidateRevision = tonumber(candidate.rev) or 0
+    local currentRevision = tonumber(current.rev) or 0
+    if candidateRevision ~= currentRevision then
+        return candidateRevision > currentRevision
     end
 
     return tostring(candidate.origin or '') > tostring(current.origin or '')
@@ -841,31 +904,43 @@ end
 function OrderFulfillment:ApplyRemoteStatus(remoteEntry)
     local entry = SanitizeEntry(remoteEntry)
     if not entry then
-        return false
+        return false, false, nil
     end
 
     local statuses = EnsureStorage()
     local key = HironCraftScan.OrderToOrderID(entry)
-    if not EntryIsNewer(entry, statuses[key]) then
-        return false
+    local current = statuses[key]
+    if not EntryIsNewer(entry, current) then
+        -- Only an exact idempotent replay is safe to acknowledge silently. A
+        -- different rejected revision needs an immediate repair response; ACKing
+        -- it here used to stop the sender's retries while leaving this row stale.
+        return false, EntriesEquivalent(entry, current), current
     end
 
     statuses[key] = entry
     RememberCraftingOrder(entry)
     NotifyUpdated(entry)
-    return true
+    return true, true, entry
 end
 
 function OrderFulfillment:ApplyRemoteStatuses(remoteStatuses)
     if type(remoteStatuses) ~= 'table' then
-        return false
+        return false, {}, {}
     end
 
     local changed = false
-    for _, entry in pairs(remoteStatuses) do
-        changed = self:ApplyRemoteStatus(entry) or changed
+    local accepted = {}
+    local conflicts = {}
+    for _, remoteEntry in pairs(remoteStatuses) do
+        local entryChanged, entryAccepted, current = self:ApplyRemoteStatus(remoteEntry)
+        changed = entryChanged or changed
+        if entryAccepted then
+            table.insert(accepted, remoteEntry)
+        elseif current then
+            table.insert(conflicts, current)
+        end
     end
-    return changed
+    return changed, accepted, conflicts
 end
 
 function OrderFulfillment:ApplyRemoteCompletion(noticeData)
