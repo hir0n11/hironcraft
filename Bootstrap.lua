@@ -4,7 +4,7 @@ HironCraftProfit = HironCraftProfit or {}
 HironCraft = HironCraftProfit
 
 HironCraft.addonName = addonName
-HironCraft.version = "0.2.16"
+HironCraft.version = "0.2.17"
 HironCraft.migration = HironCraft.migration or {
     imported = {},
 }

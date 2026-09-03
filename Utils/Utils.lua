@@ -1202,6 +1202,27 @@ end
 HironCraftScan.Utils.ChatHistoryTooltip = {}
 HironCraftScan.Utils.ChatHistoryTooltip.__index = HironCraftScan.Utils.ChatHistoryTooltip
 
+function HironCraftScan.Utils.GetChatHistoryColor(chat)
+    local args = type(chat) == 'table' and chat.args
+    local r = type(args) == 'table' and tonumber(args[1])
+    local g = type(args) == 'table' and tonumber(args[2])
+    local b = type(args) == 'table' and tonumber(args[3])
+    if r and g and b then
+        return r, g, b
+    end
+
+    local chatType = type(chat) == 'table' and chat.chatType
+    local message = type(chat) == 'table' and tostring(chat.message or '') or ''
+    if not chatType and message:find('|Hchannel:', 1, true) then
+        chatType = 'CHANNEL'
+    end
+    local color = ChatTypeInfo and ChatTypeInfo[chatType or 'WHISPER']
+    if color then
+        return color.r or 0.78, color.g or 0.78, color.b or 0.78
+    end
+    return 0.78, 0.78, 0.78
+end
+
 function HironCraftScan.Utils.ChatHistoryTooltip:new()
     local instance = setmetatable({}, HironCraftScan.Utils.ChatHistoryTooltip)
     instance.tooltip = nil
@@ -1271,12 +1292,8 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
 
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
     for _, chat in ipairs(customerInfo.chat_history) do
-        if chat.args then
-            local r, g, b = unpack(chat.args)
-            tooltip:AddLine(chat.message, r, g, b, true, 0)
-        else
-            tooltip:AddLine(chat.message, 1, 1, 1, true, 0)
-        end
+        local r, g, b = HironCraftScan.Utils.GetChatHistoryColor(chat)
+        tooltip:AddLine(chat.message, r, g, b, true, 0)
     end
 
     SpaceOutRightText(name)

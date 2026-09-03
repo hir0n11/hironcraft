@@ -405,10 +405,11 @@ local function PopulateChatHistory(order, chatFrame)
         -- timestamp. Tried what they do by calling historyBuffer:PushBack, but
         -- that leads to scrollframe getting upset. I'm fine with the double
         -- timestamp for now.
-        if item.args then
+        if item.args and tonumber(item.args[1]) and tonumber(item.args[2]) and tonumber(item.args[3]) then
             chatFrame:AddMessage(item.message, unpack(item.args))
         else
-            chatFrame:AddMessage(item.message)
+            local r, g, b = HironCraftScan.Utils.GetChatHistoryColor(item)
+            chatFrame:AddMessage(item.message, r, g, b)
         end
     end
     chatFrame:ResetAllFadeTimes()

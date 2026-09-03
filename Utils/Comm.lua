@@ -54,6 +54,7 @@ HironCraftScanComm.Operations = {
     ShareCharacterData = 'share_char_data',
     Handshake = 'handshake',
     ShareCustomerOrder = 'share_customer_order',
+    ShareCustomerChat = 'share_customer_chat',
     ShareCustomGreeting = 'share_custom_greeting',
     ShareCustomExplanations = 'share_custom_explanations',
     ShareQuickReplies = 'share_quick_replies',
@@ -729,6 +730,70 @@ function HironCraftScanComm:ShareCustomerOrder(
     end
 
     TransmitToFullLinkedAccounts(data, HironCraftScanComm.Operations.ShareCustomerOrder)
+end
+
+local customerChatSequence = 0
+
+function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, incoming)
+    if not LinkedAccountsConfigured()
+        or HironCraftScanComm.applying_remote_state
+        or not HironCraftScan.DB.settings.proxy_send_enabled
+        or type(customer) ~= 'string'
+        or type(entry) ~= 'table'
+        or type(entry.message) ~= 'string'
+    then
+        return
+    end
+
+    -- Keep this packet deliberately small: ChatFrame's original AddMessage
+    -- arguments can contain functions and other values AceSerializer cannot
+    -- transmit. The text and resolved colour are all the remote tooltip needs.
+    customerChatSequence = customerChatSequence + 1
+    entry.syncID = entry.syncID or table.concat({
+        tostring(HironCraftScan.DB.settings.my_uuid or ''),
+        tostring(time()),
+        tostring(customerChatSequence),
+    }, ':')
+    local r, g, b = HironCraftScan.Utils.GetChatHistoryColor(entry)
+    local data = {
+        customer = customer,
+        customerGuid = customerGuid,
+        incoming = incoming == true,
+        entry = {
+            message = entry.message,
+            args = { r, g, b },
+            chatType = entry.chatType,
+            syncID = entry.syncID,
+        },
+    }
+    TransmitToFullLinkedAccounts(data, HironCraftScanComm.Operations.ShareCustomerChat)
+end
+
+local function ReceiveShareCustomerChat(sender, data, senderID)
+    if not HironCraftScan.DB.settings.proxy_receive_enabled
+        or type(data) ~= 'table'
+        or not HironCraftScan.ApplyRemoteCustomerChat
+    then
+        return
+    end
+
+    local applyingRemoteState = HironCraftScanComm.applying_remote_state
+    HironCraftScanComm.applying_remote_state = true
+    local ok, err = pcall(
+        HironCraftScan.ApplyRemoteCustomerChat,
+        data.customer,
+        data.customerGuid,
+        data.entry,
+        data.incoming
+    )
+    HironCraftScanComm.applying_remote_state = applyingRemoteState
+    if not ok then
+        HironCraftScan.Utils.printTable('Failed to receive customer chat', {
+            sender = sender,
+            senderID = senderID,
+            error = err,
+        })
+    end
 end
 
 local function ReceiveShareCustomerOrder(sender, data, senderID)
@@ -1973,6 +2038,7 @@ end
 local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.Handshake] = true,
     [HironCraftScanComm.Operations.ShareCustomerOrder] = true,
+    [HironCraftScanComm.Operations.ShareCustomerChat] = true,
     [HironCraftScanComm.Operations.ShareOrderStatus] = true,
     [HironCraftScanComm.Operations.OrderStatusAck] = true,
     [HironCraftScanComm.Operations.OrderStatusRepair] = true,
@@ -2267,6 +2333,8 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveShareCharacterData(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomerOrder then
             ReceiveShareCustomerOrder(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomerChat then
+            ReceiveShareCustomerChat(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomGreeting then
             ReceiveShareCustomGreeting(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomExplanations then

@@ -1017,9 +1017,28 @@ end
 
 local lastChatFrameMessages = {}
 local lastChatFrameIndex = 0 -- Incremented to 1 before use
-local CHAT_FRAME_BUFFER_SIZE = 10
+-- A busy services channel can push more than ten formatted lines through the
+-- chat frame before an item finishes loading and the matching callback runs.
+local CHAT_FRAME_BUFFER_SIZE = 50
 
-local function MakeChatHistoryEntry(customer)
+local function NormalizeChatHistorySearchText(text)
+    if type(text) ~= 'string' then
+        return ''
+    end
+    text = text:gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+    text = text:gsub('|H.-|h(.-)|h', '%1')
+    text = text:gsub('|T.-|t', ''):gsub('|A.-|a', '')
+    return text:lower():gsub('%s+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+end
+
+local function ChatTypeFromEvent(event)
+    if type(event) ~= 'string' then
+        return nil
+    end
+    return event:match('^CHAT_MSG_(.+)$')
+end
+
+local function MakeChatHistoryEntry(customer, expectedMessage, event)
     -- We've hacked together the ChatFrame and the CHAT_MSG_ events, but they
     -- are not guaranteed to line up with eachother because we depend on the
     -- message appearing on ChatFrame1 but it could appear on any (or no) chat
@@ -1032,10 +1051,22 @@ local function MakeChatHistoryEntry(customer)
     -- yourself.
     local function DoIt(index)
         local lastChatFrameMessage = lastChatFrameMessages[index]
-        if string.find(lastChatFrameMessage.message, HironCraftScan.NameAndRealmToName(customer)) then
+        if type(lastChatFrameMessage) ~= 'table' or type(lastChatFrameMessage.message) ~= 'string' then
+            return nil
+        end
+
+        local formatted = NormalizeChatHistorySearchText(lastChatFrameMessage.message)
+        local customerName = type(customer) == 'string'
+            and NormalizeChatHistorySearchText(customer:match('^([^-]+)') or customer)
+            or ''
+        local expected = NormalizeChatHistorySearchText(expectedMessage)
+        local customerMatches = customerName == '' or formatted:find(customerName, 1, true) ~= nil
+        local messageMatches = expected == '' or formatted:find(expected, 1, true) ~= nil
+        if customerMatches and messageMatches then
             return {
                 message = lastChatFrameMessage.message,
                 args = lastChatFrameMessage.args,
+                chatType = ChatTypeFromEvent(event),
             }
         end
         return nil
@@ -1044,16 +1075,11 @@ local function MakeChatHistoryEntry(customer)
     -- We add entries to the circular buffer in increasing order, so start at
     -- the last added entry and work our way backwards to find the customer's
     -- message with formatting.
-    if lastChatFrameIndex then
-        for i = lastChatFrameIndex, 1, -1 do
-            local result = DoIt(i)
-            if result then
-                return result
-            end
-        end
-
-        for i = 2, lastChatFrameIndex - 1, 1 do
-            local result = DoIt(i)
+    local count = #lastChatFrameMessages
+    if count > 0 and lastChatFrameIndex >= 1 then
+        for offset = 0, count - 1 do
+            local index = ((lastChatFrameIndex - offset - 1) % count) + 1
+            local result = DoIt(index)
             if result then
                 return result
             end
@@ -1063,14 +1089,17 @@ local function MakeChatHistoryEntry(customer)
     return nil
 end
 
-local function MakeChatHistoryEntryDefault(customer, message)
-    local found = MakeChatHistoryEntry(customer)
+local function MakeChatHistoryEntryDefault(customer, message, event)
+    local found = MakeChatHistoryEntry(customer, message, event)
     if found then
         return found
     end
+    local chatType = ChatTypeFromEvent(event) or 'WHISPER'
+    local color = ChatTypeInfo and ChatTypeInfo[chatType]
     return {
         message = message,
-        args = nil,
+        args = color and { color.r, color.g, color.b } or nil,
+        chatType = chatType,
     }
 end
 
@@ -1259,7 +1288,7 @@ HironCraftScan.RebuildResponseMessage = function(order)
     response.alt_craft = newAltCraft
 end
 
-local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides)
+local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, chatEvent)
     -- At this point, we have everything we need to generate a response to the message.
     local itemLink = item and item:GetItemLink() or nil
 
@@ -1347,7 +1376,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local chat_history = saved(customerInfo, 'chat_history', {})
     local requestChatEntry
     if not (overrides and overrides.chatHistoryAlreadyStored) then
-        requestChatEntry = MakeChatHistoryEntryDefault(customer, message)
+        requestChatEntry = MakeChatHistoryEntryDefault(customer, message, chatEvent)
         table.insert(chat_history, requestChatEntry)
     else
         requestChatEntry = chat_history[#chat_history]
@@ -1465,9 +1494,88 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     )
 end
 
+local function BaseCustomerName(name)
+    if type(name) ~= 'string' then
+        return nil
+    end
+    return (name:match('^([^-]+)') or name):lower()
+end
+
+local function ResolveExistingCustomer(customer, customerGuid)
+    local customers = HironCraftScan.DB.customers or {}
+    local guidCanBeCompared = customerGuid
+        and (type(issecretvalue) ~= 'function' or not issecretvalue(customerGuid))
+    if customers[customer]
+        and (not guidCanBeCompared or not customers[customer].guid or customers[customer].guid == customerGuid)
+    then
+        return customer, customers[customer]
+    end
+
+    -- Whisper events can omit the realm even though the original channel
+    -- request was stored as Name-Realm (or the reverse). Use a base-name match
+    -- only when it is unambiguous, otherwise keep the realms separated.
+    local wanted = BaseCustomerName(customer)
+    local foundKey, foundInfo
+    for key, info in pairs(customers) do
+        if BaseCustomerName(key) == wanted then
+            if guidCanBeCompared and info.guid == customerGuid then
+                return key, info
+            end
+            if foundKey then
+                return nil, nil
+            end
+            foundKey, foundInfo = key, info
+        end
+    end
+    return foundKey, foundInfo
+end
+
+function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, incoming)
+    if type(customer) ~= 'string'
+        or type(entry) ~= 'table'
+        or type(entry.message) ~= 'string'
+    then
+        return false
+    end
+
+    local existingCustomer, customerInfo = ResolveExistingCustomer(customer, customerGuid)
+    customer = existingCustomer or customer
+    customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
+    if customerGuid and not customerInfo.guid then
+        customerInfo.guid = customerGuid
+    end
+
+    local chatHistory = saved(customerInfo, 'chat_history', {})
+    if entry.syncID then
+        for _, stored in ipairs(chatHistory) do
+            if stored.syncID == entry.syncID then
+                return false
+            end
+        end
+    end
+
+    table.insert(chatHistory, HironCraftScan.Utils.DeepCopy(entry))
+    if incoming then
+        for _, response in pairs(customerInfo.responses or {}) do
+            if response.greeting_sent then
+                response.customer_answered = true
+            end
+        end
+    end
+    if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
+        HironCraftScanCraftingOrderPage:ShowGeneric()
+    end
+    return true
+end
+
 function HironCraftScan.OnMessage(event, message, customer, customerGuid, overrides)
     if not message or not customer then
         return false
+    end
+
+    local existingCustomer, customerInfo = ResolveExistingCustomer(customer, customerGuid)
+    if existingCustomer then
+        customer = existingCustomer
     end
 
     local ignored = HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[customer]
@@ -1475,13 +1583,16 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
-    local customerInfo = HironCraftScan.DB.customers[customer]
     local crafterInfo, itemID, recipeInfo
 
     if event == 'CHAT_MSG_WHISPER_INFORM' then
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
-            table.insert(chat_history, MakeChatHistoryEntryDefault(customer, message))
+            local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            table.insert(chat_history, entry)
+            if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
+                HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, entry, false)
+            end
         end
         return false
     end
@@ -1489,7 +1600,11 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if event == 'CHAT_MSG_WHISPER' then
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
-            table.insert(chat_history, MakeChatHistoryEntryDefault(customer, message))
+            local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            table.insert(chat_history, entry)
+            if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
+                HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)
+            end
 
             for _, response in pairs(customerInfo.responses) do
                 if response.greeting_sent then
@@ -1549,13 +1664,13 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         if itemID then
             local item = Item:CreateFromItemID(itemID)
             item:ContinueOnItemLoad(function()
-                handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides)
+                handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, event)
             end)
             return false
         end
     end
 
-    handleResponse(message, customer, crafterInfo, itemID, recipeInfo, nil, overrides)
+    handleResponse(message, customer, crafterInfo, itemID, recipeInfo, nil, overrides, event)
 
     return false
 end
@@ -1592,14 +1707,28 @@ local function CaptureChatMessage(chatFrame, message, ...)
 
     -- For Prat integration, we grab the historyBuffer value, which has
     -- the timestamp separately added. 'message' does not include it.
-    InsertChatFrame(chatFrame.historyBuffer:GetEntryAtIndex(1).message, SafePack(...))
+    local displayedMessage = message
+    local historyBuffer = chatFrame and chatFrame.historyBuffer
+    local entry = historyBuffer
+        and historyBuffer.GetEntryAtIndex
+        and historyBuffer:GetEntryAtIndex(1)
+    if entry and type(entry.message) == 'string' then
+        displayedMessage = entry.message
+    end
+    if type(displayedMessage) == 'string' then
+        InsertChatFrame(displayedMessage, SafePack(...))
+    end
 end
 
 function HironCraftScan.InjectLastChatFrameMessage(customer, message, last)
     -- If we didn't see the same message, append it to our history and return
     -- that we should continue processing it. Otherwise, this account has
     -- already seen it so we can stop working.
-    local found = MakeChatHistoryEntry(customer)
+    if type(last) ~= 'table' or type(last.message) ~= 'string' then
+        return true
+    end
+
+    local found = MakeChatHistoryEntry(customer, message, 'CHAT_MSG_CHANNEL')
     if not found or found.message ~= last.message then
         HironCraftScan.Utils.printTable('Inserting', last.message)
         InsertChatFrame(last.message, last.args)
