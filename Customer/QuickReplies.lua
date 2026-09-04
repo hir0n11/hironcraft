@@ -862,6 +862,11 @@ local function ShowPopup(customer, message, customerInfo, responses, templateKey
 
     popupSerial = popupSerial + 1
     for index, option in ipairs(options) do
+        -- A customer may express the same intent in consecutive, differently
+        -- worded whispers (for example "will send" followed by "sent"). Keep
+        -- only the newest actionable card for that reply/order context; the
+        -- older card may reference a response table replaced by the refresh.
+        DismissEquivalentToasts(option)
         SetupToast(GetToast(), option, customerInfo, popupSerial, index)
     end
     LayoutToasts()
