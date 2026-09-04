@@ -12,6 +12,14 @@ local CraftScan = {
                         keywords = "sent",
                         response = "omw",
                     },
+                    CUSTOM_2 = {
+                        custom = true,
+                        label = "YES",
+                        enabled = true,
+                        keywords = "sent",
+                        response = "yes",
+                        priority = 10,
+                    },
                 },
             },
         },
@@ -58,6 +66,13 @@ end
 
 assert(loadfile("Customer/QuickReplies.lua"))("HironCraft", CraftScan)
 local QuickReplies = CraftScan.QuickReplies
+
+assert(QuickReplies:GetConfig().templates.CUSTOM_1.priority == 0, "missing priority was not migrated")
+local classified = QuickReplies:Classify("sent")
+assert(#classified == 1 and classified[1] == "CUSTOM_2", "higher-priority reply did not win")
+QuickReplies:GetConfig().templates.CUSTOM_2.priority = 0
+classified = QuickReplies:Classify("sent")
+assert(#classified == 2, "equal-priority exact matches should remain tied")
 
 local definitions = QuickReplies:GetDefinitions()
 assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")

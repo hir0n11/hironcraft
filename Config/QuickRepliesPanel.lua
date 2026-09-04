@@ -13,8 +13,8 @@ local FULL_ROW_STEP = 116
 
 local COMPACT_PANEL_WIDTH = 350
 local COMPACT_CONTENT_WIDTH = 300
-local COMPACT_ROW_HEIGHT = 190
-local COMPACT_ROW_STEP = 194
+local COMPACT_ROW_HEIGHT = 226
+local COMPACT_ROW_STEP = 230
 
 local allowedContext = {
     crafter = true,
@@ -120,6 +120,17 @@ local function CreateRow(panel, index)
     row.Delete:SetPoint('TOPLEFT', 8, -42)
     row.Delete:SetText(L('Delete'))
 
+    row.PriorityLabel = CreateLabel(row, 'GameFontNormalSmall', L('dialog.quick_reply.priority'))
+    row.PriorityLabel:SetSize(64, 20)
+    row.PriorityLabel:SetJustifyV('MIDDLE')
+
+    row.Priority = CreateFrame('EditBox', nil, row, 'InputBoxTemplate')
+    row.Priority:SetSize(42, 20)
+    row.Priority:SetAutoFocus(false)
+    row.Priority:SetNumeric(true)
+    row.Priority:SetMaxLetters(3)
+    row.Priority:SetJustifyH('CENTER')
+
     row.Keywords = CreateFrame('Frame', nil, row, 'HironCraftScanTextInputTemplate')
     row.Keywords:SetSize(280, 102)
     row.Keywords:SetPoint('TOPLEFT', 116, 0)
@@ -135,6 +146,8 @@ end
 local function LayoutRow(row, isCollapsed)
     row.Enabled:ClearAllPoints()
     row.Delete:ClearAllPoints()
+    row.PriorityLabel:ClearAllPoints()
+    row.Priority:ClearAllPoints()
     row.Keywords:ClearAllPoints()
     row.Response:ClearAllPoints()
 
@@ -148,25 +161,39 @@ local function LayoutRow(row, isCollapsed)
         row.Delete:SetPoint('TOPRIGHT', -3, -2)
 
         if eventOnly then
+            row.PriorityLabel:Hide()
+            row.Priority:Hide()
             row.Response:SetSize(COMPACT_CONTENT_WIDTH, 150)
             row.Response:SetPoint('TOPLEFT', 0, -28)
         else
+            row.PriorityLabel:SetPoint('TOPLEFT', 5, -31)
+            row.Priority:SetPoint('TOPLEFT', 70, -29)
+            row.PriorityLabel:Show()
+            row.Priority:Show()
+
             row.Keywords:SetSize(COMPACT_CONTENT_WIDTH, 80)
-            row.Keywords:SetPoint('TOPLEFT', 0, -28)
+            row.Keywords:SetPoint('TOPLEFT', 0, -55)
 
             row.Response:SetSize(COMPACT_CONTENT_WIDTH, 80)
-            row.Response:SetPoint('TOPLEFT', 0, -108)
+            row.Response:SetPoint('TOPLEFT', 0, -139)
         end
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
         row.Enabled:SetWidth(eventOnly and 184 or 114)
 
-        row.Delete:SetPoint('TOPLEFT', 8, -42)
+        row.Delete:SetPoint('TOPLEFT', 8, -76)
 
         if eventOnly then
+            row.PriorityLabel:Hide()
+            row.Priority:Hide()
             row.Response:SetSize(508, 102)
             row.Response:SetPoint('TOPLEFT', 188, 0)
         else
+            row.PriorityLabel:SetPoint('TOPLEFT', 5, -39)
+            row.Priority:SetPoint('TOPLEFT', 70, -37)
+            row.PriorityLabel:Show()
+            row.Priority:Show()
+
             row.Keywords:SetSize(280, 102)
             row.Keywords:SetPoint('TOPLEFT', 116, 0)
 
@@ -210,6 +237,37 @@ local function SetupCustomTooltip(frame, title, body)
     end)
 end
 
+local function SetupPriorityInput(panel, row, keyword)
+    local function RefreshValue()
+        row.Priority:SetText(tostring(HironCraftScan.QuickReplies.NormalizePriority(
+            panel:GetConfigValue(keyword)
+        )))
+    end
+
+    RefreshValue()
+    row.Priority:SetScript('OnEnterPressed', function(self)
+        self:ClearFocus()
+    end)
+    row.Priority:SetScript('OnEscapePressed', function(self)
+        RefreshValue()
+        self:ClearFocus()
+    end)
+    row.Priority:SetScript('OnEditFocusLost', function(self)
+        local priority = HironCraftScan.QuickReplies.NormalizePriority(self:GetText())
+        panel:UpdateConfigValue(keyword, priority)
+        self:SetText(tostring(priority))
+        panel:OnConfigChange(keyword)
+    end)
+    SetupCustomTooltip(
+        row.Priority,
+        L('dialog.quick_reply.priority'),
+        L('dialog.quick_reply.priority.tooltip.body')
+    )
+    if panel.tabGroup then
+        panel.tabGroup:AddFrame(row.Priority)
+    end
+end
+
 function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
     self.tabGroup = CreateTabGroup()
     HironCraftScan.SetupCheckBox(self, self.Enabled, 'quick_reply.enabled', 300)
@@ -232,6 +290,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
         if definition.eventOnly then
             row.Keywords:Hide()
         else
+            SetupPriorityInput(self, row, prefix .. 'priority')
             HironCraftScan.SetupTextInput(self, row.Keywords, prefix .. 'keywords')
             row.Keywords:Show()
         end
@@ -348,6 +407,9 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
     local templateKey, field = ParseTemplateKeyword(keyword)
     local template = templateKey and config.templates[templateKey]
     if template then
+        if field == 'priority' then
+            value = HironCraftScan.QuickReplies.NormalizePriority(value)
+        end
         template[field] = value
     end
 end

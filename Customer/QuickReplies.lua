@@ -12,6 +12,7 @@ local MAX_MESSAGE_WORDS = 12
 local MAX_CHAT_BYTES = 255
 local MAX_VISIBLE_TOASTS = 8
 local MAX_OPTIONS_PER_POPUP = 8
+local MAX_PRIORITY = 999
 local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 
 -- Adding another built-in quick reply only requires another definition here.
@@ -55,6 +56,13 @@ local function Trim(text)
     return (text or ''):gsub('^%s+', ''):gsub('%s+$', '')
 end
 
+local function NormalizePriority(value)
+    value = math.floor(tonumber(value) or 0)
+    return math.max(0, math.min(MAX_PRIORITY, value))
+end
+
+QuickReplies.NormalizePriority = NormalizePriority
+
 local function EnsureConfig()
     local config = HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'quick_replies', {})
     if config.enabled == nil then
@@ -69,7 +77,7 @@ local function EnsureConfig()
     if type(config.next_custom_id) ~= 'number' then
         config.next_custom_id = 1
     end
-    config.schema_version = 3
+    config.schema_version = 4
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -82,6 +90,11 @@ local function EnsureConfig()
         end
         if template.response == nil then
             template.response = definition.response
+        end
+    end
+    for _, template in pairs(templates) do
+        if type(template) == 'table' then
+            template.priority = NormalizePriority(template.priority)
         end
     end
     return config
@@ -175,6 +188,7 @@ function QuickReplies:CreateCustomTemplate(label, keywords, response)
         enabled = true,
         keywords = Trim(keywords),
         response = Trim(response),
+        priority = 0,
     }
     self:NotifyConfigChanged()
     return key
@@ -266,6 +280,7 @@ function QuickReplies:Classify(message)
         return {}
     end
 
+    local bestPriority = nil
     local bestScore = nil
     local matched = {}
     for _, definition in ipairs(self:GetDefinitions()) do
@@ -281,10 +296,15 @@ function QuickReplies:Classify(message)
             end
 
             if templateScore then
-                if not bestScore or templateScore > bestScore then
+                local priority = NormalizePriority(template.priority)
+                if bestPriority == nil
+                    or priority > bestPriority
+                    or (priority == bestPriority and templateScore > bestScore)
+                then
+                    bestPriority = priority
                     bestScore = templateScore
                     matched = { definition.key }
-                elseif templateScore == bestScore then
+                elseif priority == bestPriority and templateScore == bestScore then
                     table.insert(matched, definition.key)
                 end
             end
