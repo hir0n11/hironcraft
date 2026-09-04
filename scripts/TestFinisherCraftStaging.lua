@@ -76,6 +76,7 @@ assert(CO.preparedFinisherOrderID == nil)
 -- and craft on the following press instead of entering a stuck pending state.
 local craftCalls = 0
 local apiCraftCalls = 0
+local apiCraftReagents
 local createButtonCalls = 0
 local prepareCalls = 0
 local scheduled = {}
@@ -85,14 +86,34 @@ E.C_Timer = {
     end,
 }
 E.C_TradeSkillUI = {
-    CraftRecipe = function()
+    CraftRecipe = function(_, _, reagents)
         apiCraftCalls = apiCraftCalls + 1
+        apiCraftReagents = reagents
     end,
 }
+E.GetOrderReagentItemID = function(reagentInfo)
+    local reagent = reagentInfo and (reagentInfo.reagent or reagentInfo.reagentInfo or reagentInfo)
+    return reagent and reagent.itemID
+end
+E.IsResultOk = function(result) return result == 0 end
 E.UnitCastingInfo = function() return nil end
 E.UnitChannelInfo = function() return nil end
 local createEnabled = false
 local engine = {
+    OrderDetails = {
+        SchematicForm = {
+            GetTransaction = function()
+                return {
+                    CreateCraftingReagentInfoTbl = function()
+                        return {
+                            { reagent = { itemID = 100 }, dataSlotIndex = 1, quantity = 10 },
+                            { reagent = { itemID = 246447 }, dataSlotIndex = 9, quantity = 1 },
+                        }
+                    end,
+                }
+            end,
+        },
+    },
     CreateButton = {
         IsEnabled = function() return createEnabled end,
         GetScript = function(_, scriptName)
@@ -107,7 +128,14 @@ local engine = {
     end,
 }
 local button = {}
-order = { orderID = 77, spellID = 1234, isRecraft = false }
+order = {
+    orderID = 77,
+    spellID = 1234,
+    isRecraft = false,
+    reagents = {
+        { reagent = { itemID = 100 }, quantity = 10 },
+    },
+}
 
 CO.GetEffectiveOrder = function(_, _, fallback) return fallback end
 CO.FindOrderPageFrame = function(_, candidate) return candidate end
@@ -154,8 +182,16 @@ assert(CO.pendingCraftOrderID == order.orderID)
 assert(CO.pendingCraftSpellID == order.spellID)
 assert(createButtonCalls == 0, "prepared transaction opened Blizzard's own-reagents confirmation")
 assert(apiCraftCalls == 1, "prepared transaction was not submitted through the direct crafting API")
+assert(#apiCraftReagents == 1 and apiCraftReagents[1].reagent.itemID == 246447,
+    "customer-supplied reagents were sent back with the crafter finishing reagent")
 assert(craftCalls == 0, "first prepared-finisher submission did not prefer the direct API")
 assert(prepareCalls == 1, "staged finisher was recalculated before crafting")
+
+-- A successful order response is not proof that the profession cast began.
+-- It must leave the short start watchdog armed.
+assert(CO:HandleCraftOrderResponse(0, order.orderID) == true)
+assert(not CO:IsCraftSubmissionAcknowledged(order.orderID),
+    "server request response incorrectly acknowledged the craft start")
 
 -- A protected API call can return successfully without actually starting a
 -- craft. The short acknowledgement watchdog must unblock the same staged

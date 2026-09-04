@@ -579,6 +579,60 @@ function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
     return true
 end
 
+-- Blizzard's transaction contains both the reagents supplied by the customer
+-- and the reagents allocated by the crafter. CraftRecipe(orderID) expects only
+-- the latter: sending the customer items back can produce an OK order response
+-- without starting a profession cast. This is particularly visible after we
+-- add a finishing reagent, because that path submits the transaction directly.
+function CO:BuildCrafterOnlyReagentInfoTbl(order, reagentTbl)
+    if type(reagentTbl) ~= "table" then return reagentTbl end
+
+    local customerItemIDs = {}
+    for _, reagentInfo in ipairs((order and order.reagents) or {}) do
+        local itemID = GetOrderReagentItemID and GetOrderReagentItemID(reagentInfo)
+        if itemID then customerItemIDs[tonumber(itemID) or itemID] = true end
+    end
+
+    if not next(customerItemIDs) then return reagentTbl end
+
+    local crafterOnly = {}
+    for _, reagentInfo in ipairs(reagentTbl) do
+        local itemID = GetOrderReagentItemID and GetOrderReagentItemID(reagentInfo)
+        local key = itemID and (tonumber(itemID) or itemID)
+        if not (key and customerItemIDs[key]) then
+            crafterOnly[#crafterOnly + 1] = reagentInfo
+        end
+    end
+    return crafterOnly
+end
+
+function CO:HandleCraftOrderResponse(result, orderID)
+    local matchesPending = self.pendingCraftOrderID
+        and (not orderID or SameOrderID(orderID, self.pendingCraftOrderID))
+    if not matchesPending then return false end
+
+    if not IsResultOk(result) then
+        self:SetStatus(T("COA_STATUS_CRAFT_FAILED", "Could not craft the order."))
+        self.pendingCraftOrderID = nil
+        self.pendingCraftSpellID = nil
+        self.pendingCraftButton = nil
+        self.craftSubmissionAcknowledgedOrderID = nil
+        self:StopRowProgress()
+        if self.preparedFinisherOrderID then
+            self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
+        end
+        return true
+    end
+
+    -- An Ok response only acknowledges the server request. It is also sent for
+    -- requests that never begin a profession cast, so it must not disarm the
+    -- craft-start watchdog. Only cast/begin/result events are real start acks.
+    if self.pendingCraftButton then
+        self:StartRowProgress(self.pendingCraftButton, self.pendingCraftOrderID)
+    end
+    return true
+end
+
 function CO:CraftOrderFromRow(order, pageFrame, btn)
     if not order or not order.orderID then return false end
     if self.GetEffectiveOrder then
@@ -783,6 +837,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     local form = engine.OrderDetails and engine.OrderDetails.SchematicForm
     local transaction = form and ((form.GetTransaction and form:GetTransaction()) or form.transaction)
     local reagentTbl = transaction and transaction.CreateCraftingReagentInfoTbl and transaction:CreateCraftingReagentInfoTbl()
+    reagentTbl = self:BuildCrafterOnlyReagentInfoTbl(order, reagentTbl)
     local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
 
     local function SubmitThroughAPI()

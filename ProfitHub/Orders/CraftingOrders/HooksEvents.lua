@@ -500,28 +500,7 @@ function CO:OnEvent(event, ...)
 
     if event == "CRAFTINGORDERS_CRAFT_ORDER_RESPONSE" then
         local result, orderID = ...
-        local matchesPending = self.pendingCraftOrderID and (not orderID or SameOrderID(orderID, self.pendingCraftOrderID))
-
-        if matchesPending then
-            if not IsResultOk(result) then
-                self:SetStatus(T("COA_STATUS_CRAFT_FAILED", "Could not craft the order."))
-                self.pendingCraftOrderID = nil
-                self.pendingCraftSpellID = nil
-                self.pendingCraftButton = nil
-                self.craftSubmissionAcknowledgedOrderID = nil
-                self:StopRowProgress()
-                if self.preparedFinisherOrderID then
-                    self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
-                end
-            else
-                local pendingID = self.pendingCraftOrderID
-                self:MarkCraftSubmissionAcknowledged(pendingID)
-                if self.pendingCraftButton then
-                    self:StartRowProgress(self.pendingCraftButton, pendingID)
-                end
-            end
-        end
-
+        self:HandleCraftOrderResponse(result, orderID)
         self:RefreshVisibleRowsSoon(0.15)
         return
     end
