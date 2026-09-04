@@ -290,6 +290,9 @@ local function PurgeOldOrders()
     return #old ~= 0
 end
 
+local updateCellsScheduled = false
+local ScheduleUpdateCells
+
 local function UpdateCells()
     for customer, customerInfo in pairs(HironCraftScan.LIVE.customers) do
         for _, response in pairs(customerInfo.responses) do
@@ -302,8 +305,17 @@ local function UpdateCells()
     if PurgeOldOrders() then
         HironCraftScanCraftingOrderPage:ShowGeneric()
     else
-        C_Timer.After(5, UpdateCells)
+        ScheduleUpdateCells()
     end
+end
+
+ScheduleUpdateCells = function()
+    if updateCellsScheduled then return end
+    updateCellsScheduled = true
+    C_Timer.After(5, function()
+        updateCellsScheduled = false
+        UpdateCells()
+    end)
 end
 
 local function SortItemsByComparator(items, keys, comparator)
@@ -438,7 +450,7 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
 
     ScrollUtil.AddManagedScrollBarVisibilityBehavior(scrollBox, self.BrowseFrame.OrderList.ScrollBar, nil, nil);
 
-    C_Timer.After(5, UpdateCells)
+    ScheduleUpdateCells()
 end
 
 function HironCraftScanCraftingOrderPageMixin:SortOrderIsValid(sortOrder)

@@ -1291,7 +1291,7 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     end
 
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
-    for _, chat in ipairs(customerInfo.chat_history) do
+    for _, chat in ipairs(HironCraftScan.Utils.GetUniqueChatHistory(customerInfo.chat_history)) do
         local r, g, b = HironCraftScan.Utils.GetChatHistoryColor(chat)
         tooltip:AddLine(chat.message, r, g, b, true, 0)
     end

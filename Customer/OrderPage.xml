@@ -7,7 +7,7 @@
 	<Button name="HironCraftScanCrafterOrderListElementTemplate" mixin="HironCraftScanCrafterOrderListElementMixin" registerForClicks="LeftButtonUp, RightButtonUp, MiddleButtonUp" virtual="true">
 		<Size y="20"/>
 		<Layers>
-			<Layer level="OVERLAY">
+			<Layer level="BACKGROUND">
 				<Texture parentKey="HighlightTexture" atlas="auctionhouse-ui-row-highlight" alphaMode="ADD" setAllPoints="true" hidden="true"/>
 			</Layer>
 		</Layers>

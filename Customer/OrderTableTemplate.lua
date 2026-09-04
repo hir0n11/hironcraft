@@ -413,7 +413,7 @@ local function PopulateChatHistory(order, chatFrame)
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
 
     local accessID = ChatHistory_GetAccessID("WHISPER", order.customerName);
-    for _, item in ipairs(customerInfo.chat_history) do
+    for _, item in ipairs(HironCraftScan.Utils.GetUniqueChatHistory(customerInfo.chat_history)) do
         -- With Prat, this leads to a double timestamp because they hook
         -- AddMessage to add the timestamp, and our message already includes a
         -- timestamp. Tried what they do by calling historyBuffer:PushBack, but

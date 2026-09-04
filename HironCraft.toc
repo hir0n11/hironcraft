@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.2.26
+## Version: 0.2.27
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -143,6 +143,7 @@ Utils\FStrings.lua
 Config\RecipeSchematicMenu.xml
 
 Customer\AlertIcon.xml
+Customer\ChatHistory.lua
 Customer\ChatScanner.lua
 Customer\OrderFulfillment.lua
 Customer\QuickReplies.lua

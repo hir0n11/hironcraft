@@ -1377,14 +1377,27 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local requestChatEntry
     if not (overrides and overrides.chatHistoryAlreadyStored) then
         requestChatEntry = MakeChatHistoryEntryDefault(customer, message, chatEvent)
-        table.insert(chat_history, requestChatEntry)
     else
         requestChatEntry = chat_history[#chat_history]
     end
 
+    local requestToken = response.requestToken
     if firstInteraction or restartingTerminalRequest then
-        response.requestToken = overrides and overrides.requestToken
+        requestToken = overrides and overrides.requestToken
             or NewRequestToken(customer, responseID, requestChatEntry)
+    end
+    if requestChatEntry and requestToken then
+        requestChatEntry.syncID = requestChatEntry.syncID
+            or ('order:' .. tostring(requestToken))
+    end
+    if not (overrides and overrides.chatHistoryAlreadyStored) then
+        requestChatEntry = HironCraftScan.Utils.AppendUniqueChatHistory(
+            chat_history,
+            requestChatEntry
+        )
+    end
+    if firstInteraction or restartingTerminalRequest then
+        response.requestToken = requestToken
     end
 
     -- Save the request at higher granularities as well so that we don't
@@ -1488,7 +1501,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         message,
         customer,
         customerInfo.guid,
-        chat_history[#chat_history],
+        requestChatEntry or chat_history[#chat_history],
         response.requestToken,
         restartingTerminalRequest
     )
@@ -1546,15 +1559,11 @@ function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, i
     end
 
     local chatHistory = saved(customerInfo, 'chat_history', {})
-    if entry.syncID then
-        for _, stored in ipairs(chatHistory) do
-            if stored.syncID == entry.syncID then
-                return false
-            end
-        end
-    end
-
-    table.insert(chatHistory, HironCraftScan.Utils.DeepCopy(entry))
+    local _, inserted = HironCraftScan.Utils.AppendUniqueChatHistory(
+        chatHistory,
+        HironCraftScan.Utils.DeepCopy(entry)
+    )
+    if not inserted then return false end
     if incoming then
         for _, response in pairs(customerInfo.responses or {}) do
             if response.greeting_sent then
