@@ -341,6 +341,15 @@ end
 function CO:ContinueEmptyPersonalOrdersRefresh()
     if not self._oneButtonEmptyRefreshRunning then return end
 
+    if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then
+        self._oneButtonEmptyRefreshToken = (self._oneButtonEmptyRefreshToken or 0) + 1
+        self._oneButtonEmptyRefreshRunning = false
+        self._oneButtonEmptyRefreshScheduled = false
+        self._oneButtonEmptyRefreshResponseSeen = false
+        self._oneButtonEmptyRefreshResponseAt = nil
+        return
+    end
+
     local pageFrame = self.activePageFrame or self:FindOrderPageFrame()
     local elapsed = Now() - (self._oneButtonEmptyRefreshStartedAt or Now())
     if not pageFrame or not IsShown(pageFrame) then
@@ -396,6 +405,14 @@ function CO:ContinueEmptyPersonalOrdersRefresh()
 end
 
 function CO:StartEmptyPersonalOrdersRefresh(pageFrame)
+    -- A delayed post-completion refresh can collide with the next hardware
+    -- press. Never clear Blizzard's order cache after a claim/craft/fulfill has
+    -- already started; doing so can leave the row marked as claimed while
+    -- GetClaimedOrder() is still empty.
+    if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then
+        return true
+    end
+
     if self._oneButtonEmptyRefreshRunning then
         self:SetStatus(T("COA_ONE_BUTTON_REFRESHING", "Refreshing personal orders..."))
         return true
@@ -452,6 +469,9 @@ function CO:RefreshPersonalOrdersAfterTerminalAction(pageFrame)
         if CO._oneButtonTerminalRefreshToken ~= token then return end
         local currentPage = CO.activePageFrame or pageFrame or CO:FindOrderPageFrame()
         if not currentPage or not IsShown(currentPage) or currentPage.orderType ~= personalType then
+            return
+        end
+        if CO.IsOrderActionInProgress and CO:IsOrderActionInProgress() then
             return
         end
         CO._oneButtonLastEmptyRefreshAt = nil

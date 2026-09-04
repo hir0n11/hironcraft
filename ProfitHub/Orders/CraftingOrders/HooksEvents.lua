@@ -372,21 +372,19 @@ function CO:OnEvent(event, ...)
         if self.pendingClaimOrderID and (not orderID or SameOrderID(orderID, self.pendingClaimOrderID)) then
             if IsResultOk(result) then
                 local pendingID = self.pendingClaimOrderID
-                self.pendingClaimOrderID = nil
-
                 local claimed = self:GetClaimedOrder()
                 if claimed and SameOrderID(claimed.orderID, pendingID) then
-                    self.rowStates[pendingID] = self.rowStates[pendingID] or {}
-                    self.rowStates[pendingID].order = claimed
+                    self:MarkClaimedOrderReady(pendingID, claimed)
                 elseif self.rowStates[pendingID] and self.rowStates[pendingID].order then
                     SetCachedOrderStateClaimed(self.rowStates[pendingID].order)
+                    self.currentQueueOrderID = pendingID
+                    self:InvalidateOrderCaches(pendingID)
+                    self:SetStatus(T("COA_STATUS_CLAIMING", "Claiming order..."))
+                    self:ScheduleClaimedOrderReadiness(pendingID)
                 end
-
-                self.currentQueueOrderID = pendingID
-                self:InvalidateOrderCaches(pendingID)
-                self:SetStatus(T("COA_STATUS_CLAIMED", "Order claimed."))
             else
                 self.pendingClaimOrderID = nil
+                self._claimReadyToken = (self._claimReadyToken or 0) + 1
                 self:SetStatus(T("COA_STATUS_CLAIM_FAILED", "Could not claim the order."))
             end
         end
@@ -397,18 +395,10 @@ function CO:OnEvent(event, ...)
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_ADDED" then
         local order = self:GetClaimedOrder()
         if order then
-            self.activeOrderID = order.orderID
-            self.currentQueueOrderID = order.orderID
-            self.rowStates[order.orderID] = self.rowStates[order.orderID] or {}
-            self.rowStates[order.orderID].order = order
-            self:InvalidateOrderCaches(order.orderID)
-            if self.pendingClaimOrderID and SameOrderID(self.pendingClaimOrderID, order.orderID) then
-                self.pendingClaimOrderID = nil
-            end
-        else
-            self.pendingClaimOrderID = nil
+            self:MarkClaimedOrderReady(order.orderID, order)
+        elseif self.pendingClaimOrderID then
+            self:ScheduleClaimedOrderReadiness(self.pendingClaimOrderID)
         end
-        self:SetStatus(T("COA_STATUS_CLAIMED", "Order claimed."))
         self:RefreshVisibleRowsSoon()
         return
     end

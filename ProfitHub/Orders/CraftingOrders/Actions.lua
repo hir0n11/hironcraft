@@ -7,6 +7,9 @@ end
 setfenv(1, E)
 if not PT or not CO then return end
 
+local CLAIM_READY_POLL = 0.08
+local CLAIM_READY_TIMEOUT = 8.0
+
 function CO:SyncRowActionButtonLayers(row, btn)
     btn = btn or (row and row.ahuiOrderActionButton)
     if not btn then return end
@@ -420,6 +423,66 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     return true
 end
 
+function CO:MarkClaimedOrderReady(orderID, claimed)
+    if not orderID or not claimed or not SameOrderID(claimed.orderID, orderID) then
+        return false
+    end
+
+    if self.pendingClaimOrderID and SameOrderID(self.pendingClaimOrderID, orderID) then
+        self.pendingClaimOrderID = nil
+    end
+    self.rowStates[orderID] = self.rowStates[orderID] or {}
+    self.rowStates[orderID].order = claimed
+    self.currentQueueOrderID = orderID
+    self.activeOrderID = orderID
+    self:InvalidateOrderCaches(orderID)
+    self:SetStatus(T("COA_STATUS_CLAIMED", "Order claimed."))
+    self:RefreshVisibleRowsSoon(0.01)
+    return true
+end
+
+function CO:ScheduleClaimedOrderReadiness(orderID)
+    if not orderID or not C_Timer or not C_Timer.After then return false end
+
+    self._claimReadyToken = (self._claimReadyToken or 0) + 1
+    local token = self._claimReadyToken
+    local startedAt = GetTime and GetTime() or 0
+
+    local function poll()
+        if CO._claimReadyToken ~= token then return end
+        if not CO.pendingClaimOrderID or not SameOrderID(CO.pendingClaimOrderID, orderID) then
+            return
+        end
+
+        local claimed = CO:GetClaimedOrder()
+        if claimed and SameOrderID(claimed.orderID, orderID) then
+            CO:MarkClaimedOrderReady(orderID, claimed)
+            return
+        end
+
+        local now = GetTime and GetTime() or startedAt
+        if (now - startedAt) >= CLAIM_READY_TIMEOUT then
+            -- Keep the cached row usable for diagnostics, but do not present
+            -- it as craft-ready: protected crafting cannot succeed until the
+            -- authoritative claimed order exists.
+            CO.pendingClaimOrderID = nil
+            local state = CO.rowStates and CO.rowStates[orderID]
+            if state and state.order then SetCachedOrderStateClaimed(state.order) end
+            CO:SetStatus(T(
+                "COA_STATUS_CLAIM_NOT_READY",
+                "Order is still being claimed — press craft again in a moment."
+            ))
+            CO:RefreshVisibleRowsSoon()
+            return
+        end
+
+        C_Timer.After(CLAIM_READY_POLL, poll)
+    end
+
+    C_Timer.After(CLAIM_READY_POLL, poll)
+    return true
+end
+
 function CO:ClaimOrder(order, pageFrame)
     if not order or not order.orderID then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
@@ -466,34 +529,12 @@ function CO:ClaimOrder(order, pageFrame)
 
     if not ok then
         self.pendingClaimOrderID = nil
+        self._claimReadyToken = (self._claimReadyToken or 0) + 1
         self:RefreshVisibleRowsSoon()
         return false
     end
 
-    local requestedOrderID = order.orderID
-    C_Timer.After(1.25, function()
-        if not CO.pendingClaimOrderID or not SameOrderID(CO.pendingClaimOrderID, requestedOrderID) then
-            return
-        end
-
-        local claimed = CO:GetClaimedOrder()
-        if claimed and SameOrderID(claimed.orderID, requestedOrderID) then
-            CO.pendingClaimOrderID = nil
-            CO.rowStates[requestedOrderID] = CO.rowStates[requestedOrderID] or {}
-            CO.rowStates[requestedOrderID].order = claimed
-            CO:SetStatus(T("COA_STATUS_CLAIMED", "Order claimed."))
-        else
-
-
-            CO.pendingClaimOrderID = nil
-            local state = CO.rowStates[requestedOrderID]
-            if state and state.order then
-                SetCachedOrderStateClaimed(state.order)
-            end
-        end
-
-        CO:RefreshVisibleRows()
-    end)
+    self:ScheduleClaimedOrderReadiness(order.orderID)
 
     return true
 end

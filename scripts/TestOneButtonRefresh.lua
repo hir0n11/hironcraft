@@ -95,6 +95,19 @@ assert(CO:HandleEmptyPersonalOrdersHotkey() == true)
 assert(refreshCalls == 1, "new Personal order did not refresh the visible list")
 assert(actionCalls == 1, "the same hardware press did not advance the new Personal order")
 
+CO.IsOrderActionInProgress = function()
+    return CO.pendingClaimOrderID ~= nil
+end
+CO._oneButtonEmptyRefreshToken = 5
+CO._oneButtonEmptyRefreshRunning = true
+CO._oneButtonEmptyRefreshScheduled = true
+CO._oneButtonEmptyRefreshResponseSeen = true
+CO.pendingClaimOrderID = 1002
+CO:ContinueEmptyPersonalOrdersRefresh()
+assert(CO._oneButtonEmptyRefreshRunning == false, "running refresh survived a new claim")
+assert(CO._oneButtonEmptyRefreshToken == 6, "running refresh callback was not invalidated")
+CO.pendingClaimOrderID = nil
+
 local refreshedPage
 CO.StartEmptyPersonalOrdersRefresh = function(_, candidate)
     refreshedPage = candidate
@@ -102,7 +115,14 @@ CO.StartEmptyPersonalOrdersRefresh = function(_, candidate)
 end
 assert(CO:RefreshPersonalOrdersAfterTerminalAction(page) == true)
 assert(#timers == 1, "terminal refresh was not scheduled")
+CO.pendingClaimOrderID = 1002
 timers[1]()
+assert(refreshedPage == nil, "terminal refresh cleared the cache during a new claim")
+
+CO.pendingClaimOrderID = nil
+assert(CO:RefreshPersonalOrdersAfterTerminalAction(page) == true)
+assert(#timers == 2, "safe terminal refresh was not rescheduled")
+timers[2]()
 assert(refreshedPage == page, "terminal refresh did not target the open Personal page")
 
 print("One-button refresh tests passed.")

@@ -905,34 +905,48 @@ function QuickReplies:OnWhisper(customer, message, customerInfo)
 end
 
 local shownRejections = {}
+function QuickReplies:GetRejectedOrderSuggestionKeys(order, entry)
+    local keys = {}
+    local seen = {}
+    local function add(kind, value)
+        if value == nil or value == '' then return end
+        local key = kind .. '\30' .. tostring(value)
+        if not seen[key] then
+            seen[key] = true
+            keys[#keys + 1] = key
+        end
+    end
+
+    -- Keep every stable identity as an alias. Reconciliation may initially
+    -- omit craftingOrderID and populate it on a later ACK; revisions and
+    -- updatedAt change on those updates and must not create another offer.
+    add('crafting-order', entry and entry.craftingOrderID)
+    add('request-token', entry and entry.requestToken)
+    add('order', order and HironCraftScan.OrderToOrderID(order))
+    if type(order) == 'table' then
+        add('response', table.concat({
+            tostring(order.customerName or ''),
+            tostring(order.responseID or ''),
+        }, '\31'))
+    end
+    return keys
+end
+
 function QuickReplies:OnOrderFulfillmentUpdated(order, entry)
     local option, customerInfo = self:BuildRejectedOrderOption(order, entry)
     if not option then
         return
     end
 
-    -- One Blizzard order may update both a specific and a generic CraftScan
-    -- row. Key by Blizzard's order ID when available so that reconciliation
-    -- still produces exactly one suggestion for the customer.
-    local orderKey = HironCraftScan.OrderToOrderID(order)
-    local rejectionKey = entry.craftingOrderID and table.concat({
-        option.customer,
-        'crafting-order',
-        tostring(entry.craftingOrderID),
-    }, '\30') or table.concat({
-        orderKey,
-        tostring(entry.requestToken or ''),
-        tostring(entry.rev or ''),
-        tostring(entry.updatedAt or ''),
-    }, '\30')
-    if shownRejections[rejectionKey] then
-        return
+    local rejectionKeys = self:GetRejectedOrderSuggestionKeys(order, entry)
+    for _, key in ipairs(rejectionKeys) do
+        if shownRejections[key] then return end
     end
+    for _, key in ipairs(rejectionKeys) do shownRejections[key] = true end
 
     popupSerial = popupSerial + 1
     SetupToast(GetToast(), option, customerInfo, popupSerial, 1)
     LayoutToasts()
-    shownRejections[rejectionKey] = true
 end
 
 HironCraftScan.Utils.onLoad(function()

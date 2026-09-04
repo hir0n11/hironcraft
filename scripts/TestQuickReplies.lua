@@ -135,4 +135,26 @@ assert(QuickReplies:BuildRejectedOrderOption(
     { status = "failed", rev = 2 }
 ) == nil, "ordinary red crosses must not offer the rejected-order reply")
 
+local stableOrder = { customerName = "Valnihra", responseID = 101 }
+local initialKeys = QuickReplies:GetRejectedOrderSuggestionKeys(stableOrder, {
+    status = "rejected",
+    requestToken = "request-1",
+    rev = 1,
+    updatedAt = 100,
+})
+local reconciledKeys = QuickReplies:GetRejectedOrderSuggestionKeys(stableOrder, {
+    status = "rejected",
+    craftingOrderID = 9001,
+    requestToken = "request-1",
+    rev = 7,
+    updatedAt = 500,
+})
+local initialSet = {}
+for _, key in ipairs(initialKeys) do initialSet[key] = true end
+local hasStableAlias = false
+for _, key in ipairs(reconciledKeys) do
+    if initialSet[key] then hasStableAlias = true end
+end
+assert(hasStableAlias, "reconciled rejected status would create a repeated suggestion")
+
 print("Quick reply tests passed.")
