@@ -20,6 +20,13 @@ local CraftScan = {
                         response = "yes",
                         priority = 10,
                     },
+                    CUSTOM_3 = {
+                        custom = true,
+                        label = "CHARACTER CONFIRMATION",
+                        enabled = true,
+                        keywords = "this character",
+                        response = "yes",
+                    },
                 },
             },
         },
@@ -73,6 +80,24 @@ assert(#classified == 1 and classified[1] == "CUSTOM_2", "higher-priority reply 
 QuickReplies:GetConfig().templates.CUSTOM_2.priority = 0
 classified = QuickReplies:Classify("sent")
 assert(#classified == 2, "equal-priority exact matches should remain tied")
+
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords = "send, sent"
+classified = QuickReplies:Classify("i send on this caracter")
+assert(
+    #classified == 1 and classified[1] == "CUSTOM_3",
+    "a specific phrase with the character/caracter typo should beat the broad send keyword"
+)
+QuickReplies:GetConfig().typo_tolerance = false
+classified = QuickReplies:Classify("i send on this caracter")
+assert(
+    #classified == 1 and classified[1] == "CUSTOM_1",
+    "disabling typo recognition should restore exact-only matching"
+)
+QuickReplies:GetConfig().typo_tolerance = true
+classified = QuickReplies:Classify("i send on this char")
+for _, templateKey in ipairs(classified) do
+    assert(templateKey ~= "CUSTOM_3", "short words must not fuzzy-match a longer keyword")
+end
 
 local definitions = QuickReplies:GetDefinitions()
 assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")

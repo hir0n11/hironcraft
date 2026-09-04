@@ -70,6 +70,10 @@ function HironCraftScanQuickReplyConfigPanelMixin:CreateControls()
     self.Enabled:SetPoint('TOPLEFT', self.Description, 'BOTTOMLEFT', -5, -3)
     self.Enabled:SetWidth(300)
 
+    self.TypoTolerance = CreateFrame('Frame', nil, self, 'HironCraftScanCheckButtonTemplate')
+    self.TypoTolerance:SetPoint('LEFT', self.Enabled, 'RIGHT', 8, 0)
+    self.TypoTolerance:SetWidth(250)
+
     self.AddButton = CreateFrame('Button', nil, self, 'HironCraftScanConfigButtonTemplate')
     self.AddButton:SetPoint('TOPRIGHT', self.Description, 'BOTTOMRIGHT', 0, -1)
     HironCraftScan.SetupButton(self.AddButton, 'quick_reply.new.button', function()
@@ -214,6 +218,19 @@ function HironCraftScanQuickReplyConfigPanelMixin:Layout(isCollapsed)
     self.Enabled:SetWidth(isCollapsed and 190 or 300)
     self.Content:SetWidth(contentWidth)
 
+    self.TypoTolerance:ClearAllPoints()
+    self.Scroll:ClearAllPoints()
+    if isCollapsed then
+        self.TypoTolerance:SetPoint('TOPLEFT', self.Enabled, 'BOTTOMLEFT', 0, 0)
+        self.TypoTolerance:SetWidth(300)
+        self.Scroll:SetPoint('TOPLEFT', self.TypoTolerance, 'BOTTOMLEFT', 5, -8)
+    else
+        self.TypoTolerance:SetPoint('LEFT', self.Enabled, 'RIGHT', 8, 0)
+        self.TypoTolerance:SetWidth(250)
+        self.Scroll:SetPoint('TOPLEFT', self.Enabled, 'BOTTOMLEFT', 5, -8)
+    end
+    self.Scroll:SetPoint('BOTTOMRIGHT', self, 'BOTTOMRIGHT', -30, 8)
+
     for index = 1, self.definitionCount or 0 do
         local row = self.Rows[index]
         LayoutRow(row, isCollapsed)
@@ -271,6 +288,7 @@ end
 function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
     self.tabGroup = CreateTabGroup()
     HironCraftScan.SetupCheckBox(self, self.Enabled, 'quick_reply.enabled', 300)
+    HironCraftScan.SetupCheckBox(self, self.TypoTolerance, 'quick_reply.typo_tolerance', 250)
 
     local definitions = HironCraftScan.QuickReplies:GetDefinitions()
     self.definitionCount = #definitions
@@ -391,6 +409,9 @@ function HironCraftScanQuickReplyConfigPanelMixin:GetConfigValue(keyword)
     if keyword == 'quick_reply.enabled' then
         return config.enabled
     end
+    if keyword == 'quick_reply.typo_tolerance' then
+        return config.typo_tolerance
+    end
 
     local templateKey, field = ParseTemplateKeyword(keyword)
     local template = templateKey and config.templates[templateKey]
@@ -401,6 +422,10 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
     local config = HironCraftScan.QuickReplies:GetConfig()
     if keyword == 'quick_reply.enabled' then
         config.enabled = value
+        return
+    end
+    if keyword == 'quick_reply.typo_tolerance' then
+        config.typo_tolerance = value
         return
     end
 

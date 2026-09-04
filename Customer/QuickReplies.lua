@@ -77,7 +77,10 @@ local function EnsureConfig()
     if type(config.next_custom_id) ~= 'number' then
         config.next_custom_id = 1
     end
-    config.schema_version = 4
+    if config.typo_tolerance == nil then
+        config.typo_tolerance = true
+    end
+    config.schema_version = 5
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -246,20 +249,112 @@ local function CountWords(text)
     return count
 end
 
-local function KeywordScore(message, keyword)
+local function SplitWords(text)
+    local words = {}
+    for word in text:gmatch('%S+') do
+        words[#words + 1] = word
+    end
+    return words
+end
+
+local function IsAsciiWord(word)
+    return type(word) == 'string' and word:match('^[a-z]+$') ~= nil
+end
+
+-- Bounded Damerau-Levenshtein distance for ASCII words. Adjacent swapped
+-- letters count as one typo, which covers a common kind of misspelling.
+local function FuzzyWordDistance(lhs, rhs)
+    if lhs == rhs then return 0 end
+    if not IsAsciiWord(lhs) or not IsAsciiWord(rhs) then return nil end
+
+    local longest = math.max(#lhs, #rhs)
+    if longest < 6 then return nil end
+    local limit = longest >= 10 and 2 or 1
+    if math.abs(#lhs - #rhs) > limit then return nil end
+
+    local distance = {}
+    for i = 0, #lhs do
+        distance[i] = { [0] = i }
+    end
+    for j = 0, #rhs do
+        distance[0][j] = j
+    end
+
+    for i = 1, #lhs do
+        local rowMinimum = limit + 1
+        for j = 1, #rhs do
+            local cost = lhs:byte(i) == rhs:byte(j) and 0 or 1
+            local value = math.min(
+                distance[i - 1][j] + 1,
+                distance[i][j - 1] + 1,
+                distance[i - 1][j - 1] + cost
+            )
+            if i > 1 and j > 1
+                and lhs:byte(i) == rhs:byte(j - 1)
+                and lhs:byte(i - 1) == rhs:byte(j)
+            then
+                value = math.min(value, distance[i - 2][j - 2] + 1)
+            end
+            distance[i][j] = value
+            rowMinimum = math.min(rowMinimum, value)
+        end
+        if rowMinimum > limit and i > #rhs + limit then
+            return nil
+        end
+    end
+
+    local result = distance[#lhs][#rhs]
+    return result <= limit and result or nil
+end
+
+local function KeywordScore(message, keyword, allowTypos)
     keyword = Normalize(keyword)
     if keyword == '' then
         return nil
     end
 
     local paddedMessage = ' ' .. message .. ' '
-    if not paddedMessage:find(' ' .. keyword .. ' ', 1, true) then
-        return nil
+    if paddedMessage:find(' ' .. keyword .. ' ', 1, true) then
+        -- Prefer longer phrases ("who to send") over contained short words
+        -- ("who") so ORDER wins over NAME in that example.
+        return CountWords(keyword) * 1000 + #keyword
+    end
+    if not allowTypos then return nil end
+
+    local messageWords = SplitWords(message)
+    local keywordWords = SplitWords(keyword)
+    if #keywordWords == 0 or #keywordWords > #messageWords then return nil end
+
+    local bestDistance
+    for startIndex = 1, #messageWords - #keywordWords + 1 do
+        local totalDistance = 0
+        local changedWords = 0
+        local valid = true
+        for keywordIndex, keywordWord in ipairs(keywordWords) do
+            local messageWord = messageWords[startIndex + keywordIndex - 1]
+            if messageWord ~= keywordWord then
+                local wordDistance = FuzzyWordDistance(messageWord, keywordWord)
+                if not wordDistance then
+                    valid = false
+                    break
+                end
+                changedWords = changedWords + 1
+                totalDistance = totalDistance + wordDistance
+                -- One misspelled word per phrase is deliberately conservative.
+                if changedWords > 1 then
+                    valid = false
+                    break
+                end
+            end
+        end
+        if valid and (bestDistance == nil or totalDistance < bestDistance) then
+            bestDistance = totalDistance
+        end
     end
 
-    -- Prefer longer phrases ("who to send") over contained short words
-    -- ("who") so ORDER wins over NAME in that example.
-    return CountWords(keyword) * 1000 + #keyword
+    if bestDistance == nil then return nil end
+    -- An exact phrase with the same word count must always beat its fuzzy form.
+    return #keywordWords * 1000 + #keyword - bestDistance * 100 - 1
 end
 
 function QuickReplies:Classify(message)
@@ -289,7 +384,7 @@ function QuickReplies:Classify(message)
             local templateScore = nil
             local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
             for keyword in keywords:gmatch('[^,\n]+') do
-                local score = KeywordScore(normalized, keyword)
+                local score = KeywordScore(normalized, keyword, config.typo_tolerance)
                 if score and (not templateScore or score > templateScore) then
                     templateScore = score
                 end
