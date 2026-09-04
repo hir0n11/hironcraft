@@ -492,7 +492,10 @@ function CO:OnEvent(event, ...)
         self:SetStatus(T("COA_STATUS_DONE", "Order completed or released."))
         self:StopRowProgress()
         self:UpdateControlPanel()
-        self:RefreshPageSoon(0.35, not self:HasSelectedOrders())
+        local terminalRefreshScheduled = self.RefreshPersonalOrdersAfterTerminalAction
+            and self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
+        self:RefreshPageSoon(terminalRefreshScheduled and 0.05 or 0.35,
+            not terminalRefreshScheduled and not self:HasSelectedOrders())
         if continuation and type(continuation.callback) == "function" then
             C_Timer.After(0.1, continuation.callback)
         end
@@ -556,6 +559,9 @@ function CO:OnEvent(event, ...)
             end
             self:UpdateControlPanel()
             self:SetStatus(T("COA_STATUS_FULFILLED", "Order completed."))
+            if self.RefreshPersonalOrdersAfterTerminalAction then
+                self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
+            end
         else
             self:SetStatus(T("COA_STATUS_FULFILL_FAILED", "Could not complete the order."))
         end

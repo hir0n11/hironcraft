@@ -201,8 +201,13 @@ function CO:GetOneButtonPersonalOrders()
     local personalType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
     local count = 0
     for _, order in ipairs(orders) do
+        local fulfilled = type(order) == "table"
+            and order.orderID
+            and self.fulfilledOrderIDs
+            and self.fulfilledOrderIDs[order.orderID]
         if type(order) == "table" and order.orderID
             and (personalType == nil or order.orderType == nil or order.orderType == personalType)
+            and not fulfilled
         then
             count = count + 1
         end
@@ -426,6 +431,35 @@ function CO:StartEmptyPersonalOrdersRefresh(pageFrame)
     return true
 end
 
+function CO:RefreshPersonalOrdersAfterTerminalAction(pageFrame)
+    if not self:IsOneButtonPersonalEnabled() or not C_Timer or not C_Timer.After then
+        return false
+    end
+
+    pageFrame = pageFrame or self.activePageFrame or self:FindOrderPageFrame()
+    local personalType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
+    if not pageFrame or personalType == nil or pageFrame.orderType ~= personalType then
+        return false
+    end
+
+    -- Blizzard transitions from the completed order view back to Browse on
+    -- the same event. Let that transition settle, then perform the same fresh
+    -- request used for an empty Personal page. The token coalesces the fulfill
+    -- response and claimed-order removal when both schedule this repair.
+    self._oneButtonTerminalRefreshToken = (self._oneButtonTerminalRefreshToken or 0) + 1
+    local token = self._oneButtonTerminalRefreshToken
+    C_Timer.After(0.12, function()
+        if CO._oneButtonTerminalRefreshToken ~= token then return end
+        local currentPage = CO.activePageFrame or pageFrame or CO:FindOrderPageFrame()
+        if not currentPage or not IsShown(currentPage) or currentPage.orderType ~= personalType then
+            return
+        end
+        CO._oneButtonLastEmptyRefreshAt = nil
+        CO:StartEmptyPersonalOrdersRefresh(currentPage)
+    end)
+    return true
+end
+
 function CO:HandleEmptyPersonalOrdersHotkey()
     if not self:IsOneButtonPersonalEnabled() then return false end
 
@@ -435,7 +469,28 @@ function CO:HandleEmptyPersonalOrdersHotkey()
     if self.IsOrderListOpen and not self:IsOrderListOpen(pageFrame) then return false end
 
     local orders, personalCount = self:GetOneButtonPersonalOrders()
-    if not orders or personalCount > 0 then return false end
+    if not orders then return false end
+    if personalCount > 0 then
+        -- A new order can already be present in the API while the custom list
+        -- and selection still reflect the just-completed order. Rebind the
+        -- visible rows, select the current Personal orders and, when possible,
+        -- spend this same hardware press on their first action.
+        self:ClearSelectedOrders()
+        if self.CustomList and self.CustomList.Refresh then
+            self.CustomList:Refresh(pageFrame)
+        end
+        self:SelectAllVisibleOrders(pageFrame)
+        self:RefreshVisibleRowsSoon(0.01)
+        self:UpdateControlPanel()
+
+        local btn = self:GetQueueButton()
+        if btn and self:IsOrderSelected(btn.orderID) then
+            self:RunRowButtonAction(btn)
+        else
+            self:SetStatus(string.format(T("COA_ONE_BUTTON_REFRESHED", "New personal orders selected: %d."), personalCount))
+        end
+        return true
+    end
     return self:StartEmptyPersonalOrdersRefresh(pageFrame)
 end
 
