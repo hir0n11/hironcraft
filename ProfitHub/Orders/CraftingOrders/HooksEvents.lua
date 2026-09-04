@@ -289,11 +289,13 @@ function CO:MarkOrderCraftedReady(orderID)
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
     self.pendingCraftButton = nil
+    self.craftSubmissionAcknowledgedOrderID = nil
     if self.preparedFinisherOrderID
         and SameOrderID(self.preparedFinisherOrderID, orderID)
     then
         self.preparedFinisherOrderID = nil
         self.preparedFinisherReadyAt = nil
+        self.preparedFinisherUseEngineOrderID = nil
     end
     self:StopRowProgress()
     self:InvalidateOrderCaches(orderID)
@@ -315,6 +317,7 @@ function CO:OnEvent(event, ...)
         if self:IsCraftingOrderInteractionType(interactionType) then
             self.preparedFinisherOrderID = nil
             self.preparedFinisherReadyAt = nil
+            self.preparedFinisherUseEngineOrderID = nil
             self:SetOrderTablePresence(false)
             self:RefreshVisibleRowsSoon(0.05)
         end
@@ -333,6 +336,7 @@ function CO:OnEvent(event, ...)
         self.qualityWarmSerial = (tonumber(self.qualityWarmSerial) or 0) + 1
         self.preparedFinisherOrderID = nil
         self.preparedFinisherReadyAt = nil
+        self.preparedFinisherUseEngineOrderID = nil
         if self.StopPageProtector then self:StopPageProtector() end
         if self.StopRowProgress then self:StopRowProgress() end
         self:SetOrderTablePresence(false)
@@ -464,6 +468,7 @@ function CO:OnEvent(event, ...)
             if self.pendingCraftOrderID and SameOrderID(self.pendingCraftOrderID, orderID) then
                 self.pendingCraftOrderID = nil
                 self.pendingCraftSpellID = nil
+                self.craftSubmissionAcknowledgedOrderID = nil
             end
             if self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID) then
                 self.pendingFulfillOrderID = nil
@@ -477,6 +482,7 @@ function CO:OnEvent(event, ...)
             if self.preparedFinisherOrderID and SameOrderID(self.preparedFinisherOrderID, orderID) then
                 self.preparedFinisherOrderID = nil
                 self.preparedFinisherReadyAt = nil
+                self.preparedFinisherUseEngineOrderID = nil
             end
         end
         self:SetStatus(T("COA_STATUS_DONE", "Order completed or released."))
@@ -502,25 +508,17 @@ function CO:OnEvent(event, ...)
                 self.pendingCraftOrderID = nil
                 self.pendingCraftSpellID = nil
                 self.pendingCraftButton = nil
+                self.craftSubmissionAcknowledgedOrderID = nil
                 self:StopRowProgress()
                 if self.preparedFinisherOrderID then
                     self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
                 end
             else
                 local pendingID = self.pendingCraftOrderID
+                self:MarkCraftSubmissionAcknowledged(pendingID)
                 if self.pendingCraftButton then
                     self:StartRowProgress(self.pendingCraftButton, pendingID)
                 end
-                C_Timer.After(30, function()
-                    local name = UnitCastingInfo("player") or UnitChannelInfo("player")
-                    if not name and CO.pendingCraftOrderID and pendingID and SameOrderID(CO.pendingCraftOrderID, pendingID) then
-                        CO.pendingCraftOrderID = nil
-                        CO.pendingCraftSpellID = nil
-                        CO.pendingCraftButton = nil
-                        CO:StopRowProgress()
-                        CO:RefreshVisibleRowsSoon()
-                    end
-                end)
             end
         end
 
@@ -566,6 +564,7 @@ function CO:OnEvent(event, ...)
             and self.pendingCraftOrderID
             and (not expectedSpellID or not spellID or tonumber(spellID) == expectedSpellID)
         then
+            self:MarkCraftSubmissionAcknowledged(self.pendingCraftOrderID)
             local btn = self.pendingCraftButton or self.progressButton
             local orderID = self.pendingCraftOrderID or self.progressOrderID or (btn and btn.orderID)
             if orderID and (not btn) then
@@ -576,6 +575,24 @@ function CO:OnEvent(event, ...)
                 self.pendingCraftOrderID = self.pendingCraftOrderID or orderID
                 self:StartRowProgress(btn, orderID)
             end
+        end
+        return
+    end
+
+    if event == "TRADE_SKILL_CRAFT_BEGIN" then
+        local orderID = self.pendingCraftOrderID
+        if orderID then
+            self:MarkCraftSubmissionAcknowledged(orderID)
+            local btn = self.pendingCraftButton or self.progressButton
+            if btn then self:StartRowProgress(btn, orderID) end
+        end
+        return
+    end
+
+    if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
+        local orderID = self.pendingCraftOrderID or self.progressOrderID
+        if orderID then
+            self:MarkOrderCraftedReady(orderID)
         end
         return
     end
@@ -607,6 +624,7 @@ function CO:OnEvent(event, ...)
             CO.pendingCraftButton = nil
             CO.pendingCraftOrderID = nil
             CO.pendingCraftSpellID = nil
+            CO.craftSubmissionAcknowledgedOrderID = nil
             if CO.preparedFinisherOrderID then
                 CO.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
             end
@@ -630,6 +648,7 @@ function CO:OnEvent(event, ...)
                         CO.pendingCraftButton = nil
                         CO.pendingCraftOrderID = nil
                         CO.pendingCraftSpellID = nil
+                        CO.craftSubmissionAcknowledgedOrderID = nil
                         CO:RefreshVisibleRowsSoon()
                     end
                 end)
@@ -730,6 +749,8 @@ SafeRegisterEvent(eventFrame, "UNIT_SPELLCAST_STOP")
 SafeRegisterEvent(eventFrame, "UNIT_SPELLCAST_SUCCEEDED")
 SafeRegisterEvent(eventFrame, "UNIT_SPELLCAST_INTERRUPTED")
 SafeRegisterEvent(eventFrame, "UNIT_SPELLCAST_FAILED")
+SafeRegisterEvent(eventFrame, "TRADE_SKILL_CRAFT_BEGIN")
+SafeRegisterEvent(eventFrame, "TRADE_SKILL_ITEM_CRAFTED_RESULT")
 SafeRegisterEvent(eventFrame, "UPDATE_TRADESKILL_CAST_STOPPED")
 SafeRegisterEvent(eventFrame, "TRADE_SKILL_LIST_UPDATE")
 SafeRegisterEvent(eventFrame, "BAG_UPDATE_DELAYED")

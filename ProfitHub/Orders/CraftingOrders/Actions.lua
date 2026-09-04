@@ -9,6 +9,8 @@ if not PT or not CO then return end
 
 local CLAIM_READY_POLL = 0.08
 local CLAIM_READY_TIMEOUT = 8.0
+local CRAFT_START_ACK_TIMEOUT = 4.0
+local CRAFT_FINAL_TIMEOUT = 30.0
 
 function CO:SyncRowActionButtonLayers(row, btn)
     btn = btn or (row and row.ahuiOrderActionButton)
@@ -227,6 +229,7 @@ function CO:GetOrderEngine(pageFrame, order)
     then
         self.preparedFinisherOrderID = nil
         self.preparedFinisherReadyAt = nil
+        self.preparedFinisherUseEngineOrderID = nil
     end
 
     local browseShown = pageFrame.BrowseFrame and pageFrame.BrowseFrame:IsShown()
@@ -290,9 +293,11 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
+    self.craftSubmissionAcknowledgedOrderID = nil
     self.pendingFulfillOrderID = nil
     self.preparedFinisherOrderID = nil
     self.preparedFinisherReadyAt = nil
+    self.preparedFinisherUseEngineOrderID = nil
     self:SetStatus(T("COA_STATUS_RELEASING", "Releasing order..."))
     self:StopRowProgress()
     self:RefreshVisibleRows()
@@ -516,6 +521,8 @@ function CO:ClaimOrder(order, pageFrame)
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.preparedFinisherOrderID = nil
     self.preparedFinisherReadyAt = nil
+    self.preparedFinisherUseEngineOrderID = nil
+    self.craftSubmissionAcknowledgedOrderID = nil
     self.currentQueueOrderID = order.orderID
     self.pendingClaimOrderID = order.orderID
     self.activeOrderID = order.orderID
@@ -536,6 +543,39 @@ function CO:ClaimOrder(order, pageFrame)
 
     self:ScheduleClaimedOrderReadiness(order.orderID)
 
+    return true
+end
+
+function CO:MarkCraftSubmissionAcknowledged(orderID)
+    if not orderID or not self.pendingCraftOrderID then return false end
+    if not SameOrderID(self.pendingCraftOrderID, orderID) then return false end
+    self.craftSubmissionAcknowledgedOrderID = orderID
+    return true
+end
+
+function CO:IsCraftSubmissionAcknowledged(orderID)
+    return orderID
+        and self.craftSubmissionAcknowledgedOrderID
+        and SameOrderID(self.craftSubmissionAcknowledgedOrderID, orderID)
+end
+
+function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
+    if orderID and self.pendingCraftOrderID
+        and not SameOrderID(self.pendingCraftOrderID, orderID)
+    then
+        return false
+    end
+
+    self.pendingCraftOrderID = nil
+    self.pendingCraftSpellID = nil
+    self.pendingCraftButton = nil
+    self.craftSubmissionAcknowledgedOrderID = nil
+    if not keepPreparedFinisher then
+        self.preparedFinisherOrderID = nil
+        self.preparedFinisherReadyAt = nil
+        self.preparedFinisherUseEngineOrderID = nil
+    end
+    self:StopRowProgress()
     return true
 end
 
@@ -619,6 +659,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         if finisherResult == "reject" then
             self.preparedFinisherOrderID = nil
             self.preparedFinisherReadyAt = nil
+            self.preparedFinisherUseEngineOrderID = nil
             return self:RejectOrder(order, pageFrame, false, "insufficient_quality")
         elseif finisherResult == "applied" and finisher then
             -- The Blizzard transaction needs one UI update before its protected
@@ -627,6 +668,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             -- press reuses this transaction and performs the actual craft.
             self.preparedFinisherOrderID = order.orderID
             self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
+            self.preparedFinisherUseEngineOrderID = nil
             self.activeOrderID = order.orderID
             self.activePageFrame = pageFrame
             self:SetStatus(string.format(
@@ -656,6 +698,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
     self.pendingCraftOrderID = order.orderID
     self.pendingCraftSpellID = order.spellID
+    self.craftSubmissionAcknowledgedOrderID = nil
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.activeOrderID = order.orderID
     self.activePageFrame = pageFrame
@@ -664,25 +707,72 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     self:StartRowProgress(btn, order.orderID)
     self:RefreshVisibleRows()
 
-    -- Watchdog: self-heal a stuck "crafting" state if no completion event ever resolves it
-    -- (otherwise the row is jammed as "Crafting" and reports "no available action" forever).
+    -- A protected craft API can return without throwing while silently doing
+    -- nothing. Require a real response/cast/result acknowledgement instead of
+    -- keeping the row blocked until the old ten-second watchdog expires.
     do
         local co = self
         local watchID = order.orderID
+        local prepared = craftingWithPreparedFinisher
         co._craftWatchToken = (co._craftWatchToken or 0) + 1
         local token = co._craftWatchToken
         if C_Timer then
-            C_Timer.After(10, function()
+            C_Timer.After(CRAFT_START_ACK_TIMEOUT, function()
                 if co._craftWatchToken == token
                    and co.pendingCraftOrderID and SameOrderID(co.pendingCraftOrderID, watchID) then
-                    co:DActionPrint("craft watchdog: clearing stuck 'crafting' state for order", watchID)
-                    co.pendingCraftOrderID = nil
-                    co.pendingCraftSpellID = nil
-                    co.pendingCraftButton = nil
-                    if co.progressOrderID and SameOrderID(co.progressOrderID, watchID) then
-                        co.progressOrderID = nil
+                    local claimedNow = co:GetClaimedOrder()
+                    if claimedNow and SameOrderID(claimedNow.orderID, watchID)
+                        and claimedNow.isFulfillable
+                    then
+                        co:MarkOrderCraftedReady(watchID)
+                        return
                     end
-                    if co.StopRowProgress then co:StopRowProgress() end
+
+                    local casting = UnitCastingInfo("player") or UnitChannelInfo("player")
+                    if casting then
+                        co:MarkCraftSubmissionAcknowledged(watchID)
+                        return
+                    end
+
+                    if co:IsCraftSubmissionAcknowledged(watchID) then return end
+
+                    co:DActionPrint("craft start was not acknowledged for order", watchID)
+                    co:ClearPendingCraftAttempt(watchID, prepared)
+                    if prepared then
+                        if co.preparedFinisherUseEngineOrderID
+                            and SameOrderID(co.preparedFinisherUseEngineOrderID, watchID)
+                        then
+                            co.preparedFinisherUseEngineOrderID = nil
+                        else
+                            co.preparedFinisherUseEngineOrderID = watchID
+                        end
+                    end
+                    co:SetStatus(T(
+                        "COA_STATUS_CRAFT_RETRY",
+                        "Craft did not start. Press Action again."
+                    ))
+                    if co.RefreshVisibleRowsSoon then co:RefreshVisibleRowsSoon() end
+                    if co.UpdateControlPanel then co:UpdateControlPanel() end
+                end
+            end)
+
+            C_Timer.After(CRAFT_FINAL_TIMEOUT, function()
+                if co._craftWatchToken == token
+                    and co.pendingCraftOrderID and SameOrderID(co.pendingCraftOrderID, watchID)
+                then
+                    local claimedNow = co:GetClaimedOrder()
+                    if claimedNow and SameOrderID(claimedNow.orderID, watchID)
+                        and claimedNow.isFulfillable
+                    then
+                        co:MarkOrderCraftedReady(watchID)
+                        return
+                    end
+                    co:DActionPrint("craft final watchdog released order", watchID)
+                    co:ClearPendingCraftAttempt(watchID, prepared)
+                    co:SetStatus(T(
+                        "COA_STATUS_CRAFT_RETRY",
+                        "Craft did not start. Press Action again."
+                    ))
                     if co.RefreshVisibleRowsSoon then co:RefreshVisibleRowsSoon() end
                     if co.UpdateControlPanel then co:UpdateControlPanel() end
                 end
@@ -690,7 +780,28 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         end
     end
 
+    local form = engine.OrderDetails and engine.OrderDetails.SchematicForm
+    local transaction = form and ((form.GetTransaction and form:GetTransaction()) or form.transaction)
+    local reagentTbl = transaction and transaction.CreateCraftingReagentInfoTbl and transaction:CreateCraftingReagentInfoTbl()
+    local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
 
+    local function SubmitThroughAPI()
+        if order.isRecraft and C_TradeSkillUI and C_TradeSkillUI.RecraftRecipeForOrder then
+            local itemGUID = order.outputItemGUID or order.recraftItemGUID or order.outputItemGUIDString
+            return SafeCall("RecraftRecipeForOrder", function()
+                C_TradeSkillUI.RecraftRecipeForOrder(order.orderID, itemGUID, reagentTbl, nil, useConcentration)
+            end)
+        elseif C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
+            return SafeCall("CraftRecipe", function()
+                C_TradeSkillUI.CraftRecipe(order.spellID, 1, reagentTbl, recipeLevel, order.orderID, useConcentration)
+            end)
+        end
+        return false
+    end
+
+    local preferEngine = craftingWithPreparedFinisher
+        and self.preparedFinisherUseEngineOrderID
+        and SameOrderID(self.preparedFinisherUseEngineOrderID, order.orderID)
     local ok
     -- Do not invoke CreateButton's OnClick handler for a staged finisher. The
     -- Blizzard handler sees it as a crafter-provided reagent and opens the
@@ -699,28 +810,22 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     -- select the finisher again forever. CraftOrder/RecraftOrder submit this
     -- exact live transaction directly, which is also what the popup callback
     -- calls after the user confirms it.
-    if order.isRecraft and engine.RecraftOrder then
+    -- For the first prepared-finisher attempt use the underlying API directly;
+    -- it consumes the exact live transaction without the own-reagents popup.
+    -- If that client silently ignores it, the acknowledgement watchdog switches
+    -- the next hardware press to the order-view method (and vice versa).
+    if craftingWithPreparedFinisher and not preferEngine then
+        ok = SubmitThroughAPI()
+    end
+
+    if not ok and order.isRecraft and engine.RecraftOrder then
         ok = SafeCall("RecraftOrder", function() engine:RecraftOrder() end)
-    elseif engine.CraftOrder then
+    elseif not ok and engine.CraftOrder then
         ok = SafeCall("CraftOrder", function() engine:CraftOrder() end)
     end
 
     if not ok then
-        local form = engine.OrderDetails and engine.OrderDetails.SchematicForm
-        local transaction = form and ((form.GetTransaction and form:GetTransaction()) or form.transaction)
-        local reagentTbl = transaction and transaction.CreateCraftingReagentInfoTbl and transaction:CreateCraftingReagentInfoTbl()
-        local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
-
-        if order.isRecraft and C_TradeSkillUI.RecraftRecipeForOrder then
-            local itemGUID = order.outputItemGUID or order.recraftItemGUID or order.outputItemGUIDString
-            ok = SafeCall("RecraftRecipeForOrder", function()
-                C_TradeSkillUI.RecraftRecipeForOrder(order.orderID, itemGUID, reagentTbl, nil, useConcentration)
-            end)
-        elseif C_TradeSkillUI.CraftRecipe then
-            ok = SafeCall("CraftRecipe", function()
-                C_TradeSkillUI.CraftRecipe(order.spellID, 1, reagentTbl, recipeLevel, order.orderID, useConcentration)
-            end)
-        end
+        ok = SubmitThroughAPI()
     end
 
     if (not ok) and engine.CreateButton and engine.CreateButton.GetScript then
@@ -733,10 +838,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     end
 
     if not ok then
-        self.pendingCraftOrderID = nil
-        self.pendingCraftSpellID = nil
-        self.pendingCraftButton = nil
-        self:StopRowProgress()
+        self:ClearPendingCraftAttempt(order.orderID, craftingWithPreparedFinisher)
         self:SetStatus(T("COA_STATUS_NO_ENGINE", "Crafting order view is not available."))
         self:RefreshVisibleRowsSoon()
         return false

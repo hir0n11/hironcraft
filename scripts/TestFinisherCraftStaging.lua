@@ -75,8 +75,22 @@ assert(CO.preparedFinisherOrderID == nil)
 -- CraftOrderFromRow must stop after selecting the finisher, remain actionable,
 -- and craft on the following press instead of entering a stuck pending state.
 local craftCalls = 0
+local apiCraftCalls = 0
 local createButtonCalls = 0
 local prepareCalls = 0
+local scheduled = {}
+E.C_Timer = {
+    After = function(delay, callback)
+        scheduled[#scheduled + 1] = { delay = delay, callback = callback }
+    end,
+}
+E.C_TradeSkillUI = {
+    CraftRecipe = function()
+        apiCraftCalls = apiCraftCalls + 1
+    end,
+}
+E.UnitCastingInfo = function() return nil end
+E.UnitChannelInfo = function() return nil end
 local createEnabled = false
 local engine = {
     CreateButton = {
@@ -112,6 +126,7 @@ CO.PrepareAutoFinishingReagent = function()
     return "not_needed"
 end
 CO.SetStatus = function(_, value) CO.lastStatus = value end
+CO.DActionPrint = function() end
 CO.RefreshVisibleRowsSoon = function() end
 CO.RefreshVisibleRows = function() end
 CO.StartRowProgress = function() end
@@ -138,7 +153,26 @@ assert(CO.preparedFinisherOrderID == order.orderID)
 assert(CO.pendingCraftOrderID == order.orderID)
 assert(CO.pendingCraftSpellID == order.spellID)
 assert(createButtonCalls == 0, "prepared transaction opened Blizzard's own-reagents confirmation")
-assert(craftCalls == 1, "prepared transaction was not submitted through the live order view")
+assert(apiCraftCalls == 1, "prepared transaction was not submitted through the direct crafting API")
+assert(craftCalls == 0, "first prepared-finisher submission did not prefer the direct API")
 assert(prepareCalls == 1, "staged finisher was recalculated before crafting")
+
+-- A protected API call can return successfully without actually starting a
+-- craft. The short acknowledgement watchdog must unblock the same staged
+-- transaction and switch the following hardware press to the alternate path.
+local startWatchdog
+for _, timer in ipairs(scheduled) do
+    if timer.delay == 4.0 then startWatchdog = timer.callback end
+end
+assert(startWatchdog, "craft-start acknowledgement watchdog was not scheduled")
+startWatchdog()
+assert(CO.pendingCraftOrderID == nil, "unacknowledged craft stayed blocked")
+assert(CO.preparedFinisherOrderID == order.orderID, "retry discarded the staged finisher")
+assert(CO.preparedFinisherUseEngineOrderID == order.orderID, "retry path did not switch submission method")
+
+assert(CO:CraftOrderFromRow(order, page, button) == true)
+assert(craftCalls == 1, "alternate order-view submission was not used on retry")
+assert(apiCraftCalls == 1, "retry repeated the silently ignored API path")
+assert(prepareCalls == 1, "retry recalculated the staged finisher")
 
 print("Finisher craft staging tests passed.")
