@@ -300,7 +300,9 @@ local ORDER_STATUS_COLORS = {
     [HironCraftScan.OrderFulfillment.Status.Crafted] = { 1, 0.85, 0.1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Fulfilled] = { 1, 1, 1, 1 },
     [HironCraftScan.OrderFulfillment.Status.Failed] = { 1, 1, 1, 1 },
-    [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 0.95, 0.1, 1 },
+    -- Use exact RGB yellow so the desaturated red-X atlas does not read as an
+    -- olive or yellow-green mark on darker UI backgrounds.
+    [HironCraftScan.OrderFulfillment.Status.Rejected] = { 1, 1, 0, 1 },
 }
 
 function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
@@ -325,7 +327,7 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
         self.RejectGlow:SetPoint("CENTER", self.Icon, "CENTER")
         self.RejectGlow:SetSize(20, 20)
         self.RejectGlow:SetDesaturated(true)
-        self.RejectGlow:SetVertexColor(1, 0.72, 0, 1)
+        self.RejectGlow:SetVertexColor(1, 1, 0, 1)
         self.RejectGlow:SetBlendMode("ADD")
     end
 
