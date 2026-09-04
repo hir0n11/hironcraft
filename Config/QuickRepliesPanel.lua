@@ -104,6 +104,13 @@ local function CreateRow(panel, index)
     row.Background = row:CreateTexture(nil, 'BACKGROUND')
     row.Background:SetAllPoints()
 
+    row.Separator = row:CreateTexture(nil, 'BORDER')
+    row.Separator:SetPoint('BOTTOMLEFT', 0, -2)
+    row.Separator:SetPoint('BOTTOMRIGHT', 0, -2)
+    row.Separator:SetHeight(2)
+    row.Separator:SetColorTexture(1, 0.72, 0.05, 0.9)
+    row.Separator:Hide()
+
     row.Enabled = CreateFrame('Frame', nil, row, 'HironCraftScanCheckButtonTemplate')
     row.Enabled:SetPoint('TOPLEFT', 3, -4)
     row.Enabled:SetWidth(114)
@@ -132,29 +139,40 @@ local function LayoutRow(row, isCollapsed)
     row.Response:ClearAllPoints()
 
     row.Enabled:SetPoint('TOPLEFT', 3, -4)
+    local eventOnly = row.definition and row.definition.eventOnly
 
     if isCollapsed then
         row:SetSize(COMPACT_CONTENT_WIDTH, COMPACT_ROW_HEIGHT)
-        row.Enabled:SetWidth(190)
+        row.Enabled:SetWidth(eventOnly and 260 or 190)
 
         row.Delete:SetPoint('TOPRIGHT', -3, -2)
 
-        row.Keywords:SetSize(COMPACT_CONTENT_WIDTH, 80)
-        row.Keywords:SetPoint('TOPLEFT', 0, -28)
+        if eventOnly then
+            row.Response:SetSize(COMPACT_CONTENT_WIDTH, 150)
+            row.Response:SetPoint('TOPLEFT', 0, -28)
+        else
+            row.Keywords:SetSize(COMPACT_CONTENT_WIDTH, 80)
+            row.Keywords:SetPoint('TOPLEFT', 0, -28)
 
-        row.Response:SetSize(COMPACT_CONTENT_WIDTH, 80)
-        row.Response:SetPoint('TOPLEFT', 0, -108)
+            row.Response:SetSize(COMPACT_CONTENT_WIDTH, 80)
+            row.Response:SetPoint('TOPLEFT', 0, -108)
+        end
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
-        row.Enabled:SetWidth(114)
+        row.Enabled:SetWidth(eventOnly and 184 or 114)
 
         row.Delete:SetPoint('TOPLEFT', 8, -42)
 
-        row.Keywords:SetSize(280, 102)
-        row.Keywords:SetPoint('TOPLEFT', 116, 0)
+        if eventOnly then
+            row.Response:SetSize(508, 102)
+            row.Response:SetPoint('TOPLEFT', 188, 0)
+        else
+            row.Keywords:SetSize(280, 102)
+            row.Keywords:SetPoint('TOPLEFT', 116, 0)
 
-        row.Response:SetSize(298, 102)
-        row.Response:SetPoint('TOPLEFT', 398, 0)
+            row.Response:SetSize(298, 102)
+            row.Response:SetPoint('TOPLEFT', 398, 0)
+        end
     end
 end
 
@@ -200,12 +218,23 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
     self.definitionCount = #definitions
     for index, definition in ipairs(definitions) do
         local row = self.Rows[index] or CreateRow(self, index)
-        row.Background:SetColorTexture(0.08, 0.08, 0.08, index % 2 == 0 and 0.3 or 0.18)
         row.definition = definition
+        if definition.eventOnly then
+            row.Background:SetColorTexture(0.18, 0.13, 0.02, 0.42)
+            row.Separator:Show()
+        else
+            row.Background:SetColorTexture(0.08, 0.08, 0.08, index % 2 == 0 and 0.3 or 0.18)
+            row.Separator:Hide()
+        end
 
         local prefix = 'quick_reply.' .. definition.key .. '.'
         HironCraftScan.SetupCheckBox(self, row.Enabled, prefix .. 'enabled', 98)
-        HironCraftScan.SetupTextInput(self, row.Keywords, prefix .. 'keywords')
+        if definition.eventOnly then
+            row.Keywords:Hide()
+        else
+            HironCraftScan.SetupTextInput(self, row.Keywords, prefix .. 'keywords')
+            row.Keywords:Show()
+        end
         HironCraftScan.SetupTextInput(self, row.Response, prefix .. 'response')
 
         if definition.custom then

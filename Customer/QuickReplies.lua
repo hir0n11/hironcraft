@@ -12,11 +12,18 @@ local MAX_MESSAGE_WORDS = 12
 local MAX_CHAT_BYTES = 255
 local MAX_VISIBLE_TOASTS = 8
 local MAX_OPTIONS_PER_POPUP = 8
+local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 
 -- Adding another built-in quick reply only requires another definition here.
 -- The SavedVariables defaults and the configuration UI are generated from
 -- this list.
 local DEFAULT_TEMPLATES = {
+    {
+        key = REJECTED_ORDER_TEMPLATE_KEY,
+        eventOnly = true,
+        keywords = '',
+        response = 'You need provide all mats and they all should be max tier (even missive and embelishment)',
+    },
     {
         key = 'NAME',
         keywords = 'name, crafter, char, character, who',
@@ -62,7 +69,7 @@ local function EnsureConfig()
     if type(config.next_custom_id) ~= 'number' then
         config.next_custom_id = 1
     end
-    config.schema_version = 2
+    config.schema_version = 3
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -92,6 +99,7 @@ function QuickReplies:GetDefinitions()
             key = definition.key,
             label = definition.key,
             custom = false,
+            eventOnly = definition.eventOnly == true,
         })
     end
 
@@ -262,7 +270,7 @@ function QuickReplies:Classify(message)
     local matched = {}
     for _, definition in ipairs(self:GetDefinitions()) do
         local template = config.templates[definition.key]
-        if template and template.enabled then
+        if template and template.enabled and not definition.eventOnly then
             local templateScore = nil
             local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
             for keyword in keywords:gmatch('[^,\n]+') do
@@ -442,6 +450,51 @@ local function ResponseLabel(response)
         return crafter .. ' / ' .. subject
     end
     return crafter
+end
+
+function QuickReplies:BuildRejectedOrderOption(order, entry)
+    local config = EnsureConfig()
+    local rejectedStatus = HironCraftScan.OrderFulfillment
+        and HironCraftScan.OrderFulfillment.Status
+        and HironCraftScan.OrderFulfillment.Status.Rejected
+    if
+        not config.enabled
+        or type(order) ~= 'table'
+        or type(entry) ~= 'table'
+        or entry.status ~= rejectedStatus
+        or type(order.customerName) ~= 'string'
+        or order.responseID == nil
+        or not IsListedOrder(order.customerName, order.responseID)
+    then
+        return nil
+    end
+
+    local customerInfo = HironCraftScan.DB.customers[order.customerName]
+    if not customerInfo then
+        return nil
+    end
+
+    local ok, response = pcall(HironCraftScan.OrderToResponse, order)
+    if not ok or type(response) ~= 'table' then
+        return nil
+    end
+
+    local reply = self:BuildReply(REJECTED_ORDER_TEMPLATE_KEY, response)
+    if not reply then
+        return nil
+    end
+
+    return {
+        customer = order.customerName,
+        message = L('Crafting order status rejected'),
+        response = response,
+        responseID = order.responseID,
+        templateKey = REJECTED_ORDER_TEMPLATE_KEY,
+        templateLabel = L('Crafting order status rejected'),
+        reply = reply,
+        label = reply,
+        contextLabel = ResponseLabel(response),
+    }, customerInfo
 end
 
 local TOAST_WIDTH = 277
@@ -851,6 +904,41 @@ function QuickReplies:OnWhisper(customer, message, customerInfo)
     end
 end
 
+local shownRejections = {}
+function QuickReplies:OnOrderFulfillmentUpdated(order, entry)
+    local option, customerInfo = self:BuildRejectedOrderOption(order, entry)
+    if not option then
+        return
+    end
+
+    -- One Blizzard order may update both a specific and a generic CraftScan
+    -- row. Key by Blizzard's order ID when available so that reconciliation
+    -- still produces exactly one suggestion for the customer.
+    local orderKey = HironCraftScan.OrderToOrderID(order)
+    local rejectionKey = entry.craftingOrderID and table.concat({
+        option.customer,
+        'crafting-order',
+        tostring(entry.craftingOrderID),
+    }, '\30') or table.concat({
+        orderKey,
+        tostring(entry.requestToken or ''),
+        tostring(entry.rev or ''),
+        tostring(entry.updatedAt or ''),
+    }, '\30')
+    if shownRejections[rejectionKey] then
+        return
+    end
+
+    popupSerial = popupSerial + 1
+    SetupToast(GetToast(), option, customerInfo, popupSerial, 1)
+    LayoutToasts()
+    shownRejections[rejectionKey] = true
+end
+
 HironCraftScan.Utils.onLoad(function()
     EnsureConfig()
+end)
+
+HironCraftScan.Events:Register('ORDER_FULFILLMENT_UPDATED', function(order, entry)
+    QuickReplies:OnOrderFulfillmentUpdated(order, entry)
 end)

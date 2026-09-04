@@ -319,18 +319,30 @@ function HironCraftScanCraftingOrderStatusButtonMixin:Refresh()
     local atlas = isIncomplete and "common-icon-redx" or "common-icon-checkmark"
     local color = ORDER_STATUS_COLORS[status]
 
+    if not self.RejectGlow then
+        self.RejectGlow = self:CreateTexture(nil, "BACKGROUND")
+        self.RejectGlow:SetAtlas("common-icon-redx")
+        self.RejectGlow:SetPoint("CENTER", self.Icon, "CENTER")
+        self.RejectGlow:SetSize(20, 20)
+        self.RejectGlow:SetDesaturated(true)
+        self.RejectGlow:SetVertexColor(1, 0.72, 0, 1)
+        self.RejectGlow:SetBlendMode("ADD")
+    end
+
     self.entry = entry
     self.deliveryPending = deliveryPending
     self.Icon:SetAtlas(atlas)
+    self.Icon:SetSize(isRejected and 16 or 14, isRejected and 16 or 14)
+    self.Icon:SetAlpha(1)
     self.Icon:SetDesaturated(
         status ~= HironCraftScan.OrderFulfillment.Status.Fulfilled
             and status ~= HironCraftScan.OrderFulfillment.Status.Failed
     )
     self.Icon:SetVertexColor(unpack(color))
-    -- The yellow rejection mark was easy to lose against the dark order list.
-    -- Additive blending lifts only this state without changing the normal red
-    -- crosses or green check marks.
-    self.Icon:SetBlendMode(isRejected and "ADD" or "BLEND")
+    -- Keep the cross itself opaque and add a separate additive halo. Applying
+    -- ADD directly to the icon made its thin parts look translucent.
+    self.Icon:SetBlendMode("BLEND")
+    self.RejectGlow:SetShown(isRejected)
 end
 
 function HironCraftScanCraftingOrderStatusButtonMixin:OnClick(button)

@@ -21,7 +21,8 @@ local CraftScan = {
     State = {},
     Utils = {},
     Config = {},
-    Events = { Emit = function() end },
+    Events = { Emit = function() end, Register = function() end },
+    OrderFulfillment = { Status = { Rejected = "rejected" } },
     LOCAL = { GetText = function(_, id) return id end },
 }
 
@@ -43,6 +44,13 @@ function CraftScan.BuildResponseContext(response)
     }
 end
 function CraftScan.NameAndRealmToName(name) return name and name:match("^[^-]+") end
+function CraftScan.OrderToOrderID(order)
+    return order.customerName .. "-" .. tostring(order.responseID)
+end
+function CraftScan.OrderToResponse(order)
+    local customer = CraftScan.DB.customers[order.customerName]
+    return customer and customer.responses[order.responseID]
+end
 
 function GetItemInfo(itemID)
     return itemID == 200 and "Second Item" or "Spellbreaker's Bracers"
@@ -50,6 +58,10 @@ end
 
 assert(loadfile("Customer/QuickReplies.lua"))("HironCraft", CraftScan)
 local QuickReplies = CraftScan.QuickReplies
+
+local definitions = QuickReplies:GetDefinitions()
+assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")
+assert(definitions[1].eventOnly == true, "rejected-order reply must not use chat keywords")
 
 local function Response(responseID, itemID)
     return {
@@ -97,5 +109,30 @@ local resolved = QuickReplies:ResolvePopupResponse({
     contextLabel = "Farrierr / Spellbreaker's Bracers",
 })
 assert(resolved == first, "profession aliases must not make a popup stale")
+
+-- A yellow rejected-order status creates one direct, context-bound reply. It
+-- must not be classified from chat keywords and must never attach to another
+-- order belonging to the same customer.
+CraftScan.DB.customers.Valnihra.responses[101] = first
+local rejectedOption = QuickReplies:BuildRejectedOrderOption(
+    { customerName = "Valnihra", responseID = 101 },
+    { status = "rejected", rev = 1 }
+)
+assert(rejectedOption, "rejected order did not create a quick reply")
+assert(rejectedOption.response == first)
+assert(
+    rejectedOption.reply == "You need provide all mats and they all should be max tier (even missive and embelishment)",
+    "rejected-order reply text changed"
+)
+QuickReplies:GetConfig().templates.REJECTED_ORDER.response = "Edited rejected-order reply"
+rejectedOption = QuickReplies:BuildRejectedOrderOption(
+    { customerName = "Valnihra", responseID = 101 },
+    { status = "rejected", rev = 2 }
+)
+assert(rejectedOption.reply == "Edited rejected-order reply", "rejected-order reply is not editable")
+assert(QuickReplies:BuildRejectedOrderOption(
+    { customerName = "Valnihra", responseID = 101 },
+    { status = "failed", rev = 2 }
+) == nil, "ordinary red crosses must not offer the rejected-order reply")
 
 print("Quick reply tests passed.")
