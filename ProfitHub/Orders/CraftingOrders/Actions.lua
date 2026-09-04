@@ -561,7 +561,14 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         return true
     end
 
-    if self.PrepareAutoFinishingReagent then
+    local craftingWithPreparedFinisher = self.preparedFinisherOrderID
+        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
+
+    -- Once a finishing reagent has been staged, keep the live Blizzard
+    -- transaction intact. Re-running the quality search here can allocate the
+    -- same reagent again after a failed/no-op button handler and creates an
+    -- apply -> wait -> apply loop.
+    if not craftingWithPreparedFinisher and self.PrepareAutoFinishingReagent then
         local finisherResult, finisher = self:PrepareAutoFinishingReagent(
             engine,
             order,
@@ -589,9 +596,6 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             return true
         end
     end
-
-    local craftingWithPreparedFinisher = self.preparedFinisherOrderID
-        and SameOrderID(self.preparedFinisherOrderID, order.orderID)
 
     if craftingWithPreparedFinisher
         and engine.CreateButton
@@ -647,25 +651,16 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
 
     local ok
-    -- A staged finishing reagent belongs to the Blizzard Create button's live
-    -- transaction. Invoke that button's own handler first so the exact reagent
-    -- table we just prepared is submitted. Calling the higher-level view method
-    -- can rebuild or ignore that transaction on some client builds.
-    if craftingWithPreparedFinisher
-        and engine.CreateButton
-        and type(engine.CreateButton.GetScript) == "function"
-    then
-        local script = engine.CreateButton:GetScript("OnClick")
-        if script then
-            ok = SafeCall("Prepared finishing reagent craft", function()
-                script(engine.CreateButton, "LeftButton")
-            end)
-        end
-    end
-
-    if not ok and order.isRecraft and engine.RecraftOrder then
+    -- Do not invoke CreateButton's OnClick handler for a staged finisher. The
+    -- Blizzard handler sees it as a crafter-provided reagent and opens the
+    -- "use your own reagents" confirmation popup. That is a successful Lua
+    -- call but it does not start a craft, so the queue used to wait, reset and
+    -- select the finisher again forever. CraftOrder/RecraftOrder submit this
+    -- exact live transaction directly, which is also what the popup callback
+    -- calls after the user confirms it.
+    if order.isRecraft and engine.RecraftOrder then
         ok = SafeCall("RecraftOrder", function() engine:RecraftOrder() end)
-    elseif not ok and engine.CraftOrder then
+    elseif engine.CraftOrder then
         ok = SafeCall("CraftOrder", function() engine:CraftOrder() end)
     end
 
