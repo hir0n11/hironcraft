@@ -78,7 +78,7 @@ function CO:SelectClassicPanelTab(panel, key)
 end
 
 -- Columns are shared by headers and rows. Hide secondary columns as space
--- narrows; the item, reward and action always remain within the viewport.
+-- narrows; item, reward, profit and action always remain within the viewport.
 function CO:GetClassicOrderColumns(width, compact)
     width = math.max(320, tonumber(width) or 800)
     local columns = {}
@@ -88,10 +88,11 @@ function CO:GetClassicOrderColumns(width, compact)
         columns[key] = { x = cursor, w = size }
         cursor = cursor - 8
     end
-    right("action", 78)
-    if width >= 580 then right("profit", 70) end
-    right("reward", 82)
-    if width >= 440 then right("conc", 52) end
+    local narrow = width < 400
+    right("action", narrow and 68 or 78)
+    right("profit", narrow and 54 or 70)
+    right("reward", narrow and 48 or 82)
+    if width >= 480 then right("conc", 52) end
     if not compact and width >= 760 then right("cost", 74) end
     if compact and width >= 760 then right("reagents", 76) end
     local nameX = compact and 64 or 82

@@ -20,7 +20,7 @@ does not mark a later request from the same customer as complete.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.1)
+## Crafting orders interface (0.3.2)
 
 The order list uses the full width of Blizzard's profession window, with the
 control panel attached outside its right edge. Native buttons, framed panels
@@ -33,9 +33,9 @@ queue settings and key bindings are kept.
 - The action button, selection count and current status stay visible below
   both settings pages. The settings and order list scroll independently.
 - Use the list's **+/−** button to switch between compact and detailed rows.
-  Detailed rows include the customer; narrower lists show profit beneath the
-  item, and the commission tooltip also includes it. Additional icons are
-  available through **+N** when their column is full.
+  Detailed rows include the customer. The **Profit** column stays visible in
+  both layouts, including narrow windows. Additional icons are available
+  through **+N** when their column is full.
 - **Refresh** reloads orders when no order action is in progress. Clicking the
   item row still opens the original Blizzard order details.
 

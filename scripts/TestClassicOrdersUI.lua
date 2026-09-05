@@ -183,7 +183,7 @@ local row = CL:CreateRow(container.content, 1)
 container.rows[1] = row
 row:SetPoint('TOPLEFT', container.content, 'TOPLEFT', 0, 0)
 row:SetPoint('TOPRIGHT', container.content, 'TOPRIGHT', 0, 0)
-for _, width in ipairs({640, 792, 1020, 1250}) do
+for _, width in ipairs({352, 431, 432, 511, 512, 600, 640, 792, 1020, 1250}) do
     anchor:SetWidth(width)
     -- Keep one horizontal anchor to simulate Blizzard windows of different widths.
     anchor.anchors.BOTTOMRIGHT = nil
@@ -203,6 +203,8 @@ for _, width in ipairs({640, 792, 1020, 1250}) do
         assert(ax >= rx and ax + aw <= rx + rw + .1, 'action outside the list')
         assert(rx + rw < px, 'list overlaps the settings pane')
         local cols = CL:ActiveCols()
+        assert(cols.profit and row.profitBtn:IsVisible() and container.header.cols.profit:IsVisible(),
+            'profit column disappeared at a narrow width')
         local ordered = {}
         for _, col in pairs(cols) do ordered[#ordered+1] = col end
         table.sort(ordered,function(a,b) return a.x < b.x end)
