@@ -15,6 +15,23 @@ function CO:UpdateClassicPanelToggle(button)
     button.arrowBottom:SetEndPoint("CENTER", button, direction * 2, 0)
 end
 
+function CO:CreateClassicToggleBorder(button)
+    local sides = {
+        { "borderTop", "TOPLEFT", 1, -1, "TOPRIGHT", -1, -1 },
+        { "borderBottom", "BOTTOMLEFT", 1, 1, "BOTTOMRIGHT", -1, 1 },
+        { "borderLeft", "TOPLEFT", 1, -1, "BOTTOMLEFT", 1, 1 },
+        { "borderRight", "TOPRIGHT", -1, -1, "BOTTOMRIGHT", -1, 1 },
+    }
+    for _, side in ipairs(sides) do
+        local border = button:CreateLine(nil, "OVERLAY")
+        border:SetColorTexture(0.72, 0.64, 0.50, 1)
+        border:SetThickness(1)
+        border:SetStartPoint(side[2], button, side[3], side[4])
+        border:SetEndPoint(side[5], button, side[6], side[7])
+        button[side[1]] = border
+    end
+end
+
 function CO:ApplyClassicInset(frame, raised)
     frame:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -106,6 +123,7 @@ function CO:CreateClassicPanelShell(panel)
         texture:ClearAllPoints()
         texture:SetAllPoints(panel.collapseButton)
     end
+    self:CreateClassicToggleBorder(panel.collapseButton)
     for _, part in ipairs({ "arrowTop", "arrowBottom" }) do
         local arrow = panel.collapseButton:CreateLine(nil, "OVERLAY")
         arrow:SetColorTexture(1, 0.82, 0.2, 1)

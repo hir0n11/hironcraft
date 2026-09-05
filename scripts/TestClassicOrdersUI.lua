@@ -299,6 +299,22 @@ for _, texture in ipairs({panel.collapseButton:GetNormalTexture(), panel.collaps
     local x,y,w,h = bounds(texture)
     assert(x == toggleX and y == toggleY and w == toggleW and h == toggleH, 'toggle skin extends beyond the button')
 end
+local borderExpectations = {
+    borderTop = { 'TOPLEFT', 1, -1, 'TOPRIGHT', -1, -1 },
+    borderBottom = { 'BOTTOMLEFT', 1, 1, 'BOTTOMRIGHT', -1, 1 },
+    borderLeft = { 'TOPLEFT', 1, -1, 'BOTTOMLEFT', 1, 1 },
+    borderRight = { 'TOPRIGHT', -1, -1, 'BOTTOMRIGHT', -1, 1 },
+}
+for key, expected in pairs(borderExpectations) do
+    local border = panel.collapseButton[key]
+    assert(border and border.kind == 'Line' and border.thickness == 1, key .. ' border is missing')
+    assert(border.startPoint[1] == expected[1] and border.startPoint[2] == panel.collapseButton
+        and border.startPoint[3] == expected[2] and border.startPoint[4] == expected[3],
+        key .. ' start is outside the button')
+    assert(border.endPoint[1] == expected[4] and border.endPoint[2] == panel.collapseButton
+        and border.endPoint[3] == expected[5] and border.endPoint[4] == expected[6],
+        key .. ' end is outside the button')
+end
 for _, line in ipairs({panel.collapseButton.arrowTop, panel.collapseButton.arrowBottom}) do
     assert(line.kind == 'Line' and line.thickness == 1.5, 'chevron relies on font metrics or rotated solid textures')
     assert(line.startPoint[1] == 'CENTER' and line.endPoint[1] == 'CENTER'
