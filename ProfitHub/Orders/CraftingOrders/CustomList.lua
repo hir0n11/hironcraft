@@ -442,6 +442,7 @@ function CL:CreateRow(parent, index)
     row.firstCraftIcon:Hide()
 
     row.reagentsBar = CreateFrame("Frame", nil, row)
+    row.reagentsBar.isReagentBar = true
     row.reagentsBar:SetSize(COLS.name.w, self.SMALL_ICON)
     row.reagentsBar:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -6)
     row.reagentIcons = {}
@@ -729,6 +730,28 @@ local function FormatCopper(copper)
     return "0"
 end
 
+function CL:SetMoneyText(fs, copper)
+    copper = tonumber(copper) or 0
+    fs:SetWordWrap(false)
+    if fs.SetMaxLines then fs:SetMaxLines(1) end
+    local gold = copper / 10000
+    local magnitude = math.abs(gold)
+    local divisor = magnitude >= 1000000 and 1000000 or (magnitude >= 1000 and 1000 or 1)
+    local suffix = divisor == 1000000 and "m" or (divisor == 1000 and "k" or "")
+    local approximate = suffix == "" and "~" or ""
+    local candidates = {
+        FormatCopper(copper),
+        string.format("%.2f", gold) .. GOLD_ICON,
+        approximate .. string.format("%.1f", gold / divisor) .. suffix .. GOLD_ICON,
+        approximate .. string.format("%.0f", gold / divisor) .. suffix .. GOLD_ICON,
+    }
+    for _, text in ipairs(candidates) do
+        fs:SetText(text)
+        local width = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+        if width <= fs:GetWidth() then break end
+    end
+end
+
 local function GetIconButton(row, parent, store, index)
     local b = store[index]
     if b then return b end
@@ -744,14 +767,15 @@ local function GetIconButton(row, parent, store, index)
     b.tex:SetPoint("BOTTOMRIGHT", -1, 1)
     b.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     b.count = b:CreateFontString(nil, "OVERLAY")
-    b.count:SetFont(HironCraftProfit.FONT or STANDARD_TEXT_FONT, 12, "THICKOUTLINE")
+    b.count:SetFont(FONT, 11, "OUTLINE")
+    b.count:SetWordWrap(false)
     b.count:SetPoint("BOTTOMRIGHT", -1, 1)
     b.count:SetTextColor(1, 1, 1)
     b.count:SetShadowColor(0, 0, 0, 1)
     b.count:SetShadowOffset(1, -1)
     b.grade = b:CreateTexture(nil, "OVERLAY")
-    b.grade:SetSize(16, 16)
-    b.grade:SetPoint("CENTER", b, "TOPLEFT", 1, -1)
+    b.grade:SetSize(12, 12)
+    b.grade:SetPoint("TOPLEFT", b, "TOPLEFT", -4, 4)
     b.grade:Hide()
     b.gold = b:CreateFontString(nil, "OVERLAY")
     b.gold:SetFont(HironCraftProfit.FONT or STANDARD_TEXT_FONT, 12, "OUTLINE")
@@ -894,8 +918,10 @@ function CL:FitIconBar(bar, icons, maxRows, title)
     for _, icon in ipairs(icons) do
         if icon:IsShown() then shown[#shown + 1] = icon end
     end
-    local step = self.SMALL_ICON + 2
-    local columns = math.max(1, math.floor((bar:GetWidth() + 2) / step))
+    local left = bar.isReagentBar and 8 or 0
+    local gap = bar.isReagentBar and 10 or 6
+    local step = self.SMALL_ICON + gap
+    local columns = math.max(1, math.floor((bar:GetWidth() - left + gap) / step))
     local capacity = columns * maxRows
     local overflow = #shown > capacity
     local visible = overflow and math.max(0, capacity - 1) or capacity
@@ -925,7 +951,7 @@ function CL:FitIconBar(bar, icons, maxRows, title)
         icon:SetShown(index <= visible)
         if index <= visible then
             icon:ClearAllPoints()
-            icon:SetPoint("TOPLEFT", bar, "TOPLEFT", ((index - 1) % columns) * step, -math.floor((index - 1) / columns) * step)
+            icon:SetPoint("TOPLEFT", bar, "TOPLEFT", left + ((index - 1) % columns) * step, -math.floor((index - 1) / columns) * step)
             if icon.gold then
                 icon.gold:SetWidth(math.max(1, bar:GetWidth() - self.SMALL_ICON - 4))
                 icon.gold:SetWordWrap(false)
@@ -935,7 +961,7 @@ function CL:FitIconBar(bar, icons, maxRows, title)
     bar.more:SetShown(overflow)
     if overflow then
         bar.more:ClearAllPoints()
-        bar.more:SetPoint("TOPLEFT", bar, "TOPLEFT", (visible % columns) * step, -math.floor(visible / columns) * step)
+        bar.more:SetPoint("TOPLEFT", bar, "TOPLEFT", left + (visible % columns) * step, -math.floor(visible / columns) * step)
         bar.more.text:SetText("+" .. (#shown - visible))
     end
 end
@@ -1090,7 +1116,7 @@ function CL:PopulateRow(row, order)
         profitInfo = CO:GetOrderProfitInfo(order)
         if profitInfo and profitInfo.reagentCost then cost = tonumber(profitInfo.reagentCost) or 0 end
     end
-    row.cost:SetText(cost > 0 and FormatCopper(cost) or "—")
+    if cost > 0 then self:SetMoneyText(row.cost, cost) else row.cost:SetText("—") end
 
     local compact = self:IsCompact()
     local isNpcReward = Enum and Enum.CraftingOrderType and order.orderType == Enum.CraftingOrderType.Npc
@@ -1169,7 +1195,7 @@ function CL:PopulateRow(row, order)
         local customer = order.customerName or order.npcCustomerName or ""
         row.customer:SetText(customer .. (customer ~= "" and " · " or "") .. FormatCopper(profit))
     end
-    row.profit:SetText(FormatCopper(profit))
+    self:SetMoneyText(row.profit, profit)
     if profit > 0 then
         row.profit:SetTextColor(0.50, 1.00, 0.50)
     elseif profit < 0 then

@@ -88,6 +88,12 @@ function methods:SetFontObject() self.fontPath, self.fontSize = STANDARD_TEXT_FO
 function methods:SetJustifyH(value) self.justify = value end
 function methods:SetJustifyV(value) self.justifyV = value end
 function methods:GetStringWidth() return #(self.text or '') * 6 end
+function methods:GetUnboundedStringWidth()
+    local plain, textureCount = (self.text or ''):gsub('|T.-|t', '')
+    return #plain * 7 + textureCount * 13
+end
+function methods:SetWordWrap(value) self.wordWrap = value end
+function methods:SetMaxLines(value) self.maxLines = value end
 function methods:GetFontString()
     self.fontString = self.fontString or frame('FontString', self)
     return self.fontString
@@ -117,7 +123,7 @@ function methods:GetChecked() return self.checked end
 function methods:SetScrollChild(child) self.child = child end
 function methods:SetVerticalScroll(value) self.scroll = value end
 function methods:GetVerticalScroll() return self.scroll or 0 end
-for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetWordWrap','SetMaxLines','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
+for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
 
 local CO, PT = {}, { L = {} }
 PT.CraftingOrders = CO
@@ -276,21 +282,35 @@ for i=1,12 do
     icon:SetSize(20,20)
     icons[i] = icon
 end
-row.reagentsBar:SetWidth(82)
+row.reagentsBar:SetWidth(100)
 CL:FitIconBar(row.reagentsBar, icons, 1, 'Reagents')
 assert(row.reagentsBar.more:IsShown(), 'overflow is unreachable')
 assert(row.reagentsBar.more:GetObjectType() == 'Frame' and not row.reagentsBar.more.template and not row.reagentsBar.more.backdrop,
     'reagent overflow is still styled as an action button')
 local mx, _, mw = bounds(row.reagentsBar.more)
 local count = 0
+local previousRight
 for _, icon in ipairs(icons) do
     if icon:IsShown() then
         count = count + 1
         local ix, _, iw = bounds(icon)
         assert(ix + iw <= mx, 'overflow label overlaps a reagent icon')
+        if previousRight then assert(ix - previousRight >= 10, 'reagent quantities/badges have no breathing room') end
+        previousRight = ix + iw
     end
 end
 assert(count == 2, 'too many icons entered the next column')
+local moneyText = frame('FontString', row)
+for _, width in ipairs({54,70,94}) do
+    moneyText:SetWidth(width)
+    for _, copper in ipairs({-32900,-27422800,1785000,123456789012}) do
+        CL:SetMoneyText(moneyText, copper)
+        assert(moneyText.wordWrap == false and moneyText.maxLines == 1, 'money can wrap into the next row')
+        assert(moneyText:GetUnboundedStringWidth() <= width, 'money exceeds its column width')
+        if copper < 0 then assert(moneyText:GetText():find('-',1,true), 'negative profit lost its sign') end
+    end
+end
+moneyText:Hide()
 CO.GetRowAction = function(_, _, order) return 'craft', 'Craft', order, true end
 CO.activePageFrame = page
 local rowCalls, focusCalls = 0, 0

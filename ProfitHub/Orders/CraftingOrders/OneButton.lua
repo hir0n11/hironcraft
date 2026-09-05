@@ -122,6 +122,16 @@ function CO:PrepareFreshOrderSearch(pageFrame)
 end
 
 function CO:InstallFreshOrderSearchHooks()
+    local function HookOrderType(target)
+        if not target or target.ahuiOneButtonOrderTypeHooked or type(target.SetCraftingOrderType) ~= "function" then return end
+        target.ahuiOneButtonOrderTypeHooked = true
+        hooksecurefunc(target, "SetCraftingOrderType", function(pageFrame, orderType)
+            CO:HandleOneButtonOrderTypeChanged(pageFrame, orderType)
+        end)
+    end
+    HookOrderType(_G.ProfessionsCraftingOrderPageMixin)
+    if _G.ProfessionsFrame then HookOrderType(ProfessionsFrame.OrdersPage) end
+
     local function Wrap(target)
         if not target or target.ahuiFreshOrderSearchWrapped then return end
         if type(target.StartDefaultSearch) ~= "function" then return end
@@ -155,6 +165,20 @@ function CO:InstallFreshOrderSearchHooks()
     if _G.ProfessionsFrame then
         HookShowGeneric(ProfessionsFrame.OrdersPage)
     end
+end
+
+function CO:HandleOneButtonOrderTypeChanged(pageFrame, orderType)
+    if self._oneButtonNavigating then return end
+    if not self._oneButtonFlowRunning and not self._oneButtonEmptyRefreshRunning then return end
+    local personalType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
+    if orderType == nil or orderType == personalType then return end
+    if not IsShown(pageFrame) then return end
+    if pageFrame.IsVisible and not pageFrame:IsVisible() then return end
+
+    -- Choosing another tab takes ownership away from the startup retries.
+    -- Keep Auto on open enabled, but do not resume it until the next opening.
+    self:CancelOneButtonPersonalFlow()
+    self._oneButtonPreparedForOpen = true
 end
 
 function CO:MarkFreshOrderSearchComplete(pageFrame)
@@ -257,12 +281,19 @@ function CO:ContinueOneButtonPersonalFlow()
         return
     end
 
+    self._oneButtonNavigating = true
     local pageFrame = self:GetOneButtonOrdersPage()
+    self._oneButtonNavigating = nil
+    if pageFrame and self._oneButtonPersonalPage == pageFrame then
+        self:HandleOneButtonOrderTypeChanged(pageFrame, pageFrame.orderType)
+        if not self._oneButtonFlowRunning then return end
+    end
     if not pageFrame or not self:OpenOneButtonPersonalTab(pageFrame) then
         self:ScheduleOneButtonPersonalStep()
         return
     end
 
+    self._oneButtonPersonalPage = pageFrame
     self.activePageFrame = pageFrame
     self:EnsurePageBindingHooks(pageFrame)
     self:EnsureControlPanel(pageFrame)
@@ -302,6 +333,8 @@ end
 function CO:BeginOneButtonPersonalFlow()
     if not self:IsOneButtonPersonalEnabled() or self._oneButtonPreparedForOpen then return end
 
+    self:InstallFreshOrderSearchHooks()
+    self._oneButtonPersonalPage = nil
     self._oneButtonFlowToken = (self._oneButtonFlowToken or 0) + 1
     self._oneButtonFlowStartedAt = Now()
     self._oneButtonFlowRunning = true
@@ -312,6 +345,7 @@ function CO:BeginOneButtonPersonalFlow()
 end
 
 function CO:CancelOneButtonPersonalFlow(resetForNextOpen)
+    self._oneButtonPersonalPage = nil
     self._oneButtonFlowToken = (self._oneButtonFlowToken or 0) + 1
     self._oneButtonFlowRunning = false
     self._oneButtonRetryScheduled = false

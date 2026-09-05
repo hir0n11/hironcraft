@@ -118,11 +118,11 @@ function CO:GetClassicOrderColumns(width, compact)
     end
     local narrow = width < 400
     right("action", narrow and 68 or 78)
-    right("profit", narrow and 54 or 70)
+    right("profit", narrow and 54 or (width >= 580 and 94 or 70))
     right("reward", narrow and 48 or 82)
     if width >= 480 then right("conc", 52) end
     if not compact and width >= 760 then right("cost", 74) end
-    if compact and width >= 760 then right("reagents", 76) end
+    if compact and width >= 760 then right("reagents", 100) end
     local nameX = compact and 64 or 82
     columns.name = { x = nameX, w = math.max(40, cursor - nameX) }
     return columns
