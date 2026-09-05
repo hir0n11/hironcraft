@@ -17,16 +17,26 @@ offered as `Decline` instead of `Claim`. The matching chat row receives a yellow
 cross; a later successfully completed order replaces it with the green check.
 Completion state is scoped to an individual customer request, so an older job
 does not mark a later request from the same customer as complete.
+The rejected-order quick reply is offered only on the character that started
+the customer conversation, even if another character performs the craft.
+Conversation ownership is stored per request and shared with linked accounts.
+Legacy requests without recorded ownership do not offer this reply until a
+local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.4)
+## Crafting orders interface (0.3.5)
 
 The order list uses the full width of Blizzard's profession window, with the
 control panel attached outside its right edge. Native buttons, framed panels
 and gold selection highlights keep the classic WoW look. Cyrillic-capable
 addon fonts keep Russian labels readable on English clients too. Existing
 queue settings and key bindings are kept.
+
+Use the small arrow above the order list's top-right corner to hide or show
+the entire side panel, including its header. The arrow stays inside the main
+window. This preference survives reopening and reloads; selected orders and
+the hotkey still work while the side panel is hidden.
 
 - **Crafting** contains reagent quality, concentration, finishers and tools.
 - The **Queue** settings tab contains profit filters and automatic selection settings.
@@ -53,8 +63,8 @@ queue settings and key bindings are kept.
   Profit has a wider column and remains on one line, using decimal gold or
   compact k/m notation when necessary. Hover for the detailed amount.
 
-This release changes presentation; the reported finisher craft-start issue
-is not considered resolved by the interface redesign.
+The reported finisher craft-start issue is not considered resolved by these
+interface changes.
 
 ## First start and settings migration
 

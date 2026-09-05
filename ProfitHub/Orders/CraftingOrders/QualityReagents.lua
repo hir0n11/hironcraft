@@ -1950,6 +1950,7 @@ function CO:UpdateControlPanelVisibility(pageFrame)
 
     if not self:IsEnabled() then
         panel:Hide()
+        if panel.collapseButton then panel.collapseButton:Hide() end
         if panel.shopButton then panel.shopButton:Hide() end
         if panel.shopCostText then panel.shopCostText:Hide() end
         return
@@ -1959,13 +1960,15 @@ function CO:UpdateControlPanelVisibility(pageFrame)
     panel.pageFrame = pageFrame or panel.pageFrame
 
     if pageFrame and self:IsOrderListOpen(pageFrame) then
-        panel:Show()
+        panel:SetShown(GetDB().panelCollapsed ~= true)
+        if panel.collapseButton then panel.collapseButton:Show() end
         if self.AnchorControlPanelToOrderList then self:AnchorControlPanelToOrderList(panel, pageFrame) end
         if panel.shopButton then panel.shopButton:Show() end
         if panel.shopCostText then panel.shopCostText:Show() end
         if self.UpdateTabActionButton then self:UpdateTabActionButton(pageFrame) end
     else
         panel:Hide()
+        if panel.collapseButton then panel.collapseButton:Hide() end
         if panel.shopButton then panel.shopButton:Hide() end
         if panel.shopCostText then panel.shopCostText:Hide() end
     end

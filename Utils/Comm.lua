@@ -764,6 +764,7 @@ function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, inc
             args = { r, g, b },
             chatType = entry.chatType,
             syncID = entry.syncID,
+            conversationOwners = entry.conversationOwners,
         },
     }
     TransmitToFullLinkedAccounts(data, HironCraftScanComm.Operations.ShareCustomerChat)
@@ -830,6 +831,7 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
         {
             requestToken = data.requestToken,
             restartTerminalRequest = data.restartTerminalRequest == true,
+            conversationOwners = data.lastChatFrameMessage and data.lastChatFrameMessage.conversationOwners,
         }
     )
 

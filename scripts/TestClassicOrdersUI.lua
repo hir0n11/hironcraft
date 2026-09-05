@@ -145,12 +145,22 @@ dofile('ProfitHub/Core/Locales/ruRU.lua')
 dofile('ProfitHub/Orders/Locale.lua')
 PT.L = arg[2] == 'en' and PT.L_enUS or PT.L_ruRU
 dofile('ProfitHub/Orders/Core/CraftingOrders_Core.lua')
+local coreMethods = {}
+for key, value in pairs(CO) do coreMethods[key] = value end
+dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
+-- Keep the real visibility lifecycle, without importing unrelated crafting
+-- checks into this presentation-only frame model.
+local visibilityMethods = { UpdateControlPanelVisibility=true, IsOrderListOpen=true,
+    IsOrderViewOpen=true, IsCraftingOrdersPageOpen=true }
+for key in pairs(CO) do
+    if not visibilityMethods[key] then CO[key] = coreMethods[key] end
+end
 dofile('ProfitHub/Orders/CraftingOrders/Rows.lua')
 dofile('ProfitHub/Orders/CraftingOrders/ClassicTheme.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Panel.lua')
 dofile('ProfitHub/Orders/CraftingOrders/CustomList.lua')
 CO.IsEnabled = function() return true end
-CO.UpdateControlPanel, CO.UpdateControlPanelVisibility = noop, noop
+CO.UpdateControlPanel = noop
 CO.GetQueueReagentMode = function() return 't1' end
 CO.GetQueueConcMode = function() return 'off' end
 CO.GetAutoFinishingLabel = function() return '+10' end
@@ -251,6 +261,7 @@ for _, width in ipairs({352, 431, 432, 511, 512, 600, 640, 792, 1020, 1250}) do
 end
 for _, height in ipairs({390,490,590}) do
     anchor:SetHeight(height)
+    CO:AnchorControlPanelToOrderList(panel, page)
     local _, sy, _, sh = bounds(craft.scroll)
     local _, fy = bounds(panel.footer)
     local _, ay, _, ah = bounds(panel.queueActions)
@@ -267,6 +278,43 @@ craft.scroll:SetVerticalScroll(40)
 CO:UpdateClassicSettingsScroll(craft.scroll, craft.body)
 assert(not craft.scroll.ScrollBar:IsShown() and craft.scroll:GetVerticalScroll() == 0, 'empty settings retain scrollbar/offset')
 craft.body:SetHeight(savedHeight)
+local originalListWidth, originalPanelHeight = anchor:GetWidth(), panel:GetHeight()
+panel.classicTabs.queue:Click()
+panel.collapseButton:Click()
+assert(E.GetDB().panelCollapsed == true and not panel:IsVisible(), 'collapse did not persist or hide the panel')
+assert(panel.collapseButton.text:GetText() == '<' and panel.collapseButton:IsVisible(), 'hidden panel cannot be restored')
+assert(panel.collapseButton:GetParent() == page, 'toggle is hidden with the panel')
+assert(not panel.helpButton:IsVisible() and not panel.titleFS:IsVisible(), 'hidden panel retains its header')
+local toggleX, toggleY, toggleW, toggleH = bounds(panel.collapseButton)
+local listX, listY, listW = bounds(anchor)
+assert(toggleX >= listX and toggleX + toggleW <= listX + listW and toggleY + toggleH < listY,
+    'toggle is not above the top-right corner inside the main window')
+assert(not panel.shopButton:IsVisible() and not panel.runActionButton:IsVisible()
+    and not queue.scroll:IsVisible() and not panel.debugToggle:IsVisible(), 'collapsed content leaked outside the header')
+CO:UpdateTabActionButton(page)
+CO:UpdateControlPanelVisibility(page)
+assert(not panel.knowledgeButton:IsVisible() and not panel:IsVisible(), 'periodic refresh expanded the panel')
+assert(anchor:GetWidth() == originalListWidth, 'collapse resized the order list')
+panel.collapseButton:Click()
+assert(E.GetDB().panelCollapsed == false and panel:GetHeight() == originalPanelHeight, 'expand did not restore full height')
+assert(queue.scroll:IsVisible() and not craft.scroll:IsVisible(), 'expand lost the selected settings tab')
+assert(panel.runActionButton:IsVisible() and panel.shopButton:IsVisible(), 'expand lost actions')
+panel.classicTabs.craft:Click()
+E.GetDB().panelCollapsed = true
+local reopenedPage = frame('Frame')
+reopenedPage:SetSize(1060, 680)
+CO:EnsureControlPanel(reopenedPage)
+assert(not CO.controlPanel:IsVisible() and CO.controlPanel.collapseButton:IsVisible(),
+    'a newly created panel ignored the saved collapse preference')
+reopenedPage:Hide()
+CO.controlPanel = panel
+E.GetDB().panelCollapsed = false
+page.BrowseFrame:Hide()
+CO:UpdateControlPanelVisibility(page)
+assert(not panel:IsVisible() and not panel.collapseButton:IsVisible(), 'toggle remains on the order-detail page')
+page.BrowseFrame:Show()
+CO:UpdateControlPanelVisibility(page)
+assert(panel:IsVisible() and panel.collapseButton:IsVisible(), 'returning to the list lost the panel toggle')
 local fallbackPage = frame('Frame')
 fallbackPage:SetSize(1060, 680)
 local fallbackPanel = frame('Frame', fallbackPage)
@@ -342,6 +390,7 @@ print('Classic orders UI tests passed.')
 
 if arg[1] == '--scene' then
     anchor:SetWidth(792); anchor:SetHeight(590)
+    CO:AnchorControlPanelToOrderList(panel, page)
     CL:SetCompact(false); CL:ResizeList(container)
     panel.selectedText:SetText('Выбрано: 2')
     panel.keyText:SetText('Клавиша: Tab')
@@ -363,6 +412,7 @@ if arg[1] == '--scene' then
         demo.action.text:SetText(i == 1 and 'Крафт' or 'Взять')
     end
     if arg[3] == 'queue' then panel.classicTabs.queue:Click() end
+    if arg[3] == 'collapsed' then panel.collapseButton:Click() end
     local function quote(value)
         return '"' .. tostring(value or ''):gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','') .. '"'
     end

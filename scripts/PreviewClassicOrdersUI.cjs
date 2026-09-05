@@ -36,4 +36,4 @@ async function render(tab) {
     await sharp(Buffer.from(content)).png().toFile(out);
     console.log(out);
 }
-render('craft').then(()=>render('queue')).catch(e=>{console.error(e);process.exitCode=1;});
+render('craft').then(()=>render('queue')).then(()=>render('collapsed')).catch(e=>{console.error(e);process.exitCode=1;});

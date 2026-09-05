@@ -567,6 +567,68 @@ local function ResponseLabel(response)
     return crafter
 end
 
+-- The character handling the conversation is not necessarily the crafter.
+-- Keep ownership on the individual request, not on the account/customer.
+function QuickReplies:RememberConversationCharacter(response, character)
+    if type(response) ~= 'table' then return end
+    if not character then
+        if HironCraftScanComm and HironCraftScanComm.applying_remote_state then return end
+        character = HironCraftScan.GetPlayerName(true)
+    end
+    if type(character) == 'string' and character ~= '' and not response.conversationCharacter then
+        response.conversationCharacter = character
+    end
+end
+
+function QuickReplies:GetConversationOwners(customerInfo)
+    local owners, seen = {}, {}
+    for responseID, response in pairs(customerInfo.responses or {}) do
+        if type(response) == 'table' and not seen[response] and response.conversationCharacter then
+            seen[response] = true
+            owners[#owners + 1] = {
+                responseID = response.responseID or responseID,
+                requestToken = response.requestToken,
+                time = response.time,
+                character = response.conversationCharacter,
+            }
+        end
+    end
+    return owners
+end
+
+function QuickReplies:RememberCustomerConversation(customerInfo)
+    for _, response in pairs(customerInfo.responses or {}) do
+        self:RememberConversationCharacter(response)
+    end
+    return self:GetConversationOwners(customerInfo)
+end
+
+function QuickReplies:ApplyConversationOwners(customerInfo, owners)
+    if type(owners) ~= 'table' then return end
+    for _, owner in ipairs(owners) do
+        if type(owner) == 'table' and type(owner.character) == 'string' and #owner.character <= 128 then
+            for responseID, response in pairs(customerInfo.responses or {}) do
+                if type(response) == 'table'
+                    and (response.responseID or responseID) == owner.responseID
+                    and ((response.requestToken and response.requestToken == owner.requestToken)
+                        or (not response.requestToken and not owner.requestToken
+                            and response.time and response.time == owner.time))
+                then
+                    self:RememberConversationCharacter(response, owner.character)
+                end
+            end
+        end
+    end
+end
+
+function QuickReplies:IsConversationCharacter(response)
+    local owner = response and response.conversationCharacter
+    local current = HironCraftScan.GetPlayerName(true)
+    -- Old rows without ownership cannot safely be assigned to the crafting alt.
+    return type(owner) == 'string' and type(current) == 'string'
+        and owner:gsub('%s+', ''):lower() == current:gsub('%s+', ''):lower()
+end
+
 function QuickReplies:BuildRejectedOrderOption(order, entry)
     local config = EnsureConfig()
     local rejectedStatus = HironCraftScan.OrderFulfillment
@@ -593,6 +655,7 @@ function QuickReplies:BuildRejectedOrderOption(order, entry)
     if not ok or type(response) ~= 'table' then
         return nil
     end
+    if not self:IsConversationCharacter(response) then return nil end
 
     local reply = self:BuildReply(REJECTED_ORDER_TEMPLATE_KEY, response)
     if not reply then
@@ -802,7 +865,11 @@ local function FindEquivalentResponse(option)
 end
 
 function QuickReplies:ResolvePopupResponse(option)
-    return CurrentResponse(option) or FindEquivalentResponse(option)
+    local response = CurrentResponse(option)
+    if option.templateKey == REJECTED_ORDER_TEMPLATE_KEY then
+        return self:IsConversationCharacter(response) and response or nil
+    end
+    return response or FindEquivalentResponse(option)
 end
 
 local function SameReplyContext(lhs, rhs)

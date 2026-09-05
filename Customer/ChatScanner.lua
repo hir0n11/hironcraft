@@ -1398,6 +1398,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     end
     if firstInteraction or restartingTerminalRequest then
         response.requestToken = requestToken
+        response.conversationCharacter = nil
     end
 
     -- Save the request at higher granularities as well so that we don't
@@ -1416,6 +1417,9 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         and not (overrides and overrides.existingCustomerRequest)
     if greeting_queued then
         C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
+            if HironCraftScan.QuickReplies then
+                HironCraftScan.QuickReplies:RememberConversationCharacter(response)
+            end
             HironCraftScan.Utils.SendResponses(response.message, customer)
             response.greeting_sent = true
         end)
@@ -1436,6 +1440,14 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.time = now
     response.responseID = responseID
     response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
+    if HironCraftScan.QuickReplies then
+        -- A proxied request must retain the originating conversation character.
+        HironCraftScan.QuickReplies:ApplyConversationOwners(customerInfo,
+            overrides and overrides.conversationOwners)
+        if customerStartedInteraction or (overrides and overrides.greeted) then
+            HironCraftScan.QuickReplies:RememberConversationCharacter(response)
+        end
+    end
     if customerStartedInteraction then
         response.customer_answered = true
     end
@@ -1497,6 +1509,9 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         HironCraftScanCraftingOrderPage:ShowGeneric()
     end
 
+    if requestChatEntry and HironCraftScan.QuickReplies then
+        requestChatEntry.conversationOwners = HironCraftScan.QuickReplies:GetConversationOwners(customerInfo)
+    end
     HironCraftScanComm:ShareCustomerOrder(
         message,
         customer,
@@ -1563,6 +1578,9 @@ function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, i
         chatHistory,
         HironCraftScan.Utils.DeepCopy(entry)
     )
+    if HironCraftScan.QuickReplies then
+        HironCraftScan.QuickReplies:ApplyConversationOwners(customerInfo, entry.conversationOwners)
+    end
     if not inserted then return false end
     if incoming then
         for _, response in pairs(customerInfo.responses or {}) do
@@ -1598,6 +1616,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
             local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            if HironCraftScan.QuickReplies then
+                entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
+            end
             table.insert(chat_history, entry)
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, entry, false)
@@ -1610,6 +1631,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
             local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            if HironCraftScan.QuickReplies then
+                entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
+            end
             table.insert(chat_history, entry)
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)

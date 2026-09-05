@@ -85,6 +85,23 @@ function CO:CreateClassicPanelShell(panel)
         panel.classicTabs[key] = tab
     end
     self:SelectClassicPanelTab(panel, "craft")
+
+    -- A sibling of the sidebar, so hiding the entire panel leaves the toggle
+    -- available inside Blizzard's window, above the list's right corner.
+    panel.collapseButton = self:CreateTextButton(panel.pageFrame, nil, 24, 24, ">")
+    panel.collapseButton:SetFrameLevel(panel:GetFrameLevel())
+    panel.collapseButton:SetScript("OnClick", function()
+        GetDB().panelCollapsed = not (GetDB().panelCollapsed == true)
+        CO:UpdateControlPanelVisibility(panel.pageFrame)
+    end)
+    panel.collapseButton:SetScript("OnEnter", function(button)
+        GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+        GameTooltip:SetText(GetDB().panelCollapsed
+            and T("COA_PANEL_EXPAND", "Expand order panel")
+            or T("COA_PANEL_COLLAPSE", "Collapse order panel"))
+        GameTooltip:Show()
+    end)
+    panel.collapseButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
 function CO:UpdateClassicSettingsScroll(scroll, body)

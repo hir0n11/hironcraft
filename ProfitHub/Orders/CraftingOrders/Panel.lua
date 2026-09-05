@@ -1186,12 +1186,27 @@ function CO:AnchorControlPanelToOrderList(panel, pageFrame)
         panel:SetPoint("TOPLEFT", pageFrame, "TOPRIGHT", self.CLASSIC_PANEL_GAP, -110)
         panel:SetPoint("BOTTOMLEFT", pageFrame, "BOTTOMRIGHT", self.CLASSIC_PANEL_GAP, 10)
     end
+    if panel.collapseButton then
+        panel.collapseButton:ClearAllPoints()
+        if list then
+            panel.collapseButton:SetPoint("BOTTOMRIGHT", list, "TOPRIGHT", -6, 6)
+        else
+            panel.collapseButton:SetPoint("TOPRIGHT", pageFrame, "TOPRIGHT", -6, -80)
+        end
+        panel.collapseButton.text:SetText(GetDB().panelCollapsed and "<" or ">")
+    end
 end
 
 function CO:EnsureControlPanel(pageFrame)
     if not self:IsEnabled() then
-        if self.controlPanel then self.controlPanel:Hide() end
-        if pageFrame and pageFrame.ahuiCraftingOrdersPanel then pageFrame.ahuiCraftingOrdersPanel:Hide() end
+        if self.controlPanel then
+            self.controlPanel:Hide()
+            if self.controlPanel.collapseButton then self.controlPanel.collapseButton:Hide() end
+        end
+        if pageFrame and pageFrame.ahuiCraftingOrdersPanel then
+            pageFrame.ahuiCraftingOrdersPanel:Hide()
+            if pageFrame.ahuiCraftingOrdersPanel.collapseButton then pageFrame.ahuiCraftingOrdersPanel.collapseButton:Hide() end
+        end
         return
     end
 

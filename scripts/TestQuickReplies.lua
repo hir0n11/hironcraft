@@ -59,6 +59,8 @@ function CraftScan.BuildResponseContext(response)
     }
 end
 function CraftScan.NameAndRealmToName(name) return name and name:match("^[^-]+") end
+local currentCharacter = "Seller-Realm"
+function CraftScan.GetPlayerName() return currentCharacter end
 function CraftScan.OrderToOrderID(order)
     return order.customerName .. "-" .. tostring(order.responseID)
 end
@@ -154,12 +156,30 @@ assert(resolved == first, "profession aliases must not make a popup stale")
 -- must not be classified from chat keywords and must never attach to another
 -- order belonging to the same customer.
 CraftScan.DB.customers.Valnihra.responses[101] = first
+local rejectionOrder = { customerName = "Valnihra", responseID = 101 }
+local rejectionEntry = { status = "rejected", rev = 1 }
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
+    "a legacy row without conversation ownership was assigned to an arbitrary character")
+QuickReplies:RememberConversationCharacter(first)
+assert(first.conversationCharacter == "Seller-Realm")
+currentCharacter = "Farrierr-Realm"
+QuickReplies:RememberCustomerConversation(CraftScan.DB.customers.Valnihra)
+assert(first.conversationCharacter == "Seller-Realm", "crafting alt stole the conversation")
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
+    "rejection reply leaked onto the crafting alt")
+currentCharacter = "Seller-OtherRealm"
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
+    "same name on another realm inherited the rejection")
+currentCharacter = "Seller-Realm"
 local rejectedOption = QuickReplies:BuildRejectedOrderOption(
     { customerName = "Valnihra", responseID = 101 },
     { status = "rejected", rev = 1 }
 )
 assert(rejectedOption, "rejected order did not create a quick reply")
 assert(rejectedOption.response == first)
+currentCharacter = "Farrierr-Realm"
+assert(QuickReplies:ResolvePopupResponse(rejectedOption) == nil, "stale rejection popup sent from another character")
+currentCharacter = "Seller-Realm"
 assert(
     rejectedOption.reply == "You need provide all mats and they all should be max tier (even missive and embelishment)",
     "rejected-order reply text changed"
@@ -196,5 +216,78 @@ for _, key in ipairs(reconciledKeys) do
     if initialSet[key] then hasStableAlias = true end
 end
 assert(hasStableAlias, "reconciled rejected status would create a repeated suggestion")
+
+-- Ownership survives linked-account chat, aliases and request replay. A later
+-- job for the same item must not inherit ownership from an old chat packet.
+first.requestToken = "request-owner-1"
+local owners = QuickReplies:GetConversationOwners(CraftScan.DB.customers.Valnihra)
+assert(#owners == 1, "profession alias duplicated the conversation owner")
+local remoteResponse = Response(101)
+remoteResponse.requestToken = first.requestToken
+local remoteCustomer = { responses = { [101] = remoteResponse } }
+HironCraftScanComm = { applying_remote_state = true }
+QuickReplies:RememberConversationCharacter(remoteResponse)
+assert(remoteResponse.conversationCharacter == nil, "proxied scan claimed the local character")
+QuickReplies:ApplyConversationOwners(remoteCustomer, owners)
+assert(remoteResponse.conversationCharacter == "Seller-Realm", "linked account lost the conversation owner")
+remoteResponse.requestToken = "request-owner-2"
+remoteResponse.conversationCharacter = nil
+QuickReplies:ApplyConversationOwners(remoteCustomer, owners)
+assert(remoteResponse.conversationCharacter == nil, "old chat assigned a newer request")
+HironCraftScanComm = nil
+currentCharacter = "NewSeller-Realm"
+QuickReplies:RememberConversationCharacter(remoteResponse)
+assert(remoteResponse.conversationCharacter == currentCharacter, "new request cannot select a new conversation character")
+
+-- Exercise the actual outgoing-whisper event path, not just the owner helper.
+CraftScan.CONST = { TEXT = {} }
+CraftScan.Utils.onLoad = function() end
+CraftScan.Utils.DeepCopy = function(value) return value end
+EnumUtil = { MakeEnum = function() return {} end }
+CreateFrame = function() return {} end
+assert(loadfile('Customer/ChatHistory.lua'))('HironCraft', CraftScan)
+assert(loadfile('Customer/ChatScanner.lua'))('HironCraft', CraftScan)
+CraftScan.GetPlayerName = function() return currentCharacter end
+local sharedEntry
+HironCraftScanComm = { ShareCustomerChat = function(_, _, _, entry) sharedEntry = entry end }
+local liveResponse = Response(201)
+liveResponse.requestToken = 'live-request'
+CraftScan.DB.customers.LiveCustomer = { responses = { [201] = liveResponse } }
+CraftScan.OnMessage('CHAT_MSG_WHISPER_INFORM', 'Hello, send the order to my crafter.', 'LiveCustomer')
+assert(liveResponse.conversationCharacter == 'NewSeller-Realm', 'outgoing greeting did not record its character')
+assert(sharedEntry.conversationOwners[1].character == 'NewSeller-Realm', 'outgoing whisper omitted synced ownership')
+local linkedResponse = Response(201)
+linkedResponse.requestToken = 'live-request'
+CraftScan.DB.customers.LinkedCustomer = { responses = { [201] = linkedResponse } }
+CraftScan.ApplyRemoteCustomerChat('LinkedCustomer', nil, sharedEntry, false)
+assert(linkedResponse.conversationCharacter == 'NewSeller-Realm', 'remote chat handler discarded ownership')
+currentCharacter = 'Farrierr-Realm'
+CraftScan.OnMessage('CHAT_MSG_WHISPER_INFORM', 'Crafting now.', 'LiveCustomer')
+assert(liveResponse.conversationCharacter == 'NewSeller-Realm', 'later alt whisper replaced the original seller')
+
+-- Explicit greeting/open-chat clicks capture the selected request before the
+-- outgoing-chat echo arrives (including middle-click without a greeting).
+CreateFromMixins = function() return {} end
+StaticPopupDialogs = {}
+UnitName = function() return currentCharacter end
+GetRealmName = function() return 'Realm' end
+bit = { bxor = function() return 0 end, band = function() return 0 end }
+setmetatable(CraftScan.CONST.TEXT, { __index = function(_, key) return key end })
+CraftScan.Utils.ChatHistoryTooltip = { new = function() return {} end }
+HironCraftScanScannerMenu = { ClearAlert = function() end }
+HironCraftScanCraftingOrderPage = { ShowGeneric = function() end }
+CraftScan.Utils.SendResponses = function() end
+ChatFrame_SendTell = function() end
+assert(loadfile('Customer/OrderPage.lua'))('HironCraft', CraftScan)
+CraftScan.RebuildResponseMessage = function() end
+local clickedResponse = Response(301)
+clickedResponse.requestToken = 'clicked-request'
+CraftScan.DB.customers.ClickedCustomer = { responses = { [301] = clickedResponse } }
+local clickedOrder = { customerName = 'ClickedCustomer', responseID = 301 }
+CraftScan.GreetCustomer('LeftButton', clickedOrder)
+assert(clickedResponse.conversationCharacter == currentCharacter, 'greeting click did not capture the seller')
+clickedResponse.conversationCharacter = nil
+CraftScan.GreetCustomer('MiddleButton', clickedOrder)
+assert(clickedResponse.conversationCharacter == currentCharacter, 'middle-click conversation did not capture the seller')
 
 print("Quick reply tests passed.")

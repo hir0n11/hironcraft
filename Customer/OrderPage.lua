@@ -95,6 +95,9 @@ function HironCraftScan.GreetCustomer(button, order)
     HironCraftScanScannerMenu:ClearAlert(order)
 
     local response = HironCraftScan.OrderToResponse(order)
+    if button == "LeftButton" or button == "MiddleButton" then
+        HironCraftScan.QuickReplies:RememberConversationCharacter(response)
+    end
     if button == "LeftButton" then
         if not response.greeting_sent then
             HironCraftScan.RebuildResponseMessage(order)
