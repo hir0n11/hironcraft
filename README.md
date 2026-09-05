@@ -20,6 +20,26 @@ does not mark a later request from the same customer as complete.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Crafting orders interface (0.3.0)
+
+The order list and controls now share Blizzard's profession window. Native
+buttons, standard fonts, framed panels and gold selection highlights replace
+the external flat sidebar. Existing queue settings and key bindings are kept.
+
+- **Crafting** contains reagent quality, concentration, finishers and tools.
+- **Queue** contains profit filters, automatic selection and shopping.
+- The action button, selection count and current status stay visible below
+  both settings pages. The settings and order list scroll independently.
+- Use the list's **+/−** button to switch between compact and detailed rows.
+  Detailed rows include the customer; narrower lists show profit beneath the
+  item, and the commission tooltip also includes it. Additional icons are
+  available through **+N** when their column is full.
+- **Refresh** reloads orders when no order action is in progress. Clicking the
+  item row still opens the original Blizzard order details.
+
+This release changes presentation; the reported finisher craft-start issue
+is not considered resolved by the interface redesign.
+
 ## First start and settings migration
 
 1. Install the `HironCraft` folder on both WoW clients.

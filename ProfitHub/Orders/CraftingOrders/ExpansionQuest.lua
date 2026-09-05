@@ -407,6 +407,12 @@ function CO:UpdateWeeklyQuestIndicator()
     indicator.ahuiWeeklyQuestStatus = status
 
     indicator.text:SetText(T("COA_WEEKLY_QUEST_LABEL", "Квест"))
+    if indicator.hironClassic then
+        self:StyleClassicButton(indicator)
+        local _, r, g, b = self:GetWeeklyQuestIndicatorTextAndColor(status)
+        indicator.text:SetTextColor(r, g, b)
+        return
+    end
 
     if HironCraftProfit.IsFantasyDesign and HironCraftProfit:IsFantasyDesign() then
         local _, tr, tg, tb = self:GetWeeklyQuestIndicatorTextAndColor(status)

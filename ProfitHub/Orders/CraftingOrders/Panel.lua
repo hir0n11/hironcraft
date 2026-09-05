@@ -973,107 +973,15 @@ function CO:CreateSegmentedControl(parent, segments, totalWidth, getValue, setVa
     return holder
 end
 
-local PANEL_STYLE = {
-    bronze = {
-        fill    = { 0.14, 0.10, 0.06, 0.82 },
-        border  = { 0.55, 0.42, 0.22, 1 },
-        text    = { 0.96, 0.90, 0.76, 1 },
-        textOff = { 0.66, 0.58, 0.42, 1 },
-    },
-    soulless = {
-        fill    = { 0.02, 0.02, 0.025, 0.94 },
-        border  = { 1, 1, 1, 0.12 },
-        text    = { 0.80, 0.80, 0.85, 1 },
-        textOff = { 0.62, 0.62, 0.66, 1 },
-    },
-}
-local PANEL_STYLE_SEL = {
-    fill   = { 0.08, 0.20, 0.09, 0.95 },
-    border = { 0.30, 1.00, 0.30, 1 },
-    text   = { 0.35, 1.00, 0.40, 1 },
-}
-
-local function IsFantasyDesign()
-    if PT.IsFantasyDesign then return PT:IsFantasyDesign() end
-    return false
-end
-local function DesignVariant()
-    return IsFantasyDesign() and "bronze" or "soulless"
-end
-
-local BTN_ATLAS   = "Professions-Specializations-Background-Footer"
-local INPUT_ATLAS = "Professions-Recrafting-Panel"
-local ATLAS_PRESSED = {
-    ["UI-Journeys-Renown-Button"] = "UI-Journeys-Renown-Button-pressed",
-}
-
-local function EnsureWidgetAtlas(frame)
-    if not frame.ahuiBgTex then
-        frame.ahuiBgTex = frame:CreateTexture(nil, "BACKGROUND")
-        frame.ahuiBgTex:SetAllPoints()
-    end
-    return frame.ahuiBgTex
-end
-
-function CO:StyleWidget(frame, variant, selected, atlas)
-    local st = selected and PANEL_STYLE_SEL or PANEL_STYLE[variant]
-    if not (frame and st) then return end
-    local textColor = st.text
-    if atlas and variant == "bronze"
-        and atlas == BTN_ATLAS
-        and frame.GetObjectType and frame:GetObjectType() == "Button"
-        and PT.ApplyPanelButtonSkin then
-        if frame.ahuiBgTex then frame.ahuiBgTex:Hide() end
-        if selected then
-            PT:ApplyPanelButtonSkin(frame, { st.text[1], st.text[2], st.text[3] })
-            textColor = { 1, 1, 1, 1 }
-        else
-            PT:ApplyPanelButtonSkin(frame, { 1, 1, 1 })
-        end
-        if PT.SetPanelButtonForced then
-            PT:SetPanelButtonForced(frame, selected and "disabled" or nil)
-        end
-        if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0) end
-        if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(0, 0, 0, 0) end
-    elseif atlas and variant == "bronze" then
-        local t = EnsureWidgetAtlas(frame)
-        t.ahuiAtlas = atlas
-        t.ahuiAtlasPressed = ATLAS_PRESSED[atlas]
-        t:SetAtlas(atlas, false)
-        if t.SetTextureSliceMargins then
-            t:SetTextureSliceMargins(20, 20, 20, 20)
-            if Enum and Enum.UITextureSliceMode then
-                t:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
-            end
-        end
-        t:Show()
-        if t.ahuiAtlasPressed and not frame.ahuiPressHooked then
-            frame.ahuiPressHooked = true
-            frame:HookScript("OnMouseDown", function(self)
-                local tex = self.ahuiBgTex
-                if tex and tex:IsShown() and tex.ahuiAtlasPressed then tex:SetAtlas(tex.ahuiAtlasPressed, false) end
-            end)
-            frame:HookScript("OnMouseUp", function(self)
-                local tex = self.ahuiBgTex
-                if tex and tex:IsShown() and tex.ahuiAtlas then tex:SetAtlas(tex.ahuiAtlas, false) end
-            end)
-        end
-        if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0) end
-        if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(0.16, 0.16, 0.18, 1) end
+function CO:StyleWidget(frame, selected)
+    if not frame then return end
+    if frame.GetObjectType and frame:GetObjectType() == "Button" and frame.text then
+        self:StyleClassicButton(frame, selected)
     else
-        if frame.ahuiBgTex then frame.ahuiBgTex:Hide() end
-        if frame.SetBackdropColor then
-            frame:SetBackdropColor(st.fill[1], st.fill[2], st.fill[3], st.fill[4])
+        self:ApplyClassicInset(frame)
+        if frame.GetObjectType and frame:GetObjectType() == "EditBox" then
+            frame:SetTextColor(1, 1, 1)
         end
-        if frame.SetBackdropBorderColor then
-            frame:SetBackdropBorderColor(st.border[1], st.border[2], st.border[3], st.border[4])
-        end
-    end
-    if frame.GetObjectType and frame:GetObjectType() == "EditBox" then
-        frame:SetTextColor(textColor[1], textColor[2], textColor[3], textColor[4])
-    else
-        local fs = frame.text or frame.label
-        if fs then fs:SetTextColor(textColor[1], textColor[2], textColor[3], textColor[4]) end
     end
 end
 
@@ -1139,15 +1047,14 @@ function CO:UpdatePageBackground(pageFrame)
     -- background. The old ProfitHUB logo tile obscured the default artwork.
     container.profBg:Hide()
     if container.tile then container.tile:Hide() end
-    if container.SetBackdropColor then container:SetBackdropColor(0, 0, 0, 0) end
+    self:ApplyClassicInset(container)
 end
 
 function CO:UpdateSegmentedControl(holder)
     if not holder or not holder.buttons then return end
     local cur = holder.getValue and holder.getValue()
-    local variant = holder.ahuiStyleVariant or "bronze"
     for _, b in ipairs(holder.buttons) do
-        CO:StyleWidget(b, variant, b.segValue == cur, BTN_ATLAS)
+        CO:StyleWidget(b, b.segValue == cur)
     end
 end
 
@@ -1160,12 +1067,12 @@ function CO:CreateCheckToggle(parent, label, getValue, setValue, width)
     b.box = b:CreateTexture(nil, "ARTWORK")
     b.box:SetSize(16, 16)
     b.box:SetPoint("LEFT", 0, 0)
-    b.box:SetAtlas("uitools-icon-checkbox")
+    b.box:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
 
     b.check = b:CreateTexture(nil, "OVERLAY")
     b.check:SetSize(14, 14)
     b.check:SetPoint("CENTER", b.box, "CENTER", 0, 0)
-    b.check:SetAtlas("uitools-icon-checkmark")
+    b.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
 
     b.label = b:CreateFontString(nil, "OVERLAY")
     ApplyFont(b.label, 12, "")
@@ -1193,8 +1100,7 @@ function CO:UpdateCheckToggle(b)
     local on = b.getValue and b.getValue()
     if b.check then b.check:SetShown(on and true or false) end
     if b.label then
-        local st = PANEL_STYLE[b.ahuiStyleVariant or "bronze"]
-        local c = on and st.text or st.textOff
+        local c = on and { 1, 0.82, 0.2, 1 } or { 0.65, 0.61, 0.53, 1 }
         b.label:SetTextColor(c[1], c[2], c[3], c[4])
     end
 end
@@ -1273,12 +1179,11 @@ function CO:AnchorControlPanelToOrderList(panel, pageFrame)
     panel:ClearAllPoints()
     local list = pageFrame.BrowseFrame and pageFrame.BrowseFrame.OrderList
     if list then
-        panel:SetPoint("LEFT", pageFrame, "RIGHT", 4, 0)
-        panel:SetPoint("TOP", list, "TOP", 0, 2)
-        panel:SetPoint("BOTTOM", list, "BOTTOM", 0, -2)
+        panel:SetPoint("TOPRIGHT", list, "TOPRIGHT", 0, 0)
+        panel:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", 0, 0)
     else
-        panel:SetPoint("TOPLEFT", pageFrame, "TOPRIGHT", 4, -110)
-        panel:SetPoint("BOTTOMLEFT", pageFrame, "BOTTOMRIGHT", 4, 10)
+        panel:SetPoint("TOPRIGHT", pageFrame, "TOPRIGHT", -4, -110)
+        panel:SetPoint("BOTTOMRIGHT", pageFrame, "BOTTOMRIGHT", -4, 10)
     end
 end
 
@@ -1297,9 +1202,10 @@ function CO:EnsureControlPanel(pageFrame)
         return
     end
 
-    local VPANEL_W = 152
-    local PADX = 10
-    local INNER = VPANEL_W - PADX * 2
+
+    local VPANEL_W = self.CLASSIC_PANEL_WIDTH
+    local PADX = 8
+    local INNER = VPANEL_W - 40 - PADX * 2
     local COL_GAP = 6
     local COL_W = math.floor((INNER - COL_GAP) / 2)
 
@@ -1307,34 +1213,8 @@ function CO:EnsureControlPanel(pageFrame)
     panel:SetWidth(VPANEL_W)
     panel:SetFrameLevel((pageFrame:GetFrameLevel() or 1) + 60)
     panel.pageFrame = pageFrame
-    CreateBackdrop(panel, 0.95)
-    if IsFantasyDesign() then
-        panel:SetBackdropColor(0, 0, 0, 0)
-        panel.bgAtlas = panel:CreateTexture(nil, "BACKGROUND")
-        panel.bgAtlas:SetAtlas("Professions-background-summarylist", false)
-        panel.bgAtlas:SetAllPoints()
-        if panel.SetBackdropBorderColor then
-            panel:SetBackdropBorderColor(0, 0, 0, 0)
-        end
-    else
-        if panel.SetBackdropBorderColor then
-            panel:SetBackdropBorderColor(0.694, 0.612, 0.851, 0.9)
-        end
-    end
+    self:CreateClassicPanelShell(panel)
     self:AnchorControlPanelToOrderList(panel, pageFrame)
-
-    local y = -12
-
-    local function AddHeader(text)
-        local fs = panel:CreateFontString(nil, "OVERLAY")
-        ApplyFont(fs, 12, "OUTLINE")
-        fs:SetPoint("TOPLEFT", PADX, y)
-        fs:SetTextColor(1, 0.82, 0.35, 1)
-        fs:SetText(text)
-        y = y - 18
-        return fs
-    end
-
     -- Help icon (top-left)
     panel.helpButton = CreateFrame("Button", nil, panel)
     panel.helpButton:SetSize(28, 28)
@@ -1363,11 +1243,22 @@ function CO:EnsureControlPanel(pageFrame)
     panel.titleFS:SetPoint("RIGHT", panel, "RIGHT", -6, 0)
     panel.titleFS:SetJustifyH("LEFT")
     panel.titleFS:SetText(T("COA_PANEL_TITLE", "Очередь заказов"))
-    y = y - 26
 
+
+    local body = panel.classicPages.craft.body
+    local y = -8
+    local function AddHeader(text)
+        local fs = body:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("TOPLEFT", PADX, y)
+        fs:SetWidth(INNER)
+        fs:SetJustifyH("LEFT")
+        fs:SetText(text)
+        y = y - 22
+        return fs
+    end
     -- Reagent mode (two rows)
     AddHeader(T("COA_QUEUE_REAGENTS_HEADER", "Реагенты"))
-    panel.reagentSeg = self:CreateSegmentedControl(panel, {
+    panel.reagentSeg = self:CreateSegmentedControl(body, {
         { value = "auto",   label = T("COA_QUEUE_REAGENT_MODE_AUTO_SHORT", "Авто") },
         { value = "t1",     label = "T1" },
         { value = "t2",     label = "T2" },
@@ -1382,7 +1273,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Concentration
     AddHeader(T("COA_QUEUE_CONC_HEADER", "Концентрация"))
-    panel.concSeg = self:CreateSegmentedControl(panel, {
+    panel.concSeg = self:CreateSegmentedControl(body, {
         { value = "off",   label = T("COA_CONC_OFF", "Выкл"), weight = 1 },
         { value = "allow", label = T("COA_CONC_ALLOW_FULL", "Разрешить"), weight = 2 },
     }, INNER, function() local m = CO:GetQueueConcMode(); return m == "force" and "allow" or m end,
@@ -1395,13 +1286,13 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Automatic finishing reagents. The menu separates the master switch from
     -- the maximum skill bonus the queue may consume before declining an order.
-    local finisherHeader = panel:CreateFontString(nil, "OVERLAY")
+    local finisherHeader = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(finisherHeader, 11, "OUTLINE")
     finisherHeader:SetPoint("TOPLEFT", PADX, y - 4)
     finisherHeader:SetTextColor(1, 0.82, 0.35, 1)
     finisherHeader:SetText(T("COA_FINISHER_HEADER", "Финишеры"))
     panel.finisherButton = self:CreateTextButton(
-        panel,
+        body,
         nil,
         62,
         20,
@@ -1421,37 +1312,82 @@ function CO:EnsureControlPanel(pageFrame)
     panel.finisherButton:SetScript("OnLeave", HideStyledTooltip)
     y = y - 26
 
+
+    y = y - 12
+    AddHeader(T("COA_CLASSIC_TOOLS", "Profession equipment"))
+    -- Tool icons row (centered): best quality, auto tool, profession tool slot
+    local toolsRowW = PROFESSION_TOOL_SLOT_SIZE * 3 + 8 * 2
+    local toolsStartX = PADX + math.max(0, math.floor((INNER - toolsRowW) / 2))
+    panel.bestQualityToggle = self:CreateBestQualityToggle(body)
+    panel.bestQualityToggle:SetPoint("TOPLEFT", toolsStartX, y)
+    panel.autoToolToggle = self:CreateAutoToolToggle(body)
+    panel.autoToolToggle:SetPoint("LEFT", panel.bestQualityToggle, "RIGHT", 8, 0)
+    panel.professionToolSlot = self:CreateProfessionToolSlot(body)
+    panel.professionToolSlot:SetPoint("LEFT", panel.autoToolToggle, "RIGHT", 8, 0)
+    y = y - 44
+
+    -- Expansion + weekly quest (bottom of settings block)
+    panel.expansionButton = self:CreateTextButton(body, nil, COL_W, 20, self:GetSelectedProfessionExpansionLabel())
+    if panel.expansionButton.text then ApplyFont(panel.expansionButton.text, 12, "") end
+    panel.expansionButton:SetPoint("TOPLEFT", PADX, y)
+    panel.expansionButton:SetScript("OnClick", function(self)
+        CO:OpenProfessionExpansionMenu(self)
+    end)
+    panel.expansionButton:SetScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_EXPANSION_DROPDOWN_TITLE", "Profession expansion"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_EXPANSION_DROPDOWN_TOOLTIP", "Switches the actual profession expansion, like Blizzard's profession page dropdown."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.expansionButton:SetScript("OnLeave", HideStyledTooltip)
+
+    panel.weeklyQuestIndicator = self:CreateTextButton(body, nil, COL_W, 20, "")
+    if panel.weeklyQuestIndicator.text then ApplyFont(panel.weeklyQuestIndicator.text, 12, "") end
+    panel.weeklyQuestIndicator:SetPoint("TOPLEFT", PADX + COL_W + COL_GAP, y)
+    panel.weeklyQuestIndicator:SetScript("OnClick", nil)
+    panel.weeklyQuestIndicator:SetScript("OnEnter", function(self)
+        CO:ShowWeeklyQuestIndicatorTooltip(self)
+    end)
+    panel.weeklyQuestIndicator:SetScript("OnLeave", HideStyledTooltip)
+
+
+    body:SetHeight(-y + 36)
+
+    body = panel.classicPages.queue.body
+    y = -8
+    AddHeader(T("COA_CLASSIC_FILTERS", "Order filters"))
     -- Min profit
-    local mpHeader = panel:CreateFontString(nil, "OVERLAY")
+    local mpHeader = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(mpHeader, 11, "OUTLINE")
     mpHeader:SetPoint("TOPLEFT", PADX, y - 4)
     mpHeader:SetTextColor(1, 0.82, 0.35, 1)
     mpHeader:SetText(T("COA_QUEUE_MINPROFIT_HEADER", "Мин. профит"))
-    panel.minProfitInput = self:CreateValueInput(panel, 62, 20,
+    panel.minProfitInput = self:CreateValueInput(body, 62, 20,
         function() return CO:GetQueueMinProfitCopper() end,
         function(c) CO:SetQueueMinProfitCopper(c) end)
     panel.minProfitInput:SetPoint("TOPRIGHT", -PADX, y)
     y = y - 26
 
     -- Bag reward value
-    local bagHeader = panel:CreateFontString(nil, "OVERLAY")
+    local bagHeader = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(bagHeader, 11, "OUTLINE")
     bagHeader:SetPoint("TOPLEFT", PADX, y - 4)
     bagHeader:SetTextColor(1, 0.82, 0.35, 1)
     bagHeader:SetText(T("COA_QUEUE_BAGVALUE_HEADER", "Цена сумки"))
-    panel.bagValueInput = self:CreateValueInput(panel, 62, 20,
+    panel.bagValueInput = self:CreateValueInput(body, 62, 20,
         function() return CO:GetBagRewardValueCopper() end,
         function(c) CO:SetBagRewardValueCopper(c) end)
     panel.bagValueInput:SetPoint("TOPRIGHT", -PADX, y)
     y = y - 26
 
     -- Knowledge point value
-    local kpHeader = panel:CreateFontString(nil, "OVERLAY")
+    local kpHeader = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(kpHeader, 11, "OUTLINE")
     kpHeader:SetPoint("TOPLEFT", PADX, y - 4)
     kpHeader:SetTextColor(1, 0.82, 0.35, 1)
     kpHeader:SetText(T("COA_QUEUE_KPVALUE_HEADER", "Цена ОЗ"))
-    panel.kpValueInput = self:CreateValueInput(panel, 62, 20,
+    panel.kpValueInput = self:CreateValueInput(body, 62, 20,
         function() return CO:GetKnowledgePointValueCopper() end,
         function(c) CO:SetKnowledgePointValueCopper(c) end)
     panel.kpValueInput:SetPoint("TOPRIGHT", -PADX, y)
@@ -1459,7 +1395,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Auto on open (stacked)
     AddHeader(T("COA_QUEUE_AUTO_ON_OPEN_HEADER", "При открытии"))
-    panel.autoQueueCheck = self:CreateCheckToggle(panel, T("COA_AUTO_QUEUE_SHORT", "Очередь"),
+    panel.autoQueueCheck = self:CreateCheckToggle(body, T("COA_AUTO_QUEUE_SHORT", "Очередь"),
         function() return CO:IsAutoQueueOnOpen() end,
         function(v) CO:SetAutoQueueOnOpen(v) end, 74)
     panel.autoQueueCheck:SetPoint("TOPLEFT", PADX, y)
@@ -1471,14 +1407,14 @@ function CO:EnsureControlPanel(pageFrame)
         ShowStyledTooltip(self)
     end)
     panel.autoQueueCheck:HookScript("OnLeave", HideStyledTooltip)
-    panel.autoShopCheck = self:CreateCheckToggle(panel, T("COA_AUTO_SHOP_SHORT", "Закуп"),
+    panel.autoShopCheck = self:CreateCheckToggle(body, T("COA_AUTO_SHOP_SHORT", "Закуп"),
         function() return CO:IsAutoShoppingOnOpen() end,
         function(v) CO:SetAutoShoppingOnOpen(v) end, INNER - 74)
     panel.autoShopCheck:SetPoint("TOPLEFT", PADX + 74, y)
     y = y - 24
 
     -- Divider
-    local div1 = panel:CreateTexture(nil, "ARTWORK")
+    local div1 = body:CreateTexture(nil, "ARTWORK")
     div1:SetColorTexture(1, 1, 1, 0.10)
     div1:SetPoint("TOPLEFT", PADX, y)
     div1:SetPoint("TOPRIGHT", -PADX, y)
@@ -1486,7 +1422,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 10
 
     -- Queue action (full width)
-    panel.selectAllButton = self:CreateTextButton(panel, nil, INNER, 26, T("COA_QUEUE_BUTTON", "Queue"))
+    panel.selectAllButton = self:CreateTextButton(body, nil, INNER, 26, T("COA_QUEUE_BUTTON", "Queue"))
     if panel.selectAllButton.text then ApplyFont(panel.selectAllButton.text, 13, "") end
     panel.selectAllButton:SetPoint("TOPLEFT", PADX, y)
     panel.selectAllButton:SetScript("OnClick", function(self)
@@ -1505,7 +1441,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 32
 
     -- Knowledge-only queue (patron) / select-all-visible (other tabs)
-    panel.knowledgeButton = self:CreateTextButton(panel, nil, INNER, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
+    panel.knowledgeButton = self:CreateTextButton(body, nil, INNER, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
     if panel.knowledgeButton.text then ApplyFont(panel.knowledgeButton.text, 12, "") end
     panel.knowledgeButton:SetPoint("TOPLEFT", PADX, y)
     panel.knowledgeButton:SetBackdropBorderColor(0.30, 0.60, 1.00, 1)
@@ -1521,7 +1457,7 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.knowledgeButton:SetScript("OnLeave", HideStyledTooltip)
 
-    panel.selectAllOrdersButton = self:CreateTextButton(panel, nil, INNER, 22, T("COA_SELECT_ALL_TITLE", "Select all"))
+    panel.selectAllOrdersButton = self:CreateTextButton(body, nil, INNER, 22, T("COA_SELECT_ALL_TITLE", "Select all"))
     if panel.selectAllOrdersButton.text then ApplyFont(panel.selectAllOrdersButton.text, 12, "") end
     panel.selectAllOrdersButton:SetPoint("TOPLEFT", PADX, y)
     panel.selectAllOrdersButton:Hide()
@@ -1539,7 +1475,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 28
 
     -- Shopping + Clear (two columns)
-    panel.shopButton = self:CreateTextButton(panel, nil, COL_W, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
+    panel.shopButton = self:CreateTextButton(body, nil, COL_W, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
     if panel.shopButton.text then ApplyFont(panel.shopButton.text, 12, "") end
     panel.shopButton:SetPoint("TOPLEFT", PADX, y)
     panel.shopButton:SetScript("OnClick", function()
@@ -1567,7 +1503,7 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.shopButton:SetScript("OnLeave", HideStyledTooltip)
 
-    panel.clearSelectedButton = self:CreateTextButton(panel, nil, COL_W, 22, T("COA_CLEAR_SELECTED", "Clear"))
+    panel.clearSelectedButton = self:CreateTextButton(body, nil, COL_W, 22, T("COA_CLEAR_SELECTED", "Clear"))
     if panel.clearSelectedButton.text then ApplyFont(panel.clearSelectedButton.text, 12, "") end
     panel.clearSelectedButton:SetPoint("TOPLEFT", PADX + COL_W + COL_GAP, y)
     panel.clearSelectedButton:SetScript("OnClick", function()
@@ -1575,7 +1511,7 @@ function CO:EnsureControlPanel(pageFrame)
     end)
 
     -- Shopping cost centered under Shopping; selected count centered under Clear
-    panel.shopCostText = panel:CreateFontString(nil, "OVERLAY")
+    panel.shopCostText = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(panel.shopCostText, 12, "")
     panel.shopCostText:SetPoint("TOP", panel.shopButton, "BOTTOM", 0, -3)
     panel.shopCostText:SetWidth(COL_W)
@@ -1583,23 +1519,13 @@ function CO:EnsureControlPanel(pageFrame)
     panel.shopCostText:SetText("")
     panel.shopCostText:SetTextColor(0.95, 0.82, 0.42, 1)
 
-    panel.selectedText = panel:CreateFontString(nil, "OVERLAY")
-    ApplyFont(panel.selectedText, 12, "")
-    panel.selectedText:SetPoint("TOP", panel.clearSelectedButton, "BOTTOM", 0, -3)
-    panel.selectedText:SetWidth(COL_W)
-    panel.selectedText:SetJustifyH("CENTER")
-    y = y - 40
 
-    -- Divider
-    local div2 = panel:CreateTexture(nil, "ARTWORK")
-    div2:SetColorTexture(1, 1, 1, 0.10)
-    div2:SetPoint("TOPLEFT", PADX, y)
-    div2:SetPoint("TOPRIGHT", -PADX, y)
-    div2:SetHeight(1)
-    y = y - 10
+    body:SetHeight(-y + 52)
 
+    local footer = panel.footer
+    y = -64
     -- Action: click-equivalent of the hotkey (performs one order step per click)
-    panel.runActionButton = self:CreateTextButton(panel, nil, INNER, 24, T("COA_CL_RUN_NEXT", "Действие"))
+    panel.runActionButton = self:CreateTextButton(footer, nil, INNER, 24, T("COA_CL_RUN_NEXT", "Действие"))
     if panel.runActionButton.text then ApplyFont(panel.runActionButton.text, 13, "") end
     panel.runActionButton:SetPoint("TOPLEFT", PADX, y)
     panel.runActionButton:SetBackdropBorderColor(0.30, 0.75, 0.40, 1)
@@ -1617,7 +1543,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 32
 
     -- Hotkey: label on its own line, then Bind / clear
-    panel.keyText = panel:CreateFontString(nil, "OVERLAY")
+    panel.keyText = footer:CreateFontString(nil, "OVERLAY")
     ApplyFont(panel.keyText, 12, "")
     panel.keyText:SetPoint("TOPLEFT", PADX, y - 3)
     panel.keyText:SetWidth(INNER)
@@ -1626,7 +1552,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     local bindGroupW = 60 + 4 + 24
     local bindStartX = PADX + math.max(0, math.floor((INNER - bindGroupW) / 2))
-    panel.bindButton = self:CreateTextButton(panel, nil, 60, 22, T("COA_BIND_ASSIGN", "Bind"))
+    panel.bindButton = self:CreateTextButton(footer, nil, 60, 22, T("COA_BIND_ASSIGN", "Bind"))
     if panel.bindButton.text then ApplyFont(panel.bindButton.text, 12, "") end
     panel.bindButton:SetPoint("TOPLEFT", bindStartX, y)
     panel.bindButton:SetScript("OnClick", function()
@@ -1634,7 +1560,7 @@ function CO:EnsureControlPanel(pageFrame)
         CO.bindCapture:Show()
     end)
 
-    panel.clearButton = self:CreateTextButton(panel, nil, 24, 22, "×")
+    panel.clearButton = self:CreateTextButton(footer, nil, 24, 22, "×")
     panel.clearButton:SetPoint("LEFT", panel.bindButton, "RIGHT", 4, 0)
     panel.clearButton:SetScript("OnClick", function()
         CO:ClearBinding()
@@ -1643,42 +1569,40 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     y = y - 30
 
-    -- Tool icons row (centered): best quality, auto tool, profession tool slot
-    local toolsRowW = PROFESSION_TOOL_SLOT_SIZE * 3 + 8 * 2
-    local toolsStartX = PADX + math.max(0, math.floor((INNER - toolsRowW) / 2))
-    panel.bestQualityToggle = self:CreateBestQualityToggle(panel)
-    panel.bestQualityToggle:SetPoint("TOPLEFT", toolsStartX, y)
-    panel.autoToolToggle = self:CreateAutoToolToggle(panel)
-    panel.autoToolToggle:SetPoint("LEFT", panel.bestQualityToggle, "RIGHT", 8, 0)
-    panel.professionToolSlot = self:CreateProfessionToolSlot(panel)
-    panel.professionToolSlot:SetPoint("LEFT", panel.autoToolToggle, "RIGHT", 8, 0)
-    y = y - 44
 
-    -- Expansion + weekly quest (bottom of settings block)
-    panel.expansionButton = self:CreateTextButton(panel, nil, COL_W, 20, self:GetSelectedProfessionExpansionLabel())
-    if panel.expansionButton.text then ApplyFont(panel.expansionButton.text, 12, "") end
-    panel.expansionButton:SetPoint("TOPLEFT", PADX, y)
-    panel.expansionButton:SetScript("OnClick", function(self)
-        CO:OpenProfessionExpansionMenu(self)
-    end)
-    panel.expansionButton:SetScript("OnEnter", function(self)
-        if not Tooltip then return end
-        Tooltip:Clear()
-        Tooltip:AddLine(T("COA_EXPANSION_DROPDOWN_TITLE", "Profession expansion"), 13, 1, 0.82, 0.35)
-        Tooltip:AddLine(T("COA_EXPANSION_DROPDOWN_TOOLTIP", "Switches the actual profession expansion, like Blizzard's profession page dropdown."), 11, 0.85, 0.85, 0.85)
-        ShowStyledTooltip(self)
-    end)
-    panel.expansionButton:SetScript("OnLeave", HideStyledTooltip)
+    panel.runActionButton:ClearAllPoints()
+    panel.runActionButton:SetPoint("TOPLEFT", footer, "TOPLEFT", 10, -64)
+    panel.runActionButton:SetSize(VPANEL_W - 30, 28)
+    panel.runActionButton.text:SetWidth(VPANEL_W - 40)
+    panel.keyText:ClearAllPoints()
+    panel.keyText:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", 10, 13)
+    panel.keyText:SetWidth(100)
+    panel.keyText:SetJustifyH("LEFT")
+    panel.bindButton:ClearAllPoints()
+    panel.bindButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -36, 8)
+    panel.bindButton:SetWidth(68)
+    panel.clearButton:ClearAllPoints()
+    panel.clearButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -8, 8)
 
-    panel.weeklyQuestIndicator = self:CreateTextButton(panel, nil, COL_W, 20, "")
-    if panel.weeklyQuestIndicator.text then ApplyFont(panel.weeklyQuestIndicator.text, 12, "") end
-    panel.weeklyQuestIndicator:SetPoint("TOPLEFT", PADX + COL_W + COL_GAP, y)
-    panel.weeklyQuestIndicator:SetScript("OnClick", nil)
-    panel.weeklyQuestIndicator:SetScript("OnEnter", function(self)
-        CO:ShowWeeklyQuestIndicatorTooltip(self)
+    panel.selectedText = footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    panel.selectedText:SetPoint("TOPLEFT", 10, -8)
+    panel.selectedText:SetWidth(VPANEL_W - 30)
+    panel.selectedText:SetJustifyH("LEFT")
+    panel.statusText = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    panel.statusText:SetPoint("TOPLEFT", 10, -26)
+    panel.statusText:SetSize(VPANEL_W - 30, 32)
+    panel.statusText:SetJustifyH("LEFT")
+    panel.statusText:SetJustifyV("TOP")
+    panel.statusText:SetMaxLines(2)
+    local statusTip = CreateFrame("Frame", nil, footer)
+    statusTip:SetAllPoints(panel.statusText)
+    statusTip:EnableMouse(true)
+    statusTip:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine(CO.lastStatus or T("COA_CLASSIC_READY", "Select orders and press Action."), 1, 1, 1, true)
+        GameTooltip:Show()
     end)
-    panel.weeklyQuestIndicator:SetScript("OnLeave", HideStyledTooltip)
-
+    statusTip:SetScript("OnLeave", function() GameTooltip:Hide() end)
     -- Action-debug toggle: tiny square flush in the bottom-right corner
     panel.debugToggle = CreateFrame("Button", nil, panel)
     panel.debugToggle:SetSize(10, 10)
@@ -1701,17 +1625,12 @@ function CO:EnsureControlPanel(pageFrame)
     panel.debugDummy:SetAtlas("SquareMask")
     panel.debugDummy:SetVertexColor(0, 0, 0, 0.85)
 
-    local variant = DesignVariant()
-    panel.reagentSeg.ahuiStyleVariant = variant
-    panel.concSeg.ahuiStyleVariant = variant
-    panel.autoQueueCheck.ahuiStyleVariant = variant
-    panel.autoShopCheck.ahuiStyleVariant = variant
     self:UpdateSegmentedControl(panel.reagentSeg)
     self:UpdateSegmentedControl(panel.concSeg)
     self:UpdateCheckToggle(panel.autoQueueCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
     for _, w in ipairs({ panel.minProfitInput, panel.bagValueInput, panel.kpValueInput }) do
-        if w then self:StyleWidget(w, variant, false, INPUT_ATLAS) end
+        if w then self:StyleWidget(w) end
     end
 
     for _, w in ipairs({
@@ -1720,16 +1639,11 @@ function CO:EnsureControlPanel(pageFrame)
         panel.bindButton, panel.clearButton, panel.expansionButton, panel.weeklyQuestIndicator,
         panel.finisherButton,
     }) do
-        if w then self:StyleWidget(w, variant, false, BTN_ATLAS) end
+        if w then self:StyleWidget(w) end
     end
     for _, w in ipairs({ panel.bestQualityToggle, panel.autoToolToggle, panel.professionToolSlot }) do
-        if w then self:StyleWidget(w, variant) end
+        if w then self:StyleWidget(w) end
     end
-    if not IsFantasyDesign() then
-        if panel.runActionButton then panel.runActionButton:SetBackdropBorderColor(0.30, 0.75, 0.40, 1) end
-        if panel.knowledgeButton then panel.knowledgeButton:SetBackdropBorderColor(0.30, 0.60, 1.00, 1) end
-    end
-
     pageFrame.ahuiCraftingOrdersPanel = panel
     self.controlPanel = panel
     self:EnsureConflictBar(pageFrame)

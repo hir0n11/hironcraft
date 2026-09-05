@@ -883,19 +883,21 @@ function CO:UpdateOrderColumnFrames(row, order)
 end
 
 function CO:CreateTextButton(parent, name, width, height, text)
-    local b = CreateFrame("Button", name, parent, "BackdropTemplate")
+    local b = CreateFrame("Button", name, parent, "UIPanelButtonTemplate,BackdropTemplate")
     b:SetSize(width, height)
     CreateBackdrop(b, 0.94)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
-    b.text = b:CreateFontString(nil, "OVERLAY")
+    b.text = b:GetFontString()
     ApplyFont(b.text, 11, "")
+    b.text:ClearAllPoints()
     b.text:SetPoint("CENTER", 0, 0)
     b.text:SetWidth(math.max(1, (width or 40) - 6))
     b.text:SetJustifyH("CENTER")
     b.text:SetWordWrap(false)
     if b.text.SetMaxLines then b.text:SetMaxLines(1) end
     b.text:SetText(text or "")
+    if self.StyleClassicButton then self:StyleClassicButton(b) end
 
     b:SetScript("OnMouseDown", function(self)
         if self:IsEnabled() then self.text:SetPoint("CENTER", 1, -1) end

@@ -874,6 +874,7 @@ function CO:SetStatus(text)
     end
 
     self.lastStatus = text
+    if self.UpdateClassicPanelStatus then self:UpdateClassicPanelStatus() end
     if text and text ~= "" then
         print("|cffb19cd9HironCraft:|r " .. text)
     end
@@ -1585,8 +1586,11 @@ function CO:UpdateRowButton(btn)
             btn:SetBackdropBorderColor(1, 1, 1, 0.08)
         end
     end
-    if fantasy and HironCraftProfit.SetPanelButtonForced then
+    if not btn.hironClassic and fantasy and HironCraftProfit.SetPanelButtonForced then
         HironCraftProfit:SetPanelButtonForced(btn, forced)
+    end
+    if btn.hironClassic then
+        self:StyleClassicButton(btn, isQueueOrder or isProgressOrder, not enabled and not isProgressOrder)
     end
 
     if btn.check then
@@ -1832,6 +1836,7 @@ end
 function CO:UpdateControlPanel()
     local panel = self.controlPanel
     if not panel then return end
+    if self.UpdateClassicPanelStatus then self:UpdateClassicPanelStatus(panel) end
 
     self:UpdateControlPanelVisibility(panel.pageFrame or self.activePageFrame)
 

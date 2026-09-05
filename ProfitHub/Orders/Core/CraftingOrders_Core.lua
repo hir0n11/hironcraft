@@ -16,7 +16,7 @@ PT.CraftingOrders = PT.CraftingOrders or {}
 CO = PT.CraftingOrders
 _G.HironCraftProfitCraftingOrders = CO
 
-FONT = PT.FONT or STANDARD_TEXT_FONT
+FONT = STANDARD_TEXT_FONT
 ROW_BUTTON_W = 74
 ROW_BUTTON_H = 28
 ROW_CHECKBOX_SIZE = 22

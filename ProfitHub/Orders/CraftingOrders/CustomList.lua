@@ -6,21 +6,21 @@ local CO = PT.CraftingOrders
 local CL = {}
 CO.CustomList = CL
 
-local FONT = PT.FONT or STANDARD_TEXT_FONT
-local BORDER = { 0.694, 0.612, 0.851 }
+local FONT = STANDARD_TEXT_FONT
+local BORDER = { 0.65, 0.57, 0.43 }
 
 local function IsFantasy()
     return PT.IsFantasyDesign and PT:IsFantasyDesign()
 end
 
 
-CL.ROW_H = 56
-CL.ICON_SIZE = 48
-CL.SMALL_ICON = 22
+CL.ROW_H = 72
+CL.ICON_SIZE = 40
+CL.SMALL_ICON = 20
 CL.GAP = 6
 
-CL.ROW_H_COMPACT = 30
-CL.ICON_COMPACT = 24
+CL.ROW_H_COMPACT = 36
+CL.ICON_COMPACT = 26
 
 local QueueRefresh
 
@@ -217,7 +217,24 @@ local COLS_COMPACT = {
 }
 
 function CL:ActiveCols()
-    return self:IsCompact() and COLS_COMPACT or COLS
+    return self._layoutCols or (self:IsCompact() and COLS_COMPACT or COLS)
+end
+
+function CL:ResizeList(container)
+    local width = container.scroll:GetWidth()
+    if not width or width <= 0 then return end
+    local compact = self:IsCompact()
+    if container._layoutWidth == width and container._layoutCompact == compact then return end
+    container._layoutWidth, container._layoutCompact = width, compact
+    container.content:SetWidth(width)
+    self._layoutCols = CO:GetClassicOrderColumns(width, compact)
+    for key, col in pairs(self._layoutCols) do
+        local source = (compact and COLS_COMPACT or COLS)[key]
+        col.label = source and source.label or key
+        col.sort = source and source.sort or key
+    end
+    self:RebuildHeader(container.header)
+    for _, row in ipairs(container.rows or {}) do self:ApplyRowLayout(row) end
 end
 
 local function MakeBackdrop(frame)
@@ -244,22 +261,14 @@ function CL:CreateHeader(parent)
     local h = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     h:SetPoint("TOPLEFT", 0, 0)
     h:SetPoint("TOPRIGHT", 0, 0)
-    h:SetHeight(26)
+    h:SetHeight(30)
     h:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = 1,
     })
-    if IsFantasy() then
-        h:SetBackdropColor(0, 0, 0, 0)
-        h.bgAtlas = h:CreateTexture(nil, "BACKGROUND")
-        h.bgAtlas:SetAtlas("Professions-Specializations-Background-Footer", false)
-        h.bgAtlas:SetAllPoints()
-        h:SetBackdropBorderColor(0, 0, 0, 1)
-    else
-        h:SetBackdropColor(0.08, 0.08, 0.10, 0.95)
-        h:SetBackdropBorderColor(BORDER[1], BORDER[2], BORDER[3], 0.6)
-    end
+    h:SetBackdropColor(0.19, 0.15, 0.10, 0.95)
+    h:SetBackdropBorderColor(BORDER[1], BORDER[2], BORDER[3], 0.7)
 
     local toggle = CreateFrame("Button", nil, h)
     toggle:SetSize(20, 20)
@@ -269,14 +278,14 @@ function CL:CreateHeader(parent)
 
     toggle.caption = MakeText(toggle, 10, "LEFT")
     toggle.caption:SetPoint("LEFT", toggle, "RIGHT", 3, 0)
-    toggle.caption:SetText(L("COA_CL_VIEW_CAPTION", "view"))
-    toggle.caption:SetTextColor(0.70, 0.65, 0.85)
+    toggle.caption:SetText("+ / −")
+    toggle.caption:SetTextColor(1, 0.82, 0.2)
 
     local function RefreshToggleIcon()
         if CL:IsCompact() then
-            toggle.tex:SetAtlas("azsharawards-state2-zone4")
+            toggle.tex:SetTexture("Interface\\Buttons\\UI-PlusButton-UP")
         else
-            toggle.tex:SetAtlas("azsharawards-state2-zone4-cap")
+            toggle.tex:SetTexture("Interface\\Buttons\\UI-MinusButton-UP")
         end
     end
     RefreshToggleIcon()
@@ -294,7 +303,7 @@ function CL:CreateHeader(parent)
     toggle:SetScript("OnClick", function()
         CL:SetCompact(not CL:IsCompact())
         RefreshToggleIcon()
-        CL:RebuildHeader(h)
+        CL:ResizeList(parent)
         if QueueRefresh then QueueRefresh() end
     end)
     h.toggle = toggle
@@ -326,14 +335,14 @@ function CL:RebuildHeader(h)
         btn:SetSize(col.w, 24)
         btn._label:SetWidth(col.w)
         btn._label:SetText(col.label)
-        btn._label:SetTextColor(0.78, 0.72, 0.95)
+        btn._label:SetTextColor(1, 0.82, 0.2)
         btn._arrow:Hide()
 
         local sortKey = col.sort or key
         local sortable = (sortKey == "name" or sortKey == "cost" or sortKey == "reward" or sortKey == "profit")
 
         btn:SetScript("OnEnter", function() btn._label:SetTextColor(1, 0.95, 0.55) end)
-        btn:SetScript("OnLeave", function() btn._label:SetTextColor(0.78, 0.72, 0.95) end)
+        btn:SetScript("OnLeave", function() btn._label:SetTextColor(1, 0.82, 0.2) end)
         if sortable then
             btn:SetScript("OnClick", function()
                 if CL._sortColumn == sortKey then
@@ -371,6 +380,7 @@ end
 
 function CL:CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent)
+    row._index = index
     row:SetSize(800, self.ROW_H)
 
     row.bg = row:CreateTexture(nil, "BACKGROUND")
@@ -385,7 +395,7 @@ function CL:CreateRow(parent, index)
     row.separator:SetPoint("BOTTOMLEFT", 4, 0)
     row.separator:SetPoint("BOTTOMRIGHT", -4, 0)
     row.separator:SetHeight(1)
-    row.separator:SetColorTexture(0.30, 0.27, 0.40, 0.40)
+    row.separator:SetColorTexture(0.55, 0.45, 0.28, 0.24)
 
     row.checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
     row.checkbox:SetSize(24, 24)
@@ -421,6 +431,10 @@ function CL:CreateRow(parent, index)
     row.name:SetPoint("TOPLEFT", row, "TOPLEFT", NAME_X, -8)
     row.name:SetPoint("RIGHT", row, "LEFT", NAME_X + COLS.name.w, 0)
     row.name:SetWordWrap(false)
+    row.customer = MakeText(row, 11, "LEFT")
+    row.customer:SetHeight(14)
+    row.customer:SetWordWrap(false)
+    row.customer:SetTextColor(0.76, 0.70, 0.59)
 
     row.firstCraftIcon = row:CreateTexture(nil, "OVERLAY")
     row.firstCraftIcon:SetSize(18, 18)
@@ -474,7 +488,7 @@ function CL:CreateRow(parent, index)
     row.profit:SetPoint("LEFT")
     row.profit:SetWidth(COLS.profit.w)
 
-    row.action = CreateFrame("Button", nil, row, "BackdropTemplate")
+    row.action = CreateFrame("Button", nil, row, "UIPanelButtonTemplate,BackdropTemplate")
     row.action:SetSize(74, 28)
     row.action:SetPoint("LEFT", row, "LEFT", COLS.action.x, 0)
     row.action:SetBackdrop({
@@ -484,21 +498,18 @@ function CL:CreateRow(parent, index)
     })
     row.action:SetBackdropColor(0.07, 0.09, 0.11, 0.94)
     row.action:SetBackdropBorderColor(0.95, 0.78, 0.35, 0.80)
-    if IsFantasy() and PT.ApplyPanelButtonSkin then
-        PT:ApplyPanelButtonSkin(row.action)
-        row.action:SetBackdropColor(0, 0, 0, 0)
-        row.action:SetBackdropBorderColor(0, 0, 0, 0)
-    end
-    row.action.text = MakeText(row.action, 12, "CENTER")
+    row.action.text = row.action:GetFontString()
+    row.action.text:ClearAllPoints()
     row.action.text:SetPoint("CENTER")
     row.action.text:SetText("—")
     row.action.label = row.action.text
+    CO:StyleClassicButton(row.action)
 
     row.action.bar = CreateFrame("StatusBar", nil, row.action)
     row.action.bar:SetPoint("BOTTOMLEFT", 1, 1)
     row.action.bar:SetPoint("BOTTOMRIGHT", -1, 1)
     row.action.bar:SetHeight(3)
-    row.action.bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    row.action.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     row.action.bar:SetStatusBarColor(0.95, 0.78, 0.35, 0.95)
     row.action.bar:SetMinMaxValues(0, 1)
     row.action.bar:SetValue(0)
@@ -512,7 +523,8 @@ function CL:CreateRow(parent, index)
     end)
 
     row:SetScript("OnEnter", function(self)
-        self.hover:SetColorTexture(1, 1, 1, 0.06)
+        self.hover:SetColorTexture(1, 0.82, 0.2, 0.10)
+        if self.action and CO.SetActiveRowButton then CO:SetActiveRowButton(self.action) end
     end)
     row:SetScript("OnLeave", function(self)
         self.hover:SetColorTexture(1, 1, 1, 0)
@@ -530,7 +542,8 @@ function CL:EnsureScrollFrame(pageFrame)
     if not listAnchor then return nil end
 
     local container = CreateFrame("Frame", nil, listAnchor, "BackdropTemplate")
-    container:SetAllPoints(listAnchor)
+    container:SetPoint("TOPLEFT", listAnchor, "TOPLEFT", 0, 0)
+    container:SetPoint("BOTTOMRIGHT", listAnchor, "BOTTOMRIGHT", -(CO.CLASSIC_PANEL_WIDTH + CO.CLASSIC_PANEL_GAP), 0)
     container:SetFrameLevel((listAnchor:GetFrameLevel() or 0) + 10)
     container:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
@@ -561,8 +574,8 @@ function CL:EnsureScrollFrame(pageFrame)
     container.header = CL:CreateHeader(container)
 
     container.scroll = CreateFrame("ScrollFrame", nil, container, "UIPanelScrollFrameTemplate")
-    container.scroll:SetPoint("TOPLEFT", container.header, "BOTTOMLEFT", 0, -2)
-    container.scroll:SetPoint("BOTTOMRIGHT", -30, 4)
+    container.scroll:SetPoint("TOPLEFT", container.header, "BOTTOMLEFT", 4, -2)
+    container.scroll:SetPoint("BOTTOMRIGHT", -28, 28)
     container.scroll:EnableMouseWheel(true)
 
     container.content = CreateFrame("Frame", nil, container.scroll)
@@ -570,6 +583,27 @@ function CL:EnsureScrollFrame(pageFrame)
     container.scroll:SetScrollChild(container.content)
 
     container.rows = {}
+    container.countText = MakeText(container, 11, "LEFT")
+    container.countText:SetPoint("BOTTOMLEFT", 10, 9)
+    container.countText:SetTextColor(0.8, 0.74, 0.60)
+    container.emptyText = MakeText(container, 13, "CENTER")
+    container.emptyText:SetPoint("CENTER", container.scroll, "CENTER", 0, 0)
+    container.emptyText:SetPoint("LEFT", container.scroll, "LEFT", 12, 0)
+    container.emptyText:SetPoint("RIGHT", container.scroll, "RIGHT", -12, 0)
+    container.emptyText:SetText(L("COA_CLASSIC_EMPTY", "No orders. Refresh the list or choose another tab."))
+    container.emptyText:SetTextColor(0.85, 0.78, 0.63)
+    container.emptyText:Hide()
+    container.refreshButton = CO:CreateTextButton(container, nil, 88, 20, L("COA_CLASSIC_REFRESH", "Refresh"))
+    container.refreshButton:SetPoint("BOTTOMRIGHT", -6, 4)
+    container.refreshButton:SetScript("OnClick", function()
+        if CO.IsOrderActionInProgress and CO:IsOrderActionInProgress() then return end
+        if pageFrame.StartDefaultSearch then pageFrame:StartDefaultSearch() end
+    end)
+    container.scroll:HookScript("OnSizeChanged", function()
+        CL:ResizeList(container)
+        if QueueRefresh then QueueRefresh() end
+    end)
+    self:ResizeList(container)
 
     local scrollBox = listAnchor.ScrollBox
     if scrollBox and scrollBox.RegisterCallback and ScrollBoxConstants then
@@ -802,79 +836,90 @@ end
 
 function CL:ApplyRowLayout(row)
     local compact = self:IsCompact()
-    local h = self:RowHeight()
-    row:SetHeight(h)
+    local columns = self:ActiveCols()
+    row:SetHeight(self:RowHeight())
+    row.iconBtn:SetSize(compact and self.ICON_COMPACT or self.ICON_SIZE, compact and self.ICON_COMPACT or self.ICON_SIZE)
+    row.iconBtn:ClearAllPoints()
+    row.iconBtn:SetPoint("LEFT", row.checkbox, "RIGHT", 4, 0)
+    row.qualityBadge:SetSize(compact and 14 or 18, compact and 14 or 18)
+    row.name:ClearAllPoints()
+    row.name:SetPoint("LEFT", row, "LEFT", columns.name.x, compact and 0 or 16)
+    row.name:SetWidth(columns.name.w)
 
+    row.customer:SetShown(not compact)
+    row.customer:ClearAllPoints()
+    row.customer:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
+    row.customer:SetWidth(columns.name.w)
+
+    local function place(frame, key, height)
+        local col = columns[key]
+        frame:SetShown(col ~= nil)
+        if not col then return end
+        frame:ClearAllPoints()
+        frame:SetPoint("LEFT", row, "LEFT", col.x, 0)
+        frame:SetSize(col.w, height)
+    end
+    place(row.cost, "cost", 18)
+    place(row.profitBtn, "profit", 18)
+    row.profit:SetWidth(columns.profit and columns.profit.w or 1)
+    place(row.concBtn, "conc", 24)
+    place(row.rewardBar, "reward", compact and self.SMALL_ICON or self.SMALL_ICON * 2 + 2)
+    place(row.action, "action", compact and 26 or 28)
+    row.action.text:SetWidth(columns.action.w - 8)
+    row.reward:Hide()
     if compact then
-        local C = COLS_COMPACT
-        row.iconBtn:SetSize(self.ICON_COMPACT, self.ICON_COMPACT)
-        row.iconBtn:ClearAllPoints()
-        row.iconBtn:SetPoint("LEFT", row.checkbox, "RIGHT", 2, 0)
-
-        row.qualityBadge:SetSize(14, 14)
-
-        row.name:ClearAllPoints()
-        row.name:SetPoint("LEFT", row, "LEFT", C.name.x, 0)
-        row.name:SetWidth(C.name.w)
-
-        row.cost:Hide()
-        row.reward:Hide()
-
-        row.profit:Show()
-        row.profitBtn:ClearAllPoints()
-        row.profitBtn:SetPoint("LEFT", row, "LEFT", C.profit.x, 0)
-        row.profitBtn:SetSize(C.profit.w, 18)
-        row.profit:SetWidth(C.profit.w)
-
-        row.concBtn:ClearAllPoints()
-        row.concBtn:SetPoint("LEFT", row, "LEFT", C.conc.x, 0)
-        row.concBtn:SetSize(48, 22)
-
-        row.rewardBar:Show()
-        row.rewardBar:ClearAllPoints()
-        row.rewardBar:SetPoint("LEFT", row, "LEFT", C.reward.x, 0)
-
-        row.reagentsBar:ClearAllPoints()
-        row.reagentsBar:SetPoint("LEFT", row, "LEFT", C.reagents.x, 0)
-
-        row.action:ClearAllPoints()
-        row.action:SetPoint("LEFT", row, "LEFT", C.action.x, 0)
-        row.action:SetSize(74, 24)
+        place(row.reagentsBar, "reagents", self.SMALL_ICON)
     else
-        row.iconBtn:SetSize(self.ICON_SIZE, self.ICON_SIZE)
-        row.iconBtn:ClearAllPoints()
-        row.iconBtn:SetPoint("LEFT", row.checkbox, "RIGHT", 4, 0)
-
-        row.qualityBadge:SetSize(20, 20)
-
-        row.name:ClearAllPoints()
-        row.name:SetPoint("TOPLEFT", row, "TOPLEFT", NAME_X, -8)
-        row.name:SetPoint("RIGHT", row, "LEFT", NAME_X + COLS.name.w, 0)
-
-        row.cost:Show()
-        row.profit:Show()
-        row.reward:Hide()
-        row.rewardBar:Show()
-
-        row.cost:ClearAllPoints()
-        row.cost:SetPoint("TOPLEFT", row, "TOPLEFT", COLS.cost.x, -10)
-
-        row.concBtn:ClearAllPoints()
-        row.concBtn:SetPoint("TOPLEFT", row, "TOPLEFT", COLS.conc.x, -8)
-        row.concBtn:SetSize(54, 24)
-
-        row.rewardBar:ClearAllPoints()
-        row.rewardBar:SetPoint("TOPLEFT", row, "TOPLEFT", COLS.reward.x, -8)
-
+        row.reagentsBar:Show()
         row.reagentsBar:ClearAllPoints()
-        row.reagentsBar:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -6)
+        row.reagentsBar:SetPoint("TOPLEFT", row.customer, "BOTTOMLEFT", 0, -4)
+        row.reagentsBar:SetSize(columns.name.w, self.SMALL_ICON)
+    end
+end
 
-        row.profitBtn:ClearAllPoints()
-        row.profitBtn:SetPoint("TOPLEFT", row, "TOPLEFT", COLS.profit.x, -10)
-
-        row.action:ClearAllPoints()
-        row.action:SetPoint("LEFT", row, "LEFT", COLS.action.x, 0)
-        row.action:SetSize(74, 28)
+-- Bound icon rows to their column. All hidden rewards/materials remain
+-- available from a single overflow tooltip instead of covering Action.
+function CL:FitIconBar(bar, icons, maxRows, title)
+    local shown = {}
+    for _, icon in ipairs(icons) do
+        if icon:IsShown() then shown[#shown + 1] = icon end
+    end
+    local step = self.SMALL_ICON + 2
+    local columns = math.max(1, math.floor((bar:GetWidth() + 2) / step))
+    local capacity = columns * maxRows
+    local overflow = #shown > capacity
+    local visible = overflow and math.max(0, capacity - 1) or capacity
+    if not bar.more then
+        bar.more = CO:CreateTextButton(bar, nil, self.SMALL_ICON, self.SMALL_ICON, "")
+        bar.more:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(bar.moreTitle or "", 1, 0.82, 0.2)
+            for _, icon in ipairs(bar.allIcons or {}) do
+                local id = icon._itemID
+                local name = icon._itemLink or (id and C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id))
+                if name then GameTooltip:AddLine(name, 1, 1, 1, true) end
+            end
+            GameTooltip:Show()
+        end)
+        bar.more:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    bar.allIcons, bar.moreTitle = shown, title
+    for index, icon in ipairs(shown) do
+        icon:SetShown(index <= visible)
+        if index <= visible then
+            icon:ClearAllPoints()
+            icon:SetPoint("TOPLEFT", bar, "TOPLEFT", ((index - 1) % columns) * step, -math.floor((index - 1) / columns) * step)
+            if icon.gold then
+                icon.gold:SetWidth(math.max(1, bar:GetWidth() - self.SMALL_ICON - 4))
+                icon.gold:SetWordWrap(false)
+            end
+        end
+    end
+    bar.more:SetShown(overflow)
+    if overflow then
+        bar.more:ClearAllPoints()
+        bar.more:SetPoint("TOPLEFT", bar, "TOPLEFT", (visible % columns) * step, -math.floor(visible / columns) * step)
+        bar.more.text:SetText("+" .. (#shown - visible))
     end
 end
 
@@ -887,6 +932,7 @@ function CL:PopulateRow(row, order)
     local icon = recipeInfo and recipeInfo.icon or (spellID and GetSpellTexture and GetSpellTexture(spellID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
     row.icon:SetTexture(icon)
     row.name:SetText((recipeInfo and recipeInfo.name) or ("Recipe " .. tostring(spellID)))
+    row.customer:SetText(order.customerName or order.npcCustomerName or "")
 
     row.iconBtn._spellID = spellID
     row.iconBtn._itemID = order.itemID
@@ -1066,6 +1112,9 @@ function CL:PopulateRow(row, order)
             b:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine(FormatCopper(tip), 1, 0.82, 0.20)
+                if row._profit then
+                    GameTooltip:AddLine(string.format(L("COA_CLASSIC_NET", "Profit: %s"), FormatCopper(row._profit)), 1, 1, 1)
+                end
                 GameTooltip:Show()
             end)
             b:SetScript("OnLeave", HideTooltip)
@@ -1098,6 +1147,11 @@ function CL:PopulateRow(row, order)
     end
 
     local profit = (profitInfo and tonumber(profitInfo.profit)) or (tip - cost)
+    row._profit = profit
+    if not self:IsCompact() and not self:ActiveCols().profit then
+        local customer = order.customerName or order.npcCustomerName or ""
+        row.customer:SetText(customer .. (customer ~= "" and " · " or "") .. FormatCopper(profit))
+    end
     row.profit:SetText(FormatCopper(profit))
     if profit > 0 then
         row.profit:SetTextColor(0.50, 1.00, 0.50)
@@ -1132,7 +1186,11 @@ function CL:PopulateRow(row, order)
     end)
     row.profitBtn:SetScript("OnLeave", HideTooltip)
 
-    local action, _, _, enabled = CO.GetRowAction and CO:GetRowAction(order.orderID, order)
+    local action, enabled
+    if CO.GetRowAction then
+        local result, _, _, canRun = CO:GetRowAction(order.orderID, order)
+        action, enabled = result, canRun
+    end
     local actionLabel = "—"
     if action == "reject" then actionLabel = L("COA_ACTION_REJECT", "Decline")
     elseif action == "rejecting" then actionLabel = "..."
@@ -1257,7 +1315,11 @@ function CL:PopulateRow(row, order)
     else
         nr, ng, nb = 0.95, 0.95, 0.95
     end
-    row.bg:SetColorTexture(0, 0, 0, 0)
+    if CO.IsOrderSelected and CO:IsOrderSelected(order.orderID) then
+        row.bg:SetColorTexture(0.80, 0.58, 0.18, 0.12)
+    else
+        row.bg:SetColorTexture(1, 0.90, 0.70, (row._index or 0) % 2 == 0 and 0.035 or 0)
+    end
     row.name:SetTextColor(nr, ng, nb)
 
     row.checkbox:SetChecked(CO.IsOrderSelected and CO:IsOrderSelected(order.orderID) or false)
@@ -1305,9 +1367,9 @@ function CL:PopulateRow(row, order)
             pf:ViewOrder(order)
         end
     end)
-    row:HookScript("OnEnter", function()
-        if CO.SetActiveRowButton then CO:SetActiveRowButton(row.action) end
-    end)
+    if not self:ActiveCols().conc then row.concBtn:Hide() end
+    self:FitIconBar(row.reagentsBar, row.reagentIcons, 1, L("COA_HDR_REAGENTS", "Reagents"))
+    self:FitIconBar(row.rewardBar, row.rewardIcons, self:IsCompact() and 1 or 2, L("COA_HDR_REWARD", "Reward"))
 end
 
 function CL:Refresh(pageFrame)
@@ -1333,6 +1395,7 @@ function CL:Refresh(pageFrame)
 
     local container = self:EnsureScrollFrame(pageFrame)
     if not container then return end
+    self:ResizeList(container)
 
     self:HideBlizzardList(pageFrame)
 
@@ -1410,6 +1473,8 @@ function CL:Refresh(pageFrame)
     end
     container._allowEmptyOnce = false
     container._lastOrderCount = #orders
+    container.countText:SetText(string.format(L("COA_CLASSIC_ORDER_COUNT", "Orders: %d"), #orders))
+    container.emptyText:SetShown(#orders == 0)
 
     local sortCol = CL._sortColumn
     local sortAsc = (CL._sortDir == "asc")
@@ -1492,13 +1557,15 @@ function CL:Refresh(pageFrame)
         end
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", container.content, "TOPLEFT", 0, -y)
-        row:SetPoint("RIGHT", container.content, "RIGHT", 0, 0)
+        row:SetPoint("TOPRIGHT", container.content, "TOPRIGHT", 0, -y)
         row:Show()
         self:PopulateRow(row, order)
         y = y + self:RowHeight()
     end
 
+    local oldScroll = container.scroll:GetVerticalScroll()
     container.content:SetHeight(math.max(1, y))
+    container.scroll:SetVerticalScroll(math.max(0, math.min(oldScroll, y - container.scroll:GetHeight())))
     container:Show()
 end
 

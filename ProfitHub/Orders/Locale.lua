@@ -4,6 +4,27 @@ if not PT then return end
 PT.L_enUS = PT.L_enUS or {}
 PT.L_ruRU = PT.L_ruRU or {}
 
+PT.L_enUS["COA_CLASSIC_CRAFT_TAB"] = "Crafting"
+PT.L_ruRU["COA_CLASSIC_CRAFT_TAB"] = "Изготовление"
+PT.L_enUS["COA_CLASSIC_QUEUE_TAB"] = "Queue"
+PT.L_ruRU["COA_CLASSIC_QUEUE_TAB"] = "Очередь"
+PT.L_enUS["COA_CLASSIC_TOOLS"] = "Profession equipment"
+PT.L_ruRU["COA_CLASSIC_TOOLS"] = "Снаряжение профессии"
+PT.L_enUS["COA_CLASSIC_FILTERS"] = "Order filters"
+PT.L_ruRU["COA_CLASSIC_FILTERS"] = "Отбор заказов"
+PT.L_enUS["COA_CLASSIC_READY"] = "Select orders and press Action."
+PT.L_ruRU["COA_CLASSIC_READY"] = "Отметьте заказы и нажмите «Действие»."
+PT.L_enUS["COA_CLASSIC_EMPTY"] = "No orders. Refresh the list or choose another tab."
+PT.L_ruRU["COA_CLASSIC_EMPTY"] = "Заказов нет. Обновите список или выберите другую вкладку."
+PT.L_enUS["COA_CLASSIC_REFRESH"] = "Refresh"
+PT.L_ruRU["COA_CLASSIC_REFRESH"] = "Обновить"
+PT.L_enUS["COA_CLASSIC_ORDER_COUNT"] = "Orders: %d"
+PT.L_ruRU["COA_CLASSIC_ORDER_COUNT"] = "Заказов: %d"
+PT.L_enUS["COA_CLASSIC_MORE"] = "More: %d"
+PT.L_ruRU["COA_CLASSIC_MORE"] = "Ещё: %d"
+PT.L_enUS["COA_CLASSIC_NET"] = "Profit: %s"
+PT.L_ruRU["COA_CLASSIC_NET"] = "Прибыль: %s"
+
 PT.L_enUS["Settings_CraftingOrders"] = "Crafting Orders"
 PT.L_enUS["Settings_CraftingOrders_Tooltip"] = "Enables the HironCraft enhanced crafting orders list: queue, quality, reagents, concentration and shopping. When enabled, HironCraft reapplies its row layer over the crafting orders page."
 PT.L_enUS["COA_BIND_CAPTURE"] = "Press a keyboard key or side mouse button (Button4/Button5).\nEsc or left/right click — cancel."
