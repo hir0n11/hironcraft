@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.8)
+## Crafting orders interface (0.3.9)
 
 The order list uses the full width of Blizzard's profession window, with the
 control panel attached outside its right edge. Native buttons, framed panels
@@ -67,6 +67,8 @@ four-sided outline remains visible even at small UI scales.
   compact k/m notation when necessary. Hover for the detailed amount.
 - Personal orders omit the redundant **Reward** column and use its space for
   the item name. Public, Guild and Patron orders keep Reward visible.
+- Checking or unchecking an order no longer changes its sort position. Equal
+  rows retain the order supplied by Blizzard across selection refreshes.
 
 The reported finisher craft-start issue is not considered resolved by these
 interface changes.

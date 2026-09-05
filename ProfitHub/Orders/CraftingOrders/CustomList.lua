@@ -1553,6 +1553,8 @@ function CL:Refresh(pageFrame)
     end
 
     local isNpcTab = Enum and Enum.CraftingOrderType and currentType == Enum.CraftingOrderType.Npc
+    local originalPosition = {}
+    for index, order in ipairs(orders) do originalPosition[order] = index end
 
     table.sort(orders, function(a, b)
         local aDone = isDoneOrder(a) and 1 or 0
@@ -1562,10 +1564,6 @@ function CL:Refresh(pageFrame)
         local pa = isActiveCraft(a) and 1 or 0
         local pb = isActiveCraft(b) and 1 or 0
         if pa ~= pb then return pa > pb end
-
-        local sa = CO.IsOrderSelected and CO:IsOrderSelected(a.orderID) and 1 or 0
-        local sb = CO.IsOrderSelected and CO:IsOrderSelected(b.orderID) and 1 or 0
-        if sa ~= sb then return sa > sb end
 
         if sortCol then
             local va, vb
@@ -1595,7 +1593,9 @@ function CL:Refresh(pageFrame)
         local ra = rankOrder(a)
         local rb = rankOrder(b)
         if ra ~= rb then return ra < rb end
-        return getProfit(a) > getProfit(b)
+        local profitA, profitB = getProfit(a), getProfit(b)
+        if profitA ~= profitB then return profitA > profitB end
+        return originalPosition[a] < originalPosition[b]
     end)
 
     if container.header and UpdateHeaderArrows then UpdateHeaderArrows(container.header) end

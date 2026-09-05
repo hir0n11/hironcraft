@@ -416,6 +416,31 @@ assert(rowCalls == 1, 'row action did not dispatch exactly once')
 row.scripts.OnEnter(row)
 assert(focusCalls == 1, 'row refresh accumulated hover callbacks')
 
+-- Selecting a lower row may repaint it, but must not promote it above the
+-- list order (the recorded regression was the third row jumping to first).
+local sortOrders = {
+    {orderID=101, spellID=101, customerName='Buyer'},
+    {orderID=102, spellID=102, customerName='Buyer'},
+    {orderID=103, spellID=103, customerName='Buyer'},
+}
+local recipeNames = { [101]='Alpha', [102]='Bravo', [103]='Charlie' }
+C_TradeSkillUI.GetRecipeInfo = function(spellID) return { name=recipeNames[spellID], learned=true } end
+CL.GetOrders = function() return { sortOrders[1], sortOrders[2], sortOrders[3] } end
+CO.selectedOrders = { ['103']=true }
+CO.IsOrderSelected = function(_, orderID) return CO.selectedOrders[tostring(orderID)] == true end
+CO.GetOrderProfitInfo = function() return { profit=0, reagentCost=0 } end
+CO.GetOrderActionAvailabilitySortRank = function() return 1 end
+page.orderType = Enum.CraftingOrderType.Personal
+container._orderType = page.orderType
+CL._sortColumn = nil
+CL:Refresh(page)
+assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
+    and container.rows[3].action.orderID == 103, 'checking an order moved it to the top')
+CO.selectedOrders = {}
+CL:Refresh(page)
+assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
+    and container.rows[3].action.orderID == 103, 'unchecking an order changed its position')
+
 dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
 UIParent = frame('Frame')
 for _, scale in ipairs({.65, 1, 1.3}) do
