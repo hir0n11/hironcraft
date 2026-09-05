@@ -224,10 +224,19 @@ function CL:ResizeList(container)
     local width = container.scroll:GetWidth()
     if not width or width <= 0 then return end
     local compact = self:IsCompact()
-    if container._layoutWidth == width and container._layoutCompact == compact then return end
+    local orderType = container.pageFrame and container.pageFrame.orderType
+    local personalType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
+    local hideReward = personalType ~= nil and orderType == personalType
+    if container._layoutWidth == width
+        and container._layoutCompact == compact
+        and container._layoutOrderType == orderType
+    then
+        return
+    end
     container._layoutWidth, container._layoutCompact = width, compact
+    container._layoutOrderType = orderType
     container.content:SetWidth(width)
-    self._layoutCols = CO:GetClassicOrderColumns(width, compact)
+    self._layoutCols = CO:GetClassicOrderColumns(width, compact, hideReward)
     for key, col in pairs(self._layoutCols) do
         local source = (compact and COLS_COMPACT or COLS)[key]
         col.label = source and source.label or key
@@ -543,6 +552,7 @@ function CL:EnsureScrollFrame(pageFrame)
     if not listAnchor then return nil end
 
     local container = CreateFrame("Frame", nil, listAnchor, "BackdropTemplate")
+    container.pageFrame = pageFrame
     container:SetPoint("TOPLEFT", listAnchor, "TOPLEFT", 0, 0)
     container:SetPoint("BOTTOMRIGHT", listAnchor, "BOTTOMRIGHT", 0, 0)
     container:SetFrameLevel((listAnchor:GetFrameLevel() or 0) + 10)

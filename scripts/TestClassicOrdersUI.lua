@@ -163,6 +163,7 @@ dofile('ProfitHub/Orders/CraftingOrders/Rows.lua')
 dofile('ProfitHub/Orders/CraftingOrders/ClassicTheme.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Panel.lua')
 dofile('ProfitHub/Orders/CraftingOrders/CustomList.lua')
+local CL = CO.CustomList
 CO.IsEnabled = function() return true end
 CO.UpdateControlPanel = noop
 CO.GetQueueReagentMode = function() return 't1' end
@@ -186,6 +187,11 @@ anchor:SetPoint('BOTTOMRIGHT', -8, 8)
 page.BrowseFrame.OrderList = anchor
 CO:EnsureControlPanel(page)
 local panel = CO.controlPanel
+local container = CL:EnsureScrollFrame(page)
+local personalCols = CL:ActiveCols()
+assert(not personalCols.reward and not container.header.cols.reward:IsVisible(),
+    'Personal tab still shows the Reward column')
+local personalNameWidth = personalCols.name.w
 assert(panel.titleFS.fontPath == PT.FONT, 'panel title lost the Cyrillic-capable font')
 assert(panel.keyText.fontPath == PT.FONT, 'binding label lost the Cyrillic-capable font')
 assert(panel.runActionButton.text.fontPath == PT.FONT, 'action label lost the Cyrillic-capable font')
@@ -201,6 +207,10 @@ for _, button in ipairs({panel.selectAllButton, panel.shopButton, panel.clearSel
     assert(button:GetParent() == panel.queueActions and button:IsVisible(), 'common action requires a settings-tab click')
 end
 page.orderType = Enum.CraftingOrderType.Npc
+CL:ResizeList(container)
+local npcCols = CL:ActiveCols()
+assert(npcCols.reward and container.header.cols.reward:IsVisible(), 'Patron tab lost the Reward column')
+assert(personalNameWidth > npcCols.name.w, 'Personal Reward space was not returned to the item name')
 CO:UpdateTabActionButton(page)
 assert(panel.knowledgeButton:IsVisible(), 'knowledge action is not available on the main settings page')
 assert(not panel.selectAllOrdersButton:IsVisible(), 'knowledge and select-all buttons overlap')
@@ -215,8 +225,6 @@ CO.RunActiveRowAction = function() calls = calls + 1 end
 panel.runActionButton:Click()
 assert(calls == 1, 'action click no longer dispatches exactly one step')
 panel.classicTabs.craft:Click()
-local CL = CO.CustomList
-local container = CL:EnsureScrollFrame(page)
 assert(container.refreshButton.text.justify == 'CENTER' and container.refreshButton.text.justifyV == 'MIDDLE',
     'Refresh label is not centered horizontally and vertically')
 local bx, by, bw, bh = bounds(container.refreshButton)

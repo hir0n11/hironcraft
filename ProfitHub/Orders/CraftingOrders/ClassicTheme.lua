@@ -167,7 +167,7 @@ end
 
 -- Columns are shared by headers and rows. Hide secondary columns as space
 -- narrows; item, reward, profit and action always remain within the viewport.
-function CO:GetClassicOrderColumns(width, compact)
+function CO:GetClassicOrderColumns(width, compact, hideReward)
     width = math.max(320, tonumber(width) or 800)
     local columns = {}
     local cursor = width - 6
@@ -179,7 +179,7 @@ function CO:GetClassicOrderColumns(width, compact)
     local narrow = width < 400
     right("action", narrow and 68 or 78)
     right("profit", narrow and 54 or (width >= 580 and 94 or 70))
-    right("reward", narrow and 48 or 82)
+    if not hideReward then right("reward", narrow and 48 or 82) end
     if width >= 480 then right("conc", 52) end
     if not compact and width >= 760 then right("cost", 74) end
     if compact and width >= 760 then right("reagents", 100) end
