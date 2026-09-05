@@ -7,6 +7,14 @@ setfenv(1, E)
 CO.CLASSIC_PANEL_WIDTH = 244
 CO.CLASSIC_PANEL_GAP = 8
 
+function CO:UpdateClassicPanelToggle(button)
+    local direction = GetDB().panelCollapsed and -1 or 1
+    button.arrowTop:SetStartPoint("CENTER", button, -direction * 2, 4)
+    button.arrowTop:SetEndPoint("CENTER", button, direction * 2, 0)
+    button.arrowBottom:SetStartPoint("CENTER", button, -direction * 2, -4)
+    button.arrowBottom:SetEndPoint("CENTER", button, direction * 2, 0)
+end
+
 function CO:ApplyClassicInset(frame, raised)
     frame:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -88,7 +96,24 @@ function CO:CreateClassicPanelShell(panel)
 
     -- A sibling of the sidebar, so hiding the entire panel leaves the toggle
     -- available inside Blizzard's window, above the list's right corner.
-    panel.collapseButton = self:CreateTextButton(panel.pageFrame, nil, 24, 24, ">")
+    -- No UIPanelButtonTemplate end caps or font bearings on this tiny square:
+    -- keep every texture inside the hit box and draw a centered chevron.
+    panel.collapseButton = CreateFrame("Button", nil, panel.pageFrame)
+    panel.collapseButton:SetSize(20, 20)
+    self:StyleClassicButton(panel.collapseButton)
+    for _, texture in ipairs({ panel.collapseButton:GetNormalTexture(), panel.collapseButton:GetPushedTexture(),
+        panel.collapseButton:GetDisabledTexture(), panel.collapseButton:GetHighlightTexture() }) do
+        texture:ClearAllPoints()
+        texture:SetAllPoints(panel.collapseButton)
+    end
+    for _, part in ipairs({ "arrowTop", "arrowBottom" }) do
+        local arrow = panel.collapseButton:CreateLine(nil, "OVERLAY")
+        arrow:SetColorTexture(1, 0.82, 0.2, 1)
+        arrow:SetThickness(1.5)
+        panel.collapseButton[part] = arrow
+    end
+    self:UpdateClassicPanelToggle(panel.collapseButton)
+    panel.collapseButton:RegisterForClicks("LeftButtonUp")
     panel.collapseButton:SetFrameLevel(panel:GetFrameLevel())
     panel.collapseButton:SetScript("OnClick", function()
         GetDB().panelCollapsed = not (GetDB().panelCollapsed == true)

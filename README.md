@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.5)
+## Crafting orders interface (0.3.6)
 
 The order list uses the full width of Blizzard's profession window, with the
 control panel attached outside its right edge. Native buttons, framed panels
@@ -37,6 +37,8 @@ Use the small arrow above the order list's top-right corner to hide or show
 the entire side panel, including its header. The arrow stays inside the main
 window. This preference survives reopening and reloads; selected orders and
 the hotkey still work while the side panel is hidden.
+The toggle uses a centered drawn chevron and an inset 20-pixel button whose
+textures stay inside its bounds, clear of the main window's border.
 
 - **Crafting** contains reagent quality, concentration, finishers and tools.
 - The **Queue** settings tab contains profit filters and automatic selection settings.

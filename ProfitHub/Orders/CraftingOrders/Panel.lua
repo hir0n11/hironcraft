@@ -1189,11 +1189,11 @@ function CO:AnchorControlPanelToOrderList(panel, pageFrame)
     if panel.collapseButton then
         panel.collapseButton:ClearAllPoints()
         if list then
-            panel.collapseButton:SetPoint("BOTTOMRIGHT", list, "TOPRIGHT", -6, 6)
+            panel.collapseButton:SetPoint("BOTTOMRIGHT", list, "TOPRIGHT", -14, 8)
         else
-            panel.collapseButton:SetPoint("TOPRIGHT", pageFrame, "TOPRIGHT", -6, -80)
+            panel.collapseButton:SetPoint("TOPRIGHT", pageFrame, "TOPRIGHT", -14, -82)
         end
-        panel.collapseButton.text:SetText(GetDB().panelCollapsed and "<" or ">")
+        self:UpdateClassicPanelToggle(panel.collapseButton)
     end
 end
 

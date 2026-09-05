@@ -24,6 +24,10 @@ local function frame(kind, parent, template)
 end
 function methods:CreateFontString(_, _, template) return frame('FontString', self, template) end
 function methods:CreateTexture() return frame('Texture', self) end
+function methods:CreateLine() return frame('Line', self) end
+function methods:SetStartPoint(point, relative, x, y) self.startPoint = {point, relative, x, y} end
+function methods:SetEndPoint(point, relative, x, y) self.endPoint = {point, relative, x, y} end
+function methods:SetThickness(value) self.thickness = value end
 function methods:SetPoint(point, relative, relativePoint, x, y)
     if type(relative) == 'number' then x, y, relative, relativePoint = relative, relativePoint, self.parent, point end
     relative, relativePoint = relative or self.parent, relativePoint or point
@@ -282,13 +286,29 @@ local originalListWidth, originalPanelHeight = anchor:GetWidth(), panel:GetHeigh
 panel.classicTabs.queue:Click()
 panel.collapseButton:Click()
 assert(E.GetDB().panelCollapsed == true and not panel:IsVisible(), 'collapse did not persist or hide the panel')
-assert(panel.collapseButton.text:GetText() == '<' and panel.collapseButton:IsVisible(), 'hidden panel cannot be restored')
+assert(panel.collapseButton.arrowTop.endPoint[3] == -2 and panel.collapseButton:IsVisible(), 'hidden panel cannot be restored')
 assert(panel.collapseButton:GetParent() == page, 'toggle is hidden with the panel')
 assert(not panel.helpButton:IsVisible() and not panel.titleFS:IsVisible(), 'hidden panel retains its header')
 local toggleX, toggleY, toggleW, toggleH = bounds(panel.collapseButton)
 local listX, listY, listW = bounds(anchor)
-assert(toggleX >= listX and toggleX + toggleW <= listX + listW and toggleY + toggleH < listY,
+assert(toggleW == 20 and toggleH == 20 and not panel.collapseButton.template, 'toggle retained the oversized text-button template')
+assert(toggleX >= listX and toggleX + toggleW <= listX + listW - 14 and toggleY + toggleH <= listY - 8,
     'toggle is not above the top-right corner inside the main window')
+for _, texture in ipairs({panel.collapseButton:GetNormalTexture(), panel.collapseButton:GetPushedTexture(),
+    panel.collapseButton:GetDisabledTexture(), panel.collapseButton:GetHighlightTexture()}) do
+    local x,y,w,h = bounds(texture)
+    assert(x == toggleX and y == toggleY and w == toggleW and h == toggleH, 'toggle skin extends beyond the button')
+end
+for _, line in ipairs({panel.collapseButton.arrowTop, panel.collapseButton.arrowBottom}) do
+    assert(line.kind == 'Line' and line.thickness == 1.5, 'chevron relies on font metrics or rotated solid textures')
+    assert(line.startPoint[1] == 'CENTER' and line.endPoint[1] == 'CENTER'
+        and line.startPoint[2] == panel.collapseButton and line.endPoint[2] == panel.collapseButton,
+        'chevron is not anchored to the button center')
+    assert(line.startPoint[3] + line.endPoint[3] == 0, 'chevron is not centered horizontally')
+    assert(math.abs(line.startPoint[4]) == 4 and line.endPoint[4] == 0, 'chevron escaped the centered icon area')
+end
+assert(panel.collapseButton.arrowTop.startPoint[4] + panel.collapseButton.arrowBottom.startPoint[4] == 0,
+    'chevron is not centered vertically')
 assert(not panel.shopButton:IsVisible() and not panel.runActionButton:IsVisible()
     and not queue.scroll:IsVisible() and not panel.debugToggle:IsVisible(), 'collapsed content leaked outside the header')
 CO:UpdateTabActionButton(page)
@@ -296,6 +316,7 @@ CO:UpdateControlPanelVisibility(page)
 assert(not panel.knowledgeButton:IsVisible() and not panel:IsVisible(), 'periodic refresh expanded the panel')
 assert(anchor:GetWidth() == originalListWidth, 'collapse resized the order list')
 panel.collapseButton:Click()
+assert(panel.collapseButton.arrowTop.endPoint[3] == 2, 'chevron did not reverse when showing the panel')
 assert(E.GetDB().panelCollapsed == false and panel:GetHeight() == originalPanelHeight, 'expand did not restore full height')
 assert(queue.scroll:IsVisible() and not craft.scroll:IsVisible(), 'expand lost the selected settings tab')
 assert(panel.runActionButton:IsVisible() and panel.shopButton:IsVisible(), 'expand lost actions')
