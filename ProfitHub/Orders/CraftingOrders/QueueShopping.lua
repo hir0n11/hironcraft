@@ -1105,7 +1105,7 @@ function CO:AnalyzeOrderForQueue(order, orderType, opts, pageFrame)
 
     local prepared = self:PrepareOrderForQueueAnalysis(order, pageFrame)
 
-    if self._knowledgeOnly then
+    if opts and opts.knowledgeOnly then
         if not self:OrderGivesKnowledge(order) then return nil end
         local o = {}
         if opts then for k, v in pairs(opts) do o[k] = v end end
@@ -1192,20 +1192,21 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
     return true
 end
 
-function CO:ShouldQueueOrderByAvailabilityColor(order)
+function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     if not order or not order.orderID then return false end
-    if self._knowledgeOnly and not self:OrderGivesKnowledge(order) then return false end
+    local knowledgeOnly = opts and opts.knowledgeOnly
+    if knowledgeOnly and not self:OrderGivesKnowledge(order) then return false end
     if not self.GetOrderActionAvailabilitySortRank then return false end
     if not self:ApplyQueueReagentModeToOrder(order) then return false end
     if self:OrderRequiresConcentrationForQueue(order) then return false end
-    if not self:OrderPassesQueueProfitFilter(order) then return false end
+    if not knowledgeOnly and not self:OrderPassesQueueProfitFilter(order) then return false end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
     return rank == 1 or rank == 2
 end
 
 function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
-    if not self:ShouldQueueOrderByAvailabilityColor(order) then return nil end
+    if not self:ShouldQueueOrderByAvailabilityColor(order, opts) then return nil end
 
     local analysis = self:AnalyzeOrderForQueue(order, orderType, opts, pageFrame)
     if analysis and analysis.queued then
@@ -1216,6 +1217,8 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
         return analysis
     end
 
+    -- Rank 2 orders can still need a reagent purchase. Preserve that path so
+    -- the Shopping action can prepare both normal and knowledge queues.
     return {
         queued = true,
         useConcentration = false,
@@ -1224,7 +1227,10 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
 end
 
 function CO:FinishQueueWorkOrdersSelection(session)
-    local selected = session and session.selected or 0
+    local selected = 0
+    for _, checked in pairs(self.selectedOrders or {}) do
+        if checked then selected = selected + 1 end
+    end
     self.queueSelectionRunning = false
 
     if self.controlPanel and self.controlPanel.selectAllButton then
@@ -1237,19 +1243,29 @@ function CO:FinishQueueWorkOrdersSelection(session)
     self:SetStatus(string.format(T("COA_STATUS_QUEUED_ORDERS", "Queued orders: %d."), selected))
 end
 
-function CO:QueueVisibleWorkOrdersSelection()
+function CO:GetQueueSelectionOptions(knowledgeOnly)
+    -- Never put transient selection modes into the saved queue settings.
+    local opts = {}
+    for key, value in pairs(self:GetQueueOptions()) do opts[key] = value end
+    opts.knowledgeOnly = knowledgeOnly == true
+    return opts
+end
+
+function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly)
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     local session = { selected = 0, seen = {} }
 
-    wipe(self.selectedOrders)
-    self.currentQueueOrderID = nil
+    if not knowledgeOnly then
+        wipe(self.selectedOrders)
+        self.currentQueueOrderID = nil
+    end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
 
     local buttons = self:GetVisibleOrderButtonsSorted()
 
-    local opts = self:GetQueueOptions()
+    local opts = self:GetQueueSelectionOptions(knowledgeOnly)
     for _, btn in ipairs(buttons) do
         local order = btn.order
         local key = OrderKey(order and order.orderID)
@@ -1257,9 +1273,11 @@ function CO:QueueVisibleWorkOrdersSelection()
             and order.orderType ~= pageFrame.orderType)
         if key and tabOk and not session.seen[key] then
             session.seen[key] = true
-            local analysis = self:GetAvailabilityQueueAnalysis(order, order.orderType, opts, pageFrame)
-            if analysis and analysis.queued and self:MarkOrderQueuedForCheckbox(order, analysis, pageFrame) then
-                session.selected = session.selected + 1
+            if not self.selectedOrders[key] then
+                local analysis = self:GetAvailabilityQueueAnalysis(order, order.orderType, opts, pageFrame)
+                if analysis and analysis.queued and self:MarkOrderQueuedForCheckbox(order, analysis, pageFrame) then
+                    session.selected = session.selected + 1
+                end
             end
         end
     end
@@ -1269,7 +1287,7 @@ end
 
 function CO:QueueWorkOrdersSelection(knowledgeOnly)
     if self.queueSelectionRunning then return end
-    self._knowledgeOnly = knowledgeOnly == true
+    knowledgeOnly = knowledgeOnly == true
     if self.viewingCachedOrders then
         self:SetStatus(T("COA_STATUS_QUEUE_VIEW_ONLY", "Queue can only be built while the crafting orders page is available."))
         return
@@ -1278,7 +1296,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     local profession = GetProfessionFromPage(pageFrame)
     if not profession or not C_CraftingOrders or type(C_CraftingOrders.RequestCrafterOrders) ~= "function" then
-        self:QueueVisibleWorkOrdersSelection()
+        self:QueueVisibleWorkOrdersSelection(knowledgeOnly)
         return
     end
 
@@ -1292,13 +1310,15 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     self.queueSelectionRunning = true
-    wipe(self.selectedOrders)
-    self.currentQueueOrderID = nil
+    if not knowledgeOnly then
+        wipe(self.selectedOrders)
+        self.currentQueueOrderID = nil
+    end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
 
-    local opts = self:GetQueueOptions()
+    local opts = self:GetQueueSelectionOptions(knowledgeOnly)
 
     if self.controlPanel and self.controlPanel.selectAllButton then
         self.controlPanel.selectAllButton:Disable()
@@ -1313,7 +1333,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
 
     local function selectOrder(order, analysis)
         local key = OrderKey(order and order.orderID)
-        if not key or session.seen[key] then return end
+        if not key or session.seen[key] or self.selectedOrders[key] then return end
         if pageFrame and pageFrame.orderType ~= nil and order and order.orderType ~= nil
             and order.orderType ~= pageFrame.orderType then
             return
@@ -1352,7 +1372,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
 
         if session.selected == 0 then
             self.queueSelectionRunning = false
-            self:QueueVisibleWorkOrdersSelection()
+            self:QueueVisibleWorkOrdersSelection(knowledgeOnly)
             return
         end
         self:FinishQueueWorkOrdersSelection(session)
@@ -1363,11 +1383,12 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
         local isPublic = Enum and Enum.CraftingOrderType and orderType == Enum.CraftingOrderType.Public
 
         local function step()
+            if session.finished then return end
             local limit = math.min(#orders, i + 3)
             while i <= limit do
                 local order = orders[i]
                 i = i + 1
-                if order and order.orderID and order.spellID then
+                if order and order.orderID and order.spellID and not self.selectedOrders[OrderKey(order.orderID)] then
                     local analysis = self:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
                     if analysis and analysis.queued then
                         if isPublic then
@@ -1398,6 +1419,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     local function requestType(index)
+        if session.finished then return end
         local orderType = orderTypes[index]
         if not orderType then
             finish()
@@ -1409,6 +1431,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
         end
 
         local callback = function(result)
+            if session.finished then return end
             if not IsResultOk(result) then
                 requestType(index + 1)
                 return

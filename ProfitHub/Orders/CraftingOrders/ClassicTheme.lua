@@ -20,6 +20,7 @@ end
 
 function CO:StyleClassicButton(button, selected, unavailable)
     if not button then return end
+    if button.hironClassicClose then return end
     button.hironClassic = true
     button:SetNormalTexture("Interface\\Buttons\\UI-Panel-Button-" .. ((selected or unavailable) and "Disabled" or "Up"))
     button:SetPushedTexture("Interface\\Buttons\\UI-Panel-Button-Down")
@@ -35,6 +36,11 @@ function CO:StyleClassicButton(button, selected, unavailable)
     if label then
         label:SetFontObject(GameFontNormalSmall)
         ApplyFont(label, 11, "")
+        label:ClearAllPoints()
+        label:SetPoint("CENTER", button, "CENTER", 0, 0)
+        label:SetSize(math.max(1, button:GetWidth() - 8), button:GetHeight())
+        label:SetJustifyH("CENTER")
+        label:SetJustifyV("MIDDLE")
         label:SetTextColor(unavailable and 0.55 or 1, unavailable and 0.55 or 0.82, unavailable and 0.55 or 0.2)
     end
 end
@@ -47,18 +53,30 @@ function CO:CreateClassicPanelShell(panel)
     panel.footer:SetHeight(140)
     self:ApplyClassicInset(panel.footer)
 
+    -- Common actions stay outside both settings scroll pages.
+    panel.queueActions = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    panel.queueActions:SetPoint("BOTTOMLEFT", panel.footer, "TOPLEFT", 0, 4)
+    panel.queueActions:SetPoint("BOTTOMRIGHT", panel.footer, "TOPRIGHT", 0, 4)
+    panel.queueActions:SetHeight(112)
+    self:ApplyClassicInset(panel.queueActions)
+
     panel.classicPages = {}
     panel.classicTabs = {}
     for index, key in ipairs({ "craft", "queue" }) do
         local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", 8, -66)
-        scroll:SetPoint("BOTTOMRIGHT", panel.footer, "TOPRIGHT", -24, 5)
+        scroll:SetPoint("BOTTOMRIGHT", panel.queueActions, "TOPRIGHT", -24, 5)
         local body = CreateFrame("Frame", nil, scroll)
         body:SetSize(self.CLASSIC_PANEL_WIDTH - 40, 1)
         scroll:SetScrollChild(body)
         scroll:HookScript("OnSizeChanged", function(self, width)
             body:SetWidth(math.max(1, width))
+            CO:UpdateClassicSettingsScroll(self, body)
         end)
+        local function updateScroll() CO:UpdateClassicSettingsScroll(scroll, body) end
+        scroll:HookScript("OnShow", updateScroll)
+        scroll:HookScript("OnScrollRangeChanged", updateScroll)
+        body:HookScript("OnSizeChanged", updateScroll)
         panel.classicPages[key] = { scroll = scroll, body = body }
         local tab = self:CreateTextButton(panel, nil, 110, 24,
             index == 1 and T("COA_CLASSIC_CRAFT_TAB", "Crafting") or T("COA_CLASSIC_QUEUE_TAB", "Queue"))
@@ -67,6 +85,16 @@ function CO:CreateClassicPanelShell(panel)
         panel.classicTabs[key] = tab
     end
     self:SelectClassicPanelTab(panel, "craft")
+end
+
+function CO:UpdateClassicSettingsScroll(scroll, body)
+    local range = math.max(0, body:GetHeight() - scroll:GetHeight())
+    local needed = range > 1
+    if scroll.ScrollBar then scroll.ScrollBar:SetShown(needed) end
+    scroll:EnableMouseWheel(needed)
+    local offset = scroll:GetVerticalScroll()
+    local clamped = needed and math.min(offset, range) or 0
+    if clamped ~= offset then scroll:SetVerticalScroll(clamped) end
 end
 
 function CO:SelectClassicPanelTab(panel, key)

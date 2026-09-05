@@ -181,9 +181,9 @@ PT.L_ruRU["COA_QUEUE_REAGENT_MODE_PROFIT"] = "Профит"
 PT.L_ruRU["COA_QUEUE_REAGENT_MODE_MANUAL"] = "Ручной"
 
 PT.L_enUS["COA_KNOWLEDGE_QUEUE_TITLE"]    = "Queue: knowledge only"
-PT.L_enUS["COA_KNOWLEDGE_QUEUE_TIP"]      = "Queues only orders whose reward includes knowledge items and that can be crafted without concentration."
+PT.L_enUS["COA_KNOWLEDGE_QUEUE_TIP"]      = "Adds knowledge-reward orders regardless of profit, keeping existing selections. Orders requiring concentration or an unknown recipe are excluded. Use Shopping for missing reagents."
 PT.L_ruRU["COA_KNOWLEDGE_QUEUE_TITLE"]    = "Очередь: только знания"
-PT.L_ruRU["COA_KNOWLEDGE_QUEUE_TIP"]      = "Выбирает только заказы, в награде которых есть предметы со знаниями и которые можно скрафтить без концентрации."
+PT.L_ruRU["COA_KNOWLEDGE_QUEUE_TIP"]      = "Добавляет заказы со знаниями независимо от профита, сохраняя уже выбранные. Заказы с неизвестным рецептом или требующие концентрацию исключаются. Недостающие реагенты можно добавить в закупку."
 
 PT.L_enUS["COA_QUEUE_AUTO_ON_OPEN_HEADER"] = "Auto on open:"
 PT.L_enUS["COA_QUEUE_AUTO_ON_OPEN"]        = "Auto-queue on open"

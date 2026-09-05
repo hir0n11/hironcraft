@@ -641,6 +641,12 @@ function CL:HideBlizzardList(pageFrame)
     ForceHide(list.ScrollBox)
     ForceHide(list.ScrollBar)
     ForceHide(list.HeaderContainer)
+    -- ResultsText is a FontString, so it cannot use the frame OnShow hook.
+    -- Blizzard may show it again after searches; retain its state via alpha.
+    if list.ResultsText then
+        if list.ahuiResultsTextAlpha == nil then list.ahuiResultsTextAlpha = list.ResultsText:GetAlpha() end
+        list.ResultsText:SetAlpha(0)
+    end
 end
 
 function CL:ShowBlizzardList(pageFrame)
@@ -649,6 +655,10 @@ function CL:ShowBlizzardList(pageFrame)
     if list.ScrollBox then list.ScrollBox:Show() end
     if list.ScrollBar then list.ScrollBar:Show() end
     if list.HeaderContainer then list.HeaderContainer:Show() end
+    if list.ResultsText and list.ahuiResultsTextAlpha ~= nil then
+        list.ResultsText:SetAlpha(list.ahuiResultsTextAlpha)
+        list.ahuiResultsTextAlpha = nil
+    end
 end
 
 function CL:Deactivate(pageFrame)
@@ -890,7 +900,14 @@ function CL:FitIconBar(bar, icons, maxRows, title)
     local overflow = #shown > capacity
     local visible = overflow and math.max(0, capacity - 1) or capacity
     if not bar.more then
-        bar.more = CO:CreateTextButton(bar, nil, self.SMALL_ICON, self.SMALL_ICON, "")
+        -- Overflow is an information label, not a tiny red action button.
+        bar.more = CreateFrame("Frame", nil, bar)
+        bar.more:SetSize(self.SMALL_ICON, self.SMALL_ICON)
+        bar.more:EnableMouse(true)
+        bar.more.text = MakeText(bar.more, 11, "CENTER")
+        bar.more.text:SetAllPoints()
+        bar.more.text:SetWordWrap(false)
+        bar.more.text:SetTextColor(1, 0.82, 0.2)
         bar.more:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(bar.moreTitle or "", 1, 0.82, 0.2)

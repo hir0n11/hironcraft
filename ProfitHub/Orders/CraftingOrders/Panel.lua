@@ -975,6 +975,7 @@ end
 
 function CO:StyleWidget(frame, selected)
     if not frame then return end
+    if frame.hironClassicClose then return end
     if frame.GetObjectType and frame:GetObjectType() == "Button" and frame.text then
         self:StyleClassicButton(frame, selected)
     else
@@ -1352,7 +1353,7 @@ function CO:EnsureControlPanel(pageFrame)
     panel.weeklyQuestIndicator:SetScript("OnLeave", HideStyledTooltip)
 
 
-    body:SetHeight(-y + 36)
+    body:SetHeight(-y + 26)
 
     body = panel.classicPages.queue.body
     y = -8
@@ -1413,16 +1414,14 @@ function CO:EnsureControlPanel(pageFrame)
     panel.autoShopCheck:SetPoint("TOPLEFT", PADX + 74, y)
     y = y - 24
 
-    -- Divider
-    local div1 = body:CreateTexture(nil, "ARTWORK")
-    div1:SetColorTexture(1, 1, 1, 0.10)
-    div1:SetPoint("TOPLEFT", PADX, y)
-    div1:SetPoint("TOPRIGHT", -PADX, y)
-    div1:SetHeight(1)
-    y = y - 10
+    body:SetHeight(-y + 8)
+    body = panel.queueActions
+    y = -6
+    local ACTION_INNER = VPANEL_W - 26
+    local ACTION_COL_W = math.floor((ACTION_INNER - COL_GAP) / 2)
 
     -- Queue action (full width)
-    panel.selectAllButton = self:CreateTextButton(body, nil, INNER, 26, T("COA_QUEUE_BUTTON", "Queue"))
+    panel.selectAllButton = self:CreateTextButton(body, nil, ACTION_INNER, 26, T("COA_QUEUE_BUTTON", "Queue"))
     if panel.selectAllButton.text then ApplyFont(panel.selectAllButton.text, 13, "") end
     panel.selectAllButton:SetPoint("TOPLEFT", PADX, y)
     panel.selectAllButton:SetScript("OnClick", function(self)
@@ -1441,7 +1440,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 32
 
     -- Knowledge-only queue (patron) / select-all-visible (other tabs)
-    panel.knowledgeButton = self:CreateTextButton(body, nil, INNER, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
+    panel.knowledgeButton = self:CreateTextButton(body, nil, ACTION_INNER, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
     if panel.knowledgeButton.text then ApplyFont(panel.knowledgeButton.text, 12, "") end
     panel.knowledgeButton:SetPoint("TOPLEFT", PADX, y)
     panel.knowledgeButton:SetBackdropBorderColor(0.30, 0.60, 1.00, 1)
@@ -1452,12 +1451,12 @@ function CO:EnsureControlPanel(pageFrame)
         if not Tooltip then return end
         Tooltip:Clear()
         Tooltip:AddLine(T("COA_KNOWLEDGE_QUEUE_TITLE", "Очередь: только знания"), 13, 1, 0.82, 0.35)
-        Tooltip:AddLine(T("COA_KNOWLEDGE_QUEUE_TIP", "Выбирает только заказы, в награде которых есть предметы со знаниями и которые можно скрафтить без концентрации."), 11, 0.85, 0.85, 0.85)
+        Tooltip:AddLine(T("COA_KNOWLEDGE_QUEUE_TIP", "Добавляет заказы со знаниями независимо от профита, сохраняя уже выбранные. Заказы с неизвестным рецептом или требующие концентрацию исключаются. Недостающие реагенты можно добавить в закупку."), 11, 0.85, 0.85, 0.85)
         ShowStyledTooltip(self)
     end)
     panel.knowledgeButton:SetScript("OnLeave", HideStyledTooltip)
 
-    panel.selectAllOrdersButton = self:CreateTextButton(body, nil, INNER, 22, T("COA_SELECT_ALL_TITLE", "Select all"))
+    panel.selectAllOrdersButton = self:CreateTextButton(body, nil, ACTION_INNER, 22, T("COA_SELECT_ALL_TITLE", "Select all"))
     if panel.selectAllOrdersButton.text then ApplyFont(panel.selectAllOrdersButton.text, 12, "") end
     panel.selectAllOrdersButton:SetPoint("TOPLEFT", PADX, y)
     panel.selectAllOrdersButton:Hide()
@@ -1475,7 +1474,7 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 28
 
     -- Shopping + Clear (two columns)
-    panel.shopButton = self:CreateTextButton(body, nil, COL_W, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
+    panel.shopButton = self:CreateTextButton(body, nil, ACTION_COL_W, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
     if panel.shopButton.text then ApplyFont(panel.shopButton.text, 12, "") end
     panel.shopButton:SetPoint("TOPLEFT", PADX, y)
     panel.shopButton:SetScript("OnClick", function()
@@ -1503,9 +1502,9 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.shopButton:SetScript("OnLeave", HideStyledTooltip)
 
-    panel.clearSelectedButton = self:CreateTextButton(body, nil, COL_W, 22, T("COA_CLEAR_SELECTED", "Clear"))
+    panel.clearSelectedButton = self:CreateTextButton(body, nil, ACTION_COL_W, 22, T("COA_CLEAR_SELECTED", "Clear"))
     if panel.clearSelectedButton.text then ApplyFont(panel.clearSelectedButton.text, 12, "") end
-    panel.clearSelectedButton:SetPoint("TOPLEFT", PADX + COL_W + COL_GAP, y)
+    panel.clearSelectedButton:SetPoint("TOPLEFT", PADX + ACTION_COL_W + COL_GAP, y)
     panel.clearSelectedButton:SetScript("OnClick", function()
         CO:ClearSelectedOrders()
     end)
@@ -1514,13 +1513,11 @@ function CO:EnsureControlPanel(pageFrame)
     panel.shopCostText = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(panel.shopCostText, 12, "")
     panel.shopCostText:SetPoint("TOP", panel.shopButton, "BOTTOM", 0, -3)
-    panel.shopCostText:SetWidth(COL_W)
+    panel.shopCostText:SetWidth(ACTION_COL_W)
     panel.shopCostText:SetJustifyH("CENTER")
     panel.shopCostText:SetText("")
     panel.shopCostText:SetTextColor(0.95, 0.82, 0.42, 1)
 
-
-    body:SetHeight(-y + 52)
 
     local footer = panel.footer
     y = -64
@@ -1560,7 +1557,9 @@ function CO:EnsureControlPanel(pageFrame)
         CO.bindCapture:Show()
     end)
 
-    panel.clearButton = self:CreateTextButton(footer, nil, 24, 22, "×")
+    panel.clearButton = CreateFrame("Button", nil, footer, "UIPanelCloseButton")
+    panel.clearButton.hironClassicClose = true
+    panel.clearButton:SetSize(28, 28)
     panel.clearButton:SetPoint("LEFT", panel.bindButton, "RIGHT", 4, 0)
     panel.clearButton:SetScript("OnClick", function()
         CO:ClearBinding()
@@ -1582,7 +1581,7 @@ function CO:EnsureControlPanel(pageFrame)
     panel.bindButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -36, 8)
     panel.bindButton:SetWidth(68)
     panel.clearButton:ClearAllPoints()
-    panel.clearButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -8, 8)
+    panel.clearButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -5, 5)
 
     panel.selectedText = footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     panel.selectedText:SetPoint("TOPLEFT", 10, -8)

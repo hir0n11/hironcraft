@@ -19,6 +19,7 @@ local function noop() end
 local function frame(kind, parent, template)
     local f = setmetatable({ kind = kind, parent = parent, template = template, anchors = {}, scripts = {}, visible = true }, { __index = methods })
     frames[#frames + 1] = f
+    if template == 'UIPanelScrollFrameTemplate' then f.ScrollBar = frame('Slider', f) end
     return f
 end
 function methods:CreateFontString(_, _, template) return frame('FontString', self, template) end
@@ -63,6 +64,13 @@ end
 function methods:GetWidth() local _,_,w = bounds(self); return w end
 function methods:GetHeight() local _,_,_,h = bounds(self); return h end
 function methods:GetParent() return self.parent end
+function methods:SetParent(parent) self.parent = parent end
+function methods:SetScale(scale) self.scale = scale end
+function methods:GetEffectiveScale() return (self.scale or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
+function methods:SetFrameStrata(strata) self.strata = strata end
+function methods:GetFrameStrata() return self.strata or 'MEDIUM' end
+function methods:SetAlpha(alpha) self.alpha = alpha end
+function methods:GetAlpha() return self.alpha or 1 end
 function methods:GetObjectType() return self.kind end
 function methods:GetFrameLevel() return self.level or 1 end
 function methods:SetFrameLevel(level) self.level = level end
@@ -78,6 +86,7 @@ function methods:SetBackdropBorderColor(r,g,b,a) self.border = {r,g,b,a} end
 function methods:SetFont(path, size) self.fontPath, self.fontSize = path, size end
 function methods:SetFontObject() self.fontPath, self.fontSize = STANDARD_TEXT_FONT, 12 end
 function methods:SetJustifyH(value) self.justify = value end
+function methods:SetJustifyV(value) self.justifyV = value end
 function methods:GetStringWidth() return #(self.text or '') * 6 end
 function methods:GetFontString()
     self.fontString = self.fontString or frame('FontString', self)
@@ -108,7 +117,7 @@ function methods:GetChecked() return self.checked end
 function methods:SetScrollChild(child) self.child = child end
 function methods:SetVerticalScroll(value) self.scroll = value end
 function methods:GetVerticalScroll() return self.scroll or 0 end
-for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetWordWrap','SetMaxLines','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','SetJustifyV','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetAlpha','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
+for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetWordWrap','SetMaxLines','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
 
 local CO, PT = {}, { L = {} }
 PT.CraftingOrders = CO
@@ -168,9 +177,19 @@ assert(panel.reagentSeg:GetParent() == craft.body)
 assert(panel.bestQualityToggle:GetParent() == craft.body, 'tool escaped the scroll page')
 assert(panel.minProfitInput:GetParent() == queue.body)
 assert(panel.runActionButton:GetParent() == panel.footer)
+for _, button in ipairs({panel.selectAllButton, panel.shopButton, panel.clearSelectedButton}) do
+    assert(button:GetParent() == panel.queueActions and button:IsVisible(), 'common action requires a settings-tab click')
+end
+page.orderType = Enum.CraftingOrderType.Npc
+CO:UpdateTabActionButton(page)
+assert(panel.knowledgeButton:IsVisible(), 'knowledge action is not available on the main settings page')
+assert(not panel.selectAllOrdersButton:IsVisible(), 'knowledge and select-all buttons overlap')
+assert(panel.clearButton.template == 'UIPanelCloseButton' and not panel.clearButton.backdrop,
+    'binding clear button lost the native square close style')
 panel.classicTabs.queue:Click()
 assert(queue.scroll:IsVisible() and not craft.scroll:IsVisible())
 assert(panel.runActionButton:IsVisible(), 'switching settings hid the primary action')
+assert(panel.shopButton:IsVisible() and panel.knowledgeButton:IsVisible(), 'switching settings hid common actions')
 local calls = 0
 CO.RunActiveRowAction = function() calls = calls + 1 end
 panel.runActionButton:Click()
@@ -178,6 +197,19 @@ assert(calls == 1, 'action click no longer dispatches exactly one step')
 panel.classicTabs.craft:Click()
 local CL = CO.CustomList
 local container = CL:EnsureScrollFrame(page)
+assert(container.refreshButton.text.justify == 'CENTER' and container.refreshButton.text.justifyV == 'MIDDLE',
+    'Refresh label is not centered horizontally and vertically')
+local bx, by, bw, bh = bounds(container.refreshButton)
+local tx, ty, tw, th = bounds(container.refreshButton.text)
+assert(bx + bw/2 == tx + tw/2 and by + bh/2 == ty + th/2, 'Refresh label anchors are off-center')
+anchor.ResultsText = frame('FontString', anchor)
+anchor.ResultsText:SetAlpha(.8)
+CL:HideBlizzardList(page)
+assert(anchor.ResultsText:GetAlpha() == 0, 'duplicate Blizzard empty message remains visible')
+CL:HideBlizzardList(page)
+CL:Deactivate(page)
+assert(anchor.ResultsText:GetAlpha() == .8, 'native empty-message alpha was not restored')
+container:Show()
 assert(container.countText.fontPath == PT.FONT, 'list labels lost the Cyrillic-capable font')
 local row = CL:CreateRow(container.content, 1)
 container.rows[1] = row
@@ -215,8 +247,20 @@ for _, height in ipairs({390,490,590}) do
     anchor:SetHeight(height)
     local _, sy, _, sh = bounds(craft.scroll)
     local _, fy = bounds(panel.footer)
-    assert(sh > 0 and sy + sh < fy, 'settings overlap the persistent footer')
+    local _, ay, _, ah = bounds(panel.queueActions)
+    assert(sh > 0 and sy + sh < ay and ay + ah < fy, 'settings overlap the common actions or footer')
+    for _, scrollPage in pairs(panel.classicPages) do
+        CO:UpdateClassicSettingsScroll(scrollPage.scroll, scrollPage.body)
+        assert(scrollPage.scroll.ScrollBar:IsShown() == (scrollPage.body:GetHeight() > scrollPage.scroll:GetHeight() + 1),
+            'settings scrollbar does not match the content overflow')
+    end
 end
+local savedHeight = craft.body:GetHeight()
+craft.body:SetHeight(10)
+craft.scroll:SetVerticalScroll(40)
+CO:UpdateClassicSettingsScroll(craft.scroll, craft.body)
+assert(not craft.scroll.ScrollBar:IsShown() and craft.scroll:GetVerticalScroll() == 0, 'empty settings retain scrollbar/offset')
+craft.body:SetHeight(savedHeight)
 local fallbackPage = frame('Frame')
 fallbackPage:SetSize(1060, 680)
 local fallbackPanel = frame('Frame', fallbackPage)
@@ -235,8 +279,17 @@ end
 row.reagentsBar:SetWidth(82)
 CL:FitIconBar(row.reagentsBar, icons, 1, 'Reagents')
 assert(row.reagentsBar.more:IsShown(), 'overflow is unreachable')
+assert(row.reagentsBar.more:GetObjectType() == 'Frame' and not row.reagentsBar.more.template and not row.reagentsBar.more.backdrop,
+    'reagent overflow is still styled as an action button')
+local mx, _, mw = bounds(row.reagentsBar.more)
 local count = 0
-for _, icon in ipairs(icons) do if icon:IsShown() then count = count + 1 end end
+for _, icon in ipairs(icons) do
+    if icon:IsShown() then
+        count = count + 1
+        local ix, _, iw = bounds(icon)
+        assert(ix + iw <= mx, 'overflow label overlaps a reagent icon')
+    end
+end
 assert(count == 2, 'too many icons entered the next column')
 CO.GetRowAction = function(_, _, order) return 'craft', 'Craft', order, true end
 CO.activePageFrame = page
@@ -249,6 +302,22 @@ row.action:Click()
 assert(rowCalls == 1, 'row action did not dispatch exactly once')
 row.scripts.OnEnter(row)
 assert(focusCalls == 1, 'row refresh accumulated hover callbacks')
+
+dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
+UIParent = frame('Frame')
+for _, scale in ipairs({.65, 1, 1.3}) do
+    page:SetScale(scale)
+    CO:ShowRowProgressVisual(row.action, .5)
+    local progress = CO.rowProgressOverlay
+    assert(progress:GetParent() == row.action and progress:GetEffectiveScale() == row.action:GetEffectiveScale(),
+        'craft progress does not inherit the action button scale')
+    local px, py, pw, ph = bounds(progress)
+    local ax, ay, aw, ah = bounds(row.action)
+    assert(px == ax + 4 and px + pw == ax + aw - 4 and py + ph == ay + ah - 4,
+        'craft progress escaped the button interior')
+end
+CO:HideRowProgressVisual(row.action)
+page:SetScale(1)
 print('Classic orders UI tests passed.')
 
 if arg[1] == '--scene' then

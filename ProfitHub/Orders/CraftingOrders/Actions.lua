@@ -90,11 +90,25 @@ function CO:PositionRowProgressOverlay(btn)
     end
 
     bar:ClearAllPoints()
-    bar:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1, 1)
-    bar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-    bar:SetHeight(4)
-    bar:SetFrameStrata("TOOLTIP")
-    bar:SetFrameLevel(10000)
+    if btn.hironClassic then
+        -- Share the button's effective scale; a UIParent overlay drifts when
+        -- the profession window is scaled. Keep the fill inside its border.
+        bar:SetParent(btn)
+        bar:SetScale(1)
+        bar:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 4, 4)
+        bar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 4)
+        bar:SetHeight(3)
+        bar:SetFrameStrata(btn:GetFrameStrata())
+        bar:SetFrameLevel(btn:GetFrameLevel() + 8)
+    else
+        bar:SetParent(UIParent)
+        bar:SetScale(1)
+        bar:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1, 1)
+        bar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+        bar:SetHeight(4)
+        bar:SetFrameStrata("TOOLTIP")
+        bar:SetFrameLevel(10000)
+    end
     return true
 end
 

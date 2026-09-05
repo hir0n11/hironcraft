@@ -20,7 +20,7 @@ does not mark a later request from the same customer as complete.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.2)
+## Crafting orders interface (0.3.3)
 
 The order list uses the full width of Blizzard's profession window, with the
 control panel attached outside its right edge. Native buttons, framed panels
@@ -29,15 +29,24 @@ addon fonts keep Russian labels readable on English clients too. Existing
 queue settings and key bindings are kept.
 
 - **Crafting** contains reagent quality, concentration, finishers and tools.
-- **Queue** contains profit filters, automatic selection and shopping.
-- The action button, selection count and current status stay visible below
-  both settings pages. The settings and order list scroll independently.
+- The **Queue** settings tab contains profit filters and automatic selection settings.
+- Queue, knowledge selection, Shopping and Clear are always available beneath
+  both settings tabs, alongside the action button, selection count and status.
+  Settings scrollbars appear only when their contents do not fit.
+- To select profitable orders plus all knowledge rewards, click **Queue**,
+  then **Queue: knowledge**. The latter adds to the current selection and
+  ignores minimum profit (including missing prices), without changing saved
+  filters or previously selected reagents. Unknown recipes and orders requiring
+  concentration remain excluded; missing reagents can be added to Shopping.
 - Use the list's **+/−** button to switch between compact and detailed rows.
   Detailed rows include the customer. The **Profit** column stays visible in
   both layouts, including narrow windows. Additional icons are available
-  through **+N** when their column is full.
+  through a plain **+N** hover label when their column is full.
 - **Refresh** reloads orders when no order action is in progress. Clicking the
   item row still opens the original Blizzard order details.
+- Labels are centered within the classic buttons; craft progress inherits
+  the action button's scale and stays inside its border. The binding-clear
+  control uses WoW's square close button. Empty lists show a single message.
 
 This release changes presentation; the reported finisher craft-start issue
 is not considered resolved by the interface redesign.
