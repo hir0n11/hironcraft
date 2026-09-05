@@ -6,7 +6,7 @@ local CO = PT.CraftingOrders
 local CL = {}
 CO.CustomList = CL
 
-local FONT = STANDARD_TEXT_FONT
+local FONT = CO.FONT or PT.FONT or "Interface\\AddOns\\HironCraft\\ProfitHub\\Core\\fonts\\default.ttf"
 local BORDER = { 0.65, 0.57, 0.43 }
 
 local function IsFantasy()
@@ -543,7 +543,7 @@ function CL:EnsureScrollFrame(pageFrame)
 
     local container = CreateFrame("Frame", nil, listAnchor, "BackdropTemplate")
     container:SetPoint("TOPLEFT", listAnchor, "TOPLEFT", 0, 0)
-    container:SetPoint("BOTTOMRIGHT", listAnchor, "BOTTOMRIGHT", -(CO.CLASSIC_PANEL_WIDTH + CO.CLASSIC_PANEL_GAP), 0)
+    container:SetPoint("BOTTOMRIGHT", listAnchor, "BOTTOMRIGHT", 0, 0)
     container:SetFrameLevel((listAnchor:GetFrameLevel() or 0) + 10)
     container:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",

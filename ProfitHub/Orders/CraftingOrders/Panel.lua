@@ -1179,11 +1179,11 @@ function CO:AnchorControlPanelToOrderList(panel, pageFrame)
     panel:ClearAllPoints()
     local list = pageFrame.BrowseFrame and pageFrame.BrowseFrame.OrderList
     if list then
-        panel:SetPoint("TOPRIGHT", list, "TOPRIGHT", 0, 0)
-        panel:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", 0, 0)
+        panel:SetPoint("TOPLEFT", list, "TOPRIGHT", self.CLASSIC_PANEL_GAP, 0)
+        panel:SetPoint("BOTTOMLEFT", list, "BOTTOMRIGHT", self.CLASSIC_PANEL_GAP, 0)
     else
-        panel:SetPoint("TOPRIGHT", pageFrame, "TOPRIGHT", -4, -110)
-        panel:SetPoint("BOTTOMRIGHT", pageFrame, "BOTTOMRIGHT", -4, 10)
+        panel:SetPoint("TOPLEFT", pageFrame, "TOPRIGHT", self.CLASSIC_PANEL_GAP, -110)
+        panel:SetPoint("BOTTOMLEFT", pageFrame, "BOTTOMRIGHT", self.CLASSIC_PANEL_GAP, 10)
     end
 end
 

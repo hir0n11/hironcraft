@@ -20,11 +20,13 @@ does not mark a later request from the same customer as complete.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Crafting orders interface (0.3.0)
+## Crafting orders interface (0.3.1)
 
-The order list and controls now share Blizzard's profession window. Native
-buttons, standard fonts, framed panels and gold selection highlights replace
-the external flat sidebar. Existing queue settings and key bindings are kept.
+The order list uses the full width of Blizzard's profession window, with the
+control panel attached outside its right edge. Native buttons, framed panels
+and gold selection highlights keep the classic WoW look. Cyrillic-capable
+addon fonts keep Russian labels readable on English clients too. Existing
+queue settings and key bindings are kept.
 
 - **Crafting** contains reagent quality, concentration, finishers and tools.
 - **Queue** contains profit filters, automatic selection and shopping.

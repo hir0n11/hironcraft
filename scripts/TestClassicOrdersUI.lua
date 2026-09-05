@@ -75,8 +75,8 @@ function methods:SetAtlas(texture) self.texture = texture end
 function methods:SetBackdrop(value) self.backdrop = value end
 function methods:SetBackdropColor(r,g,b,a) self.fill = {r,g,b,a} end
 function methods:SetBackdropBorderColor(r,g,b,a) self.border = {r,g,b,a} end
-function methods:SetFont(_, size) self.fontSize = size end
-function methods:SetFontObject() self.fontSize = 12 end
+function methods:SetFont(path, size) self.fontPath, self.fontSize = path, size end
+function methods:SetFontObject() self.fontPath, self.fontSize = STANDARD_TEXT_FONT, 12 end
 function methods:SetJustifyH(value) self.justify = value end
 function methods:GetStringWidth() return #(self.text or '') * 6 end
 function methods:GetFontString()
@@ -114,6 +114,7 @@ local CO, PT = {}, { L = {} }
 PT.CraftingOrders = CO
 HironCraftProfit = PT
 STANDARD_TEXT_FONT = 'Fonts/FRIZQT__.TTF'
+PT.FONT = 'Interface\\AddOns\\HironCraft\\ProfitHub\\Core\\fonts\\default.ttf'
 SlashCmdList = {}
 GameFontNormalSmall, GameFontNormal, GameFontHighlightSmall = {}, {}, {}
 CreateFrame = function(kind, _, parent, template) return frame(kind, parent, template) end
@@ -121,15 +122,14 @@ GetLocale = function() return arg[2] == 'en' and 'enUS' or 'ruRU' end
 wipe = function(t) for k in pairs(t) do t[k] = nil end end
 Enum = { CraftingOrderType = { Npc = 4, Personal = 3 } }
 C_Timer = { After = noop }
-local E = setmetatable({ CO=CO, PT=PT, CreateBackdrop=noop, ApplyFont=function(f,size) f:SetFont('',size) end,
-    T=function(key,fallback) return PT.L[key] or fallback end,
-    HideStyledTooltip=noop,
-}, {__index=_G})
+C_CraftingOrders, C_TradeSkillUI = {}, {}
+local E = setmetatable({ CO=CO, PT=PT }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv = E
 dofile('ProfitHub/Core/Locales/enUS.lua')
 dofile('ProfitHub/Core/Locales/ruRU.lua')
 dofile('ProfitHub/Orders/Locale.lua')
 PT.L = arg[2] == 'en' and PT.L_enUS or PT.L_ruRU
+dofile('ProfitHub/Orders/Core/CraftingOrders_Core.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Rows.lua')
 dofile('ProfitHub/Orders/CraftingOrders/ClassicTheme.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Panel.lua')
@@ -157,6 +157,11 @@ anchor:SetPoint('BOTTOMRIGHT', -8, 8)
 page.BrowseFrame.OrderList = anchor
 CO:EnsureControlPanel(page)
 local panel = CO.controlPanel
+assert(panel.titleFS.fontPath == PT.FONT, 'panel title lost the Cyrillic-capable font')
+assert(panel.keyText.fontPath == PT.FONT, 'binding label lost the Cyrillic-capable font')
+assert(panel.runActionButton.text.fontPath == PT.FONT, 'action label lost the Cyrillic-capable font')
+CO:StyleClassicButton(panel.runActionButton, true)
+assert(panel.runActionButton.text.fontPath == PT.FONT, 'native button styling reset the font')
 local craft, queue = panel.classicPages.craft, panel.classicPages.queue
 assert(craft.scroll:IsVisible() and not queue.scroll:IsVisible())
 assert(panel.reagentSeg:GetParent() == craft.body)
@@ -173,6 +178,7 @@ assert(calls == 1, 'action click no longer dispatches exactly one step')
 panel.classicTabs.craft:Click()
 local CL = CO.CustomList
 local container = CL:EnsureScrollFrame(page)
+assert(container.countText.fontPath == PT.FONT, 'list labels lost the Cyrillic-capable font')
 local row = CL:CreateRow(container.content, 1)
 container.rows[1] = row
 row:SetPoint('TOPLEFT', container.content, 'TOPLEFT', 0, 0)
@@ -189,6 +195,11 @@ for _, width in ipairs({640, 792, 1020, 1250}) do
         assert(rh == CL:RowHeight(), 'row anchors stretch its height')
         local ax,_,aw = bounds(row.action)
         local px = bounds(panel)
+        local lx, ly, lw, lh = bounds(anchor)
+        local cx, cy, cw, ch = bounds(container)
+        assert(cx == lx and cy == ly and cw == lw and ch == lh, 'list no longer fills the original order area')
+        assert(px == lx + lw + CO.CLASSIC_PANEL_GAP, 'settings panel is not outside the order list')
+        assert(panel:GetWidth() == CO.CLASSIC_PANEL_WIDTH, 'external panel width changed')
         assert(ax >= rx and ax + aw <= rx + rw + .1, 'action outside the list')
         assert(rx + rw < px, 'list overlaps the settings pane')
         local cols = CL:ActiveCols()
@@ -204,6 +215,15 @@ for _, height in ipairs({390,490,590}) do
     local _, fy = bounds(panel.footer)
     assert(sh > 0 and sy + sh < fy, 'settings overlap the persistent footer')
 end
+local fallbackPage = frame('Frame')
+fallbackPage:SetSize(1060, 680)
+local fallbackPanel = frame('Frame', fallbackPage)
+fallbackPanel:SetWidth(CO.CLASSIC_PANEL_WIDTH)
+CO:AnchorControlPanelToOrderList(fallbackPanel, fallbackPage)
+local fallbackX, _, fallbackWidth = bounds(fallbackPanel)
+assert(fallbackX == 1060 + CO.CLASSIC_PANEL_GAP and fallbackWidth == CO.CLASSIC_PANEL_WIDTH,
+    'panel fallback anchor moved inside the profession window')
+fallbackPanel:Hide()
 local icons = {}
 for i=1,12 do
     local icon = frame('Button', row.reagentsBar)

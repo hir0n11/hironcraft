@@ -11,10 +11,10 @@ async function render(tab) {
     const result = spawnSync(process.execPath, [lua,'scripts/TestClassicOrdersUI.lua','--scene','ru',tab], {cwd:root, encoding:'utf8'});
     if (result.status || result.stderr || !result.stdout.includes('Classic orders UI tests passed.')) throw new Error(result.stderr || result.stdout);
     const scene = result.stdout.split(/\r?\n/).filter(l=>l.startsWith('UI ')).map(l=>JSON.parse(l.slice(3)));
-    let content = `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="740"><defs>
+    let content = `<svg xmlns="http://www.w3.org/2000/svg" width="1330" height="740"><defs>
     <linearGradient id="panel" x2="0" y2="1"><stop stop-color="#332c23"/><stop offset="1" stop-color="#171512"/></linearGradient>
     <linearGradient id="button" x2="0" y2="1"><stop stop-color="#9b231c"/><stop offset=".45" stop-color="#671410"/><stop offset="1" stop-color="#3e0b09"/></linearGradient></defs>
-    <rect width="1100" height="740" fill="#121110"/><rect x="10" y="12" width="1080" height="692" rx="6" fill="url(#panel)" stroke="#9b8a67" stroke-width="3"/>
+    <rect width="1330" height="740" fill="#121110"/><rect x="10" y="12" width="1044" height="692" rx="6" fill="url(#panel)" stroke="#9b8a67" stroke-width="3"/>
     <text x="550" y="36" text-anchor="middle" fill="#ffd100" font-family="Arial" font-size="16">HironCraft · Заказы на изготовление</text>
     <text x="550" y="726" text-anchor="middle" fill="#a19b90" font-family="Arial" font-size="12">Предпросмотр компоновки • В игре используются текстуры и кнопки Blizzard</text>
     <rect x="24" y="70" width="220" height="590" rx="3" fill="#171512" stroke="#6d6049"/>

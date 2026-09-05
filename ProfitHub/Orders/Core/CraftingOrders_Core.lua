@@ -16,7 +16,10 @@ PT.CraftingOrders = PT.CraftingOrders or {}
 CO = PT.CraftingOrders
 _G.HironCraftProfitCraftingOrders = CO
 
-FONT = STANDARD_TEXT_FONT
+-- The Orders locale can be Russian even on an English client. A direct
+-- STANDARD_TEXT_FONT assignment bypasses Blizzard's font-family fallbacks.
+FONT = PT.FONT or "Interface\\AddOns\\HironCraft\\ProfitHub\\Core\\fonts\\default.ttf"
+CO.FONT = FONT
 ROW_BUTTON_W = 74
 ROW_BUTTON_H = 28
 ROW_CHECKBOX_SIZE = 22

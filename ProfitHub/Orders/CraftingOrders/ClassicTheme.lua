@@ -3,7 +3,7 @@ if not E or not E.CO then return end
 setfenv(1, E)
 
 -- A single, Blizzard-native presentation for the order workflow. The shell
--- lives inside the existing Orders page; it never resizes Blizzard's window.
+-- sits outside the Orders page; it never resizes Blizzard's window or list.
 CO.CLASSIC_PANEL_WIDTH = 244
 CO.CLASSIC_PANEL_GAP = 8
 
@@ -34,6 +34,7 @@ function CO:StyleClassicButton(button, selected, unavailable)
     local label = button.text or button.label
     if label then
         label:SetFontObject(GameFontNormalSmall)
+        ApplyFont(label, 11, "")
         label:SetTextColor(unavailable and 0.55 or 1, unavailable and 0.55 or 0.82, unavailable and 0.55 or 0.2)
     end
 end
