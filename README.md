@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable completion after a rejected order (0.3.13)
+
+Replaying a linked-account rejection no longer turns a successfully completed
+replacement back into a cross. For the same customer request, fulfillment takes
+precedence over rejection even when the replacement has a different Blizzard
+order ID or an older client inflated the rejection's timestamp/revision.
+
+Journal replay resolves the matching outcomes together and preserves the
+original event time instead of recording the replay as a new event. Existing
+stale crosses are repaired when matching fulfillment evidence is available.
+New customer requests, manual clearing and authoritative errors after optimistic
+fulfillment remain separate. Regression coverage exercises repeated and
+out-of-order replays, persisted stale statuses and request reuse with mocked APIs.
+Update linked accounts too so both clients use the corrected merge rules.
+
 ## Monitored item links and multi-item requests (0.3.12)
 
 Chat scanning now recognizes a link to an item from a monitored recipe even

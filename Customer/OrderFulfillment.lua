@@ -249,6 +249,23 @@ local function EntriesEquivalent(candidate, current)
         and tostring(candidate.result or '') == tostring(current.result or '')
 end
 
+-- Declining an order is not a permanent failure of the customer's request:
+-- they can resend it with corrected reagents under a different Blizzard ID.
+-- Once that request succeeds, replaying its earlier decline cannot undo it.
+-- Do not apply this rule to Failed: an authoritative server error may need to
+-- replace the optimistic "fulfill_requested" mark.
+local function PreferFulfillment(candidate, current)
+    if candidate.status == OrderFulfillment.Status.Fulfilled
+        and current.status == OrderFulfillment.Status.Rejected then
+        return true
+    end
+    if candidate.status == OrderFulfillment.Status.Rejected
+        and current.status == OrderFulfillment.Status.Fulfilled then
+        return false
+    end
+    return nil
+end
+
 local function EntryIsNewer(candidate, current)
     if not current then
         return true
@@ -256,6 +273,10 @@ local function EntryIsNewer(candidate, current)
 
     local sameRequest = SameRequest(candidate, current)
     if sameRequest then
+        if candidate.automatic ~= false and current.automatic ~= false then
+            local preference = PreferFulfillment(candidate, current)
+            if preference ~= nil then return preference end
+        end
         -- Revisions are created independently on linked accounts and therefore
         -- are not globally comparable. For one concrete customer request, a
         -- terminal outcome must always beat an in-progress state, even when the
@@ -469,19 +490,12 @@ end
 local function FindCompletionNotice(order)
     local newest = nil
     for _, notice in pairs(EnsureCompletionStorage()) do
-        if
-            CompletionNoticeMatchesOrder(notice, order)
-            and (
-                not newest
-                or (notice.updatedAt or 0) > (newest.updatedAt or 0)
-                or (
-                    (notice.updatedAt or 0) == (newest.updatedAt or 0)
-                    and notice.status == OrderFulfillment.Status.Fulfilled
-                    and newest.status ~= OrderFulfillment.Status.Fulfilled
-                )
-            )
-        then
-            newest = notice
+        if CompletionNoticeMatchesOrder(notice, order) then
+            local preference = newest and PreferFulfillment(notice, newest)
+            if not newest or preference == true
+                or (preference == nil and (notice.updatedAt or 0) > (newest.updatedAt or 0)) then
+                newest = notice
+            end
         end
     end
     return newest
@@ -699,7 +713,15 @@ function OrderFulfillment:GetStatus(order)
         repaired.repairedDuplicateFulfill = true
         return repaired
     end
-    if entry and (not notice or (entry.updatedAt or 0) >= (notice.updatedAt or 0)) then
+    -- Both records have already been matched to the visible request. Prefer
+    -- its success over a rejection re-timestamped by an older addon version,
+    -- but preserve explicit manual marks and authoritative failure handling.
+    local noticePreference
+    if entry and notice and entry.automatic ~= false then
+        noticePreference = PreferFulfillment(notice, entry)
+    end
+    if entry and (not notice or noticePreference == false
+        or (noticePreference ~= true and (entry.updatedAt or 0) >= (notice.updatedAt or 0))) then
         if entry.status == self.Status.Unknown then
             return nil
         end
@@ -844,12 +866,18 @@ function OrderFulfillment:FindGenericOrders(orderInfo)
     return matches
 end
 
-local function MayTransition(current, status, craftingOrderID, requestToken)
+local function MayTransition(current, status, craftingOrderID, requestToken, requestTime)
     if not current or current.status == OrderFulfillment.Status.Unknown then
         return true
     end
     if requestToken and current.requestToken ~= requestToken then
         return true
+    end
+    if current.status == OrderFulfillment.Status.Fulfilled
+        and status == OrderFulfillment.Status.Rejected
+        and SameRequest({requestToken=requestToken, requestTime=requestTime,
+            craftingOrderID=craftingOrderID}, current) then
+        return false
     end
     if
         craftingOrderID
@@ -888,7 +916,7 @@ function OrderFulfillment:SetStatus(order, status, options)
     local requestToken = response and response.requestToken
     if
         not options.force
-        and not MayTransition(current, status, craftingOrderID, requestToken)
+        and not MayTransition(current, status, craftingOrderID, requestToken, response and response.time)
     then
         return current, false
     end
@@ -899,7 +927,7 @@ function OrderFulfillment:SetStatus(order, status, options)
         status = status,
         craftingOrderID = craftingOrderID,
         crafterFullName = options.crafterFullName or HironCraftScan.GetPlayerName(true),
-        updatedAt = time(),
+        updatedAt = tonumber(options.updatedAt) or time(),
         automatic = options.automatic ~= false,
         result = ResultForStorage(options.result),
         rev = (current and current.rev or 0) + 1,
@@ -996,12 +1024,31 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
         -- and does not have to wait for a later journal/UI reconciliation.
         for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
             if CompletionNoticeMatchesOrder(completion, order) then
-                self:SetStatus(order, completion.status, {
-                    craftingOrderID = completion.orderID,
-                    crafterFullName = completion.crafterFullName,
-                    automatic = true,
-                    result = 'completion_notice',
-                })
+                -- A retry is not a new game event. Resolve the whole journal
+                -- first (including a later successful replacement), then keep
+                -- its original timestamp when materializing the exact row.
+                local best = FindCompletionNotice(order)
+                local response = ResponseForOrder(order)
+                local stored = EnsureStorage()[HironCraftScan.OrderToOrderID(order)]
+                local candidate = best and response and {
+                    status = best.status,
+                    craftingOrderID = best.orderID,
+                    updatedAt = best.updatedAt,
+                    requestToken = response.requestToken,
+                    requestTime = tonumber(response.time),
+                }
+                local manualOverride = stored and stored.automatic == false and best
+                    and (stored.updatedAt or 0) >= best.updatedAt
+                if candidate and not manualOverride and EntryIsNewer(candidate, stored) then
+                    self:SetStatus(order, best.status, {
+                        craftingOrderID = best.orderID,
+                        crafterFullName = best.crafterFullName,
+                        updatedAt = best.updatedAt,
+                        automatic = true,
+                        result = 'completion_notice',
+                        force = true, -- The merge above already validated this transition.
+                    })
+                end
             end
         end
     end
