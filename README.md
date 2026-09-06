@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Scanner recovery (0.3.10)
+
+Stale chat-order references no longer abort dismissal, page refresh or login
+when their customer/response is missing. Expired or incomplete rows are removed
+without resetting profession settings or unrelated customer conversations.
+The alert portrait falls back to a profession icon if its active order is stale.
+An error in one scanner UI initializer is reported to WoW's error handler without
+preventing the remaining initializers from running.
+
+Scanner settings and profession-tab buttons now have HironCraft-specific global
+identifiers, avoiding the remaining collisions with the original CraftScan.
+Existing saved settings keep their values; no manual SavedVariables reset is needed.
+These regressions have standalone test coverage; the reported user's exact
+failure still needs confirmation in-game with their saved data/addon combination.
+
 ## Crafting orders interface (0.3.9)
 
 The order list uses the full width of Blizzard's profession window, with the

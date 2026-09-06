@@ -919,16 +919,19 @@ local function MakeGreetingBuilder()
 end
 
 HironCraftScan.OrderToCustomerInfo = function(order)
-    local customers = HironCraftScan.DB.customers
-    if not customers then
+    local customers = HironCraftScan.DB and HironCraftScan.DB.customers
+    if type(order) ~= 'table' or type(customers) ~= 'table' then
         return nil
     end
-    return customers[order.customerName]
+    local customer = customers[order.customerName]
+    return type(customer) == 'table' and customer or nil
 end
 
 HironCraftScan.OrderToResponse = function(order)
-    local customers = HironCraftScan.DB.customers
-    return customers[order.customerName].responses[order.responseID]
+    local customer = HironCraftScan.OrderToCustomerInfo(order)
+    local responses = customer and customer.responses
+    local response = type(responses) == 'table' and responses[order.responseID]
+    return type(response) == 'table' and response or nil
 end
 
 HironCraftScan.OrderToLiveCustomerInfo = function(order, default)

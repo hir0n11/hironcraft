@@ -252,7 +252,7 @@ HironCraftScan.Utils.onLoad(function()
         end)
         CreateSlider(
             category,
-            'CRAFTSCAN_CUSTOMER_TIMEOUT',
+            'HIRONCRAFT_SCAN_CUSTOMER_TIMEOUT',
             'customer_timeout',
             L(LID.CUSTOMER_TIMEOUT_LABEL),
             options,
@@ -266,7 +266,7 @@ HironCraftScan.Utils.onLoad(function()
         end)
         CreateSlider(
             category,
-            'CRAFTSCAN_BANNER_TIMEOU',
+            'HIRONCRAFT_SCAN_BANNER_TIMEOUT',
             'banner_timeout',
             L(LID.BANNER_TIMEOUT_LABEL),
             options,
@@ -280,7 +280,7 @@ HironCraftScan.Utils.onLoad(function()
         end)
         CreateSlider(
             category,
-            'CRAFTSCAN_AUTO_REPLY_DELAY',
+            'HIRONCRAFT_SCAN_AUTO_REPLY_DELAY',
             'auto_reply_delay',
             'Auto reply delay',
             options,
@@ -294,7 +294,7 @@ HironCraftScan.Utils.onLoad(function()
         end)
         CreateSlider(
             category,
-            'CRAFTSCAN_ALERT_ICON_SCALE',
+            'HIRONCRAFT_SCAN_ALERT_ICON_SCALE',
             'alert_icon_scale',
             L('Alert icon scale'),
             options,
@@ -311,7 +311,7 @@ HironCraftScan.Utils.onLoad(function()
         end)
         CreateSlider(
             category,
-            'CRAFTSCAN_BUTTON_HEIGHT',
+            'HIRONCRAFT_SCAN_BUTTON_HEIGHT',
             'show_button_height',
             L('Show button height'),
             options,
@@ -332,7 +332,7 @@ HironCraftScan.Utils.onLoad(function()
 
         local setting = Settings.RegisterProxySetting(
             category,
-            'CRAFTSCAN_DISCOVERABLE',
+            'HIRONCRAFT_SCAN_DISCOVERABLE',
             Settings.VarType.Boolean,
             L('Discoverable to customers'),
             Settings.Default.True,
@@ -353,7 +353,7 @@ HironCraftScan.Utils.onLoad(function()
 
         local setting = Settings.RegisterProxySetting(
             category,
-            'CRAFTSCAN_PERMISSIVE_MATCHING',
+            'HIRONCRAFT_SCAN_PERMISSIVE_MATCHING',
             Settings.VarType.Boolean,
             L('Permissive keyword matching'),
             Settings.Default.True,
@@ -375,7 +375,7 @@ HironCraftScan.Utils.onLoad(function()
 
         local setting = Settings.RegisterProxySetting(
             category,
-            'CRAFTSCAN_SHOW_CHAT_ORDERS_BUTTON',
+            'HIRONCRAFT_SCAN_SHOW_CHAT_ORDERS_BUTTON',
             Settings.VarType.Boolean,
             L('Show chat orders tab'),
             Settings.Default.True,
@@ -395,7 +395,7 @@ HironCraftScan.Utils.onLoad(function()
 
         local setting = Settings.RegisterProxySetting(
             category,
-            'CRAFTSCAN_COLLAPSE_CHAT_CONTEXT',
+            'HIRONCRAFT_SCAN_COLLAPSE_CHAT_CONTEXT',
             Settings.VarType.Boolean,
             L('Collapse chat context menu'),
             Settings.Default.False,

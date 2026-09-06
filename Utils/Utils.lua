@@ -1061,14 +1061,16 @@ HironCraftScan.Utils.GetCurrentProfessionIcon = function()
         -- If we have an active order, return the icon associated with the
         -- requested profession to give a good visual queue about the request.
         local response = HironCraftScan.OrderToResponse(HironCraftScan.State.activeOrder)
-        return HironCraftScan.CONST.MIDNIGHT_PROFESSION_ICONS[response.professionID]
-            or HironCraftScan.CONST.PARENT_PROFESSION_ICONS[response.parentProfID]
+        if response then
+            return HironCraftScan.CONST.MIDNIGHT_PROFESSION_ICONS[response.professionID]
+                or HironCraftScan.CONST.PARENT_PROFESSION_ICONS[response.parentProfID]
+        end
     end
 
     -- Otherwise, fall back to one of our professions - the one that we're near
     -- the crafting table for if possible.
     local prof = nil
-    for _, p in ipairs(HironCraftScan.CONST.PROFESSIONS) do
+    for _, p in ipairs(HironCraftScan.CONST.PROFESSIONS or {}) do
         if C_TradeSkillUI.IsNearProfessionSpellFocus(p.profession) then
             return p.icon
         elseif HironCraftScan.State.professionID == p.professionID then
@@ -1083,6 +1085,12 @@ end
 local loginFrame = CreateFrame('Frame')
 local loadOnLogin = {}
 local requiredAddons = { 'HironCraft', 'Blizzard_Professions' }
+local function RunLoadCallback(callback)
+    -- Keep unrelated UI initializers running, but still report the original
+    -- Lua error through WoW's error handler (or BugSack/BugGrabber).
+    xpcall(callback, geterrorhandler())
+end
+
 function HironCraftScan.Utils.onLoad(onLoad)
     if not C_AddOns.IsAddOnLoaded('Blizzard_Professions') then
         C_AddOns.LoadAddOn('Blizzard_Professions')
@@ -1103,16 +1111,19 @@ function HironCraftScan.Utils.onLoad(onLoad)
                 loginFrame:SetScript('OnEvent', function(self, event, ...)
                     if event == 'PLAYER_LOGIN' then
                         doOnce()
+                        self:UnregisterEvent('PLAYER_LOGIN')
+                        self:SetScript('OnEvent', nil)
                         for _, onLoad in ipairs(loadOnLogin) do
-                            onLoad()
+                            RunLoadCallback(onLoad)
                         end
+                        loadOnLogin = {}
                         loginFrame = nil
                     end
                 end)
             end
         else
             doOnce()
-            onLoad()
+            RunLoadCallback(onLoad)
         end
     end
 

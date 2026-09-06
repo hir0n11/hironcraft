@@ -42,25 +42,34 @@ function HironCraftScanCrafterOrderListElementMixin:Init(elementData)
     self.contextMenu = elementData.contextMenu;
 end
 
-local function removeOrder(orders, order)
-    local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
-    local response = customerInfo.responses[order.responseID]
-    local orderID = HironCraftScan.OrderToOrderID(order)
+local function removeOrder(orders, order, orderID)
+    -- A saved list row can outlive its customer/response (including aliases
+    -- removed by an earlier row). Always remove the row itself in that case.
+    if not orderID then
+        orderID = HironCraftScan.OrderToOrderID(order)
+    end
+    orders[orderID] = nil
+    if HironCraftScan.State.activeOrder == order then
+        HironCraftScan.State.activeOrder = nil
+    end
 
-    if HironCraftScan.State.activeOrder == orders[orderID] then
-        HironCraftScan.State.activeOrder = nil;
+    local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
+    if not customerInfo or type(customerInfo.responses) ~= 'table' or order.responseID == nil then
+        return
     end
 
     -- Wipe out any less granular reponses related to this one
     local response = customerInfo.responses[order.responseID];
-    if not response then
-        -- A less_granular child that was already wiped out. Nothing left to do.
-        return
-    end
-
-    if response.less_granular then
+    if type(response) == 'table' and type(response.less_granular) == 'table' then
         for _, child in ipairs(response.less_granular) do
-            customerInfo.responses[child] = nil
+            local childResponse = customerInfo.responses[child]
+            -- Do not delete a newer request that has since reused this alias.
+            if childResponse == response or (type(childResponse) == 'table'
+                and childResponse.responseID == order.responseID
+                and childResponse.requestToken == response.requestToken
+                and childResponse.time == response.time) then
+                customerInfo.responses[child] = nil
+            end
         end
     end
     customerInfo.responses[order.responseID] = nil
@@ -69,7 +78,7 @@ local function removeOrder(orders, order)
     -- Clear that out in case there's a bug somewhere creating them. No idea how
     -- it happened. Hopefully just something during development.
     for key, value in pairs(customerInfo.responses) do
-        if not next(value) then
+        if type(value) == 'table' and not next(value) then
             customerInfo.responses[key] = nil;
         end
     end
@@ -86,15 +95,16 @@ local function removeOrder(orders, order)
         end
         HironCraftScan.DB.customers[order.customerName] = nil
     end
-
-    -- Remove ourselves from the global list of displayed orders
-    orders[orderID] = nil
 end
 
 function HironCraftScan.GreetCustomer(button, order)
     HironCraftScanScannerMenu:ClearAlert(order)
 
     local response = HironCraftScan.OrderToResponse(order)
+    if not response then
+        HironCraftScan.DismissOrder(order)
+        return
+    end
     if button == "LeftButton" or button == "MiddleButton" then
         HironCraftScan.QuickReplies:RememberConversationCharacter(response)
     end
@@ -281,13 +291,13 @@ local function PurgeOldOrders()
     local timeout = HironCraftScan.Utils.GetSetting('customer_timeout') * 60;
     for orderID, order in pairs(orders) do
         local response = HironCraftScan.OrderToResponse(order)
-        if not response or now - response.time > timeout then
-            table.insert(old, order)
+        if not response or type(response.time) ~= 'number' or now - response.time > timeout then
+            table.insert(old, { id = orderID, order = order })
         end
     end
 
-    for _, order in ipairs(old) do
-        removeOrder(orders, order)
+    for _, entry in ipairs(old) do
+        removeOrder(orders, entry.order, entry.id)
     end
 
     return #old ~= 0
@@ -402,6 +412,7 @@ function HironCraftScanCraftingOrderPageMixin:UpdateAnalytics()
 end
 
 function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
+    PurgeOldOrders()
     local scrollBox = self.BrowseFrame.OrderList.ScrollBox;
     scrollBox:Show();
 
@@ -2199,7 +2210,7 @@ local function SetAutoReplyTimeout()
     end
 
     if not autoReplyConfirmationFrame then
-        autoReplyConfirmationFrame = CreateFrame("Frame", "AutoReplyConfirmation", UIParent,
+        autoReplyConfirmationFrame = CreateFrame("Frame", "HironCraftScanAutoReplyConfirmation", UIParent,
             "HironCraftScan_AutoReplyConfirmationTemplate")
         autoReplyConfirmationFrame:SetScript("OnKeyDown", function(self, key)
             if autoReplyConfirmationFrame:IsShown() then
@@ -2369,7 +2380,7 @@ HironCraftScan.Utils.onLoad(function()
 
     local lastButton = nil;
     for i, profession in ipairs(HironCraftScan.CONST.PROFESSIONS) do
-        local profButton = CreateFrame("Button", "OpenChatOrdersButton" .. i, frame,
+        local profButton = CreateFrame("Button", "HironCraftScanOpenProfessionButton" .. i, frame,
             "HironCraftScan_OpenProfessionButtonTemplate");
         profButton.profession = profession;
         if lastButton then
@@ -2386,7 +2397,7 @@ HironCraftScan.Utils.onLoad(function()
     local initialized = false;
     ProfessionsFrame:HookScript("OnShow", function()
         if not initialized then
-            openChatOrdersFrame = CreateFrame("Button", "OpenChatOrdersButton", ProfessionsFrame,
+            openChatOrdersFrame = CreateFrame("Button", "HironCraftScanOpenChatOrdersButton", ProfessionsFrame,
                 "HironCraftScan_OpenChatOrdersButtonTemplate");
             openChatOrdersFrame:Init();
             openChatOrdersFrame:SetPoint("TOPLEFT", ProfessionsFrame.TabSystem, "TOPRIGHT", 2, 0);
