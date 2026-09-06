@@ -413,7 +413,7 @@ local function IsScanningEnabled(crafterInfo)
     return ppConfig.scanning_enabled
 end
 
-local function RecipeIdForKeywords(message, profConfig)
+local function RecipeIdForKeywords(message, profConfig, armorContext)
     local recipeConfigs = profConfig.recipes
     if not recipeConfigs then
         return nil
@@ -431,7 +431,8 @@ local function RecipeIdForKeywords(message, profConfig)
                 ParseStringList(recipeConfig.keywords),
                 recipeConfig.secondary_keywords
             )
-            if matchLen then
+            if matchLen and (not armorContext or HironCraftScan.ClassMatching.MatchesRecipe(
+                armorContext, C_TradeSkillUI.GetRecipeInfo(id))) then
                 if
                     not len
                     or len < matchLen
@@ -449,10 +450,10 @@ local function RecipeIdForKeywords(message, profConfig)
     return result
 end
 
-local function GetRequestID(message, crafterInfo, profConfig)
+local function GetRequestID(message, crafterInfo, profConfig, armorContext)
     local recipeID = crafterInfo.recipeID
     if not recipeID then
-        recipeID = RecipeIdForKeywords(message, profConfig)
+        recipeID = RecipeIdForKeywords(message, profConfig, armorContext)
         if not recipeID then
             return nil
         end
@@ -826,7 +827,7 @@ local function GetMonitoredItemMatches(message)
     return matches
 end
 
-local function GetCrafterForMessage(customer, message, overrides)
+local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     local originalMessage = message
     message = string.lower(message)
 
@@ -917,6 +918,13 @@ local function GetCrafterForMessage(customer, message, overrides)
         end
     end
 
+    local armorContext
+    if HironCraftScan.ClassMatching and not (overrides and overrides.forceCrafterInfo) then
+        local existing = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
+        armorContext = HironCraftScan.ClassMatching.GetContext(originalMessage,
+            customerGuid or (existing and existing.guid),
+            HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass)
+    end
     local bestMatch = nil
 
     local function FindBestCrafter(crafterInfo)
@@ -931,7 +939,7 @@ local function GetCrafterForMessage(customer, message, overrides)
             local maxProfID = 0
             for pID, pConfig in pairs(crafterConfig.professions) do
                 if pConfig.parentProfID == crafterInfo.parentProfID then
-                    local recipeInfo = GetRequestID(message, crafterInfo, pConfig)
+                    local recipeInfo = GetRequestID(message, crafterInfo, pConfig, armorContext)
                     if recipeInfo then
                         return { crafter = crafterInfo.crafter, profID = pID }, nil, recipeInfo
                     end
@@ -943,7 +951,7 @@ local function GetCrafterForMessage(customer, message, overrides)
             end
 
             local profID = maxProfID
-            if profID ~= nil and not bestMatch then
+            if profID > 0 and not bestMatch then
                 bestMatch = { crafter = crafterInfo.crafter, profID = profID }
             end -- Keep looking for other crafters with keywords that match something specific.
         end
@@ -951,7 +959,8 @@ local function GetCrafterForMessage(customer, message, overrides)
 
     for _, crafterInfo in ipairs(config.prof_keywords) do
         if
-            HasMatch(message, crafterInfo.keywords)
+            ((armorContext and crafterInfo.parentProfID == armorContext.parentProfID)
+                or (not armorContext and HasMatch(message, crafterInfo.keywords)))
             and not HasMatch(message, crafterInfo.exclusions)
         then
             local crafterInfo, itemID, recipeInfo = FindBestCrafter(crafterInfo)
@@ -1785,7 +1794,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(
                 customer,
                 message,
-                overrides
+                overrides,
+                customerGuid
             )
             if not crafterInfo then
                 return false
@@ -1805,7 +1815,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     end
 
     if not crafterInfo then
-        crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(customer, message, overrides)
+        crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
     if not crafterInfo then
         return false

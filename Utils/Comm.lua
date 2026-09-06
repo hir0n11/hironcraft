@@ -716,6 +716,7 @@ function HironCraftScanComm:ShareCustomerOrder(
         customer = customer,
         customerGuid = customerGuid,
         lastChatFrameMessage = HironCraftScan.Utils.DeepCopy(lastChatFrameMessage),
+        customerClass = HironCraftScan.ClassMatching and HironCraftScan.ClassMatching.ResolveClass(customerGuid),
         requestToken = requestToken,
         restartTerminalRequest = restartTerminalRequest == true,
         requestTokens = requestTokens,
@@ -834,6 +835,7 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
             requestToken = data.requestToken,
             requestTokens = data.requestTokens,
             restartTerminalRequest = data.restartTerminalRequest == true,
+            customerClass = data.customerClass,
             conversationOwners = data.lastChatFrameMessage and data.lastChatFrameMessage.conversationOwners,
         }
     )

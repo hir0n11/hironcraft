@@ -498,4 +498,6 @@ L["Crafting order mark help"] = "|cffffd100ПКМ: отметить выполн
 L["Crafting order clear help"] = "|cffffd100ПКМ: очистить статус|r"
 L["Reply could not be sent: an item link is incomplete or too long. Try again after the item information loads."] = "Ответ не отправлен: ссылка на предмет неполная или слишком длинная. Повтори попытку после загрузки данных предмета."
 L["Scan monitored item links without keywords"] = "Отслеживаемые предметы без ключевых слов"
+L["Use customer class for armor requests"] = "Учитывать класс клиента в запросах брони"
+L["Use the sender class for generic armor slots without item links or explicit professions. Unknown class keeps normal matching."] = "Выбирать тип брони по классу автора для общих запросов слота без ссылки на предмет и явно указанной профессии. Если класс неизвестен, сохраняется обычный подбор."
 L["Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply."] = "Распознавать ссылки на предметы отслеживаемых рецептов даже без LF и других поисковых слов. Фильтры исключений продолжают действовать."

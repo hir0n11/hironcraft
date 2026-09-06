@@ -489,5 +489,7 @@ HironCraftScan.L = {
     ['Crafting order clear help'] = '|cffffd100Right click: Clear status|r',
     ['Reply could not be sent: an item link is incomplete or too long. Try again after the item information loads.'] = 'Reply could not be sent: an item link is incomplete or too long. Try again after the item information loads.',
     ['Scan monitored item links without keywords'] = 'Scan monitored item links without keywords',
+    ['Use customer class for armor requests'] = 'Use customer class for armor requests',
+    ['Use the sender class for generic armor slots without item links or explicit professions. Unknown class keeps normal matching.'] = 'Use the sender class for generic armor slots without item links or explicit professions. Unknown class keeps normal matching.',
     ['Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply.'] = 'Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply.',
 }

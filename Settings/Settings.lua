@@ -366,6 +366,20 @@ HironCraftScan.Utils.onLoad(function()
         initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
     end
     do
+        local setting = Settings.RegisterProxySetting(
+            category,
+            'HIRONCRAFT_SCAN_MATCH_CUSTOMER_CLASS',
+            Settings.VarType.Boolean,
+            L('Use customer class for armor requests'),
+            true,
+            function() return HironCraftScan.DB.settings.match_customer_class ~= false end,
+            function(value) HironCraftScan.DB.settings.match_customer_class = value end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting,
+            L('Use the sender class for generic armor slots without item links or explicit professions. Unknown class keeps normal matching.'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
+    do
         local GetValue = function()
             return HironCraftScan.DB.settings.show_chat_orders_tab
         end

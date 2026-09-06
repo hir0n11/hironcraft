@@ -53,6 +53,7 @@ HironCraftScanScannerMenu = {ClearAlert=noop}
 function ChatFrame_SendTell() opened=opened+1 end
 Scan.QuickReplies = {
     ApplyConversationOwners=noop, GetConversationOwners=function() return {} end,
+    RememberCustomerConversation=function() return {} end, OnWhisper=noop,
     RememberConversationCharacter=function(_, response) response.conversationCharacter='Seller-Realm' end,
 }
 local function link(id, variant)
@@ -89,6 +90,7 @@ loadSource('Utils/Utils.lua')
 Scan.Utils.onLoad = noop
 loadSource('Utils/FStrings.lua')
 loadSource('Customer/ChatHistory.lua')
+loadSource('Customer/ClassMatching.lua')
 loadSource('Customer/ChatScanner.lua')
 loadSource('Customer/OrderGreetings.lua')
 loadSource('Customer/OrderPage.lua')
@@ -319,3 +321,136 @@ Scan.DB.settings.ignored={Buyer=true}
 scan(a .. b)
 assert(countRows()==0 and #shared==0, 'ignored customer bypassed exclusion')
 print('Item-link request tests passed (filters, unique rows, grouped replies, tokens, timers, long links, saved repair).')
+
+-- Generic armor requests: deliberately put the WRONG armor crafter first.
+-- Exercise matching, actual order creation, whisper follow-ups and manual send.
+reset()
+Scan.DB.settings.ignored=nil
+Scan.DB.settings.inclusions='lf,need,нужны'
+Scan.DB.settings.exclusions='wts,selling'
+Scan.DB.characters={
+    ['Seller-Realm']=character(197, 'tailor,wrist,bracers,cloak,ring', {
+        [202]={scan_state=1, keywords='wrist,bracers'}, [206]={scan_state=1,keywords='cloak'},
+    }),
+    ['Smith-Realm']=character(164, 'bs,wrist,bracers', {
+        [201]={scan_state=1,keywords='wrist,bracers'}, [205]={scan_state=1,keywords='wrist'},
+    }),
+    ['Leather-Realm']=character(165, 'lw,wrist,bracers', {
+        [203]={scan_state=1,keywords='wrist,bracers'}, [204]={scan_state=1,keywords='wrist,bracers'},
+    }),
+}
+local armorItems={}
+for index,armor in ipairs({4,1,2,3,4,1}) do
+    local id=200+index
+    recipes[id]={recipeID=id, qualityItemIDs={id+1000}}
+    armorItems[id+1000]={armor=armor,slot=index==5 and 'INVTYPE_HEAD'
+        or (index==6 and 'INVTYPE_CLOAK' or 'INVTYPE_WRIST')}
+end
+Enum={ItemQuality={Epic=4}}
+C_Item={
+    GetItemQualityByID=function() return 4 end,
+    GetItemInfoInstant=function(id)
+        local info=armorItems[id]
+        if info then return id,'Armor','Armor',info.slot,0,4,info.armor end
+    end,
+}
+local classByGUID={}
+local classReads=0
+GetPlayerInfoByGUID=function(guid) classReads=classReads+1; return 'Localized',classByGUID[guid] end
+reloadConfig()
+local function forClass(text,class,options)
+    local guid='Class-'..class; classByGUID[guid]=class
+    return Scan.Scanner.GetCrafterForMessage('ClassBuyer',text,options,guid)
+end
+for class,id in pairs({WARRIOR=201,PALADIN=201,DEATHKNIGHT=201,
+    MAGE=202,PRIEST=202,WARLOCK=202,ROGUE=203,DRUID=203,MONK=203,DEMONHUNTER=203,
+    HUNTER=204,SHAMAN=204,EVOKER=204}) do
+    local crafter,_,recipe=forClass('need wrist',class)
+    assert(crafter and recipe and recipe.recipeID==id, 'wrong armor for '..class)
+end
+local preferred,_,preferredRecipe=forClass('need wrist','WARRIOR')
+assert(preferred.crafter=='Smith-Realm' and preferredRecipe.recipeID==201,
+    'local tailor or wrong-slot plate recipe took precedence')
+for _,text in ipairs({'need wrist!','NEED WRIST','нужны наручи','need boots','need gloves',
+    'need shoulders','need chest','need belt','need pants','need helm'}) do
+    local crafter=forClass(text,'WARRIOR')
+    assert(crafter and crafter.crafter=='Smith-Realm','generic slot not routed: '..text)
+end
+-- The class does not invent a request or bypass global/profession exclusions.
+assert(not forClass('wrist','WARRIOR'))
+assert(not forClass('wts need wrist','WARRIOR'))
+Scan.DB.characters['Smith-Realm'].parent_professions[164].exclusions='selling'
+assert(not forClass('need wrist selling','WARRIOR'))
+Scan.DB.characters['Smith-Realm'].parent_professions[164].exclusions=nil
+Scan.DB.characters['Smith-Realm'].parent_professions[164].scanning_enabled=false
+assert(not forClass('need wrist','WARRIOR'), 'disabled smith fell back to incompatible tailor')
+Scan.DB.characters['Smith-Realm'].parent_professions[164].scanning_enabled=true
+local crafters=Scan.DB.characters
+crafters['Smith-Realm'].parent_professions[164].keywords='bs'
+reloadConfig()
+assert(forClass('need wrist','WARRIOR').crafter=='Smith-Realm',
+    'armor intent required redundant profession-level slot keywords')
+
+-- Item/recipe links are authoritative even if a warrior orders cloth.
+local reads=classReads
+local linked,_,linkedRecipe=forClass(link(1202),'WARRIOR')
+assert(linked and linkedRecipe.recipeID==202 and classReads==reads)
+local recipeLink='|Henchant:202|h[Cloth wrists]|h'
+linked,_,linkedRecipe=forClass('LF '..recipeLink,'WARRIOR')
+assert(linked and linkedRecipe.recipeID==202)
+assert(not forClass('need wrist '..link(9999),'WARRIOR'))
+assert(forClass('need tailor wrist','WARRIOR').crafter=='Seller-Realm')
+assert(forClass('need wrist','WARRIOR',{forceCrafterInfo={crafter='Seller-Realm',parentProfID=197}}).crafter=='Seller-Realm')
+assert(forClass('need cloak','WARRIOR').crafter=='Seller-Realm')
+for _,text in ipairs({'need wrist enchant','need cloth wrist','need wrist for alt',
+    'need ring','need weapon','need tool','need bag','need necklace','need shield'}) do
+    assert(not Scan.ClassMatching.GetContext(text,'Class-WARRIOR'), 'class overrode explicit/non-armor request')
+end
+assert(not Scan.ClassMatching.GetContext('need wristwatch','Class-WARRIOR'), 'substring matched as an armor slot')
+assert(forClass('need wrist','UNKNOWN').crafter=='Seller-Realm', 'unknown class changed normal matching')
+Scan.DB.settings.match_customer_class=false
+assert(forClass('need wrist','WARRIOR').crafter=='Seller-Realm', 'opt-out ignored')
+Scan.DB.settings.match_customer_class=true
+local getClass=GetPlayerInfoByGUID
+GetPlayerInfoByGUID=function() error('unavailable') end
+assert(forClass('need wrist','WARRIOR').crafter=='Seller-Realm', 'API error did not fall back safely')
+GetPlayerInfoByGUID=getClass
+local classAPI=GetPlayerInfoByGUID
+GetPlayerInfoByGUID=nil
+HironCraftScanComm.applying_remote_state=true
+assert(forClass('need wrist','UNKNOWN',{customerClass='WARRIOR'}).crafter=='Smith-Realm',
+    'linked request lost its known class when the receiving client lacked GUID data')
+assert(forClass('need wrist','UNKNOWN',{customerClass='INVALID'}).crafter=='Seller-Realm')
+HironCraftScanComm.applying_remote_state=false
+assert(forClass('need wrist','UNKNOWN',{customerClass='WARRIOR'}).crafter=='Seller-Realm',
+    'local override was accepted as remote class metadata')
+GetPlayerInfoByGUID=classAPI
+local getItemInfo=C_Item.GetItemInfoInstant
+C_Item.GetItemInfoInstant=function() return nil end
+local generic,_,unknownRecipe=forClass('need wrist','WARRIOR')
+assert(generic.crafter=='Smith-Realm' and not unknownRecipe, 'unknown item metadata guessed an exact craft')
+C_Item.GetItemInfoInstant=getItemInfo
+local classContext=Scan.ClassMatching.GetContext('need wrist','Class-WARRIOR')
+assert(not Scan.ClassMatching.MatchesRecipe(classContext,nil))
+local getOutputs=Scan.Utils.GetOutputItems
+Scan.Utils.GetOutputItems=function() error('item data unavailable') end
+assert(not Scan.ClassMatching.MatchesRecipe(classContext,recipes[201]))
+Scan.Utils.GetOutputItems=getOutputs
+Scan.DB.customers.ClassBuyer={guid='Class-WARRIOR'}
+assert(Scan.Scanner.GetCrafterForMessage('ClassBuyer','need wrist').crafter=='Smith-Realm',
+    'stored GUID was not used when the current event omitted it')
+
+reset()
+classByGUID['Buyer-GUID']='WARRIOR'
+scan('need wrist')
+assert(countRows()==1 and response(201).crafterFullName=='Smith-Realm' and #sent==0)
+flushTimers()
+assert(#sent==0, 'class routing introduced auto replies')
+Scan.GreetCustomer('LeftButton',order(201))
+assert(#sent==1 and response(201).greeting_sent, 'class-routed greeting did not send on click')
+reset()
+classByGUID['Buyer-GUID']='HUNTER'
+scan('LF lw')
+Scan.OnMessage('CHAT_MSG_WHISPER','need wrist','Buyer','Buyer-GUID')
+assert(response(204) and not response(203), 'existing whisper conversation lost the sender class')
+print('Customer-class matching tests passed (13 classes, armor slots, links, exclusions, opt-out, unknown data, whispers, manual sends).')

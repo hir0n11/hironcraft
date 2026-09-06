@@ -125,12 +125,14 @@ realOnLoad(function() later = later + 1 end)
 
 -- Simulate an original CraftScan already owning its Settings identifiers.
 local registered = {}
+local classSetting
 local category = { GetID = function() return 17 end }
 local initializer = { AddSearchTags=noop }
-local function registerSetting(_, variable)
+local function registerSetting(_, variable, ...)
     assert(variable:match('^HIRONCRAFT_SCAN_'), 'shared CraftScan setting ID: ' .. variable)
     assert(not registered[variable], 'duplicate setting ID: ' .. variable)
     registered[variable] = true
+    if variable == 'HIRONCRAFT_SCAN_MATCH_CUSTOMER_CLASS' then classSetting={...} end
     return { SetValueChangedCallback=noop }
 end
 local registeredCategory, openedCategory
@@ -164,6 +166,11 @@ assert(Scan.DB.listed_orders['NoTime-1'] == nil and Scan.DB.listed_orders['Expir
 assert(Scan.DB.settings.alert_icon_scale == 123 and keepInfo.chat_history[1] == 'keep history')
 assert(registeredCategory == category, 'settings category did not finish registration')
 assert(not registered.HIRONCRAFT_SCAN_AUTO_REPLY_DELAY, 'removed auto-reply setting returned')
+assert(classSetting and classSetting[3]==true and classSetting[4](),
+    'customer-class setting missing or not enabled by default')
+classSetting[5](false)
+assert(not classSetting[4]() and Scan.DB.settings.match_customer_class==false)
+classSetting[5](true)
 Scan.Settings:Open()
 assert(openedCategory == 17)
 realOnLoad(function() later = later + 1 end)

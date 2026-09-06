@@ -25,6 +25,34 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Customer class for generic armor requests (0.3.19)
+
+Generic requests such as `need wrist` can now use the author's class from the
+chat-event GUID: plate routes to Blacksmithing, cloth to Tailoring, and leather
+or mail to Leatherworking. Exact keyword-matched recipes also need the requested
+equipment slot and native armor subclass, so a hunter is not offered leather
+bracers just because the same leatherworker knows both recipes.
+
+The heuristic recognizes common English/Russian names for head, shoulders,
+chest, wrists, hands, waist, legs and feet. Item/recipe links take precedence;
+explicit profession/material words, non-armor items, enchants and alt/transmog
+requests retain normal matching. Existing inclusion/exclusion filters, scanning
+toggles, recipe monitoring and crafter priorities remain in effect. No matching
+enabled profession means no substitution with the wrong armor profession.
+
+When class information is unavailable, normal matching remains. When item
+metadata is unavailable, only a profession-level response is offered, without
+claiming the exact recipe. Valid class metadata travels with proxied orders
+for linked clients that cannot resolve the author's GUID themselves.
+
+The scanner setting **Use customer class for armor requests** is enabled by
+default and can be changed without reload. Replies still require a click.
+Regression tests cover all 13 classes, slot/subclass filtering, links, missing
+APIs/data, exclusions, opt-out, proxy metadata and existing whisper conversations.
+GUID/class lookup follows the
+[Blizzard chat UI](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_ChatFrameBase/Shared/ChatFrameUtil.lua);
+item classification uses the documented `C_Item.GetItemInfoInstant` fields.
+
 ## Manual-action safety hardening (0.3.18)
 
 Removed the legacy auto-greeting mode, its timers and settings UI, and the
