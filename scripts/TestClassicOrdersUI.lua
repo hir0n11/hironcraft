@@ -203,17 +203,35 @@ assert(panel.reagentSeg:GetParent() == craft.body)
 assert(panel.bestQualityToggle:GetParent() == craft.body, 'tool escaped the scroll page')
 assert(panel.minProfitInput:GetParent() == queue.body)
 assert(panel.runActionButton:GetParent() == panel.footer)
-for _, button in ipairs({panel.selectAllButton, panel.shopButton, panel.clearSelectedButton}) do
+for _, button in ipairs({panel.selectAllButton, panel.clearSelectedButton}) do
     assert(button:GetParent() == panel.queueActions and button:IsVisible(), 'common action requires a settings-tab click')
 end
+assert(panel.shopButton:GetParent() == page and panel.shopButton:IsVisible(), 'shopping is not in the list toolbar')
+assert(panel.shopCostText:GetParent() == panel.shopButton and panel.shopCostText:IsVisible(), 'shopping total did not move with the button')
+assert(not panel.knowledgeButton:IsVisible(), 'Personal tab shows knowledge selection')
+assert(panel.shopButton.anchors.RIGHT[1] == panel.collapseButton, 'hidden knowledge button leaves a toolbar gap on Personal')
+assert(panel.queueActions:GetHeight() == 92, 'Personal sidebar retained empty shopping space')
+assert(panel.clearSelectedButton.anchors.TOPLEFT[1] == panel.selectAllOrdersButton, 'Personal lost its Select all row')
 page.orderType = Enum.CraftingOrderType.Npc
 CL:ResizeList(container)
 local npcCols = CL:ActiveCols()
 assert(npcCols.reward and container.header.cols.reward:IsVisible(), 'Patron tab lost the Reward column')
 assert(personalNameWidth > npcCols.name.w, 'Personal Reward space was not returned to the item name')
 CO:UpdateTabActionButton(page)
-assert(panel.knowledgeButton:IsVisible(), 'knowledge action is not available on the main settings page')
+assert(panel.knowledgeButton:IsVisible() and panel.knowledgeButton:GetParent() == page, 'knowledge action is not in the list toolbar')
 assert(not panel.selectAllOrdersButton:IsVisible(), 'knowledge and select-all buttons overlap')
+assert(panel.queueActions:GetHeight() == 64 and panel.clearSelectedButton.anchors.TOPLEFT[1] == panel.selectAllButton,
+    'Patron sidebar retained the vacated knowledge/shopping rows')
+assert(panel.clearSelectedButton:GetWidth() == panel.selectAllButton:GetWidth(), 'Clear no longer fills the sidebar row')
+local knowledgeCalls, shoppingCalls = 0, 0
+CO.QueueWorkOrdersSelection = function(_, knowledgeOnly)
+    assert(knowledgeOnly == true, 'knowledge button lost its profit-independent selection mode')
+    knowledgeCalls = knowledgeCalls + 1
+end
+CO.CreateShoppingListForSelectedOrders = function() shoppingCalls = shoppingCalls + 1 end
+panel.knowledgeButton:Click()
+panel.shopButton:Click()
+assert(knowledgeCalls == 1 and shoppingCalls == 1, 'toolbar clicks did not dispatch exactly once')
 assert(panel.clearButton.template == 'UIPanelCloseButton' and not panel.clearButton.backdrop,
     'binding clear button lost the native square close style')
 panel.classicTabs.queue:Click()
@@ -260,6 +278,16 @@ for _, width in ipairs({352, 431, 432, 511, 512, 600, 640, 792, 1020, 1250}) do
         assert(cx == lx and cy == ly and cw == lw and ch == lh, 'list no longer fills the original order area')
         assert(px == lx + lw + CO.CLASSIC_PANEL_GAP, 'settings panel is not outside the order list')
         assert(panel:GetWidth() == CO.CLASSIC_PANEL_WIDTH, 'external panel width changed')
+        local kx, ky, kw, kh = bounds(panel.knowledgeButton)
+        local sx, sy, sw, sh = bounds(panel.shopButton)
+        local tx, ty, tw, th = bounds(panel.shopCostText)
+        local cx, cy, cw, ch = bounds(panel.collapseButton)
+        assert(kx + kw == cx - 8 and sx + sw == kx - 8 and tx + tw == sx - 6,
+            'toolbar buttons/total overlap or lost their spacing')
+        assert(ky + kh/2 == cy + ch/2 and sy + sh/2 == cy + ch/2 and ty + th/2 == cy + ch/2,
+            'toolbar buttons/total are not vertically centered')
+        assert(tx >= lx and kx + kw < lx + lw and ky + kh < ly and sy + sh < ly and ty + th < ly,
+            'toolbar escaped the window or overlaps the list header')
         assert(ax >= rx and ax + aw <= rx + rw + .1, 'action outside the list')
         assert(rx + rw < px, 'list overlaps the settings pane')
         local cols = CL:ActiveCols()
@@ -333,11 +361,17 @@ for _, line in ipairs({panel.collapseButton.arrowTop, panel.collapseButton.arrow
 end
 assert(panel.collapseButton.arrowTop.startPoint[4] + panel.collapseButton.arrowBottom.startPoint[4] == 0,
     'chevron is not centered vertically')
-assert(not panel.shopButton:IsVisible() and not panel.runActionButton:IsVisible()
+assert(panel.shopButton:IsVisible() and panel.shopCostText:IsVisible() and panel.knowledgeButton:IsVisible(),
+    'collapsing the sidebar hid the list toolbar')
+panel.knowledgeButton:Click()
+panel.shopButton:Click()
+assert(knowledgeCalls == 2 and shoppingCalls == 2, 'toolbar stopped dispatching with the sidebar hidden')
+assert(not panel.runActionButton:IsVisible()
     and not queue.scroll:IsVisible() and not panel.debugToggle:IsVisible(), 'collapsed content leaked outside the header')
 CO:UpdateTabActionButton(page)
 CO:UpdateControlPanelVisibility(page)
-assert(not panel.knowledgeButton:IsVisible() and not panel:IsVisible(), 'periodic refresh expanded the panel')
+assert(panel.knowledgeButton:IsVisible() and panel.shopButton:IsVisible() and not panel:IsVisible(),
+    'periodic refresh lost the toolbar or expanded the panel')
 assert(anchor:GetWidth() == originalListWidth, 'collapse resized the order list')
 panel.collapseButton:Click()
 assert(panel.collapseButton.arrowTop.endPoint[3] == 2, 'chevron did not reverse when showing the panel')
@@ -357,9 +391,24 @@ E.GetDB().panelCollapsed = false
 page.BrowseFrame:Hide()
 CO:UpdateControlPanelVisibility(page)
 assert(not panel:IsVisible() and not panel.collapseButton:IsVisible(), 'toggle remains on the order-detail page')
+CO:UpdateTabActionButton(page)
+assert(not panel.knowledgeButton:IsVisible() and not panel.shopButton:IsVisible() and not panel.shopCostText:IsVisible(),
+    'toolbar remains on the order-detail page after a refresh')
 page.BrowseFrame:Show()
 CO:UpdateControlPanelVisibility(page)
 assert(panel:IsVisible() and panel.collapseButton:IsVisible(), 'returning to the list lost the panel toggle')
+assert(panel.knowledgeButton:IsVisible() and panel.shopButton:IsVisible(), 'returning to the list lost the toolbar')
+CO.IsEnabled = function() return false end
+CO:UpdateControlPanelVisibility(page)
+CO:UpdateTabActionButton(page)
+assert(not panel.knowledgeButton:IsVisible() and not panel.shopButton:IsVisible(), 'disabled addon retained toolbar actions')
+CO.IsEnabled = function() return true end
+CO:UpdateControlPanelVisibility(page)
+CO.IsEnabled = function() return false end
+CO:EnsureControlPanel(page)
+assert(not panel.knowledgeButton:IsVisible() and not panel.shopButton:IsVisible(), 'disabled panel creation retained toolbar actions')
+CO.IsEnabled = function() return true end
+CO:UpdateControlPanelVisibility(page)
 local fallbackPage = frame('Frame')
 fallbackPage:SetSize(1060, 680)
 local fallbackPanel = frame('Frame', fallbackPage)
@@ -459,6 +508,8 @@ page:SetScale(1)
 print('Classic orders UI tests passed.')
 
 if arg[1] == '--scene' then
+    page.orderType = Enum.CraftingOrderType.Npc
+    CO:UpdateControlPanelVisibility(page)
     anchor:SetWidth(792); anchor:SetHeight(590)
     CO:AnchorControlPanelToOrderList(panel, page)
     CL:SetCompact(false); CL:ResizeList(container)
@@ -466,6 +517,7 @@ if arg[1] == '--scene' then
     panel.keyText:SetText('Клавиша: Tab')
     panel.statusText:SetText('Отметьте заказы и нажмите «Действие».')
     panel.weeklyQuestIndicator.text:SetText('Квест')
+    panel.shopCostText:SetText('39g')
     container.countText:SetText('Заказов: 3')
     for i, name in ipairs({"Farstrider’s Plated Bracers", "Silvermoon Agent’s Deflectors", "Martyr’s Bindings"}) do
         local demo = i == 1 and row or CL:CreateRow(container.content, i)

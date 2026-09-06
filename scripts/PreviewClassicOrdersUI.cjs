@@ -20,7 +20,8 @@ async function render(tab) {
     <rect x="24" y="70" width="220" height="590" rx="3" fill="#171512" stroke="#6d6049"/>
     <text x="40" y="98" fill="#ffd100" font-family="Arial" font-size="13">Рецепты профессии</text>`;
     for(let i=0;i<9;i++) content+=`<text x="42" y="${139+i*32}" fill="${i%3===0?'#e1bd65':'#b4aa99'}" font-family="Arial" font-size="12">${['Избранное','Наручи','Перчатки','Реагенты','Кожа','Чешуя','Кожаные доспехи','Кольчужные доспехи','Расходуемые предметы'][i]}</text>`;
-    for(let i=0;i<4;i++) content+=`<rect x="${262+i*194}" y="43" width="185" height="26" rx="3" fill="${i===3?'#645020':'#29251e'}" stroke="#897957"/><text x="${354+i*194}" y="61" text-anchor="middle" fill="#ffd100" font-family="Arial" font-size="12">${['Общие','Гильдия','Покровители','Персональные (3)'][i]}</text>`;
+    // Leave the same top-right toolbar space as the native 150px order tabs.
+    for(let i=0;i<4;i++) content+=`<rect x="${104+i*154}" y="43" width="150" height="26" rx="3" fill="${i===2?'#645020':'#29251e'}" stroke="#897957"/><text x="${179+i*154}" y="61" text-anchor="middle" fill="#ffd100" font-family="Arial" font-size="12">${['Общие','Гильдия','Покровители (3)','Персональные'][i]}</text>`;
     for (const [i,f] of scene.entries()) {
         if (f.x < 250) continue;
         if(f.skin) content+=`<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="${f.skin==='button'?3:4}" fill="url(#${f.skin==='button'?'button':'panel'})" stroke="#827052" stroke-width="1"/>`;

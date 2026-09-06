@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Knowledge and shopping actions above the order list (0.3.17)
+
+The Patron knowledge-queue button now sits above the order list, to the left
+of the sidebar toggle. Shopping is beside it, with the compact cost on the
+same line. Both actions remain available when the sidebar is collapsed;
+on other order tabs Shopping moves next to the toggle without an empty gap.
+The sidebar closes the vacated rows and retains Queue, Select all where
+applicable, and Clear. Selection rules and shopping behavior are unchanged.
+
+Layout tests cover anchors, alignment, tab changes, hidden/disabled views,
+collapsed-panel clicks and exactly one action per click.
+
 ## Manual completion marks survive synchronization (0.3.16)
 
 Clearing a completion check is now treated as an intentional manual edit, not

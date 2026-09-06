@@ -1202,10 +1202,14 @@ function CO:EnsureControlPanel(pageFrame)
         if self.controlPanel then
             self.controlPanel:Hide()
             if self.controlPanel.collapseButton then self.controlPanel.collapseButton:Hide() end
+            if self.controlPanel.knowledgeButton then self.controlPanel.knowledgeButton:Hide() end
+            if self.controlPanel.shopButton then self.controlPanel.shopButton:Hide() end
         end
         if pageFrame and pageFrame.ahuiCraftingOrdersPanel then
             pageFrame.ahuiCraftingOrdersPanel:Hide()
             if pageFrame.ahuiCraftingOrdersPanel.collapseButton then pageFrame.ahuiCraftingOrdersPanel.collapseButton:Hide() end
+            if pageFrame.ahuiCraftingOrdersPanel.knowledgeButton then pageFrame.ahuiCraftingOrdersPanel.knowledgeButton:Hide() end
+            if pageFrame.ahuiCraftingOrdersPanel.shopButton then pageFrame.ahuiCraftingOrdersPanel.shopButton:Hide() end
         end
         return
     end
@@ -1433,7 +1437,6 @@ function CO:EnsureControlPanel(pageFrame)
     body = panel.queueActions
     y = -6
     local ACTION_INNER = VPANEL_W - 26
-    local ACTION_COL_W = math.floor((ACTION_INNER - COL_GAP) / 2)
 
     -- Queue action (full width)
     panel.selectAllButton = self:CreateTextButton(body, nil, ACTION_INNER, 26, T("COA_QUEUE_BUTTON", "Queue"))
@@ -1454,11 +1457,11 @@ function CO:EnsureControlPanel(pageFrame)
     panel.selectAllButton:SetScript("OnLeave", HideStyledTooltip)
     y = y - 32
 
-    -- Knowledge-only queue (patron) / select-all-visible (other tabs)
-    panel.knowledgeButton = self:CreateTextButton(body, nil, ACTION_INNER, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
-    if panel.knowledgeButton.text then ApplyFont(panel.knowledgeButton.text, 12, "") end
-    panel.knowledgeButton:SetPoint("TOPLEFT", PADX, y)
-    panel.knowledgeButton:SetBackdropBorderColor(0.30, 0.60, 1.00, 1)
+    -- Patron knowledge selection belongs to the list toolbar, not the sidebar:
+    -- it stays usable when the entire settings panel is collapsed.
+    panel.knowledgeButton = self:CreateTextButton(pageFrame, nil, 124, 22, T("COA_KNOWLEDGE_QUEUE_BTN", "Очередь: знания"))
+    panel.knowledgeButton:SetPoint("RIGHT", panel.collapseButton, "LEFT", -8, 0)
+    panel.knowledgeButton:SetFrameLevel(panel:GetFrameLevel())
     panel.knowledgeButton:SetScript("OnClick", function(self)
         CO:QueueWorkOrdersSelection(true)
     end)
@@ -1488,10 +1491,10 @@ function CO:EnsureControlPanel(pageFrame)
     panel.selectAllOrdersButton:SetScript("OnLeave", HideStyledTooltip)
     y = y - 28
 
-    -- Shopping + Clear (two columns)
-    panel.shopButton = self:CreateTextButton(body, nil, ACTION_COL_W, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
-    if panel.shopButton.text then ApplyFont(panel.shopButton.text, 12, "") end
-    panel.shopButton:SetPoint("TOPLEFT", PADX, y)
+    -- Shopping is beside knowledge selection in the list toolbar on every tab.
+    panel.shopButton = self:CreateTextButton(pageFrame, nil, 90, 22, T("COA_SHOPPING_BUTTON", "Shopping"))
+    panel.shopButton:SetPoint("RIGHT", panel.knowledgeButton, "LEFT", -8, 0)
+    panel.shopButton:SetFrameLevel(panel:GetFrameLevel())
     panel.shopButton:SetScript("OnClick", function()
         CO:CreateShoppingListForSelectedOrders()
     end)
@@ -1517,19 +1520,22 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.shopButton:SetScript("OnLeave", HideStyledTooltip)
 
-    panel.clearSelectedButton = self:CreateTextButton(body, nil, ACTION_COL_W, 22, T("COA_CLEAR_SELECTED", "Clear"))
+    panel.clearSelectedButton = self:CreateTextButton(body, nil, ACTION_INNER, 22, T("COA_CLEAR_SELECTED", "Clear"))
     if panel.clearSelectedButton.text then ApplyFont(panel.clearSelectedButton.text, 12, "") end
-    panel.clearSelectedButton:SetPoint("TOPLEFT", PADX + ACTION_COL_W + COL_GAP, y)
+    panel.clearSelectedButton:SetPoint("TOPLEFT", PADX, y)
     panel.clearSelectedButton:SetScript("OnClick", function()
         CO:ClearSelectedOrders()
     end)
 
-    -- Shopping cost centered under Shopping; selected count centered under Clear
-    panel.shopCostText = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(panel.shopCostText, 12, "")
-    panel.shopCostText:SetPoint("TOP", panel.shopButton, "BOTTOM", 0, -3)
-    panel.shopCostText:SetWidth(ACTION_COL_W)
-    panel.shopCostText:SetJustifyH("CENTER")
+    -- Keep the compact total on the same toolbar line, out of the list header.
+    panel.shopCostText = panel.shopButton:CreateFontString(nil, "OVERLAY")
+    ApplyFont(panel.shopCostText, 11, "")
+    panel.shopCostText:SetPoint("RIGHT", panel.shopButton, "LEFT", -6, 0)
+    panel.shopCostText:SetSize(56, 22)
+    panel.shopCostText:SetJustifyH("RIGHT")
+    panel.shopCostText:SetJustifyV("MIDDLE")
+    panel.shopCostText:SetWordWrap(false)
+    if panel.shopCostText.SetMaxLines then panel.shopCostText:SetMaxLines(1) end
     panel.shopCostText:SetText("")
     panel.shopCostText:SetTextColor(0.95, 0.82, 0.42, 1)
 
@@ -1674,9 +1680,25 @@ function CO:UpdateTabActionButton(pageFrame)
 
     local isPatron = pageFrame ~= nil and Enum and Enum.CraftingOrderType
         and pageFrame.orderType == Enum.CraftingOrderType.Npc
+    local listOpen = self:IsEnabled() and self:IsOrderListOpen(pageFrame)
 
-    if panel.knowledgeButton then panel.knowledgeButton:SetShown(isPatron and true or false) end
+    if panel.knowledgeButton then
+        panel.knowledgeButton:SetShown(isPatron and listOpen or false)
+    end
+    if panel.shopButton then
+        panel.shopButton:SetShown(listOpen)
+        panel.shopButton:ClearAllPoints()
+        panel.shopButton:SetPoint("RIGHT", isPatron and panel.knowledgeButton or panel.collapseButton, "LEFT", -8, 0)
+    end
     if panel.selectAllOrdersButton then panel.selectAllOrdersButton:SetShown((not isPatron) and true or false) end
+
+    -- Close the vacated sidebar rows; other tabs still retain Select all.
+    if panel.queueActions and panel.clearSelectedButton then
+        panel.queueActions:SetHeight(isPatron and 64 or 92)
+        local previous = isPatron and panel.selectAllButton or panel.selectAllOrdersButton
+        panel.clearSelectedButton:ClearAllPoints()
+        panel.clearSelectedButton:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -6)
+    end
 end
 
 function CO:UpdateDebugToggle()

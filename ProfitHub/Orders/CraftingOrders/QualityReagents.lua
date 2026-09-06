@@ -1951,6 +1951,7 @@ function CO:UpdateControlPanelVisibility(pageFrame)
     if not self:IsEnabled() then
         panel:Hide()
         if panel.collapseButton then panel.collapseButton:Hide() end
+        if panel.knowledgeButton then panel.knowledgeButton:Hide() end
         if panel.shopButton then panel.shopButton:Hide() end
         if panel.shopCostText then panel.shopCostText:Hide() end
         return
@@ -1969,6 +1970,7 @@ function CO:UpdateControlPanelVisibility(pageFrame)
     else
         panel:Hide()
         if panel.collapseButton then panel.collapseButton:Hide() end
+        if panel.knowledgeButton then panel.knowledgeButton:Hide() end
         if panel.shopButton then panel.shopButton:Hide() end
         if panel.shopCostText then panel.shopCostText:Hide() end
     end
