@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Long item links in grouped replies (0.3.14)
+
+Grouped requests now wait for all item-cache loads and use the same compact
+base-item links as single-item replies. Customer recraft links can carry long
+bonus/modifier lists, GUIDs and quality icons; copying them into greetings caused
+the old whitespace splitter to cut inside a hyperlink and WoW rejected the
+message with `Invalid escape code in chat message`.
+
+Message splitting now keeps whole hyperlinks (including named colors and
+quality markup) together and respects UTF-8 character boundaries. A batch is
+validated before any whisper is sent. Pending greetings are rebuilt on click,
+even on the same character, repairing older saved fragments without deleting
+the order rows or changing SavedVariables directly. Regression tests cover
+long recraft links, saved fragments, out-of-order cache callbacks, automatic
+and manual group sends, and invalid-message preflight. In-game delivery still
+needs a check after `/reload`.
+
 ## Stable completion after a rejected order (0.3.13)
 
 Replaying a linked-account rejection no longer turns a successfully completed

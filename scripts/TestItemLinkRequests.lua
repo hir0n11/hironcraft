@@ -37,6 +37,10 @@ local sent, shared, timers, refreshes, opened = {}, {}, {}, 0, 0
 function GetDefaultLanguage() return 'Common', 7 end
 function SendChatMessage(message, kind, language, customer)
     assert(kind=='WHISPER' and language==7)
+    assert(#message<=255, 'outgoing whisper exceeds 255 bytes')
+    local text=message:gsub('|H[^|]+|h.-|h', '')
+    assert(not text:find('|H', 1, true) and not text:find('|h', 1, true),
+        'outgoing whisper contains a split hyperlink')
     sent[#sent+1] = {message=message, customer=customer}
 end
 RobotsDotTxtAPI = {NotifyCustomer=noop}
@@ -254,7 +258,64 @@ assert(#sent==0, 'old timer sent a replacement request')
 flushTimers()
 assert(#sent==1)
 reset()
+-- Real-world recraft links carry bonuses, modifiers, a crafter GUID and a
+-- quality atlas. The old whitespace splitter cut inside the first hyperlink.
+local recraftLink='|cnIQ4:|Hitem:1001::::::::90:63::13:6:12245:13760:12497:13766:13658:8792:7:28:3615:29:36:30:32:38:8:40:2604:44:275385:46:245782::::Player-0000-00000000:|h[Thalassian Competitor\'s Cloth Cloak |A:Professions-ChatIcon-Quality-Tier5:17:15::1|a]|h|r'
+local secondRecraft=recraftLink:gsub('item:1001:', 'item:1003:'):gsub('Cloth Cloak', 'Cloth Treads')
+greetings.GREETING_I_CAN_CRAFT_ITEM='Hi! Send order on this char. I can craft/recraft {item}. You choose the price.'
+scan('LRC' .. recraftLink .. secondRecraft)
+assert(countRows()==2)
+-- Reproduce the already persisted fragments from the affected version, even
+-- though the active character has not changed since those replies were built.
+response(101).message={'Hi! ' .. recraftLink:sub(1,230), recraftLink:sub(231) .. ' You choose the price.'}
+response(101).itemLink=recraftLink
+response(103).itemLink=secondRecraft
+Scan.GreetCustomer('LeftButton', order(101))
+assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent)
+assert(sent[1].message:find(a, 1, true) and sent[2].message==c .. ' Send to Seller.',
+    'saved broken replies were not rebuilt using complete base-item links')
+
+reset(); Scan.auto_replies_enabled=true
+local createItem=Item.CreateFromItemID
+local pendingLoads={}
+Item.CreateFromItemID=function(_, id) return {ContinueOnItemLoad=function(_, callback)
+    assert(not pendingLoads[id], 'duplicate link caused another item-cache load')
+    pendingLoads[id]=callback
+end} end
+scan('LRC' .. recraftLink .. recraftLink .. secondRecraft)
+assert(countRows()==0 and #timers==0)
+pendingLoads[1003]()
+assert(countRows()==0 and #timers==0, 'partially loaded group was sent or listed')
+pendingLoads[1001]()
+assert(countRows()==2 and #timers==1)
+flushTimers()
+assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent,
+    'loaded long-link batch did not auto-send exactly once')
+Item.CreateFromItemID=createItem
+
+-- A long greeting may require extra whispers, but never an incomplete link.
+reset()
+local namedLink='|cnIQ4:|Hitem:1001:0|h[A long item name with spaces]|h|r'
+local text=string.rep('word ',43) .. namedLink .. ' suffix\n' .. a .. b
+local pieces=Scan.Utils.SplitResponse(text)
+assert(#pieces==3 and pieces[2]:find(namedLink, 1, true), 'named-color link was split at a display-name space')
+assert(Scan.Utils.SendResponses(pieces, 'Buyer'))
+assert(#sent==3)
+local unicode=string.rep('я',300)
+local unicodePieces=Scan.Utils.SplitResponse(unicode)
+assert(table.concat(unicodePieces)==unicode)
+for _, piece in ipairs(unicodePieces) do
+    assert(#piece<=255 and utf8.len(piece), 'split cut through a UTF-8 character')
+end
+local before=#sent
+assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer')==false)
+assert(#sent==before, 'invalid later line was detected only after partially sending the group')
+local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',120))
+assert(Scan.Utils.SendResponses(Scan.Utils.SplitResponse(oversizedLink), 'Buyer')==false)
+assert(#sent==before, 'oversized indivisible link was sent')
+
+reset()
 Scan.DB.settings.ignored={Buyer=true}
 scan(a .. b)
 assert(countRows()==0 and #shared==0, 'ignored customer bypassed exclusion')
-print('Item-link request tests passed (filters, unique rows, grouped replies, tokens, stale timers).')
+print('Item-link request tests passed (filters, unique rows, grouped replies, tokens, timers, long links, saved repair).')

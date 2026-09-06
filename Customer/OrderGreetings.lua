@@ -29,11 +29,12 @@ function Scan.SendOrderGreeting(order)
             and Scan.DB.listed_orders[Scan.OrderToOrderID(sibling)] then
             seen[member.responseID] = true
             if #pending == 0 then
-                Scan.RebuildResponseMessage(sibling)
+                -- Rebuild even on the same character: older saved greetings
+                -- may contain hyperlink fragments from the whitespace splitter.
+                Scan.RebuildResponseMessage(sibling, true)
                 for _, line in ipairs(siblingResponse.message or {}) do messages[#messages + 1] = line end
             else
-                local itemLink = siblingResponse.itemLink
-                    or (siblingResponse.itemID and select(2, GetItemInfo(siblingResponse.itemID)))
+                local itemLink = Scan.Utils.GetReplyItemLink(siblingResponse.itemID, siblingResponse.itemLink)
                 if type(itemLink) ~= 'string' or type(siblingResponse.crafterFullName) ~= 'string' then
                     return false
                 end
@@ -48,7 +49,7 @@ function Scan.SendOrderGreeting(order)
     end
     if #pending == 0 or #messages == 0 then return false end
 
-    Scan.Utils.SendResponses(messages, order.customerName)
+    if Scan.Utils.SendResponses(messages, order.customerName) == false then return false end
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end
         sentResponse.greeting_sent = true

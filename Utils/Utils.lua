@@ -83,10 +83,19 @@ function HironCraftScan.Utils.ColorizedProfessionNameByID(professionID)
 end
 
 function HironCraftScan.Utils.SendResponses(responses, customer)
+    -- Validate the complete batch before sending any part or marking its rows.
+    for _, response in ipairs(responses) do
+        local plain = response:gsub('|H[^|]+|h.-|h', '')
+        if #response > 255 or plain:find('|H', 1, true) or plain:find('|h', 1, true) then
+            print('HironCraft: ' .. L('Reply could not be sent: an item link is incomplete or too long. Try again after the item information loads.'))
+            return false
+        end
+    end
     RobotsDotTxtAPI.NotifyCustomer(customer, 'HironCraftScan')
     for _, response in ipairs(responses) do
         SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
     end
+    return true
 end
 
 function HironCraftScan.Frames.createLabel(

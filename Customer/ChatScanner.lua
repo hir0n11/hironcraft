@@ -50,23 +50,62 @@ local function ParseStringList(list)
     return items
 end
 
--- Split a string on newlines, then further split each line to ensure
--- it fits in a whisper.
+-- Hyperlinks (including their quality atlas and color) are indivisible. A
+-- whitespace inside [an item name] is not a safe chat-message boundary.
 local function SplitResponse(raw_response)
     local result = {}
-    for _, response in ipairs({ strsplit('\n', raw_response) }) do
-        while #response > 255 do
-            local split = 255
-            for i = 255, 1, -1 do
-                if response:sub(i, i) == ' ' then
-                    split = i
-                    break
-                end
-            end
-            table.insert(result, response:sub(1, split))
-            response = response:sub(split + 1, #response)
+    for _, line in ipairs({ strsplit('\n', raw_response) }) do
+        local response, space, position = '', '', 1
+        local function Flush()
+            if response ~= '' then result[#result + 1] = response end
+            response = ''
         end
-        table.insert(result, response)
+        while position <= #line do
+            local tail = line:sub(position)
+            local whitespace = tail:match('^%s+')
+            if whitespace then
+                space = whitespace
+                position = position + #whitespace
+            else
+                local color = tail:match('^|c%x%x%x%x%x%x%x%x') or tail:match('^|cn[%w_]+:') or ''
+                local start = position + #color
+                local ending
+                if line:sub(start, start + 1) == '|H' then
+                    local header = line:find('|h', start + 2, true)
+                    local label = header and line:find('|h', header + 2, true)
+                    if label then
+                        ending = label + 1
+                        if line:sub(ending + 1, ending + 2) == '|r' then ending = ending + 2 end
+                    end
+                elseif tail:sub(1, 2) == '|A' or tail:sub(1, 2) == '|T' then
+                    local close = line:find(tail:sub(1, 2) == '|A' and '|a' or '|t', position + 2, true)
+                    ending = close and close + 1
+                end
+                local atomic = ending ~= nil
+                if not ending then
+                    ending = position
+                    while ending < #line and not line:sub(ending + 1, ending + 1):match('[%s|]') do
+                        ending = ending + 1
+                    end
+                end
+                local token = line:sub(position, ending)
+                if #response + #space + #token > 255 then Flush() end
+                -- Never cut a UTF-8 character in an unusually long plain word.
+                while not atomic and #token > 255 do
+                    local cut = 255
+                    while cut > 0 and token:byte(cut + 1) >= 128 and token:byte(cut + 1) < 192 do cut = cut - 1 end
+                    if cut == 0 then cut = 255 end
+                    result[#result + 1] = token:sub(1, cut)
+                    token = token:sub(cut + 1)
+                end
+                response = response .. (response ~= '' and space or '') .. token
+                space = ''
+                position = ending + 1
+            end
+        end
+        -- An individual link longer than the chat limit stays whole; the
+        -- sender's preflight rejects it instead of emitting invalid fragments.
+        Flush()
     end
     return result
 end
@@ -771,8 +810,9 @@ local function GetMonitoredItemMatches(message)
                 local recipeInfo = C_TradeSkillUI.GetRecipeInfo(crafterInfo.recipeID)
                 if recipeInfo then
                     -- Preserve the actual linked variant and its display text.
-                    local color = first > 10 and message:sub(first - 10, first - 1)
-                    if color and color:match('^|c%x%x%x%x%x%x%x%x$') then first = first - 10 end
+                    local prefix = message:sub(1, first - 1)
+                    local color = prefix:match('(|c%x%x%x%x%x%x%x%x)$') or prefix:match('(|cn[%w_]+:)$')
+                    if color then first = first - #color end
                     if lower:sub(last + 1, last + 2) == '|r' then last = last + 2 end
                     seen[crafterInfo.recipeID] = true
                     matches[#matches + 1] = {
@@ -1225,6 +1265,12 @@ local function GetProfessionLink(profInfo)
     return skillSpellID and C_Spell.GetSpellTradeSkillLink(skillSpellID) or nil
 end
 
+function HironCraftScan.Utils.GetReplyItemLink(itemID, originalLink)
+    -- Reply with the cached base-item link, just like single-item requests.
+    -- Customer recraft links can contain hundreds of bytes of modifiers/GUIDs.
+    return (itemID and select(2, GetItemInfo(itemID))) or originalLink
+end
+
 local function BuildResponseContext(crafterFullName, profID, itemID, itemLink, recipeID)
     local profInfo = C_TradeSkillUI.GetProfessionInfoBySkillLineID(profID)
     local crafter = HironCraftScan.NameAndRealmToName(crafterFullName)
@@ -1237,7 +1283,7 @@ local function BuildResponseContext(crafterFullName, profID, itemID, itemLink, r
 
     return {
         crafter = crafter,
-        item = itemLink or (itemID and select(2, GetItemInfo(itemID))) or L(LID.GREETING_LINK_BACKUP),
+        item = HironCraftScan.Utils.GetReplyItemLink(itemID, itemLink) or L(LID.GREETING_LINK_BACKUP),
         profession = professionName,
         profession_link = professionLink,
         commission = HironCraftScan.GetConfiguredCommission(crafterFullName, profID, recipeID),
@@ -1319,18 +1365,22 @@ end
 -- If the player has logged into the crafter character since the notification
 -- was saved, the stored message may say "my alt X can craft this" even though
 -- we are now playing X. Rebuild it so it uses the first-person greeting.
-HironCraftScan.RebuildResponseMessage = function(order)
+HironCraftScan.RebuildResponseMessage = function(order, force)
     local response = HironCraftScan.OrderToResponse(order)
     if not response or response.greeting_sent or not response.crafterFullName then
         return
     end
+    local character = HironCraftScan.DB.characters and HironCraftScan.DB.characters[response.crafterFullName]
+    if not character or not character.professions or not character.professions[response.professionID] then
+        return -- Preserve a saved greeting if its crafter configuration was removed.
+    end
     local crafter = HironCraftScan.NameAndRealmToName(response.crafterFullName)
     local currentAltCraft = crafter ~= HironCraftScan.GetPlayerName()
-    if currentAltCraft == response.alt_craft then
+    if not force and currentAltCraft == response.alt_craft then
         return
     end
     local greeting, newAltCraft =
-        BuildRawGreeting(response.crafterFullName, response.professionID, response.itemID, nil, response.recipeID)
+        BuildRawGreeting(response.crafterFullName, response.professionID, response.itemID, response.itemLink, response.recipeID)
     response.message = SplitResponse(greeting)
     response.alt_craft = newAltCraft
 end
@@ -1789,7 +1839,17 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     customerInfo.guid = customerGuid
 
     if itemMatches and #itemMatches > 1 then
-        HandleItemBatch(message, customer, itemMatches, overrides, event)
+        -- Load every base-item link before creating/sending the group. This is
+        -- the same cache boundary as the single-item path below.
+        local pending = #itemMatches
+        for _, match in ipairs(itemMatches) do
+            Item:CreateFromItemID(match.itemID):ContinueOnItemLoad(function()
+                pending = pending - 1
+                if pending == 0 and HironCraftScan.DB.customers[customer] then
+                    HandleItemBatch(message, customer, itemMatches, overrides, event)
+                end
+            end)
+        end
         return false
     end
 
