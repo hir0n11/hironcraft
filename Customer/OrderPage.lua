@@ -110,9 +110,7 @@ function HironCraftScan.GreetCustomer(button, order)
     end
     if button == "LeftButton" then
         if not response.greeting_sent then
-            HironCraftScan.RebuildResponseMessage(order)
-            HironCraftScan.Utils.SendResponses(response.message, order.customerName)
-            response.greeting_sent = true
+            HironCraftScan.SendOrderGreeting(order)
             -- TODO: More efficient way to update the display?
             HironCraftScanCraftingOrderPage:ShowGeneric()
         else

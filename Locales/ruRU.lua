@@ -496,3 +496,5 @@ L["Crafting order detected automatically"] = "Определено автома�
 L["Crafting order marked manually"] = "Отмечено вручную."
 L["Crafting order mark help"] = "|cffffd100ПКМ: отметить выполненным|r"
 L["Crafting order clear help"] = "|cffffd100ПКМ: очистить статус|r"
+L["Scan monitored item links without keywords"] = "Отслеживаемые предметы без ключевых слов"
+L["Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply."] = "Распознавать ссылки на предметы отслеживаемых рецептов даже без LF и других поисковых слов. Фильтры исключений продолжают действовать."

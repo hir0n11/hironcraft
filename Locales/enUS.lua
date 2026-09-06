@@ -487,4 +487,6 @@ HironCraftScan.L = {
     ['Crafting order marked manually'] = 'Marked manually.',
     ['Crafting order mark help'] = '|cffffd100Right click: Mark fulfilled|r',
     ['Crafting order clear help'] = '|cffffd100Right click: Clear status|r',
+    ['Scan monitored item links without keywords'] = 'Scan monitored item links without keywords',
+    ['Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply.'] = 'Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply.',
 }

@@ -698,7 +698,8 @@ function HironCraftScanComm:ShareCustomerOrder(
     customerGuid,
     lastChatFrameMessage,
     requestToken,
-    restartTerminalRequest
+    restartTerminalRequest,
+    requestTokens
 )
     if not LinkedAccountsConfigured() then
         return
@@ -717,6 +718,7 @@ function HironCraftScanComm:ShareCustomerOrder(
         lastChatFrameMessage = HironCraftScan.Utils.DeepCopy(lastChatFrameMessage),
         requestToken = requestToken,
         restartTerminalRequest = restartTerminalRequest == true,
+        requestTokens = requestTokens,
     }
 
     -- Trying to send a function crashes serialization. Only seen this in testing at args[9]
@@ -830,6 +832,7 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
         data.customerGuid,
         {
             requestToken = data.requestToken,
+            requestTokens = data.requestTokens,
             restartTerminalRequest = data.restartTerminalRequest == true,
             conversationOwners = data.lastChatFrameMessage and data.lastChatFrameMessage.conversationOwners,
         }

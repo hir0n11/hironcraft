@@ -84,7 +84,7 @@ end
 
 function HironCraftScan.Utils.SendResponses(responses, customer)
     RobotsDotTxtAPI.NotifyCustomer(customer, 'HironCraftScan')
-    for _, response in pairs(responses) do
+    for _, response in ipairs(responses) do
         SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
     end
 end

@@ -25,6 +25,29 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Monitored item links and multi-item requests (0.3.12)
+
+Chat scanning now recognizes a link to an item from a monitored recipe even
+without `LF` or other search keywords. Global and profession exclusions, ignored
+customers, scanning toggles and concentration requirements still apply. The
+scanner setting **Scan monitored item links without keywords** is enabled by
+default and can be switched off to require search keywords again.
+
+A message containing different monitored crafts creates a separate order row
+for each. Clicking any unanswered row sends the normal greeting for the first
+item, followed by separate whispers in the form `[item link] Send to Crafter.`
+for the remaining items. All included rows are marked answered together;
+clicking them again opens the conversation without repeating the greeting.
+Repeated links, including bonus/quality variants of the same recipe output,
+do not create extra rows or messages. Repeated requests reuse existing rows
+until dismissed, expired or explicitly reopened as a new job.
+
+Grouped replies preserve per-request tokens for linked accounts. Deleted or
+replaced rows cannot be sent by an old group or delayed auto-reply callback.
+The existing manual-reply policy for alt crafters is retained. Regression tests
+cover matching, exclusions, deduplication, row actions and delayed sends with
+mocked WoW APIs; actual chat delivery still needs an in-game check.
+
 ## Finishing reagents and recrafts (0.3.11)
 
 Finishing reagents are allocated using the slot's position in the recipe

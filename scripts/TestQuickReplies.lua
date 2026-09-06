@@ -247,6 +247,7 @@ EnumUtil = { MakeEnum = function() return {} end }
 CreateFrame = function() return {} end
 assert(loadfile('Customer/ChatHistory.lua'))('HironCraft', CraftScan)
 assert(loadfile('Customer/ChatScanner.lua'))('HironCraft', CraftScan)
+assert(loadfile('Customer/OrderGreetings.lua'))('HironCraft', CraftScan)
 CraftScan.GetPlayerName = function() return currentCharacter end
 local sharedEntry
 HironCraftScanComm = { ShareCustomerChat = function(_, _, _, entry) sharedEntry = entry end }
@@ -282,10 +283,13 @@ assert(loadfile('Customer/OrderPage.lua'))('HironCraft', CraftScan)
 CraftScan.RebuildResponseMessage = function() end
 local clickedResponse = Response(301)
 clickedResponse.requestToken = 'clicked-request'
+clickedResponse.message = {'Hi!'}
 CraftScan.DB.customers.ClickedCustomer = { responses = { [301] = clickedResponse } }
 local clickedOrder = { customerName = 'ClickedCustomer', responseID = 301 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(clickedOrder)] = clickedOrder
 CraftScan.GreetCustomer('LeftButton', clickedOrder)
 assert(clickedResponse.conversationCharacter == currentCharacter, 'greeting click did not capture the seller')
+assert(clickedResponse.greeting_sent, 'greeting click did not mark the row answered')
 clickedResponse.conversationCharacter = nil
 CraftScan.GreetCustomer('MiddleButton', clickedOrder)
 assert(clickedResponse.conversationCharacter == currentCharacter, 'middle-click conversation did not capture the seller')

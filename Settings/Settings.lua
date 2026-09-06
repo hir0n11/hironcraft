@@ -365,6 +365,20 @@ HironCraftScan.Utils.onLoad(function()
         initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
     end
     do
+        local setting = Settings.RegisterProxySetting(
+            category,
+            'HIRONCRAFT_SCAN_ITEM_LINKS_WITHOUT_KEYWORDS',
+            Settings.VarType.Boolean,
+            L('Scan monitored item links without keywords'),
+            true,
+            function() return HironCraftScan.DB.settings.scan_item_links_without_keywords ~= false end,
+            function(value) HironCraftScan.DB.settings.scan_item_links_without_keywords = value end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting,
+            L('Recognize links to monitored recipes even without LF or other search keywords. Exclusions still apply.'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
+    do
         local GetValue = function()
             return HironCraftScan.DB.settings.show_chat_orders_tab
         end

@@ -174,6 +174,7 @@ HironCraftScan.CONST.DEFAULT_SETTINGS = {
     disabled_addon_whitelist = 'None',
     show_button_height = 0,
     alert_icon_scale = 100,
+    scan_item_links_without_keywords = true,
 }
 
 HironCraftScan.CONST.PROFESSION_COLORS = {

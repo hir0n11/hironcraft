@@ -120,7 +120,7 @@ end
 local config = {}
 local function resetConfig()
     config = {
-        -- The message must match an inclusion and either a prof_keyword or an item
+        -- Keywords require an inclusion; monitored item links may stand alone.
         exclusions = {},
         inclusions = {},
         prof_keywords = {},
@@ -751,7 +751,43 @@ local function GenericCrafterForParentProfession(parentProfessionID, preferredPr
     return nil
 end
 
+local function GetMonitoredItemMatches(message)
+    local lower = message:lower()
+    local matches, seen = {}, {}
+    local position = 1
+    while true do
+        local first, last, id = lower:find('|hitem:(%d+):[^|]*|h.-|h', position)
+        if not first then break end
+        position = last + 1
+        local itemID = tonumber(id)
+        local crafterInfo = config.items[itemID]
+        if crafterInfo and not seen[crafterInfo.recipeID] and IsScanningEnabled(crafterInfo) then
+            local character = HironCraftScan.DB.characters[crafterInfo.crafter]
+            local profession = character.professions[crafterInfo.profID]
+            local recipe = profession.recipes[crafterInfo.recipeID]
+            local parent = ParentProfessionConfig(crafterInfo)
+            if recipe and HironCraftScan.Scanner.RecipeScanningOn(profession, recipe)
+                and not HasMatch(lower, ParseStringList(parent.exclusions or '')) then
+                local recipeInfo = C_TradeSkillUI.GetRecipeInfo(crafterInfo.recipeID)
+                if recipeInfo then
+                    -- Preserve the actual linked variant and its display text.
+                    local color = first > 10 and message:sub(first - 10, first - 1)
+                    if color and color:match('^|c%x%x%x%x%x%x%x%x$') then first = first - 10 end
+                    if lower:sub(last + 1, last + 2) == '|r' then last = last + 2 end
+                    seen[crafterInfo.recipeID] = true
+                    matches[#matches + 1] = {
+                        crafterInfo = crafterInfo, itemID = itemID, recipeInfo = recipeInfo,
+                        itemLink = message:sub(first, last),
+                    }
+                end
+            end
+        end
+    end
+    return matches
+end
+
 local function GetCrafterForMessage(customer, message, overrides)
+    local originalMessage = message
     message = string.lower(message)
 
     if not overrides or (not overrides.forceCrafterInfo and not overrides.itemInfo) then
@@ -759,7 +795,10 @@ local function GetCrafterForMessage(customer, message, overrides)
             return nil
         end
 
-        if not HasMatch(message, config.inclusions) then
+        local hasKeywords = HasMatch(message, config.inclusions)
+        local itemMatches = GetMonitoredItemMatches(originalMessage)
+        if not hasKeywords and (HironCraftScan.DB.settings.scan_item_links_without_keywords == false
+            or #itemMatches == 0) then
             return nil
         end
 
@@ -771,10 +810,14 @@ local function GetCrafterForMessage(customer, message, overrides)
             -- accounts, with a merge of timestamps to avoid creating
             -- duplicates.
 
-            -- We originally piggy backed on the matching below for analytics, but
-            -- analytics supports multiple items in a request while the matching
-            -- below does not.
+            -- Analytics has its own handling of quality links, including items
+            -- this account does not monitor.
             AddMessageToAnalytics(customer, message)
+        end
+
+        if #itemMatches > 0 then
+            local first = itemMatches[1]
+            return first.crafterInfo, first.itemID, first.recipeInfo, itemMatches
         end
     end
 
@@ -822,7 +865,8 @@ local function GetCrafterForMessage(customer, message, overrides)
         if crafterInfo then
             local profConfig =
                 HironCraftScan.DB.characters[crafterInfo.crafter].professions[crafterInfo.profID]
-            if IsScanningEnabled(crafterInfo) then
+            if IsScanningEnabled(crafterInfo)
+                and not HasMatch(message, ParseStringList(ParentProfessionConfig(crafterInfo).exclusions or '')) then
                 local recipeInfo = GetRequestID(message, crafterInfo, profConfig)
                 return crafterInfo, itemID, recipeInfo
             end
@@ -1402,6 +1446,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     if firstInteraction or restartingTerminalRequest then
         response.requestToken = requestToken
         response.conversationCharacter = nil
+        response.greetingGroup = nil
     end
 
     -- Save the request at higher granularities as well so that we don't
@@ -1418,13 +1463,13 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local greeting_queued = not alt_craft
         and HironCraftScan.auto_replies_enabled
         and not (overrides and overrides.existingCustomerRequest)
+        and not (overrides and overrides.deferItemBatch)
     if greeting_queued then
+        local queuedToken = response.requestToken
         C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
-            if HironCraftScan.QuickReplies then
-                HironCraftScan.QuickReplies:RememberConversationCharacter(response)
-            end
-            HironCraftScan.Utils.SendResponses(response.message, customer)
-            response.greeting_sent = true
+            local queuedOrder = {customerName = customer, responseID = responseID}
+            local current = HironCraftScan.OrderToResponse(queuedOrder)
+            if current and current.requestToken == queuedToken then HironCraftScan.SendOrderGreeting(queuedOrder) end
         end)
     end
 
@@ -1439,6 +1484,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.parentProfID = profInfo.parentProfessionID
     response.professionName = profInfo.parentProfessionName
     response.itemID = itemID
+    response.itemLink = itemLink
     response.recipeID = recipeID
     response.time = now
     response.responseID = responseID
@@ -1479,7 +1525,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         local isAlertFiltered = (
             ppConfig.local_alerts_only and HironCraftScan.GetPlayerName(true) ~= crafterInfo.crafter
         )
-        if ppConfig.visual_alert_enabled and not isAlertFiltered then
+        if ppConfig.visual_alert_enabled and not isAlertFiltered
+            and not (overrides and overrides.suppressBatchAlert) then
             HironCraftScan.State.activeOrder = order
 
             FlashClientIcon()
@@ -1505,24 +1552,76 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
             end
         end
 
-        if ppConfig.sound_alert_enabled and not isAlertFiltered then
+        if ppConfig.sound_alert_enabled and not isAlertFiltered
+            and not (overrides and overrides.suppressBatchAlert) then
             PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master')
         end
 
-        HironCraftScanCraftingOrderPage:ShowGeneric()
+        if not (overrides and overrides.deferItemBatch) then
+            HironCraftScanCraftingOrderPage:ShowGeneric()
+        end
     end
 
     if requestChatEntry and HironCraftScan.QuickReplies then
         requestChatEntry.conversationOwners = HironCraftScan.QuickReplies:GetConversationOwners(customerInfo)
     end
-    HironCraftScanComm:ShareCustomerOrder(
-        message,
-        customer,
-        customerInfo.guid,
-        requestChatEntry or chat_history[#chat_history],
-        response.requestToken,
-        restartingTerminalRequest
-    )
+    if not (overrides and overrides.deferItemBatch) then
+        HironCraftScanComm:ShareCustomerOrder(
+            message,
+            customer,
+            customerInfo.guid,
+            requestChatEntry or chat_history[#chat_history],
+            response.requestToken,
+            restartingTerminalRequest
+        )
+    end
+    return response
+end
+
+local function HandleItemBatch(message, customer, matches, overrides, event)
+    local responses, tokens = {}, {}
+    local allLocal = true
+    for _, match in ipairs(matches) do
+        local options = {}
+        for key, value in pairs(overrides or {}) do options[key] = value end
+        options.deferItemBatch = true
+        options.suppressBatchAlert = #responses > 0
+        options.chatHistoryAlreadyStored = options.chatHistoryAlreadyStored or #responses > 0
+        local id = match.recipeInfo.recipeID
+        if overrides and type(overrides.requestTokens) == 'table' then
+            options.requestToken = overrides.requestTokens[id] or overrides.requestTokens[tostring(id)]
+        end
+        local item = { GetItemLink = function() return match.itemLink end }
+        local response = handleResponse(message, customer, match.crafterInfo,
+            match.itemID, match.recipeInfo, item, options, event)
+        if response then
+            responses[#responses + 1] = response
+            tokens[id] = response.requestToken
+            allLocal = allLocal and not response.alt_craft
+        end
+    end
+    if #responses == 0 then return end
+    HironCraftScan.GroupOrderGreetings(responses)
+    HironCraftScanCraftingOrderPage:ShowGeneric()
+
+    local customerInfo = HironCraftScan.DB.customers[customer]
+    local history = customerInfo.chat_history
+    local entry = history and history[#history]
+    if entry and HironCraftScan.QuickReplies then
+        entry.conversationOwners = HironCraftScan.QuickReplies:GetConversationOwners(customerInfo)
+    end
+    HironCraftScanComm:ShareCustomerOrder(message, customer, customerInfo.guid, entry,
+        responses[1].requestToken, overrides and overrides.restartTerminalRequest, tokens)
+
+    if HironCraftScan.auto_replies_enabled and allLocal
+        and not (overrides and overrides.existingCustomerRequest) then
+        local order = {customerName = customer, responseID = responses[1].responseID}
+        local token = responses[1].requestToken
+        C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
+            local current = HironCraftScan.OrderToResponse(order)
+            if current and current.requestToken == token then HironCraftScan.SendOrderGreeting(order) end
+        end)
+    end
 end
 
 local function BaseCustomerName(name)
@@ -1613,7 +1712,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
-    local crafterInfo, itemID, recipeInfo
+    local crafterInfo, itemID, recipeInfo, itemMatches
 
     if event == 'CHAT_MSG_WHISPER_INFORM' then
         if customerInfo then
@@ -1657,7 +1756,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             -- message that independently matches the craft scanner continues
             -- below, where a terminal row can be reopened as a new request.
             overrides = overrides or {}
-            crafterInfo, itemID, recipeInfo = GetCrafterForMessage(
+            crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(
                 customer,
                 message,
                 overrides
@@ -1680,7 +1779,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     end
 
     if not crafterInfo then
-        crafterInfo, itemID, recipeInfo = GetCrafterForMessage(customer, message, overrides)
+        crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(customer, message, overrides)
     end
     if not crafterInfo then
         return false
@@ -1688,6 +1787,16 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 
     local customerInfo = saved(HironCraftScan.DB.customers, customer, {})
     customerInfo.guid = customerGuid
+
+    if itemMatches and #itemMatches > 1 then
+        HandleItemBatch(message, customer, itemMatches, overrides, event)
+        return false
+    end
+
+    if recipeInfo and overrides and type(overrides.requestTokens) == 'table' then
+        overrides.requestToken = overrides.requestTokens[recipeInfo.recipeID]
+            or overrides.requestTokens[tostring(recipeInfo.recipeID)]
+    end
 
     if itemID or recipeInfo then
         if not itemID then
