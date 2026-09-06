@@ -424,39 +424,10 @@ local function ResolveAutoBankType(arg)
 end
 
 local function IsAutoDepositEnabled(bankType)
-    local rule = GetCurrentRule()
-
-    if not rule then
-        return false
-    end
-
-    if bankType == BANK_TYPE_ACCOUNT then
-        return rule.autoDepositAccount == true
-    end
-
-    return rule.autoDepositGuild == true
+    -- Historical SavedVariables cannot enable bank-event transfers.
+    return false
 end
 
-local function IsAutoDepositActive(bankType)
-    return not IsCharacterDepositDisabled() and IsAutoDepositEnabled(bankType)
-end
-
-local function SetAutoDepositEnabled(bankType, enabled)
-    local rule = GetCurrentRule()
-    if not rule then return end
-
-    if bankType == BANK_TYPE_ACCOUNT then
-        rule.autoDepositAccount = enabled and true or false
-    else
-        rule.autoDepositGuild = enabled and true or false
-    end
-
-    local db = EnsureDB()
-    if GetCurrentRuleID() == "default" then
-        db.autoDepositGuild = rule.autoDepositGuild == true
-        db.autoDepositAccount = rule.autoDepositAccount == true
-    end
-end
 
 local function SaveButtonPosition()
     if not button then
@@ -950,73 +921,13 @@ local function DepositGold(requestedBankType)
 end
 
 local function QueueAutoDeposit(bankType)
-    bankType = bankType or GetCurrentBankType()
-
-    if not bankType then
-        return
-    end
-
-    if not IsAutoDepositActive(bankType) then
-        return
-    end
-
-    if autoDepositQueued then
-        return
-    end
-
-    autoDepositQueued = true
-    autoDepositToken = autoDepositToken + 1
-
-    local token = autoDepositToken
-    local attempts = 0
-
-    local function TryAutoDeposit()
-        if token ~= autoDepositToken then
-            return
-        end
-
-        attempts = attempts + 1
-
-        if not IsAutoDepositActive(bankType) then
-            autoDepositQueued = false
-            return
-        end
-
-        if GetCurrentBankType() == bankType then
-            autoDepositQueued = false
-            DepositGold(bankType)
-            return
-        end
-
-        if attempts < 10 then
-            RunSoon(0.25, TryAutoDeposit)
-        else
-            autoDepositQueued = false
-        end
-    end
-
-    RunSoon(0.35, TryAutoDeposit)
+    -- Kept as a no-op for old event hooks; money moves only on a manual action.
+    autoDepositQueued = false
 end
 
 local function ToggleAutoDeposit(bankType)
-    bankType = bankType or GetCurrentBankType() or BANK_TYPE_GUILD
-
-    local enabled = not IsAutoDepositEnabled(bankType)
-    SetAutoDepositEnabled(bankType, enabled)
-
-    if enabled then
-        print(OK_PREFIX .. " " .. string.format(T("GD_AUTO_ON", "Auto-deposit for %s is ON."), GetBankName(bankType)))
-        UpdateButtonLockVisual()
-
-        if GetCurrentBankType() == bankType then
-            QueueAutoDeposit(bankType)
-        end
-    else
-        autoDepositQueued = false
-        autoDepositToken = autoDepositToken + 1
-        print(ERROR_PREFIX .. " " .. string.format(T("GD_AUTO_OFF", "Auto-deposit for %s is OFF."), GetBankName(bankType)))
-        UpdateButtonLockVisual()
-    end
+    print(T("GD_MANUAL_ONLY", "Gold transfers require a click on the deposit button.",
+        "Перенос золота выполняется только нажатием кнопки депозита."))
 end
 
 local function ToggleButtonLock()
@@ -1322,15 +1233,17 @@ local function CreateSettingsWindow()
     autoGuild.text:SetFont(FONT, 12, "")
     autoGuild.text:SetText(T("GD_SETTINGS_AUTO_GUILD", "Auto-deposit to guild bank", "Автодепозит в банк гильдии"))
     f.AutoGuild = autoGuild
+    autoGuild:Hide()
 
     local autoAccount = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     autoAccount:SetPoint("TOPLEFT", autoGuild, "BOTTOMLEFT", 0, -4)
     autoAccount.text:SetFont(FONT, 12, "")
     autoAccount.text:SetText(T("GD_SETTINGS_AUTO_ACCOUNT", "Auto-deposit to warband bank", "Автодепозит в банк отряда"))
     f.AutoAccount = autoAccount
+    autoAccount:Hide()
 
     local refillCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-    refillCheck:SetPoint("TOPLEFT", autoAccount, "BOTTOMLEFT", 0, -10)
+    refillCheck:SetPoint("TOPLEFT", keepEdit, "BOTTOMLEFT", -2, -10)
     refillCheck.text:SetFont(FONT, 12, "")
     refillCheck.text:SetText(T("GD_SETTINGS_REFILL", "Also withdraw to wallet if below the amount", "Пополнять кошелёк из банка, если ниже суммы"))
     refillCheck.text:SetTextColor(1, 0.82, 0)
@@ -1665,12 +1578,6 @@ local function ShowHironCraftProfitTooltip(owner)
     local rule = GetCurrentRule()
     local bankType = GetCurrentBankType()
     local bankName = bankType and GetBankName(bankType) or T("GD_BANK_NOT_OPEN", "bank is not open", "банк не открыт")
-    local currentAutoText = ""
-
-    if bankType then
-        currentAutoText = " " .. ColorText("[" .. EnabledStatus(IsAutoDepositEnabled(bankType)) .. "]", DIM_COLOR)
-    end
-
     local refill = IsRefillRule(rule)
 
     Tooltip:Clear()
@@ -1682,10 +1589,7 @@ local function ShowHironCraftProfitTooltip(owner)
     TooltipLine(" ", 4, 1, 1, 1)
     TooltipAction(T("GD_KEY_LMB", "LMB"), refill and T("GD_TT_BALANCE", "balance the wallet", "выровнять баланс") or T("GD_TT_DEPOSIT", "deposit gold", "положить золото"))
     TooltipAction(T("GD_KEY_MMB", "MMB"), T("GD_TT_SETTINGS", "open Gold Depositor settings", "открыть настройки депозита"))
-    TooltipAction(T("GD_KEY_RMB", "RMB"), T("GD_TT_AUTO_CURRENT", "current bank auto-deposit", "автодепозит текущего банка") .. currentAutoText)
     TooltipLine(" ", 4, 1, 1, 1)
-    TooltipStatus(T("GD_TT_AUTO_GUILD_STATUS", "Guild bank auto", "Авто банк гильдии"), EnabledStatus(IsAutoDepositEnabled(BANK_TYPE_GUILD)))
-    TooltipStatus(T("GD_TT_AUTO_ACCOUNT_STATUS", "Warband bank auto", "Авто банк отряда"), EnabledStatus(IsAutoDepositEnabled(BANK_TYPE_ACCOUNT)))
     TooltipStatus(T("GD_TT_KEEP_STATUS", "Keep", "Оставить"), ColorText(tostring(GetCurrentKeepGold()) .. "g", KEY_COLOR))
     Tooltip:ShowSmart(owner, 10)
 end
@@ -1926,9 +1830,6 @@ local function PrintHelp()
 
     print(PREFIX .. " " .. T("GD_HELP_TITLE", "Commands:", "Команды:"))
     print(T("GD_HELP_DEPOSIT", "  /gd deposit          — deposit gold into the open bank: guild bank or warband bank", "  /gd deposit          — положить золото в открытый банк: гильдии или отряда"))
-    print(T("GD_HELP_AUTO", "  /gd auto             — toggle auto-deposit for the current open bank", "  /gd auto             — переключить автодепозит для текущего открытого банка"))
-    print(T("GD_HELP_AUTO_GUILD", "  /gd auto guild       — toggle guild bank auto-deposit", "  /gd auto guild       — переключить автодепозит в банк гильдии"))
-    print(T("GD_HELP_AUTO_WARBAND", "  /gd auto warband     — toggle warband bank auto-deposit", "  /gd auto warband     — переключить автодепозит в банк отряда"))
     print(T("GD_HELP_SETTINGS", "  /gd settings         — open Gold Depositor settings", "  /gd settings         — открыть настройки депозита золота"))
     print(T("GD_HELP_LOCK", "  /gd lock             — lock/unlock button position", "  /gd lock             — заблокировать/разблокировать позицию кнопки"))
     print(T("GD_HELP_RESET", "  /gd reset            — reset button position", "  /gd reset            — сбросить позицию кнопки"))
@@ -1937,7 +1838,8 @@ local function PrintHelp()
     print(T("GD_HELP_STATUS", "  /gd status           — show current settings", "  /gd status           — показать текущие настройки"))
     print(T("GD_HELP_ALIAS", "  /ahuigd              — full alias for /gd", "  /ahuigd              — полный алиас для /gd"))
     print(string.format(T("GD_HELP_CURRENT_RULE", "  Current rule: %s", "  Текущее правило: %s"), GetRuleDisplayName(rule)))
-    print(T("GD_HELP_BUTTON_HINT", "  Button: LMB deposit, Shift+LMB settings, MMB lock, RMB current bank auto.", "  Кнопка: ЛКМ депозит, Shift+ЛКМ настройки, СКМ блокировка, ПКМ авто текущего банка."))
+    print(T("GD_MANUAL_ONLY", "Gold transfers require a click on the deposit button.",
+        "Перенос золота выполняется только нажатием кнопки депозита."))
 end
 
 local function PrintStatus()

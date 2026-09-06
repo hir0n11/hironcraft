@@ -448,17 +448,15 @@ function CO:OnEvent(event, ...)
 
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED" then
         local orderID = self.pendingReleaseOrderID or self.pendingFulfillOrderID
-        local continuation = self.pendingReleaseContinuation
-        if continuation and (not orderID or not SameOrderID(continuation.orderID, orderID)) then
-            continuation = nil
-        end
-        self.pendingReleaseContinuation = nil
+        local manualRejection = self.pendingReleaseForReject and self.pendingReleaseOrderID
+            and orderID and SameOrderID(self.pendingReleaseOrderID, orderID)
+        self.pendingReleaseForReject = nil
         if orderID and self.rowStates[orderID] then
             self.rowStates[orderID].order = nil
         end
         if orderID then
             self:InvalidateOrderCaches(orderID)
-            self.selectedOrders[OrderKey(orderID)] = nil
+            self.selectedOrders[OrderKey(orderID)] = manualRejection and true or nil
             self.orderIssues[OrderKey(orderID)] = nil
         end
         if self.currentQueueOrderID and orderID and SameOrderID(self.currentQueueOrderID, orderID) then
@@ -489,16 +487,15 @@ function CO:OnEvent(event, ...)
                 self.preparedFinisherUseEngineOrderID = nil
             end
         end
-        self:SetStatus(T("COA_STATUS_DONE", "Order completed or released."))
+        self:SetStatus(manualRejection
+            and T("COA_STATUS_CONFIRM_REJECT", "Order released. Press Action again to decline it.")
+            or T("COA_STATUS_DONE", "Order completed or released."))
         self:StopRowProgress()
         self:UpdateControlPanel()
         local terminalRefreshScheduled = self.RefreshPersonalOrdersAfterTerminalAction
             and self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
         self:RefreshPageSoon(terminalRefreshScheduled and 0.05 or 0.35,
             not terminalRefreshScheduled and not self:HasSelectedOrders())
-        if continuation and type(continuation.callback) == "function" then
-            C_Timer.After(0.1, continuation.callback)
-        end
         return
     end
 

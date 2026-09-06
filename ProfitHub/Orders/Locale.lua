@@ -3,6 +3,8 @@ if not PT then return end
 
 PT.L_enUS = PT.L_enUS or {}
 PT.L_ruRU = PT.L_ruRU or {}
+PT.L_enUS["COA_STATUS_CONFIRM_REJECT"] = "Order released. Press Action again to decline it."
+PT.L_ruRU["COA_STATUS_CONFIRM_REJECT"] = "Заказ освобождён. Нажмите «Действие» ещё раз для отклонения."
 
 PT.L_enUS["COA_CLASSIC_CRAFT_TAB"] = "Crafting"
 PT.L_ruRU["COA_CLASSIC_CRAFT_TAB"] = "Изготовление"

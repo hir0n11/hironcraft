@@ -3,6 +3,8 @@ if not PT then return end
 
 PT.L_enUS = PT.L_enUS or {}
 PT.L_ruRU = PT.L_ruRU or {}
+PT.L_enUS["PG_SELL_BUY_CONFIRM_CLICK"] = "Click again to confirm this purchase."
+PT.L_ruRU["PG_SELL_BUY_CONFIRM_CLICK"] = "Нажмите ещё раз для подтверждения покупки."
 
 PT.L_enUS["Settings_ShoppingListAlwaysShowTab"] = "PH:Shop"
 PT.L_enUS["Settings_ShoppingListAlwaysShowTab_Tooltip"] = "Always show the HironCraft Shop shopping tab"

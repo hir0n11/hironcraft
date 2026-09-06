@@ -10,7 +10,8 @@ function Scan.GroupOrderGreetings(responses)
     for _, response in ipairs(responses) do response.greetingGroup = group end
 end
 
-function Scan.SendOrderGreeting(order)
+function Scan.SendOrderGreeting(order, userInitiated)
+    if userInitiated ~= true then return false end
     local response = Scan.OrderToResponse(order)
     if not response or response.greeting_sent then return false end
 
@@ -49,7 +50,7 @@ function Scan.SendOrderGreeting(order)
     end
     if #pending == 0 or #messages == 0 then return false end
 
-    if Scan.Utils.SendResponses(messages, order.customerName) == false then return false end
+    if Scan.Utils.SendResponses(messages, order.customerName, true) == false then return false end
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end
         sentResponse.greeting_sent = true

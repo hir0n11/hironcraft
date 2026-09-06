@@ -36,7 +36,8 @@ function GetTime() return now end
 C_TradeSkillUI={GetTradeSkillTexture=function() return 42 end}
 HironCraftScanScannerMenu={PageButton={}}
 local sent, frames={}, {}
-Scan.Utils.SendResponses=function(messages, customer)
+Scan.Utils.SendResponses=function(messages, customer, userInitiated)
+    assert(userInitiated == true, 'quick reply bypassed the explicit-click sender')
     assert(#messages==1, 'one quick-reply click sent several messages')
     sent[#sent+1]={text=messages[1], customer=customer}
     return true

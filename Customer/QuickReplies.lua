@@ -930,7 +930,7 @@ local function SendOption(toast, option)
     -- Exactly one entry is intentionally passed. SendResponses uses the same
     -- whisper path as greetings, and CHAT_MSG_WHISPER_INFORM records it in the
     -- customer's existing chat_history.
-    if HironCraftScan.Utils.SendResponses({ reply }, option.customer) == false then return end
+    if HironCraftScan.Utils.SendResponses({ reply }, option.customer, true) == false then return end
     DismissEquivalentToasts(option)
 end
 

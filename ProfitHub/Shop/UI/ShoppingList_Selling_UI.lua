@@ -345,7 +345,9 @@ local function EnsureAuctionRows(auc, count)
             TT:Clear()
             if self.isConfirm then
                 TT:AddLine(T("PG_SHOP_CONFIRM", "Confirm"), 13, 1, 1, 1)
-                TT:AddLine(T("PG_SELL_BUY_PENDING_TT", "Purchase pending..."), 11, 0.8, 0.8, 0.8)
+                TT:AddLine(T("PG_SELL_BUY_CONFIRM_CLICK", "Click again to confirm this purchase."), 11, 0.8, 0.8, 0.8)
+                local pending = S.sell and S.sell.pendingBuy
+                if pending and pending.totalPrice then TT:AddLine(FormatGold(pending.totalPrice), 12, 1, 0.82, 0.2) end
             else
                 TT:AddLine(T("PG_SELL_BUY_BTN", "Buy"), 13, 1, 1, 1)
                 TT:AddLine(T("PG_SELL_BUY_TT", "Buy out this auction."), 11, 0.8, 0.8, 0.8)
@@ -901,7 +903,8 @@ local function RefreshAuctions(auc, scan)
         row.buy.tier = tier
         row.buy:SetShown(scan and scan.isCommodity and not tier.owned and true or false)
         local pb = S.sell and S.sell.pendingBuy
-        local isConfirm = pb and scan and pb.itemID == scan.itemID and pb.tierPrice == tier.price and true or false
+        local isConfirm = pb and pb.ready and not pb.confirming and scan
+            and pb.itemID == scan.itemID and pb.tierPrice == tier.price and true or false
         row.buy.isConfirm = isConfirm
         if row.buy.icon and row.buy.icon.SetAtlas then
             row.buy.icon:SetAtlas(isConfirm and "VAS-icon-checkmark" or "Perks-ShoppingCart")

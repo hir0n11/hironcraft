@@ -86,46 +86,6 @@
 		</Scripts>
 	</Button>
 
-	<Frame name="HironCraftScan_AutoReplyConfirmationTemplate" toplevel="true" frameStrata="DIALOG" enableMouse="true" hidden="true" parent="UIParent" virtual="true">
-		<Size x="195" y="180"/>
-		<Anchors>
-			<Anchor point="CENTER"/>
-		</Anchors>
-		<Layers>
-			<Layer level="BACKGROUND">
-				<FontString name="Label" inherits="Number14FontWhite" justifyH="LEFT" setAllPoints="true" text="Auto replies are enabled.">
-					<Anchors>
-						<Anchor point="CENTER" relativePoint="TOP" x="0" y="-42"/>
-					</Anchors>
-				</FontString>
-				<FontString name="Label2" inherits="Number14FontWhite" justifyH="LEFT" setAllPoints="true" text="Are you still here?">
-					<Anchors>
-						<Anchor point="CENTER" relativeTo="Label" relativePoint="TOP" x="0" y="-42"/>
-					</Anchors>
-				</FontString>
-			</Layer>
-		</Layers>
-
-		<Frames>
-			<Frame parentKey="Border" inherits="DialogBorderTemplate"/>
-			<Button name="$parentKeepEnabled" inherits="GameMenuButtonTemplate" mixin="HironCraftScan_AutoReplyKeepEnabledMixin" text="Yes">
-				<Anchors>
-					<Anchor point="CENTER" relativeTo="Label2" relativePoint="TOP" x="0" y="-42"/>
-				</Anchors>
-				<Scripts>
-					<OnClick method="OnClick"/>
-				</Scripts>
-			</Button>
-			<Button name="$parentDisable" inherits="GameMenuButtonTemplate" mixin="HironCraftScan_AutoReplyDisableMixin" text="No" motionScriptsWhileDisabled="true">
-				<Anchors>
-					<Anchor point="TOP" relativeTo="$parentKeepEnabled" relativePoint="BOTTOM" x="0" y="-1"/>
-				</Anchors>
-				<Scripts>
-					<OnClick method="OnClick"/>
-				</Scripts>
-			</Button>
-		</Frames>
-	</Frame>
 
 	<Button name="HironCraftScanCrafterListElementTemplate" mixin="HironCraftScanCrafterListElementMixin" virtual="true">
 		<Size y="22"/>
@@ -551,19 +511,6 @@
 						</Scripts>
 					</Button>
 
-					<Button parentKey="AutoReplyButton" inherits="UIPanelButtonTemplate" registerForClicks="LeftButtonDown" mixin="HironCraftScan_AutoReplyButtonMixin" motionScriptsWhileDisabled="true">
-						<Size x="140" y="22"/>
-
-						<Anchors>
-							<Anchor point="TOPLEFT" relativeKey="$parent.AddonToggleButton" relativePoint="TOPRIGHT" x="5" y="0"/>
-						</Anchors>
-						<Scripts>
-							<OnLoad method="OnLoad"/>
-							<OnClick method="OnClick"/>
-							<OnEnter method="OnEnter"/>
-							<OnLeave method="OnLeave"/>
-						</Scripts>
-					</Button>
 
 					<DropdownButton parentKey="ResetAnalyticsButton" inherits="UIPanelButtonTemplate" registerForClicks="LeftButtonDown" mixin="HironCraftScan_ResetAnalyticsButtonMixin">
 						<Size x="120" y="22"/>

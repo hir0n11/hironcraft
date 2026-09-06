@@ -1510,19 +1510,6 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         table.insert(children, profID)
     end
 
-    local greeting_queued = not alt_craft
-        and HironCraftScan.auto_replies_enabled
-        and not (overrides and overrides.existingCustomerRequest)
-        and not (overrides and overrides.deferItemBatch)
-    if greeting_queued then
-        local queuedToken = response.requestToken
-        C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
-            local queuedOrder = {customerName = customer, responseID = responseID}
-            local current = HironCraftScan.OrderToResponse(queuedOrder)
-            if current and current.requestToken == queuedToken then HironCraftScan.SendOrderGreeting(queuedOrder) end
-        end)
-    end
-
     local now = time()
 
     local customerStartedInteraction = overrides and overrides.customerStartedInteraction
@@ -1581,7 +1568,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
             FlashClientIcon()
 
-            if not greeting_queued and not customerStartedInteraction then
+            if not customerStartedInteraction then
                 HironCraftScanScannerMenu:TriggerAlert(
                     string.format(
                         '%s\n%s (%s)',
@@ -1630,7 +1617,6 @@ end
 
 local function HandleItemBatch(message, customer, matches, overrides, event)
     local responses, tokens = {}, {}
-    local allLocal = true
     for _, match in ipairs(matches) do
         local options = {}
         for key, value in pairs(overrides or {}) do options[key] = value end
@@ -1647,7 +1633,6 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
         if response then
             responses[#responses + 1] = response
             tokens[id] = response.requestToken
-            allLocal = allLocal and not response.alt_craft
         end
     end
     if #responses == 0 then return end
@@ -1663,15 +1648,6 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
     HironCraftScanComm:ShareCustomerOrder(message, customer, customerInfo.guid, entry,
         responses[1].requestToken, overrides and overrides.restartTerminalRequest, tokens)
 
-    if HironCraftScan.auto_replies_enabled and allLocal
-        and not (overrides and overrides.existingCustomerRequest) then
-        local order = {customerName = customer, responseID = responses[1].responseID}
-        local token = responses[1].requestToken
-        C_Timer.After(HironCraftScan.Utils.GetSetting('auto_reply_delay') / 1000, function()
-            local current = HironCraftScan.OrderToResponse(order)
-            if current and current.requestToken == token then HironCraftScan.SendOrderGreeting(order) end
-        end)
-    end
 end
 
 local function BaseCustomerName(name)

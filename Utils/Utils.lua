@@ -82,7 +82,11 @@ function HironCraftScan.Utils.ColorizedProfessionNameByID(professionID)
     )
 end
 
-function HironCraftScan.Utils.SendResponses(responses, customer)
+function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
+    -- Only explicit UI actions opt into sending. Scanner events, timers and
+    -- linked-account packets must remain read-only with respect to player chat.
+    -- This is an internal call-site guard, not a bypass of Blizzard protection.
+    if userInitiated ~= true then return false end
     -- Validate the complete batch before sending any part or marking its rows.
     for _, response in ipairs(responses) do
         local plain = response:gsub('|H[^|]+|h.-|h', '')
@@ -91,7 +95,6 @@ function HironCraftScan.Utils.SendResponses(responses, customer)
             return false
         end
     end
-    RobotsDotTxtAPI.NotifyCustomer(customer, 'HironCraftScan')
     for _, response in ipairs(responses) do
         SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
     end

@@ -275,7 +275,7 @@ function CO:GetOrderEngine(pageFrame, order)
     return orderView
 end
 
-function CO:ReleaseOrder(order, pageFrame, continuation)
+function CO:ReleaseOrder(order, pageFrame, forRejection)
     order = order or self:GetClaimedOrder()
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
@@ -301,10 +301,7 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     end
 
     self.pendingReleaseOrderID = order.orderID
-    self.pendingReleaseContinuation = type(continuation) == "function" and {
-        orderID = order.orderID,
-        callback = continuation,
-    } or nil
+    self.pendingReleaseForReject = forRejection == true
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
@@ -324,7 +321,7 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
 
     if not ok then
         self.pendingReleaseOrderID = nil
-        self.pendingReleaseContinuation = nil
+        self.pendingReleaseForReject = nil
         self:RefreshVisibleRowsSoon()
     end
 
@@ -381,15 +378,15 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     end
 
     local claimed = self:GetClaimedOrder()
-    if not releasedForReject and claimed and SameOrderID(claimed.orderID, order.orderID) then
+    if claimed and SameOrderID(claimed.orderID, order.orderID) then
         if qualityRejection then
             self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT_QUALITY", "Releasing order before declining it for insufficient quality..."))
         else
             self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT", "Releasing order before declining it..."))
         end
-        return self:ReleaseOrder(order, pageFrame, function()
-            CO:RejectOrder(order, pageFrame, true, rejectionReason)
-        end)
+        -- Release and decline are separate player actions. Never submit the
+        -- decline from a server-event continuation after releasing the order.
+        return self:ReleaseOrder(order, pageFrame, true)
     end
 
     local key = OrderKey(order.orderID)
@@ -1014,7 +1011,10 @@ function CO:RunRowButtonAction(btn)
     end
 
     if action == "reject" then
-        self:RejectOrder(order, btn.pageFrame)
+        local qualityRejection = self.IsOrderReadyForQualityRejection
+            and self:IsOrderReadyForQualityRejection(order)
+        self:RejectOrder(order, btn.pageFrame, false,
+            qualityRejection and "insufficient_quality" or nil)
         return
     end
 

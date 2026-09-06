@@ -204,7 +204,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local text = entry.text;
                 local button = subMenu:CreateButton(label, function()
                     local message = HironCraftScan.Utils.SplitResponse(text);
-                    HironCraftScan.Utils.SendResponses(message, contextData.chatTarget)
+                    HironCraftScan.Utils.SendResponses(message, contextData.chatTarget, true)
                 end);
 
                 button:SetTooltip(function(tooltip, elementDescription)

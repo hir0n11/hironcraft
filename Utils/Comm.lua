@@ -1989,26 +1989,36 @@ local function ReceiveFindCrafter(sender, data)
     end
 end
 
-local function CreateRequestCraftGreeting(itemID, OnReady)
+local function CreateRequestCraftGreeting(itemID)
     local item = Item:CreateFromItemID(itemID)
-    item:ContinueOnItemLoad(function()
-        OnReady(string.format(L(LID.FOUND_VIA_HIRONCRAFT_SCAN), item:GetItemLink()))
-    end)
+    local itemLink = item:GetItemLink()
+    if not itemLink then
+        -- Fetch data only. Loading it must not later send chat without a click.
+        item:ContinueOnItemLoad(function() end)
+        return nil
+    end
+    return string.format(L(LID.FOUND_VIA_HIRONCRAFT_SCAN), itemLink)
 end
 
-function HironCraftScanComm:RequestCraft(target, itemID)
-    -- Start by simply sending the message that we want something crafted.
-    CreateRequestCraftGreeting(itemID, function(message)
-        SendChatMessage(message, 'WHISPER', select(2, GetDefaultLanguage()), target)
+function HironCraftScanComm:RequestCraft(target, itemID, userInitiated)
+    if userInitiated ~= true then return false end
+    local message = CreateRequestCraftGreeting(itemID)
+    if not message then
+        print(GetLocale() == 'ruRU'
+            and 'HironCraft: Загружается предмет. Нажмите ещё раз для отправки запроса.'
+            or 'HironCraft: Item information is loading. Click again to send the request.')
+        return false
+    end
+    if HironCraftScan.Utils.SendResponses({ message }, target, true) == false then return false end
 
-        -- Also inject that message into the crafter's list since we aren't always
-        -- setup to listen for whispers.
-        HironCraftScanComm:Transmit(
-            { i = itemID, g = UnitGUID('player') },
-            HironCraftScanComm.Operations.RequestCraft,
-            target
-        )
-    end)
+    -- Also inject that message into the crafter's list since we aren't always
+    -- setup to listen for whispers.
+    HironCraftScanComm:Transmit(
+        { i = itemID, g = UnitGUID('player') },
+        HironCraftScanComm.Operations.RequestCraft,
+        target
+    )
+    return true
 end
 
 local function ReceiveRequestCraft(sender, data)

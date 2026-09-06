@@ -6854,57 +6854,9 @@ function S:HandleBuyAllClick()
 end
 
 function S:AdvanceBuyAll()
-    if not self.buyAllState.active then return end
-    if not self.isAuctionHouseOpen then
-        self:StopBuyAll()
-        return
-    end
-    local rows = self:GetRows()
-    local currentIndex = self.buyAllState.currentRowIndex
-    local currentRow = currentIndex and rows[currentIndex] or nil
-    if currentRow then
-        if currentRow.purchaseStage == "confirm" then
-            self:ConfirmCommodityPurchase(currentRow)
-            return
-        end
-        if currentRow.purchaseStage == "await_price" or currentRow.purchaseStage == "processing" or currentRow.searchPending then
-            RefreshWindow()
-            return
-        end
-        if GetRemainingQuantity(currentRow) <= 0 or not IsRowBuyableNow(currentRow) then
-            self.buyAllState.pointer = (self.buyAllState.pointer or 1) + 1
-            self.buyAllState.currentRowIndex = nil
-            currentRow = nil
-        elseif currentRow.chosenItemID and currentRow.minPrice then
-            self:BuyRow(currentIndex)
-            if currentRow.purchaseStage == "confirm" or currentRow.purchaseStage == "await_price" or currentRow.purchaseStage == "processing" or currentRow.searchPending then
-                return
-            end
-            if GetRemainingQuantity(currentRow) <= 0 or not IsRowBuyableNow(currentRow) then
-                self.buyAllState.pointer = (self.buyAllState.pointer or 1) + 1
-                self.buyAllState.currentRowIndex = nil
-            end
-            RefreshWindow()
-            return
-        else
-            self.buyAllState.pointer = (self.buyAllState.pointer or 1) + 1
-            self.buyAllState.currentRowIndex = nil
-        end
-    end
-    while self.buyAllState.active do
-        local idx = self.buyAllState.order and self.buyAllState.order[self.buyAllState.pointer]
-        if not idx then
-            self:StopBuyAll()
-            return
-        end
-        local row = rows[idx]
-        if row and IsRowBuyableNow(row) then
-            self.buyAllState.currentRowIndex = idx
-            self:BuyRow(idx)
-            return
-        end
-        self.buyAllState.pointer = (self.buyAllState.pointer or 1) + 1
-    end
+    -- Retired automation entry point: old callers cannot submit purchases.
+    -- Buying and confirming the next row require a fresh button/hotkey action.
+    self:StopBuyAll()
 end
 
 local eventFrame = CreateFrame("Frame")

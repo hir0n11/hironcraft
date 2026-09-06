@@ -959,6 +959,9 @@ function CO:GetRowAction(orderID, fallbackOrder)
     if self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID) then
         return "fulfilling", T("COA_ACTION_FULFILLING", "Completing"), order, false
     end
+    if self.pendingReleaseOrderID and SameOrderID(self.pendingReleaseOrderID, orderID) then
+        return "pending", T("COA_STATUS_RELEASING", "Releasing order..."), order, false
+    end
 
     local rejectedKey = OrderKey(orderID)
     local rejectedUntil = rejectedKey
@@ -988,6 +991,11 @@ function CO:GetRowAction(orderID, fallbackOrder)
         and order.isFulfillable ~= true
         and self:ShouldRejectForMissingCustomerReagents(order, pageFrame)
     if shouldReject and (IsOrderCreated(order) or (claimed and SameOrderID(claimed.orderID, orderID))) then
+        return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
+    end
+
+    if IsOrderCreated(order) and self.IsOrderReadyForQualityRejection
+        and self:IsOrderReadyForQualityRejection(order) then
         return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
     end
 

@@ -43,7 +43,7 @@ function SendChatMessage(message, kind, language, customer)
         'outgoing whisper contains a split hyperlink')
     sent[#sent+1] = {message=message, customer=customer}
 end
-RobotsDotTxtAPI = {NotifyCustomer=noop}
+RobotsDotTxtAPI = {NotifyCustomer=function() error('obsolete robots.txt traffic') end}
 C_Timer = {After=function(_, callback) timers[#timers+1]=callback end}
 HironCraftScanComm = {applying_remote_state=false, ShareCustomerOrder=function(_, ...)
     shared[#shared+1] = {...}
@@ -233,30 +233,26 @@ scan(a .. b, {requestToken='peer-a', requestTokens={[101]='peer-a'}})
 assert(response(101).requestToken=='peer-a' and response(102).requestToken~='peer-a',
     'item missing from a peer token map reused the first item identity')
 
--- Respect the existing auto-reply policy and cancel stale delayed sends.
+-- Obsolete flags cannot enable automatic sending, including proxied and
+-- multi-item requests. Only a later explicit row click may greet the customer.
+for _, message in ipairs({a, a .. a .. c, a .. b}) do
+    reset(); Scan.auto_replies_enabled=true
+    scan(message)
+    scan(message)
+    flushTimers()
+    assert(#sent==0 and #timers==0, 'scanner scheduled/sent an automatic greeting')
+    assert(Scan.SendOrderGreeting(order(101))==false, 'unguarded greeting call was accepted')
+    assert(not response(101).greeting_sent)
+    Scan.GreetCustomer('LeftButton', order(101))
+    assert(#sent>0 and response(101).greeting_sent)
+end
 reset(); Scan.auto_replies_enabled=true
-scan(a .. a .. c)
-assert(#timers==1 and #sent==0)
-scan(a .. c) -- Repeated incoming messages may queue checks, but cannot send twice.
+scan(a .. c, {requestTokens={[101]='remote-a', [103]='remote-c'}})
 flushTimers()
-assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent)
-reset(); Scan.auto_replies_enabled=true
-scan(a .. b)
-assert(#timers==0, 'mixed local/alt batch must not bypass manual alt greeting policy')
-reset(); Scan.auto_replies_enabled=true
-scan(a)
+assert(#sent==0, 'linked-account data caused a player whisper')
 Scan.DismissOrder(order(101))
 flushTimers()
-assert(#sent==0, 'dismissed auto reply was sent')
-reset(); Scan.auto_replies_enabled=true
-scan(a)
-local oldTimer=timers[1]
-Scan.DismissOrder(order(101))
-scan(a)
-oldTimer()
-assert(#sent==0, 'old timer sent a replacement request')
-flushTimers()
-assert(#sent==1)
+assert(#sent==0, 'dismissed request sent without a click')
 reset()
 -- Real-world recraft links carry bonuses, modifiers, a crafter GUID and a
 -- quality atlas. The old whitespace splitter cut inside the first hyperlink.
@@ -287,10 +283,12 @@ assert(countRows()==0 and #timers==0)
 pendingLoads[1003]()
 assert(countRows()==0 and #timers==0, 'partially loaded group was sent or listed')
 pendingLoads[1001]()
-assert(countRows()==2 and #timers==1)
+assert(countRows()==2 and #timers==0)
 flushTimers()
+assert(#sent==0, 'item-cache completion sent a greeting without a click')
+Scan.GreetCustomer('LeftButton', order(101))
 assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent,
-    'loaded long-link batch did not auto-send exactly once')
+    'loaded long-link batch did not send exactly once on click')
 Item.CreateFromItemID=createItem
 
 -- A long greeting may require extra whispers, but never an incomplete link.
@@ -299,7 +297,9 @@ local namedLink='|cnIQ4:|Hitem:1001:0|h[A long item name with spaces]|h|r'
 local text=string.rep('word ',43) .. namedLink .. ' suffix\n' .. a .. b
 local pieces=Scan.Utils.SplitResponse(text)
 assert(#pieces==3 and pieces[2]:find(namedLink, 1, true), 'named-color link was split at a display-name space')
-assert(Scan.Utils.SendResponses(pieces, 'Buyer'))
+assert(Scan.Utils.SendResponses(pieces, 'Buyer')==false and #sent==0,
+    'player whisper did not require an explicit user action')
+assert(Scan.Utils.SendResponses(pieces, 'Buyer', true))
 assert(#sent==3)
 local unicode=string.rep('я',300)
 local unicodePieces=Scan.Utils.SplitResponse(unicode)
@@ -308,10 +308,10 @@ for _, piece in ipairs(unicodePieces) do
     assert(#piece<=255 and utf8.len(piece), 'split cut through a UTF-8 character')
 end
 local before=#sent
-assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer')==false)
+assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer', true)==false)
 assert(#sent==before, 'invalid later line was detected only after partially sending the group')
 local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',120))
-assert(Scan.Utils.SendResponses(Scan.Utils.SplitResponse(oversizedLink), 'Buyer')==false)
+assert(Scan.Utils.SendResponses(Scan.Utils.SplitResponse(oversizedLink), 'Buyer', true)==false)
 assert(#sent==before, 'oversized indivisible link was sent')
 
 reset()

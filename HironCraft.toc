@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.3.17
+## Version: 0.3.18
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -16,7 +16,6 @@ embeds.xml
 Libs\classic.lua
 Libs\LibSerialize.lua
 Libs\LibDeflate.lua
-Libs\RobotsDotTxtClient.lua
 
 ProfitHub\Core\Libs\LibStub\LibStub.lua
 ProfitHub\Core\Libs\LibAHTab\LibAHTab.lua

@@ -25,6 +25,30 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Manual-action safety hardening (0.3.18)
+
+Removed the legacy auto-greeting mode, its timers and settings UI, and the
+robots.txt listener that could send unsolicited whispers after an addon packet.
+All player-chat send paths now require an explicit manual caller. Greetings,
+grouped item replies, quick replies, custom explanations and craft requests
+remain available on click. Scanning, exclusions, item deduplication, suggestions
+and linked-account data/status synchronization remain automatic, not sending
+player chat or executing the recipient's gameplay actions.
+
+The selling-tab commodity purchase now waits for a second click after receiving
+the price quote. Releasing a claimed order for rejection also requires another
+click to decline it. Removed the dormant buy-all execution path. Bank-event gold
+transfers are disabled regardless of legacy settings; manual deposit/refill
+buttons and commands remain. Existing SavedVariables are not wiped.
+
+These are conservative risk reductions, not a finding that every removed
+feature violated policy, and not Blizzard approval or an account-safety guarantee.
+API availability does not by itself establish policy compliance. See the
+[Blizzard UI Add-On Policy](https://eu.forums.blizzard.com/en/wow/t/wow-user-interface-add-on-development-policy/1642).
+Regression tests cover event-versus-click behavior, legacy flags, repeated
+clicks, price changes/expiry, and release/decline staging. Reload all game clients
+after updating; live server behavior still needs an in-game check.
+
 ## Knowledge and shopping actions above the order list (0.3.17)
 
 The Patron knowledge-queue button now sits above the order list, to the left

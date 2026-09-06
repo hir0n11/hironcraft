@@ -110,7 +110,7 @@ function HironCraftScan.GreetCustomer(button, order)
     end
     if button == "LeftButton" then
         if not response.greeting_sent then
-            HironCraftScan.SendOrderGreeting(order)
+            HironCraftScan.SendOrderGreeting(order, true)
             -- TODO: More efficient way to update the display?
             HironCraftScanCraftingOrderPage:ShowGeneric()
         else
@@ -2090,207 +2090,15 @@ function HironCraftScan_OpenChatOrdersButtonMixin:SetButtonText()
     self.Text:SetText(L(LID.CHAT_ORDERS));
 end
 
-local autoReplyConfirmationFrame = nil
-
-local function ResetAutoReplyTimeouts()
-    if autoReplyConfirmationFrame then
-        if autoReplyConfirmationFrame.timeout then
-            autoReplyConfirmationFrame.timeout:Cancel()
-            autoReplyConfirmationFrame.timeout = nil;
-        end
-        if autoReplyConfirmationFrame.displayTimeout then
-            autoReplyConfirmationFrame.displayTimeout:Cancel()
-            autoReplyConfirmationFrame.displayTimeout = nil;
-        end
+-- Highlight only this player's configured crafters, not a hidden author list.
+function HironCraftScan.Utils.ItsMe(player)
+    if type(player) ~= "string" then return false end
+    local shortName = player:match("^([^-]+)") or player
+    if shortName == UnitName("player") then return true end
+    for name in pairs(HironCraftScan.DB and HironCraftScan.DB.characters or {}) do
+        if name == player or (name:match("^([^-]+)") or name) == shortName then return true end
     end
-end
-
-local function IsSupportedPlayer(player, meOnly)
-    local bit = bit or bit32
-
-    local function FNV1aHash(str)
-        local prime = 16777619
-        local hash = 2166136261
-
-        for i = 1, #str do
-            hash = bit.bxor(hash, str:byte(i))
-            hash = bit.band((hash * prime), 0xFFFFFFFF)
-        end
-
-        return hash
-    end
-
-    --[[
-    local supported_players_clear = {
-        -- Auto-replies might be against ToS and are not available by default. If you
-        -- find this, please don't tell anyone because mis-use will likely ruin it for
-        -- all of us.
-    }
-
-    local hashed_players = {}
-    for i, player in ipairs(supported_players_clear) do
-        hashed_players[i] = FNV1aHash(player)
-    end
-
-    if next(supported_players_clear) then
-        HironCraftScan.Utils.printTable("Players", hashed_players);
-    end
-    ]]
-
-    local itsMe = {
-        [139713656] = 1,
-        [3499597080] = 1,
-        [966756688] = 1,
-        [609189344] = 1,
-        [3276845976] = 1,
-        [3119649560] = 1,
-        [4169972888] = 1,
-        [1989399756] = 1,
-        [1720786156] = 1,
-        [1480692192] = 1,
-        [1986072520] = 1,
-        [618885168] = 1,
-        [1159252388] = 1,
-    }
-
-    local others = {
-        -- Guild crafters
-        [2693742840] = 1,
-        [6574920] = 1,
-        [1344568737] = 1,
-        [914132312] = 1,
-    }
-
-    local me = (player or UnitName("player")) .. '-' .. GetRealmName();
-    local hash = FNV1aHash(me)
-    if meOnly then return itsMe[hash]; end
-    return itsMe[hash] or others[hash];
-end
-
-HironCraftScan.Utils.ItsMe = IsSupportedPlayer;
-
-
--- Timeout auto-replies after 5 minutes of not moving. Movement every minute
--- will reset the timeout back to 5 minutes.
-HironCraftScan.CONST.AUTO_REPLIES_SUPPORTED = IsSupportedPlayer();
-local auto_replies_supported = HironCraftScan.CONST.AUTO_REPLIES_SUPPORTED;
-local auto_reply_timeout = 300;
-local auto_reply_confirm_timeout = 15;
-local auto_reply_refresh_interval = 60;
-
-local function AutoReplyTimeout()
-    HironCraftScan.auto_replies_enabled = false;
-    HironCraftScanCraftingOrderPage.BrowseFrame.LeftPanel.CrafterList.AutoReplyButton:SetButtonText();
-    ResetAutoReplyTimeouts();
-    autoReplyConfirmationFrame:Hide();
-    autoReplyConfirmationFrame = nil;
-
-    HironCraftScanScannerMenu:UnregisterEventCallback("PLAYER_STARTED_MOVING", OnPlayerMoved);
-end
-
-local function DisplayAutoReplyConfirmation()
-    autoReplyConfirmationFrame.displayTimeout = nil;
-    if autoReplyConfirmationFrame.timeout then
-        autoReplyConfirmationFrame.timeout:Cancel()
-    end
-    autoReplyConfirmationFrame.timeout = C_FunctionContainers.CreateCallback(AutoReplyTimeout);
-
-    if HironCraftScan.auto_replies_enabled == true then
-        C_Timer.After(auto_reply_confirm_timeout, autoReplyConfirmationFrame.timeout)
-        autoReplyConfirmationFrame:Show();
-    end
-end
-
-local function SetAutoReplyTimeout()
-    ResetAutoReplyTimeouts();
-    if not HironCraftScan.auto_replies_enabled then
-        return
-    end
-
-    if not autoReplyConfirmationFrame then
-        autoReplyConfirmationFrame = CreateFrame("Frame", "HironCraftScanAutoReplyConfirmation", UIParent,
-            "HironCraftScan_AutoReplyConfirmationTemplate")
-        autoReplyConfirmationFrame:SetScript("OnKeyDown", function(self, key)
-            if autoReplyConfirmationFrame:IsShown() then
-                if key == "ESCAPE" then
-                    -- ESC ends auto-reply
-                    AutoReplyTimeout();
-                elseif key == "ENTER" then
-                    -- Enter  extends auto-reply
-                    autoReplyConfirmationFrame:Hide();
-                    SetAutoReplyTimeout()
-                end
-            end
-            return false;
-        end)
-        local lastReset = time()
-
-        local function OnPlayerMoved()
-            if HironCraftScan.auto_replies_enabled and time() - lastReset > auto_reply_refresh_interval then
-                -- Hitting any key resets the timeout.
-                lastReset = time();
-                SetAutoReplyTimeout();
-            end
-        end
-
-        HironCraftScanScannerMenu:RegisterEventCallback("PLAYER_STARTED_MOVING", OnPlayerMoved);
-    end
-
-    autoReplyConfirmationFrame.displayTimeout = C_FunctionContainers.CreateCallback(DisplayAutoReplyConfirmation);
-    C_Timer.After(auto_reply_timeout, autoReplyConfirmationFrame.displayTimeout);
-end
-
-HironCraftScan_AutoReplyKeepEnabledMixin = {}
-
-function HironCraftScan_AutoReplyKeepEnabledMixin:OnClick()
-    autoReplyConfirmationFrame:Hide();
-    SetAutoReplyTimeout()
-end
-
-HironCraftScan_AutoReplyDisableMixin = {}
-
-function HironCraftScan_AutoReplyDisableMixin:OnClick()
-    AutoReplyTimeout();
-end
-
-HironCraftScan_AutoReplyButtonMixin = {}
-
-function HironCraftScan_AutoReplyButtonMixin:OnLoad()
-    if not auto_replies_supported then
-        self:Hide();
-    end
-end
-
-function HironCraftScan_AutoReplyButtonMixin:SetButtonText()
-    self:SetText(
-        HironCraftScan.auto_replies_enabled and "Disable Auto Replies" or "Enable Auto Replies")
-end
-
-function HironCraftScan_AutoReplyButtonMixin:OnClick()
-    HironCraftScan.auto_replies_enabled = not HironCraftScan.auto_replies_enabled;
-    self:SetButtonText();
-
-    -- After enabling auto-replies, we start a timer to confirm that they should
-    -- still be enabled. Hopefully, this prevents accidental AFKs. When the
-    -- timer expires, a confirmation is requested. Failure to hit the
-    -- confirmation will disable auto replies.
-    SetAutoReplyTimeout();
-end
-
-function HironCraftScan_AutoReplyButtonMixin:OnEnter()
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-    if not HironCraftScan.auto_replies_enabled then
-        GameTooltip:SetText(
-            "Auto replies are disabled. Auto replies will quickly,\nbut not instantly, auto-reply to crafts you\ncan do for the character you are currently playing.")
-    else
-        GameTooltip:SetText(
-            "Auto replies are enabled.");
-    end
-    GameTooltip:Show()
-end
-
-function HironCraftScan_AutoReplyButtonMixin:OnLeave()
-    GameTooltip:Hide()
+    return false
 end
 
 HironCraftScan_OpenSettingsButtonMixin = {}
@@ -2371,7 +2179,6 @@ HironCraftScan.Utils.onLoad(function()
     UIPanelWindows["HironCraftScanCraftingOrderPage"] = { area = "doublewide", pushable = 1, whileDead = 1 }
 
     frame.BrowseFrame.AddonToggleButton:SetButtonText();
-    frame.BrowseFrame.AutoReplyButton:SetButtonText();
     frame.BrowseFrame.CustomExplanationsButton:Init();
 
     frame.BrowseFrame.LeftPanel.LinkedAccountList:Init();

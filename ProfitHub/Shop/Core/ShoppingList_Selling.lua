@@ -912,8 +912,26 @@ end
 function S:BuySellTier(tier)
     if not tier or not self.sell.selected then return end
     if not self.isAuctionHouseOpen then return end
-    if self.sell.pendingBuy then return end
     local entry = self.sell.selected
+    local pending = self.sell.pendingBuy
+    if pending then
+        if pending.itemID ~= entry.itemID or pending.tierPrice ~= tier.price
+            or not pending.ready or pending.confirming then return end
+        if (GetTime() - pending.requestedAt) > 10 then
+            if C_AuctionHouse.CancelCommoditiesPurchase then C_AuctionHouse.CancelCommoditiesPurchase() end
+            self.sell.pendingBuy = nil
+            if self.RefreshSellUI then self:RefreshSellUI() end
+            return
+        end
+        -- The price event only arms this confirmation. A second row click,
+        -- never a timer/server event, actually completes the purchase.
+        pending.confirming = true
+        local ok = C_AuctionHouse.ConfirmCommoditiesPurchase
+            and pcall(C_AuctionHouse.ConfirmCommoditiesPurchase, pending.itemID, pending.qty)
+        if not ok then self.sell.pendingBuy = nil end
+        if self.RefreshSellUI then self:RefreshSellUI() end
+        return
+    end
     if not entry.isCommodity then return end
     if tier.owned then return end
     if not (C_AuctionHouse and C_AuctionHouse.StartCommoditiesPurchase) then return end
@@ -927,6 +945,7 @@ function S:BuySellTier(tier)
         expected = (tier.price or 0) * qty,
         itemLink = entry.itemLink or entry.itemName,
         tierPrice = tier.price,
+        requestedAt = GetTime(),
     }
     if self.RefreshSellUI then self:RefreshSellUI() end
     local ok = pcall(C_AuctionHouse.StartCommoditiesPurchase, entry.itemID, qty)
@@ -977,7 +996,8 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
         local pb = S.sell.pendingBuy
         if not pb then return end
         local _, totalPrice = ...
-        if totalPrice and pb.expected and pb.expected > 0 and totalPrice > pb.expected * 1.1 then
+        if not totalPrice or not pb.requestedAt or (GetTime() - pb.requestedAt) > 10
+            or (pb.expected and pb.expected > 0 and totalPrice > pb.expected * 1.1) then
             if C_AuctionHouse.CancelCommoditiesPurchase then
                 pcall(C_AuctionHouse.CancelCommoditiesPurchase)
             end
@@ -985,9 +1005,9 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
             if S.RefreshSellUI then S:RefreshSellUI() end
             return
         end
-        if C_AuctionHouse.ConfirmCommoditiesPurchase then
-            pcall(C_AuctionHouse.ConfirmCommoditiesPurchase, pb.itemID, pb.qty)
-        end
+        pb.totalPrice = totalPrice
+        pb.ready = true
+        if S.RefreshSellUI then S:RefreshSellUI() end
         return
     end
 

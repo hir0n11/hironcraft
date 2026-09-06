@@ -170,7 +170,6 @@ HironCraftScan.CONST.DEFAULT_SETTINGS = {
     customer_timeout = 10,
     banner_timeout = 20,
     last_loaded_version = 0,
-    auto_reply_delay = 500,
     disabled_addon_whitelist = 'None',
     show_button_height = 0,
     alert_icon_scale = 100,

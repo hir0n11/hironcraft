@@ -225,8 +225,9 @@ function HironCraftScan_FoundCrafterListElementMixin:OnClick(button)
     if not self.info then return; end
 
     if button == 'LeftButton' and not self.info.sent then
-        HironCraftScanComm:RequestCraft(self.info.player, self.info.itemID);
-        self.info.sent = true;
+        if HironCraftScanComm:RequestCraft(self.info.player, self.info.itemID, true) then
+            self.info.sent = true;
+        end
     else
         ChatFrame_SendTell(HironCraftScan.NameAndRealmToName(self.info.player), DEFAULT_CHAT_FRAME)
     end
@@ -284,7 +285,9 @@ HironCraftScan_ItsMeIconMixin = {}
 function HironCraftScan_ItsMeIconMixin:OnEnter()
     self:GetParent().HoverBackground:Show();
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-    GameTooltip:SetText("|cFFFFFFFFThe HironCraftScan creator. Give him some business!|r");
+    GameTooltip:SetText(GetLocale() == 'ruRU'
+        and "|cFFFFFFFFВаш настроенный крафтер.|r"
+        or "|cFFFFFFFFOne of your configured crafters.|r");
     GameTooltip:Show()
 end
 

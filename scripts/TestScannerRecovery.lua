@@ -112,7 +112,7 @@ HironCraftScan_DB = { realms={TestRealm=realm}, settings={customer_timeout=5, al
 local button = { SetButtonText=noop, Init=noop }
 HironCraftScanCraftingOrderPage.EnableMouse = noop
 HironCraftScanCraftingOrderPage.BrowseFrame = {
-    AddonToggleButton=button, AutoReplyButton=button, CustomExplanationsButton=button,
+    AddonToggleButton=button, CustomExplanationsButton=button,
     LeftPanel={LinkedAccountList=button},
 }
 local hooked = 0
@@ -148,7 +148,7 @@ Settings = {
 }
 SettingsPanel = { GetLayout=function() return {AddInitializer=noop} end }
 MinimalSliderWithSteppersMixin = {Label={Right=1}}
-Scan.CONST.AUTO_REPLIES_SUPPORTED = true -- Also verify the optional setting.
+Scan.CONST.AUTO_REPLIES_SUPPORTED = true -- Obsolete state must not restore the setting.
 loadSource('Settings/Settings.lua')
 local login = frames[1]
 loggedIn = true
@@ -163,6 +163,7 @@ assert(Scan.DB.listed_orders.noResponseID == nil, 'malformed row without respons
 assert(Scan.DB.listed_orders['NoTime-1'] == nil and Scan.DB.listed_orders['Expired-1'] == nil)
 assert(Scan.DB.settings.alert_icon_scale == 123 and keepInfo.chat_history[1] == 'keep history')
 assert(registeredCategory == category, 'settings category did not finish registration')
+assert(not registered.HIRONCRAFT_SCAN_AUTO_REPLY_DELAY, 'removed auto-reply setting returned')
 Scan.Settings:Open()
 assert(openedCategory == 17)
 realOnLoad(function() later = later + 1 end)

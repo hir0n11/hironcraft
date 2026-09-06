@@ -273,20 +273,7 @@ HironCraftScan.Utils.onLoad(function()
             L(LID.BANNER_TIMEOUT_TOOLTIP)
         )
     end
-    if HironCraftScan.CONST.AUTO_REPLIES_SUPPORTED then
-        local options = Settings.CreateSliderOptions(250, 2000, 100)
-        options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
-            return value .. ' ' .. (value == 1 and L('Millisecond') or L('Milliseconds'))
-        end)
-        CreateSlider(
-            category,
-            'HIRONCRAFT_SCAN_AUTO_REPLY_DELAY',
-            'auto_reply_delay',
-            'Auto reply delay',
-            options,
-            'When auto replies are enabled, wait this long before replying to make youself seem a little less bot-like.'
-        )
-    end
+
     do
         local options = Settings.CreateSliderOptions(25, 200, 5)
         options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
