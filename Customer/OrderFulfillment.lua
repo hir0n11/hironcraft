@@ -241,6 +241,7 @@ local function EntriesEquivalent(candidate, current)
     return candidate
         and current
         and candidate.status == current.status
+        and (candidate.automatic ~= false) == (current.automatic ~= false)
         and tostring(candidate.origin or '') == tostring(current.origin or '')
         and (tonumber(candidate.rev) or 0) == (tonumber(current.rev) or 0)
         and (tonumber(candidate.updatedAt) or 0) == (tonumber(current.updatedAt) or 0)
@@ -272,19 +273,21 @@ local function EntryIsNewer(candidate, current)
     end
 
     local sameRequest = SameRequest(candidate, current)
+    local candidateManual = candidate.automatic == false
+    local currentManual = current.automatic == false
     if sameRequest then
-        if candidate.automatic ~= false and current.automatic ~= false then
+        if not candidateManual and not currentManual then
             local preference = PreferFulfillment(candidate, current)
             if preference ~= nil then return preference end
-        end
-        -- Revisions are created independently on linked accounts and therefore
-        -- are not globally comparable. For one concrete customer request, a
-        -- terminal outcome must always beat an in-progress state, even when the
-        -- sender happened to have a smaller local revision counter.
-        local candidateProgress = STATUS_PROGRESS[candidate.status] or 0
-        local currentProgress = STATUS_PROGRESS[current.status] or 0
-        if candidateProgress ~= currentProgress then
-            return candidateProgress > currentProgress
+            -- Automatic progress is monotonic, but a manual clear is an
+            -- intentional edit, not a regression to an earlier crafting step.
+            -- Comparing progress for manual entries made old fulfilled echoes
+            -- beat a newer clear and caused peers to reject the clear itself.
+            local candidateProgress = STATUS_PROGRESS[candidate.status] or 0
+            local currentProgress = STATUS_PROGRESS[current.status] or 0
+            if candidateProgress ~= currentProgress then
+                return candidateProgress > currentProgress
+            end
         end
     else
         -- A row can be reused when the same customer requests the same recipe
@@ -305,6 +308,16 @@ local function EntryIsNewer(candidate, current)
 
     local candidateRevision = tonumber(candidate.rev) or 0
     local currentRevision = tonumber(current.rev) or 0
+    if sameRequest and candidateManual ~= currentManual then
+        -- Within one origin revisions order rapid same-second edits. Across
+        -- accounts those counters are unrelated: an explicit manual edit wins
+        -- an otherwise tied automatic snapshot, in either merge direction.
+        if candidate.origin and candidate.origin == current.origin
+            and candidateRevision ~= currentRevision then
+            return candidateRevision > currentRevision
+        end
+        return candidateManual
+    end
     if candidateRevision ~= currentRevision then
         return candidateRevision > currentRevision
     end

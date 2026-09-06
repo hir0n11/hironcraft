@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Manual completion marks survive synchronization (0.3.16)
+
+Clearing a completion check is now treated as an intentional manual edit, not
+as lost automatic crafting progress. Linked accounts accept the newer clear
+and cannot restore the old check by echoing a stale status snapshot. Replaying
+completion history still respects the manual override.
+
+Same-second edits use revision order within one source; across accounts an
+otherwise tied manual edit takes priority over an automatic snapshot. Genuine
+later events and new customer requests can still update the status. Automatic
+fulfillment continues to take precedence over an earlier rejection. Regression
+tests cover both merge directions, repeated packets, rapid toggles and reused
+request rows. Reload all linked game clients after updating so they use the
+same merge rules; the fix still needs confirmation in-game.
+
 ## One conversational quick reply for multiple items (0.3.15)
 
 Identical rendered quick replies such as `hey hey` or `omw` now produce one

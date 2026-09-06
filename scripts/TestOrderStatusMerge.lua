@@ -306,11 +306,80 @@ assert(not changed and not accepted, 'an old exact success leaked onto the newer
 
 -- Preserve manual clearing and real failures of an optimistic fulfillment.
 now=now+10
-CraftScan.OrderFulfillment:ToggleManual(lateOrder)
+local beforeManualClear=CraftScan.OrderFulfillment:GetStatuses()[lateKey]
+local manualClear=CraftScan.OrderFulfillment:ToggleManual(lateOrder)
+assert(CraftScan.OrderFulfillment:GetStatus(lateOrder)==nil)
+changed, accepted, current=CraftScan.OrderFulfillment:ApplyRemoteStatus(beforeManualClear)
+assert(not changed and not accepted and current.automatic==false and current.status=='unknown',
+    'older automatic status echoed by a linked account restored the manually cleared checkmark')
 assert(CraftScan.OrderFulfillment:GetStatus(lateOrder)==nil)
 CraftScan.OrderFulfillment:ApplyRemoteCompletionNotices({lateCompletion, lateReject})
 assert(CraftScan.OrderFulfillment:GetStatus(lateOrder)==nil,
     'replaying history undid an explicit manual clear')
+
+local function copyEntry(entry)
+    local result={}; for key,value in pairs(entry) do result[key]=value end; return result
+end
+-- The other account must accept the clear, not reject it as lost automatic
+-- progress and send its old green check back as a "repair" packet.
+CraftScan.DB.realm.order_statuses[lateKey]=beforeManualClear
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(manualClear)
+assert(changed and accepted and CraftScan.OrderFulfillment:GetStatus(lateOrder)==nil,
+    'peer rejected a newer manual clear instead of accepting it')
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(manualClear)
+assert(not changed and accepted, 'idempotent manual replay was not acknowledged')
+for _, status in ipairs({'claimed','crafted','fulfilled','rejected','failed'}) do
+    local stale=copyEntry(beforeManualClear)
+    stale.status=status; stale.origin='peer-account'; stale.rev=999
+    stale.updatedAt=manualClear.updatedAt-1
+    changed, accepted, current=CraftScan.OrderFulfillment:ApplyRemoteStatus(stale)
+    assert(not changed and not accepted and current.status=='unknown' and current.automatic==false,
+        'old automatic '..status..' overrode the manual clear')
+end
+
+-- Different clocks/revision counters can produce a same-second tie. Prefer
+-- the manual action across accounts, independently of message arrival order.
+local tiedAutomatic=copyEntry(beforeManualClear)
+tiedAutomatic.updatedAt=manualClear.updatedAt; tiedAutomatic.rev=999
+tiedAutomatic.origin='other-account'
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(tiedAutomatic)
+assert(not changed and not accepted, 'large peer revision won a same-second tie over a manual clear')
+CraftScan.DB.realm.order_statuses[lateKey]=tiedAutomatic
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(manualClear)
+assert(changed and accepted, 'same-second merge depends on delivery order')
+
+-- Within one origin the revision establishes causal order even within a
+-- second: a genuine later event may still replace the manual mark.
+local laterAutomatic=copyEntry(beforeManualClear)
+laterAutomatic.updatedAt=manualClear.updatedAt; laterAutomatic.origin=manualClear.origin
+laterAutomatic.rev=manualClear.rev+1
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(laterAutomatic)
+assert(changed and accepted, 'later same-origin automatic result was suppressed forever')
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(manualClear)
+assert(not changed and not accepted, 'old manual clear undid a later same-origin result')
+CraftScan.DB.realm.order_statuses[lateKey]=manualClear
+local manualMark=CraftScan.OrderFulfillment:ToggleManual(lateOrder)
+assert(manualMark.automatic==false and manualMark.status=='fulfilled')
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(manualClear)
+assert(not changed and not accepted, 'older clear undid the next manual check in the same second')
+local wrongMode=copyEntry(manualMark); wrongMode.automatic=true
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(wrongMode)
+assert(not changed and not accepted, 'different automatic/manual modes were ACKed as equivalent')
+
+-- Manual overrides belong to one request, not every future craft of this item.
+local lateResponse=CraftScan.OrderToResponse(lateOrder)
+local originalToken, originalTime=lateResponse.requestToken, lateResponse.time
+lateResponse.requestToken='next-late-request'; lateResponse.time=now+100
+local newJob=copyEntry(beforeManualClear)
+newJob.requestToken=lateResponse.requestToken; newJob.requestTime=lateResponse.time
+newJob.status='claimed'; newJob.updatedAt=now+101; newJob.rev=1; newJob.craftingOrderID=9014
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(newJob)
+assert(changed and accepted and CraftScan.OrderFulfillment:GetStatus(lateOrder).status=='claimed')
+local delayedClear=copyEntry(manualClear); delayedClear.updatedAt=now+999
+changed, accepted=CraftScan.OrderFulfillment:ApplyRemoteStatus(delayedClear)
+assert(not changed and not accepted, 'old request\'s manual clear affected a newer job')
+lateResponse.requestToken, lateResponse.time=originalToken, originalTime
+CraftScan.DB.realm.order_statuses[lateKey]=manualClear
 CraftScan.OrderFulfillment:ToggleManual(lateOrder)
 assert(CraftScan.OrderFulfillment:GetStatus(lateOrder).status=='fulfilled')
 now=now+10
