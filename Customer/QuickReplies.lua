@@ -667,6 +667,8 @@ function QuickReplies:BuildRejectedOrderOption(order, entry)
         message = L('Crafting order status rejected'),
         response = response,
         responseID = order.responseID,
+        requestToken = response.requestToken,
+        requestTime = response.time,
         templateKey = REJECTED_ORDER_TEMPLATE_KEY,
         templateLabel = L('Crafting order status rejected'),
         reply = reply,
@@ -837,6 +839,15 @@ local function CurrentResponse(option)
         return nil
     end
 
+    -- A row can be reused in place for a later request. An old toast must not
+    -- follow that table into a new conversation about the same recipe.
+    if option.requestTime ~= nil or option.requestToken ~= nil then
+        if option.response.requestToken ~= option.requestToken
+            or (not option.requestToken and option.response.time ~= option.requestTime) then
+            return nil
+        end
+    end
+
     local response = responses[option.responseID]
     if response == option.response then
         return response
@@ -865,6 +876,18 @@ local function FindEquivalentResponse(option)
 end
 
 function QuickReplies:ResolvePopupResponse(option)
+    if option.templateKey ~= REJECTED_ORDER_TEMPLATE_KEY and option.sources then
+        -- A generic reply may represent several items/templates. If its
+        -- preferred row disappeared, only another original, still-current
+        -- source with the same outgoing text can keep the suggestion alive.
+        for _, source in ipairs(option.sources) do
+            local response = CurrentResponse(source)
+            if response and self:BuildReply(source.templateKey, response) == option.reply then
+                return response, source.templateKey
+            end
+        end
+        return nil
+    end
     local response = CurrentResponse(option)
     if option.templateKey == REJECTED_ORDER_TEMPLATE_KEY then
         return self:IsConversationCharacter(response) and response or nil
@@ -873,12 +896,15 @@ function QuickReplies:ResolvePopupResponse(option)
 end
 
 local function SameReplyContext(lhs, rhs)
-    return lhs
-        and rhs
-        and lhs.customer == rhs.customer
-        and lhs.templateKey == rhs.templateKey
-        and lhs.reply == rhs.reply
-        and lhs.contextLabel == rhs.contextLabel
+    if not lhs or not rhs or lhs.customer ~= rhs.customer or lhs.reply ~= rhs.reply then
+        return false
+    end
+    if lhs.templateKey == REJECTED_ORDER_TEMPLATE_KEY or rhs.templateKey == REJECTED_ORDER_TEMPLATE_KEY then
+        -- Rejection actions are tied to an exact order, not a general whisper.
+        return lhs.templateKey == rhs.templateKey and lhs.responseID == rhs.responseID
+            and lhs.requestToken == rhs.requestToken
+    end
+    return true
 end
 
 local function DismissEquivalentToasts(option)
@@ -892,8 +918,9 @@ local function DismissEquivalentToasts(option)
 end
 
 local function SendOption(toast, option)
-    local response = QuickReplies:ResolvePopupResponse(option)
-    local reply = response and QuickReplies:BuildReply(option.templateKey, response) or nil
+    if toast.option ~= option or not toast:IsShown() then return end
+    local response, templateKey = QuickReplies:ResolvePopupResponse(option)
+    local reply = response and QuickReplies:BuildReply(templateKey or option.templateKey, response) or nil
     if not reply then
         print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
         DismissEquivalentToasts(option)
@@ -903,7 +930,7 @@ local function SendOption(toast, option)
     -- Exactly one entry is intentionally passed. SendResponses uses the same
     -- whisper path as greetings, and CHAT_MSG_WHISPER_INFORM records it in the
     -- customer's existing chat_history.
-    HironCraftScan.Utils.SendResponses({ reply }, option.customer)
+    if HironCraftScan.Utils.SendResponses({ reply }, option.customer) == false then return end
     DismissEquivalentToasts(option)
 end
 
@@ -934,7 +961,8 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
         GameTooltip:AddLine(option.reply, 1, 1, 1, true)
         if option.contextLabel then
             GameTooltip:AddLine(' ')
-            GameTooltip:AddLine(option.contextLabel, 0.7, 0.7, 0.7, true)
+            GameTooltip:AddLine(option.contextLabels and table.concat(option.contextLabels, '\n')
+                or option.contextLabel, 0.7, 0.7, 0.7, true)
         end
         GameTooltip:AddLine(' ')
         GameTooltip:AddLine(L('Quick reply click help'), 1, 0.82, 0, true)
@@ -991,20 +1019,33 @@ function QuickReplies:BuildPopupOptions(customer, message, responses, templateKe
                     message = message,
                     response = candidate.response,
                     responseID = candidate.responseID,
+                    requestToken = candidate.response.requestToken,
+                    requestTime = candidate.response.time,
                     templateKey = templateKey,
                     templateLabel = self:GetTemplateLabel(templateKey),
                     reply = reply,
                     contextLabel = contextLabel,
                 }
-                local signature = table.concat({ templateKey, reply, contextLabel }, '\30')
+                local source = {}
+                for key, value in pairs(option) do source[key] = value end
+                option.sources = {source}
+                -- Different items can yield the same conversational answer
+                -- ("hey hey", "omw"). Only the text actually sent distinguishes
+                -- these options; event-only rejection actions remain per order.
+                local signature = templateKey == REJECTED_ORDER_TEMPLATE_KEY
+                    and table.concat({ templateKey, reply, tostring(candidate.responseID) }, '\30')
+                    or reply
                 local existing = bySignature[signature]
                 if not existing then
                     bySignature[signature] = option
                     table.insert(options, option)
-                elseif PreferPopupOption(existing, option) then
-                    for key, value in pairs(option) do
-                        existing[key] = value
+                else
+                    local sources = existing.sources
+                    sources[#sources + 1] = source
+                    if PreferPopupOption(existing, option) then
+                        for key, value in pairs(option) do existing[key] = value end
                     end
+                    existing.sources = sources
                 end
             end
         end
@@ -1019,6 +1060,14 @@ function QuickReplies:BuildPopupOptions(customer, message, responses, templateKe
     local multipleResponses = HasMultipleKeys(responseIDs)
     local multipleTemplates = HasMultipleKeys(templateIDs)
     for _, option in ipairs(options) do
+        local seenLabels = {}
+        option.contextLabels = {}
+        for _, source in ipairs(option.sources) do
+            if not seenLabels[source.contextLabel] then
+                seenLabels[source.contextLabel] = true
+                option.contextLabels[#option.contextLabels + 1] = source.contextLabel
+            end
+        end
         local label = option.reply
         if multipleResponses then
             label = option.contextLabel .. ': ' .. label

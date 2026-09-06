@@ -135,8 +135,8 @@ options = QuickReplies:BuildPopupOptions("Valnihra", "sent", {
     { response = first, responseID = 101 },
     { response = different, responseID = 103 },
 }, { "CUSTOM_1" })
-assert(#options == 2, "different item contexts must remain separate")
-assert(options[1].label:find(": omw", 1, true), "ambiguous replies must retain their context")
+assert(#options == 1, "same outgoing text for different items must create one suggestion")
+assert(options[1].label == 'omw', 'merged conversational reply should not need an item prefix')
 
 -- A recipe response may only be stored through its profession alias. It is
 -- still current when the recipe order itself remains listed.

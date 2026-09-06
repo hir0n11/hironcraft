@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One conversational quick reply for multiple items (0.3.15)
+
+Identical rendered quick replies such as `hey hey` or `omw` now produce one
+suggestion per customer, even when several items or templates generated it.
+Clicking sends one whisper and removes equivalent suggestions; repeated clicks
+on a hidden/reused card cannot send the old answer again. Different prices,
+crafter names and item-link responses remain separate choices, as do event-only
+rejection actions tied to individual orders.
+
+A merged suggestion retains its original request identities and can use another
+matching item if one row is dismissed. It cannot attach to a newer replacement
+request or silently send template text changed since the card appeared. Tooltip
+context includes all represented items. Regression tests exercise the actual
+whisper-to-toast-to-click path with mocked UI and chat APIs.
+
 ## Long item links in grouped replies (0.3.14)
 
 Grouped requests now wait for all item-cache loads and use the same compact
