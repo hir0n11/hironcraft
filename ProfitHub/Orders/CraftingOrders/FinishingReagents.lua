@@ -142,7 +142,9 @@ function CO:GetFinishingReagentCandidates(order)
     for schematicIndex, slot in ipairs(schematic.reagentSlotSchematics) do
         local isFinishing = finishingType ~= nil and GetSlotReagentType(slot) == finishingType
         if isFinishing then
-            local slotIndex = slot.dataSlotIndex or slot.slotIndex or schematicIndex
+            -- GetAllocations/OverwriteAllocation use the schematic's array
+            -- position. dataSlotIndex belongs only to the serialized API payload.
+            local slotIndex = schematicIndex
             local quantity = tonumber(slot.quantityRequired) or 1
             for _, reagent in ipairs(slot.reagents or {}) do
                 local itemID = GetOrderReagentItemID(reagent)
@@ -152,6 +154,7 @@ function CO:GetFinishingReagentCandidates(order)
                     result[#result + 1] = {
                         itemID = itemID,
                         slotIndex = slotIndex,
+                        dataSlotIndex = slot.dataSlotIndex,
                         quantity = quantity,
                         owned = GetOwnedItemCount(itemID),
                         skillBonus = FINISHING_SKILL_BONUS_BY_ITEM_ID[itemID],
@@ -162,6 +165,24 @@ function CO:GetFinishingReagentCandidates(order)
     end
 
     return result, true
+end
+
+function CO:HasPreparedFinishingReagent(order, reagentTbl)
+    local selected = self.preparedFinisherReagent
+    if not selected or not selected.itemID or not selected.dataSlotIndex
+        or not SameOrderID(self.preparedFinisherOrderID, order and order.orderID)
+        or type(reagentTbl) ~= "table" then
+        return false
+    end
+    for _, reagentInfo in ipairs(reagentTbl) do
+        local itemID = GetOrderReagentItemID(reagentInfo)
+        if tonumber(itemID) == tonumber(selected.itemID)
+            and tonumber(reagentInfo.dataSlotIndex) == tonumber(selected.dataSlotIndex)
+            and (tonumber(reagentInfo.quantity) or 0) >= (selected.quantity or 1) then
+            return true
+        end
+    end
+    return false
 end
 
 function CO:MarkOrderReadyForQualityRejection(order)

@@ -35,6 +35,7 @@ local E = setmetatable({
 _G.HironCraftProfitCraftingOrdersEnv = E
 
 dofile("ProfitHub/Orders/CraftingOrders/Actions.lua")
+dofile("ProfitHub/Orders/CraftingOrders/FinishingReagents.lua")
 
 -- GetOrderEngine must preserve only an explicitly staged transaction.
 local setOrderCalls = 0
@@ -99,18 +100,18 @@ E.IsResultOk = function(result) return result == 0 end
 E.UnitCastingInfo = function() return nil end
 E.UnitChannelInfo = function() return nil end
 local createEnabled = false
+local liveReagents = {
+    { reagent = { itemID = 100 }, dataSlotIndex = 1, quantity = 10 },
+    { reagent = { itemID = 246447 }, dataSlotIndex = 9, quantity = 1 },
+}
+local transaction = {
+    CreateCraftingReagentInfoTbl = function() return liveReagents end,
+}
 local engine = {
     OrderDetails = {
         SchematicForm = {
             GetTransaction = function()
-                return {
-                    CreateCraftingReagentInfoTbl = function()
-                        return {
-                            { reagent = { itemID = 100 }, dataSlotIndex = 1, quantity = 10 },
-                            { reagent = { itemID = 246447 }, dataSlotIndex = 9, quantity = 1 },
-                        }
-                    end,
-                }
+                return transaction
             end,
         },
     },
@@ -144,14 +145,13 @@ CO.GetRecipeKnownState = function() return true end
 CO.CanSupplyCrafterReagentsForQueue = function() return true end
 CO.GetClaimedOrder = function() return order end
 CO.GetOrderEngine = function() return engine end
+CO.GetTransactionFromEngine = function() return transaction, engine.OrderDetails.SchematicForm end
 CO.ApplySelectedReagentsToEngine = function() end
 CO.SetEngineConcentration = function() end
 CO.PrepareAutoFinishingReagent = function()
     prepareCalls = prepareCalls + 1
-    if prepareCalls == 1 then
-        return "applied", { skillBonus = 20 }
-    end
-    return "not_needed"
+    liveReagents[2] = { reagent = { itemID = 246447 }, dataSlotIndex = 9, quantity = 1 }
+    return "applied", { skillBonus = 5, itemID = 246447, slotIndex = 2, dataSlotIndex = 9, quantity = 1 }
 end
 CO.SetStatus = function(_, value) CO.lastStatus = value end
 CO.DActionPrint = function() end
@@ -210,5 +210,57 @@ assert(CO:CraftOrderFromRow(order, page, button) == true)
 assert(craftCalls == 1, "alternate order-view submission was not used on retry")
 assert(apiCraftCalls == 1, "retry repeated the silently ignored API path")
 assert(prepareCalls == 1, "retry recalculated the staged finisher")
+
+-- A server update can rebuild the same order's transaction between presses.
+-- A remembered order ID is not proof that the finisher is still allocated.
+CO:ClearPendingCraftAttempt(order.orderID, true)
+liveReagents[2] = nil
+assert(CO:CraftOrderFromRow(order, page, button) == true)
+assert(CO.pendingCraftOrderID == nil and prepareCalls == 2)
+assert(apiCraftCalls == 1 and craftCalls == 1, 'crafted after the staged finisher disappeared')
+assert(liveReagents[2].reagent.itemID == 246447, 'lost finisher was not restored')
+
+-- Recraft submission must use native slot ownership and prepare unchanged
+-- modifications, while retaining the crafter finishing reagent.
+now = now + 0.30
+order.isRecraft = true
+order.outputItemGUID = 'Item-Recraft-Test'
+engine.reagentSlotProvidedByCustomer = { [1] = true }
+E.Enum = { TradeskillSlotDataType = { ModifiedReagent = 7 } }
+transaction.CreateCraftingReagentInfoTblIf = function(_, predicate)
+    assert(not predicate({reagentSlotSchematic={dataSlotType=7}}, 1))
+    assert(predicate({reagentSlotSchematic={dataSlotType=7}}, 2))
+    assert(not predicate({reagentSlotSchematic={dataSlotType=0}}, 3))
+    return {
+        liveReagents[2],
+        {reagent={itemID=222}, dataSlotIndex=4, quantity=1}, -- existing modification
+    }
+end
+local recraftPrepared, recraftCalls = 0, 0
+E.Professions = { PrepareRecipeRecraft = function(txn, reagents)
+    assert(txn == transaction)
+    assert(#reagents == 2 and reagents[2].reagent.itemID == 222)
+    table.remove(reagents, 2)
+    recraftPrepared = recraftPrepared + 1
+end }
+E.C_TradeSkillUI.RecraftRecipeForOrder = function(id, guid, reagents, removed, concentration)
+    assert(recraftPrepared == 1, 'recraft submitted before preparing item modifications')
+    assert(id == order.orderID and guid == order.outputItemGUID)
+    assert(removed == nil and concentration == false)
+    assert(#reagents == 1 and reagents[1].reagent.itemID == 246447 and reagents[1].dataSlotIndex == 9)
+    recraftCalls = recraftCalls + 1
+end
+assert(CO:CraftOrderFromRow(order, page, button) == true)
+assert(recraftCalls == 1 and craftCalls == 1 and apiCraftCalls == 1)
+
+-- If ownership/filtering drops the staged finisher, fail closed: no cast and
+-- no progress bar. A raw transaction allocation alone is not sufficient.
+CO:ClearPendingCraftAttempt(order.orderID, true)
+transaction.CreateCraftingReagentInfoTblIf = function() return {} end
+E.Professions.PrepareRecipeRecraft = function() end
+assert(CO:CraftOrderFromRow(order, page, button) == false)
+assert(CO.pendingCraftOrderID == nil and CO.preparedFinisherOrderID == nil)
+assert(recraftCalls == 1 and craftCalls == 1)
+assert(CO.lastStatus:find('Finishing reagent is missing', 1, true))
 
 print("Finisher craft staging tests passed.")

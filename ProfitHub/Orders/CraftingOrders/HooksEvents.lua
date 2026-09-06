@@ -294,6 +294,7 @@ function CO:MarkOrderCraftedReady(orderID)
         and SameOrderID(self.preparedFinisherOrderID, orderID)
     then
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReagent = nil
         self.preparedFinisherReadyAt = nil
         self.preparedFinisherUseEngineOrderID = nil
     end
@@ -316,6 +317,7 @@ function CO:OnEvent(event, ...)
         local interactionType = ...
         if self:IsCraftingOrderInteractionType(interactionType) then
             self.preparedFinisherOrderID = nil
+            self.preparedFinisherReagent = nil
             self.preparedFinisherReadyAt = nil
             self.preparedFinisherUseEngineOrderID = nil
             self:SetOrderTablePresence(false)
@@ -335,6 +337,7 @@ function CO:OnEvent(event, ...)
     if event == "TRADE_SKILL_CLOSE" then
         self.qualityWarmSerial = (tonumber(self.qualityWarmSerial) or 0) + 1
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReagent = nil
         self.preparedFinisherReadyAt = nil
         self.preparedFinisherUseEngineOrderID = nil
         if self.StopPageProtector then self:StopPageProtector() end
@@ -481,6 +484,7 @@ function CO:OnEvent(event, ...)
             end
             if self.preparedFinisherOrderID and SameOrderID(self.preparedFinisherOrderID, orderID) then
                 self.preparedFinisherOrderID = nil
+                self.preparedFinisherReagent = nil
                 self.preparedFinisherReadyAt = nil
                 self.preparedFinisherUseEngineOrderID = nil
             end

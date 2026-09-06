@@ -242,6 +242,7 @@ function CO:GetOrderEngine(pageFrame, order)
         and not SameOrderID(self.preparedFinisherOrderID, order.orderID)
     then
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReagent = nil
         self.preparedFinisherReadyAt = nil
         self.preparedFinisherUseEngineOrderID = nil
     end
@@ -310,6 +311,7 @@ function CO:ReleaseOrder(order, pageFrame, continuation)
     self.craftSubmissionAcknowledgedOrderID = nil
     self.pendingFulfillOrderID = nil
     self.preparedFinisherOrderID = nil
+    self.preparedFinisherReagent = nil
     self.preparedFinisherReadyAt = nil
     self.preparedFinisherUseEngineOrderID = nil
     self:SetStatus(T("COA_STATUS_RELEASING", "Releasing order..."))
@@ -534,6 +536,7 @@ function CO:ClaimOrder(order, pageFrame)
     self.rowStates[order.orderID].pageFrame = pageFrame
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.preparedFinisherOrderID = nil
+    self.preparedFinisherReagent = nil
     self.preparedFinisherReadyAt = nil
     self.preparedFinisherUseEngineOrderID = nil
     self.craftSubmissionAcknowledgedOrderID = nil
@@ -586,6 +589,7 @@ function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
     self.craftSubmissionAcknowledgedOrderID = nil
     if not keepPreparedFinisher then
         self.preparedFinisherOrderID = nil
+        self.preparedFinisherReagent = nil
         self.preparedFinisherReadyAt = nil
         self.preparedFinisherUseEngineOrderID = nil
     end
@@ -645,6 +649,22 @@ function CO:HandleCraftOrderResponse(result, orderID)
         self:StartRowProgress(self.pendingCraftButton, self.pendingCraftOrderID)
     end
     return true
+end
+
+function CO:BuildOrderSubmissionReagents(engine, order, transaction)
+    if not transaction then return nil end
+    local provided = engine and engine.reagentSlotProvidedByCustomer
+    local modifiedType = Enum and Enum.TradeskillSlotDataType and Enum.TradeskillSlotDataType.ModifiedReagent
+    if transaction.CreateCraftingReagentInfoTblIf and type(provided) == "table" and modifiedType then
+        -- Match Blizzard's CraftOrder/RecraftOrder: ownership is per schematic
+        -- slot, not per item ID (the same item may appear in another slot).
+        return transaction:CreateCraftingReagentInfoTblIf(function(reagentTbl, slotIndex)
+            return reagentTbl.reagentSlotSchematic.dataSlotType == modifiedType
+                and not provided[slotIndex]
+        end)
+    end
+    local reagents = transaction.CreateCraftingReagentInfoTbl and transaction:CreateCraftingReagentInfoTbl()
+    return self:BuildCrafterOnlyReagentInfoTbl(order, reagents)
 end
 
 function CO:CraftOrderFromRow(order, pageFrame, btn)
@@ -713,6 +733,22 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     local craftingWithPreparedFinisher = self.preparedFinisherOrderID
         and SameOrderID(self.preparedFinisherOrderID, order.orderID)
 
+    if craftingWithPreparedFinisher and self.HasPreparedFinishingReagent then
+        local transaction = self:GetTransactionFromEngine(engine)
+        local reagents = transaction and transaction.CreateCraftingReagentInfoTbl
+            and transaction:CreateCraftingReagentInfoTbl()
+        if not self:HasPreparedFinishingReagent(order, reagents) then
+            -- Blizzard can rebuild the transaction after an order update even
+            -- when our prepared order ID has not changed. Never craft the bare
+            -- recipe based only on that stale flag; select the finisher again.
+            self.preparedFinisherOrderID = nil
+            self.preparedFinisherReagent = nil
+            self.preparedFinisherReadyAt = nil
+            self.preparedFinisherUseEngineOrderID = nil
+            craftingWithPreparedFinisher = false
+        end
+    end
+
     -- Once a finishing reagent has been staged, keep the live Blizzard
     -- transaction intact. Re-running the quality search here can allocate the
     -- same reagent again after a failed/no-op button handler and creates an
@@ -726,6 +762,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         )
         if finisherResult == "reject" then
             self.preparedFinisherOrderID = nil
+            self.preparedFinisherReagent = nil
             self.preparedFinisherReadyAt = nil
             self.preparedFinisherUseEngineOrderID = nil
             return self:RejectOrder(order, pageFrame, false, "insufficient_quality")
@@ -735,6 +772,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             -- Do not enter the blocking "crafting" state yet. The next user
             -- press reuses this transaction and performs the actual craft.
             self.preparedFinisherOrderID = order.orderID
+            self.preparedFinisherReagent = finisher
             self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
             self.preparedFinisherUseEngineOrderID = nil
             self.activeOrderID = order.orderID
@@ -762,6 +800,23 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         ))
         self:RefreshVisibleRowsSoon(0.01)
         return true
+    end
+
+    local transaction, form = self:GetTransactionFromEngine(engine)
+    local reagentTbl = self:BuildOrderSubmissionReagents(engine, order, transaction)
+    local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
+    if order.isRecraft and Professions and Professions.PrepareRecipeRecraft
+        and transaction and type(reagentTbl) == "table" then
+        -- The native recraft path removes unchanged item modifications from
+        -- the submission; they are not additional crafter-supplied reagents.
+        Professions.PrepareRecipeRecraft(transaction, reagentTbl)
+    end
+    if craftingWithPreparedFinisher and self.HasPreparedFinishingReagent
+        and not self:HasPreparedFinishingReagent(order, reagentTbl) then
+        self:ClearPendingCraftAttempt(order.orderID, false)
+        self:SetStatus(T("COA_STATUS_FINISHER_MISSING", "Finishing reagent is missing from the craft. Press Action to select it again."))
+        self:RefreshVisibleRowsSoon()
+        return false
     end
 
     self.pendingCraftOrderID = order.orderID
@@ -847,12 +902,6 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             end)
         end
     end
-
-    local form = engine.OrderDetails and engine.OrderDetails.SchematicForm
-    local transaction = form and ((form.GetTransaction and form:GetTransaction()) or form.transaction)
-    local reagentTbl = transaction and transaction.CreateCraftingReagentInfoTbl and transaction:CreateCraftingReagentInfoTbl()
-    reagentTbl = self:BuildCrafterOnlyReagentInfoTbl(order, reagentTbl)
-    local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
 
     local function SubmitThroughAPI()
         if order.isRecraft and C_TradeSkillUI and C_TradeSkillUI.RecraftRecipeForOrder then

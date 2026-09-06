@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Finishing reagents and recrafts (0.3.11)
+
+Finishing reagents are allocated using the slot's position in the recipe
+schematic, not its separate API `dataSlotIndex`. Before submitting a staged
+craft, the addon verifies that the selected finishing reagent is still in the
+transaction and in the outgoing reagent list. If an order update rebuilt the
+transaction, another hardware press restores the finisher instead of crafting
+without it. Submission uses Blizzard's per-slot customer ownership filtering;
+recrafts also remove unchanged item modifications as the native order view does.
+
+Regression tests cover different slot indices, a lost allocation between
+presses, filtered-out finishing reagents and the recraft API payload. An in-game
+recraft remains necessary to confirm the reported recording's symptoms are gone.
+
 ## Scanner recovery (0.3.10)
 
 Stale chat-order references no longer abort dismissal, page refresh or login

@@ -36,6 +36,7 @@ local invalidatedOrderID
 local operationCalls = 0
 local detailsRefreshCalls = 0
 local createRefreshCalls = 0
+local finishingDataSlotIndex = 1
 
 Enum = {
     CraftingReagentType = { Finishing = 3 },
@@ -54,7 +55,7 @@ C_TradeSkillUI = {
             reagentSlotSchematics = {
                 {
                     reagentType = Enum.CraftingReagentType.Finishing,
-                    dataSlotIndex = 1,
+                    dataSlotIndex = finishingDataSlotIndex,
                     quantityRequired = 1,
                     reagents = {
                         -- A non-skill finishing reagent must never be simulated.
@@ -193,5 +194,16 @@ assert(operationCalls == 1, "unowned and unrelated finishers must not be simulat
 enabled = false
 Reset(408, 5)
 assert(CO:PrepareAutoFinishingReagent(engine, order, false) == "disabled")
+
+-- Transaction allocation keys are schematic positions, not dataSlotIndex.
+-- Recraft schematics can give the finishing slot a different payload index.
+enabled = true
+finishingDataSlotIndex = 9
+order.isRecraft = true
+Reset(400, 10)
+result, candidate = CO:PrepareAutoFinishingReagent(engine, order, false)
+assert(result == "applied" and candidate.slotIndex == 1 and candidate.dataSlotIndex == 9,
+    "recraft finisher used the API dataSlotIndex as a transaction slot")
+assert(activeAllocations[1] == 246448 and activeAllocations[9] == nil)
 
 print("Finishing reagent tests passed.")
