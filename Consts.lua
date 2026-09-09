@@ -175,6 +175,7 @@ HironCraftScan.CONST.DEFAULT_SETTINGS = {
     alert_icon_scale = 100,
     scan_item_links_without_keywords = true,
     match_customer_class = true,
+    scan_bnet_whispers = true,
 }
 
 HironCraftScan.CONST.PROFESSION_COLORS = {

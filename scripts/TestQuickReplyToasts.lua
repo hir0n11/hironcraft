@@ -189,4 +189,14 @@ assert(#visible()==2, 'distinct rejected orders lost their individual actions')
 click(visible()[1])
 assert(#visible()==1 and #sent==7, 'sending one rejection dismissed the other order\'s action')
 dismissAll()
-print('Quick-reply toast tests passed (one answer per customer/text, clicks, stale sources, distinct contexts).')
+-- A Battle.net customer keeps its transport identity through grouping/clicks.
+for _,frame in ipairs(visible()) do click(frame,'RightButton') end
+local bnetCustomer='BNET:local-account:friend#1234'
+addCustomer(bnetCustomer)
+local beforeBNet=#sent
+whisper(bnetCustomer,'sent')
+assert(#visible(bnetCustomer)==1 and #sent==beforeBNet, 'BN message auto-sent or duplicated quick replies')
+click(visible(bnetCustomer)[1])
+assert(#sent==beforeBNet+1 and sent[#sent].customer==bnetCustomer and sent[#sent].text=='omw',
+    'BN quick reply lost its account-scoped transport identity')
+print('Quick-reply toast tests passed (one answer per customer/text, clicks, stale sources, distinct contexts, Battle.net).')

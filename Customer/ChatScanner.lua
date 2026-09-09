@@ -843,7 +843,8 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             return nil
         end
 
-        if not HironCraftScanComm.applying_remote_state then
+        if not HironCraftScanComm.applying_remote_state
+            and not (HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)) then
             -- Don't add to analytics based on proxied orders. The 'now' might
             -- be slightly off because of the messaging. We don't want that to
             -- create duplicates if both characters see the same message at the
@@ -1076,6 +1077,9 @@ local function ShortenedRealmForDisplay(name)
 end
 
 HironCraftScan.NameAndRealmToName = function(name, forDisplay)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(name) then
+        return HironCraftScan.BattleNet.DisplayName(name)
+    end
     if HironCraftScan.State.realmID then
         if forDisplay then
             return ShortenedRealmForDisplay(name)
@@ -1086,6 +1090,9 @@ HironCraftScan.NameAndRealmToName = function(name, forDisplay)
 end
 
 HironCraftScan.ColorizePlayerName = function(name, guid)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(name) then
+        return '|cff00ffff' .. HironCraftScan.BattleNet.DisplayName(name) .. '|r'
+    end
     name = HironCraftScan.NameAndRealmToName(name)
     local _, class = GetPlayerInfoByGUID(guid)
     local cc = RAID_CLASS_COLORS[class]
@@ -1186,6 +1193,9 @@ local function MakeChatHistoryEntry(customer, expectedMessage, event)
 end
 
 local function MakeChatHistoryEntryDefault(customer, message, event)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
+        return HironCraftScan.BattleNet.HistoryEntry(customer, message, event)
+    end
     local found = MakeChatHistoryEntry(customer, message, event)
     if found then
         return found
@@ -1482,7 +1492,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local chat_history = saved(customerInfo, 'chat_history', {})
     local requestChatEntry
     if not (overrides and overrides.chatHistoryAlreadyStored) then
-        requestChatEntry = MakeChatHistoryEntryDefault(customer, message, chatEvent)
+        requestChatEntry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, chatEvent)
     else
         requestChatEntry = chat_history[#chat_history]
     end
@@ -1534,7 +1544,12 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.recipeID = recipeID
     response.time = now
     response.responseID = responseID
-    response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
+    if overrides and overrides.battleNet then
+        -- Receiving a request is not the same as sending our proposed reply.
+        response.greeting_sent = (not restartingTerminalRequest and response.greeting_sent) or overrides.greeted or false
+    else
+        response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
+    end
     if HironCraftScan.QuickReplies then
         -- A proxied request must retain the originating conversation character.
         HironCraftScan.QuickReplies:ApplyConversationOwners(customerInfo,
@@ -1668,6 +1683,9 @@ end
 
 local function ResolveExistingCustomer(customer, customerGuid)
     local customers = HironCraftScan.DB.customers or {}
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
+        return customer, customers[customer]
+    end
     local guidCanBeCompared = customerGuid
         and (type(issecretvalue) ~= 'function' or not issecretvalue(customerGuid))
     if customers[customer]
@@ -1682,7 +1700,8 @@ local function ResolveExistingCustomer(customer, customerGuid)
     local wanted = BaseCustomerName(customer)
     local foundKey, foundInfo
     for key, info in pairs(customers) do
-        if BaseCustomerName(key) == wanted then
+        if not (HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(key))
+            and BaseCustomerName(key) == wanted then
             if guidCanBeCompared and info.guid == customerGuid then
                 return key, info
             end
@@ -1736,11 +1755,16 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if not message or not customer then
         return false
     end
+    local isBattleNet = HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)
+    if isBattleNet and (HironCraftScanComm.applying_remote_state
+        or not (overrides and overrides.battleNet)) then return false end
 
     local existingCustomer, customerInfo = ResolveExistingCustomer(customer, customerGuid)
     if existingCustomer then
         customer = existingCustomer
     end
+
+    if isBattleNet and customerInfo then customerInfo.guid = customerGuid end
 
     local ignored = HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[customer]
     if ignored then
@@ -1749,10 +1773,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 
     local crafterInfo, itemID, recipeInfo, itemMatches
 
-    if event == 'CHAT_MSG_WHISPER_INFORM' then
+    if event == 'CHAT_MSG_WHISPER_INFORM' or event == 'CHAT_MSG_BN_WHISPER_INFORM' then
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
-            local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
             if HironCraftScan.QuickReplies then
                 entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
             end
@@ -1764,10 +1788,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
-    if event == 'CHAT_MSG_WHISPER' then
+    if event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER' then
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
-            local entry = MakeChatHistoryEntryDefault(customer, message, event)
+            local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
             if HironCraftScan.QuickReplies then
                 entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
             end
@@ -1867,6 +1891,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 end
 
 local function OnMessage_(self, event, ...)
+    if event == 'CHAT_MSG_BN_WHISPER' or event == 'CHAT_MSG_BN_WHISPER_INFORM' then
+        if HironCraftScan.BattleNet then HironCraftScan.BattleNet.HandleEvent(event, ...) end
+        return
+    end
     local message, customer = ...
 
     if issecretvalue(message) then return end
@@ -1949,6 +1977,8 @@ local function UpdateScannerEventRegistry(...)
             frame:RegisterEvent('CHAT_MSG_GUILD')
             frame:RegisterEvent('CHAT_MSG_WHISPER')
             frame:RegisterEvent('CHAT_MSG_WHISPER_INFORM')
+            frame:RegisterEvent('CHAT_MSG_BN_WHISPER')
+            frame:RegisterEvent('CHAT_MSG_BN_WHISPER_INFORM')
             registered = true
         end
     else
@@ -1961,6 +1991,8 @@ local function UpdateScannerEventRegistry(...)
             frame:UnregisterEvent('CHAT_MSG_GUILD')
             frame:UnregisterEvent('CHAT_MSG_WHISPER')
             frame:UnregisterEvent('CHAT_MSG_WHISPER_INFORM')
+            frame:UnregisterEvent('CHAT_MSG_BN_WHISPER')
+            frame:UnregisterEvent('CHAT_MSG_BN_WHISPER_INFORM')
         end
     end
 end

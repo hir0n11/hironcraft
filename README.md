@@ -25,6 +25,32 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Battle.net friend whispers (0.3.21)
+
+The **Scan Battle.net whispers** setting is enabled by default. Incoming friend
+requests use the existing keywords, monitored-item matching and exclusions.
+Repeated links are deduplicated; distinct items get separate rows and grouped
+greetings. Plain social messages do not create orders, but follow-ups in an
+existing conversation feed its history and quick-reply suggestions. Sending
+still requires a click, including the first proposed greeting.
+
+Battle.net rows show a BattleTag, and replies use Battle.net rather than a
+character whisper. IDs are resolved against the current friends list at click
+time; session IDs and Real ID names are not saved. Unavailable, removed, secret
+or mismatched recipients fail closed without switching transports. Right-click
+chat menus also support manual matching, custom explanations and ignoring.
+
+These private conversations and their exact status rows remain on the receiving
+account: they are not proxied, added to analytics or included in linked journals.
+The shared crafter configuration still supplies the available professions.
+BattleTags are not assumed to be character names: automatic completion is not
+inferred from a friend's display name; the manual completion mark remains usable.
+
+Implementation follows Blizzard's
+[Battle.net API](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/BattleNetDocumentation.lua)
+and [chat event payloads](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/ChatInfoDocumentation.lua).
+Live client testing is still needed for account-specific chat restrictions/UI.
+
 ## Character rename migration (0.3.20)
 
 Explicit account-owned rename records migrate monitored recipes, profession

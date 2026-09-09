@@ -413,4 +413,19 @@ assert(CraftScan.OrderFulfillment:ApplyRemoteStatus(renamedStatus))
 local canonicalStatus=CraftScan.OrderFulfillment:GetStatuses()['RenameBuyer-98765']
 assert(canonicalStatus.crafterFullName=='Newsmith-Realm' and canonicalStatus.requestToken=='rename-request')
 
+assert(loadfile('Customer/BattleNet.lua'))('HironCraft',CraftScan)
+local bnOrders={}
+for _,tag in ipairs({'friend#1234','friend#5678'}) do
+    local name='BNET:test-account:'..tag
+    local bnOrder={customerName=name,responseID=9998}
+    CraftScan.DB.customers[name]={responses={[9998]={requestToken=tag,time=now,recipeID=9998}}}
+    CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(bnOrder)]=bnOrder
+    bnOrders[#bnOrders+1]=bnOrder
+end
+local bnMarked=CraftScan.OrderFulfillment:ToggleManual(bnOrders[1])
+assert(bnMarked.status=='fulfilled' and not CraftScan.OrderFulfillment:GetStatus(bnOrders[2]),
+    'manual BNet mark leaked to another friend sharing the same account prefix')
+assert(not CraftScan.OrderFulfillment:ApplyRemoteStatus(bnMarked), 'remote status overwrote a private BNet row')
+assert(not CraftScan.OrderFulfillment:ApplyRemoteCompletion({customerName=bnOrders[1].customerName}),
+    'remote journal injected a BNet identity')
 print("Order status merge tests passed.")

@@ -454,3 +454,98 @@ scan('LF lw')
 Scan.OnMessage('CHAT_MSG_WHISPER','need wrist','Buyer','Buyer-GUID')
 assert(response(204) and not response(203), 'existing whisper conversation lost the sender class')
 print('Customer-class matching tests passed (13 classes, armor slots, links, exclusions, opt-out, unknown data, whispers, manual sends).')
+
+-- Battle.net event -> matcher -> rows -> manual greeting -> same transport.
+loadSource('Customer/BattleNet.lua')
+reset()
+Scan.DB.settings.my_uuid='local-account'
+Scan.DB.settings.ignored=nil
+Scan.DB.characters={
+    ['Seller-Realm']=character(164,'bs',{[101]={scan_state=1}}),
+    ['Tailor-Realm']=character(197,'tailor',{[102]={scan_state=1}}),
+}
+reloadConfig()
+local friends={
+    {bnetAccountID=70,battleTag='Friend#1234',accountName='Friend',isFriend=true},
+    {bnetAccountID=71,battleTag='Friend#5678',accountName='Friend',isFriend=true},
+}
+local bnetSent, bnetOpened, sendOK={},0,true
+function BNGetNumFriends() return #friends end
+C_BattleNet={
+    GetAccountInfoByID=function(id) for _,friend in ipairs(friends) do if friend.bnetAccountID==id then return friend end end end,
+    GetFriendAccountInfo=function(index) return friends[index] end,
+    SendWhisper=function(id,text)
+        if sendOK then bnetSent[#bnetSent+1]={id=id,text=text} end
+        return sendOK
+    end,
+}
+function BNet_GetBNetIDAccount() return friends[1] and friends[1].bnetAccountID end
+ChatFrameUtil={SendBNetTell=function() bnetOpened=bnetOpened+1 end}
+local BNet=Scan.BattleNet
+local key=BNet.FromID(70)
+local function bn(message,id,event)
+    BNet.HandleEvent(event or 'CHAT_MSG_BN_WHISPER', message, 'Real name must not be saved',
+        '', '', '', '', 0, 0, '', 0, 601, 'BNet-GUID', id or 70)
+end
+bn('hihi');bn('WTS '..a);bn(link(9999))
+assert(countRows()==0 and next(Scan.DB.customers)==nil, 'irrelevant friend chat created an order')
+bn(a..a..b)
+assert(countRows()==2 and #bnetSent==0 and #sent==0, 'BN scan sent chat or duplicated items')
+local info=Scan.DB.customers[key]
+local firstOrder=order(101,key)
+assert(info and not info.guid and not info.responses[101].greeting_sent)
+assert(#info.chat_history==1 and info.chat_history[1].chatType=='BN_WHISPER')
+assert(not info.chat_history[1].message:find('Real name',1,true))
+assert(Scan.NameAndRealmToName(key)=='friend#1234 (Battle.net)')
+assert(Scan.ColorizePlayerName(key):find('friend#1234',1,true))
+assert(Scan.Utils.SendResponses({'hi'},key)==false and #bnetSent==0)
+Scan.GreetCustomer('LeftButton',firstOrder)
+assert(#bnetSent==2 and #sent==0 and bnetSent[1].id==70 and bnetSent[2].id==70)
+assert(bnetSent[2].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
+bn('our reply',70,'CHAT_MSG_BN_WHISPER_INFORM')
+assert(info.chat_history[#info.chat_history].chatType=='BN_WHISPER_INFORM')
+local quickCount=0
+Scan.QuickReplies.OnWhisper=function(_,who,text)
+    assert(who==key and text=='yo');quickCount=quickCount+1
+end
+bn('yo')
+assert(quickCount==1 and countRows()==2 and #bnetSent==2, 'follow-up did not reach the quick-reply classifier once')
+Scan.GreetCustomer('LeftButton',firstOrder)
+assert(bnetOpened==1 and opened==0, 'row opened character whisper for a BNet conversation')
+bn(a,71)
+assert(countRows()==3 and Scan.DB.customers[BNet.FromID(71)]~=info, 'same display name merged different friends')
+assert(not BNet.OpenChat(BNet.FromID(71)) and bnetOpened==1, 'ambiguous name opened wrong BNet editor')
+friends[1].bnetAccountID=99
+assert(Scan.Utils.SendResponses({'after reload'},key,true) and bnetSent[#bnetSent].id==99,
+    'cached session ID was used after it changed')
+Scan.DB.settings.my_uuid='other-account'
+assert(not Scan.Utils.SendResponses({'wrong account'},key,true))
+Scan.DB.settings.my_uuid='local-account'
+sendOK=false
+local other=order(101,BNet.FromID(71))
+Scan.GreetCustomer('LeftButton',other)
+assert(not Scan.OrderToResponse(other).greeting_sent, 'rejected BNet send marked greeting as sent')
+local modern=C_BattleNet.SendWhisper;C_BattleNet.SendWhisper=nil
+BNSendWhisper=function(id,text) bnetSent[#bnetSent+1]={id=id,text=text} end
+assert(Scan.Utils.SendResponses({'legacy'},key,true), 'legacy BNet sender did not work')
+BNSendWhisper=nil;C_BattleNet.SendWhisper=modern;sendOK=true
+friends[1].isFriend=false
+assert(not Scan.Utils.SendResponses({'removed friend'},key,true) and #sent==0)
+friends[1].isFriend=true
+local previous=countRows()
+Scan.DB.settings.scan_bnet_whispers=false;bn(b,71)
+assert(countRows()==previous, 'disabled BNet scanner still created rows')
+Scan.DB.settings.scan_bnet_whispers=true
+Scan.DB.settings.ignored={[BNet.FromID(71)]=1};bn(b,71)
+assert(countRows()==previous, 'BNet ignore was bypassed')
+Scan.DB.settings.ignored=nil
+local secret={};issecretvalue=function(value) return value==secret end
+bn(secret);bn(a,secret);friends[1].battleTag=secret;bn(a,99)
+assert(countRows()==previous, 'secret event payload was consumed')
+friends[1].battleTag='Friend#1234'
+issecretvalue=function() return false end
+HironCraftScanComm.applying_remote_state=true
+Scan.OnMessage('CHAT_MSG_CHANNEL',b,key,nil,{battleNet=true})
+assert(countRows()==previous, 'linked packet injected a private BNet conversation')
+HironCraftScanComm.applying_remote_state=false
+print('Battle.net scanner tests passed (filters, unique rows, history, manual replies, transport, ID reuse, friends, secrets, opt-out, isolation).')

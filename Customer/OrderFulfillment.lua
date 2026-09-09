@@ -53,6 +53,8 @@ local function BaseName(name)
 end
 
 local function NamesMatch(lhs, rhs)
+    if HironCraftScan.BattleNet and (HironCraftScan.BattleNet.IsCustomer(lhs)
+        or HironCraftScan.BattleNet.IsCustomer(rhs)) then return lhs == rhs end
     local lhsBase = BaseName(lhs)
     local rhsBase = BaseName(rhs)
     return lhsBase and rhsBase and lhsBase == rhsBase
@@ -982,6 +984,8 @@ function OrderFulfillment:ToggleManual(order)
 end
 
 function OrderFulfillment:ApplyRemoteStatus(remoteEntry)
+    if HironCraftScan.BattleNet and type(remoteEntry) == 'table'
+        and HironCraftScan.BattleNet.IsCustomer(remoteEntry.customerName) then return false, false end
     local entry = SanitizeEntry(remoteEntry)
     if not entry then
         return false, false, nil
@@ -1024,6 +1028,8 @@ function OrderFulfillment:ApplyRemoteStatuses(remoteStatuses)
 end
 
 function OrderFulfillment:ApplyRemoteCompletion(noticeData)
+    if HironCraftScan.BattleNet and type(noticeData) == 'table'
+        and HironCraftScan.BattleNet.IsCustomer(noticeData.customerName) then return false end
     local notice = SanitizeCompletionNotice(noticeData)
     if not notice then
         return false

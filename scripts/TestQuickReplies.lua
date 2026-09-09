@@ -279,6 +279,7 @@ HironCraftScanScannerMenu = { ClearAlert = function() end }
 HironCraftScanCraftingOrderPage = { ShowGeneric = function() end }
 CraftScan.Utils.SendResponses = function() end
 ChatFrame_SendTell = function() end
+CraftScan.Utils.OpenCustomerChat = function(customer) ChatFrame_SendTell(customer); return true end
 assert(loadfile('Customer/OrderPage.lua'))('HironCraft', CraftScan)
 CraftScan.RebuildResponseMessage = function() end
 local clickedResponse = Response(301)

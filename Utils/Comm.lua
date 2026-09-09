@@ -114,7 +114,8 @@ local PENDING_ORDER_BATCH_LIMIT = 20
 local function NewestOrderEntries(entries, limit, predicate)
     local result = {}
     for _, entry in pairs(entries or {}) do
-        if type(entry) == 'table' and (not predicate or predicate(entry)) then
+        if type(entry) == 'table' and (not predicate or predicate(entry))
+            and not (HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(entry.customerName)) then
             table.insert(result, entry)
         end
     end
@@ -194,6 +195,10 @@ end
 
 function HironCraftScanComm:PrepareOrderStatusDelivery(entry)
     if type(entry) ~= 'table' then
+        return false
+    end
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(entry.customerName) then
+        entry.deliveryPending = nil
         return false
     end
 
@@ -725,6 +730,7 @@ function HironCraftScanComm:ShareCustomerOrder(
     restartTerminalRequest,
     requestTokens
 )
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then return end
     if not LinkedAccountsConfigured() then
         return
     end
@@ -762,6 +768,7 @@ end
 local customerChatSequence = 0
 
 function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, incoming)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then return end
     if not LinkedAccountsConfigured()
         or HironCraftScanComm.applying_remote_state
         or not HironCraftScan.DB.settings.proxy_send_enabled
@@ -798,6 +805,8 @@ function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, inc
 end
 
 local function ReceiveShareCustomerChat(sender, data, senderID)
+    if HironCraftScan.BattleNet and type(data) == 'table'
+        and HironCraftScan.BattleNet.IsCustomer(data.customer) then return end
     if not HironCraftScan.DB.settings.proxy_receive_enabled
         or type(data) ~= 'table'
         or not HironCraftScan.ApplyRemoteCustomerChat
@@ -825,6 +834,8 @@ local function ReceiveShareCustomerChat(sender, data, senderID)
 end
 
 local function ReceiveShareCustomerOrder(sender, data, senderID)
+    if HironCraftScan.BattleNet and type(data) == 'table'
+        and HironCraftScan.BattleNet.IsCustomer(data.customer) then return end
     if not HironCraftScan.DB.settings.proxy_receive_enabled then
         return
     end
@@ -942,6 +953,7 @@ local function DiscoverOrderStatusTarget(accountID)
 end
 
 function HironCraftScanComm:ShareOrderStatus(entry)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(entry and entry.customerName) then return end
     if not LinkedAccountsConfigured() then
         return
     end

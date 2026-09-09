@@ -95,9 +95,37 @@ function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
             return false
         end
     end
-    for _, response in ipairs(responses) do
-        SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
+        local id = HironCraftScan.BattleNet.ResolveTarget(customer)
+        if not id then HironCraftScan.BattleNet.Unavailable(); return false end
+        for _, response in ipairs(responses) do
+            local ok, success
+            if C_BattleNet and C_BattleNet.SendWhisper then
+                ok, success = pcall(C_BattleNet.SendWhisper, id, response)
+            elseif BNSendWhisper then
+                ok, success = pcall(BNSendWhisper, id, response)
+            end
+            if not ok or (issecretvalue and issecretvalue(success)) or success == false then
+                HironCraftScan.BattleNet.Unavailable(); return false
+            end
+        end
+    else
+        -- A BNet identity must never fall through to character WHISPER, even
+        -- if an incomplete installation failed to load the transport module.
+        if type(customer) == 'string' and customer:sub(1,5) == 'BNET:' then return false end
+        for _, response in ipairs(responses) do
+            SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
+        end
     end
+    return true
+end
+
+function HironCraftScan.Utils.OpenCustomerChat(customer)
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
+        return HironCraftScan.BattleNet.OpenChat(customer)
+    end
+    if type(customer) == 'string' and customer:sub(1,5) == 'BNET:' then return false end
+    ChatFrame_SendTell(customer, DEFAULT_CHAT_FRAME)
     return true
 end
 

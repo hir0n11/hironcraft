@@ -368,6 +368,20 @@ HironCraftScan.Utils.onLoad(function()
     do
         local setting = Settings.RegisterProxySetting(
             category,
+            'HIRONCRAFT_SCAN_BNET_WHISPERS',
+            Settings.VarType.Boolean,
+            L('Scan Battle.net whispers'),
+            true,
+            function() return HironCraftScan.DB.settings.scan_bnet_whispers ~= false end,
+            function(value) HironCraftScan.DB.settings.scan_bnet_whispers = value end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting,
+            L('Scan crafting requests from Battle.net friends. Replies require a click; these conversations stay on this account.'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
+    do
+        local setting = Settings.RegisterProxySetting(
+            category,
             'HIRONCRAFT_SCAN_MATCH_CUSTOMER_CLASS',
             Settings.VarType.Boolean,
             L('Use customer class for armor requests'),

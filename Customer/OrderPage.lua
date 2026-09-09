@@ -115,12 +115,13 @@ function HironCraftScan.GreetCustomer(button, order)
             HironCraftScanCraftingOrderPage:ShowGeneric()
         else
             -- After sending the initial greeting, subsequent clicks open a chat with the customer.
-            ChatFrame_SendTell(order.customerName, DEFAULT_CHAT_FRAME)
+            HironCraftScan.Utils.OpenCustomerChat(order.customerName)
         end
     elseif button == "MiddleButton" then
         -- Middle button to begin chat without the generated greeting
-        response.greeting_sent = true
-        ChatFrame_SendTell(order.customerName, DEFAULT_CHAT_FRAME)
+        if HironCraftScan.Utils.OpenCustomerChat(order.customerName) ~= false then
+            response.greeting_sent = true
+        end
     elseif button == "RightButton" then
         HironCraftScan.DismissOrder(order);
     end

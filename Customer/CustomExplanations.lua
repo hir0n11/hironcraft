@@ -151,7 +151,13 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
     end)
 
     -- Inject our buttons on the right click of a name in chat.
-    Menu.ModifyMenu("MENU_UNIT_FRIEND", function(owner, rootDescription, contextData)
+    local function AddChatActions(owner, rootDescription, contextData, isBattleNet)
+        local target = contextData.chatTarget
+        if isBattleNet then
+            target = HironCraftScan.BattleNet and HironCraftScan.BattleNet.ContextCustomer(contextData)
+            if not target then return end
+        end
+        if (issecretvalue and issecretvalue(target)) or type(target) ~= 'string' then return end
         local collapsed = HironCraftScan.DB.settings.collapse_chat_context
         local prefix = collapsed and "" or L("HironCraftScan") .. " - "
         local subMenu = collapsed and rootDescription:CreateButton(L("HironCraftScan")) or rootDescription
@@ -182,10 +188,15 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                         HironCraftScan.Utils.ColorizeProfessionName(ppID, profName)),
                     function()
                         -- Force the message through as if it were a match for the specified profession.
-                        local customer = contextData.chatTarget;
+                        if (issecretvalue and issecretvalue(contextData.lineID))
+                            or type(contextData.lineID) ~= 'number' then return end
+                        local customer = target;
                         local message = C_ChatInfo.GetChatLineText(contextData.lineID)
                         local customerGuid = C_ChatInfo.GetChatLineSenderGUID(contextData.lineID)
+                        if issecretvalue and (issecretvalue(message) or issecretvalue(customerGuid)) then return end
+                        if isBattleNet then customerGuid = nil end
                         HironCraftScan.OnMessage(nil, message, customer, customerGuid, {
+                            battleNet = isBattleNet,
                             forceCrafterInfo = {
                                 crafter = char,
                                 parentProfID = ppID,
@@ -204,7 +215,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local text = entry.text;
                 local button = subMenu:CreateButton(label, function()
                     local message = HironCraftScan.Utils.SplitResponse(text);
-                    HironCraftScan.Utils.SendResponses(message, contextData.chatTarget, true)
+                    HironCraftScan.Utils.SendResponses(message, target, true)
                 end);
 
                 button:SetTooltip(function(tooltip, elementDescription)
@@ -215,7 +226,6 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
         do
             subMenu:CreateDivider()
-            local target = contextData.chatTarget;
             local ignored = HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[target];
             local title = subMenu:CreateButton(prefix .. L(ignored and LID.UNIGNORE or LID.IGNORE),
                 function()
@@ -230,5 +240,11 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                     HironCraftScan.MakeTextWhite(L(ignored and LID.UNIGNORE_TOOLTIP or LID.IGNORE_TOOLTIP)));
             end);
         end
-    end);
+    end
+    Menu.ModifyMenu("MENU_UNIT_FRIEND", function(owner, rootDescription, contextData)
+        AddChatActions(owner, rootDescription, contextData, false)
+    end)
+    Menu.ModifyMenu("MENU_UNIT_BN_FRIEND", function(owner, rootDescription, contextData)
+        AddChatActions(owner, rootDescription, contextData, true)
+    end)
 end

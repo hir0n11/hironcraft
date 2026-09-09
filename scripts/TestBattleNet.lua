@@ -1,0 +1,95 @@
+-- Real menu and linked-account code, with no network/chat transport available.
+local noop=function() end
+local Scan={DB={settings={my_uuid='local-account',explanations={Price='You choose the price.'}},
+    characters={Smith={parent_professions={[164]={scanning_enabled=true}}}},realm={}},
+    Utils={onLoad=noop,Contains=function(values,wanted)
+        for _,value in ipairs(values) do if value==wanted then return true end end
+    end}, CONST={TEXT=setmetatable({MANUAL_MATCH='Match %s %s'}, {__index=function(_,k) return k end})},
+    LOCAL={GetText=function(_,text) return text end},Events={Register=noop},
+}
+Scan.Utils.saved=function(t,k,v) if t[k]==nil then t[k]=v end;return t[k] end
+Scan.Utils.ProfessionNameByID=function() return 'Blacksmithing' end
+Scan.Utils.ColorizeProfessionName=function(_,name) return name end
+Scan.Utils.SplitResponse=function(text) return {text} end
+Scan.GetSortedCrafters=function() return {{name='Smith',parentProfessionID=164}} end
+Scan.ColorizeCrafterName=function(name) return name end
+local matched, sent={},{}
+Scan.OnMessage=function(event,message,customer,guid,options)
+    matched[#matched+1]={customer=customer,message=message,options=options}
+end
+Scan.Utils.SendResponses=function(messages,customer,manual)
+    assert(manual==true);sent[#sent+1]={customer=customer,message=messages[1]};return true
+end
+local friend={isFriend=true,battleTag='Friend#1234',bnetAccountID=30,accountName='Friend'}
+function BNGetNumFriends() return 1 end
+C_BattleNet={GetAccountInfoByID=function(id) if id==friend.bnetAccountID then return friend end end,
+    GetFriendAccountInfo=function() return friend end}
+function issecretvalue() return false end
+C_ChatInfo={GetChatLineText=function(id) assert(id==44);return '[Item request]' end,
+    GetChatLineSenderGUID=function() return 'BNet-GUID' end}
+assert(loadfile('Customer/BattleNet.lua'))('HironCraft',Scan)
+local key=Scan.BattleNet.FromID(30)
+local menus={}
+Menu={ModifyMenu=function(name,callback) menus[name]=callback end}
+assert(loadfile('Customer/CustomExplanations.lua'))('HironCraft',Scan)
+HironCraftScan_CustomExplanationsButtonMixin.Init({SetupMenu=noop})
+local function menu(name,context)
+    local buttons={}
+    local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end}
+    function root:CreateButton(label,click)
+        local button={label=label,click=click,SetTooltip=noop};buttons[#buttons+1]=button;return button
+    end
+    menus[name](nil,root,context)
+    return buttons
+end
+local function find(buttons,label)
+    for _,button in ipairs(buttons) do if button.label==label then return button end end
+    error('Missing menu action '..label)
+end
+local buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30,lineID=44,chatTarget='Do not whisper this'})
+assert(#sent==0 and #matched==0, 'opening a menu took an action')
+find(buttons,'Match Smith Blacksmithing').click()
+assert(#matched==1 and matched[1].customer==key and matched[1].options.battleNet==true)
+find(buttons,'Price').click()
+assert(sent[1].customer==key and sent[1].message=='You choose the price.')
+find(buttons,'HironCraftScan - IGNORE').click()
+assert(Scan.DB.settings.ignored[key]==1)
+buttons=menu('MENU_UNIT_BN_FRIEND',{accountInfo=friend,lineID=44})
+find(buttons,'HironCraftScan - UNIGNORE').click()
+assert(not Scan.DB.settings.ignored[key])
+buttons=menu('MENU_UNIT_FRIEND',{chatTarget='Normal-Realm',lineID=44})
+find(buttons,'Price').click()
+assert(sent[2].customer=='Normal-Realm', 'ordinary whisper context changed')
+assert(#menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=999})==0, 'unknown friend has actionable menu')
+buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30})
+find(buttons,'Match Smith Blacksmithing').click()
+assert(#matched==1, 'friend-list menu tried to read a missing chat line')
+
+local comm={}
+LibStub=function() return {NewAddon=function() return comm end} end
+CreateFramePool=function() return {} end
+HironCraftScanScannerMenu={RegisterEventCallback=noop}
+assert(loadfile('Utils/Comm.lua'))('HironCraft',Scan)
+comm.Transmit=function() error('Private Battle.net data was transmitted') end
+Scan.DB.settings.proxy_send_enabled=true
+Scan.DB.realm.linked_accounts={peer={permissions={1}}}
+Scan.OrderFulfillment={GetStatuses=function() return {private={customerName=key,updatedAt=20},
+    normal={customerName='Normal-Realm',updatedAt=10}} end,GetCompletionNotices=function() return {} end}
+comm:ShareCustomerOrder('private text',key,nil,{message='private history'})
+comm:ShareCustomerChat(key,nil,{message='private history'},true)
+comm:ShareOrderStatus({customerName=key})
+local status={customerName=key,deliveryPending={peer=true}}
+assert(not comm:PrepareOrderStatusDelivery(status) and not status.deliveryPending)
+local function findUpvalue(fn,wanted,seen)
+    seen=seen or {};if seen[fn] then return end;seen[fn]=true
+    for i=1,100 do
+        local name,value=debug.getupvalue(fn,i)
+        if not name then break end
+        if name==wanted then return value end
+        if type(value)=='function' then local found=findUpvalue(value,wanted,seen);if found then return found end end
+    end
+end
+local newest=assert(findUpvalue(comm.ShareCharacterData,'NewestOrderEntries'))
+local exported=newest(Scan.OrderFulfillment:GetStatuses())
+assert(#exported==1 and exported[1].customerName=='Normal-Realm', 'private identity leaked into journal/snapshot')
+print('Battle.net menu/sync tests passed (manual matching, explanations, ignore, missing context, ordinary chat, private data isolation).')

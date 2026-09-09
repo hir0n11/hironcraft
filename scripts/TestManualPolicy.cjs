@@ -54,6 +54,10 @@ for (const file of manualFiles) {
 const ownCalls = calls.filter(call => !call.file.startsWith('Libs/'));
 const directChat = ownCalls.filter(call => /(^|\.)SendChatMessage$/.test(call.name));
 assert.deepEqual(directChat.map(call => call.file), ['Utils/Utils.lua'], 'player chat bypassed the central sender');
+const bnetSends = ownCalls.filter(call => /(^|\.)(BNSendWhisper|SendWhisper)$/.test(call.name)
+    || (call.name === 'pcall' && /(^|\.)(BNSendWhisper|SendWhisper)$/.test(name(call.node.arguments[0]))));
+assert.deepEqual(bnetSends.map(call => call.file), ['Utils/Utils.lua', 'Utils/Utils.lua'],
+    'Battle.net chat bypassed the guarded central sender');
 
 function checkManualCalls(method, files) {
     const matched = ownCalls.filter(call => call.name.endsWith('.' + method));

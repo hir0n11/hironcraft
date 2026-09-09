@@ -131,6 +131,7 @@ realOnLoad(function() later = later + 1 end)
 -- Simulate an original CraftScan already owning its Settings identifiers.
 local registered = {}
 local classSetting
+local bnetSetting
 local category = { GetID = function() return 17 end }
 local initializer = { AddSearchTags=noop }
 local function registerSetting(_, variable, ...)
@@ -138,6 +139,7 @@ local function registerSetting(_, variable, ...)
     assert(not registered[variable], 'duplicate setting ID: ' .. variable)
     registered[variable] = true
     if variable == 'HIRONCRAFT_SCAN_MATCH_CUSTOMER_CLASS' then classSetting={...} end
+    if variable == 'HIRONCRAFT_SCAN_BNET_WHISPERS' then bnetSetting={...} end
     return { SetValueChangedCallback=noop }
 end
 local registeredCategory, openedCategory
@@ -178,6 +180,10 @@ assert(classSetting and classSetting[3]==true and classSetting[4](),
 classSetting[5](false)
 assert(not classSetting[4]() and Scan.DB.settings.match_customer_class==false)
 classSetting[5](true)
+assert(bnetSetting and bnetSetting[3]==true and bnetSetting[4](), 'BNet scanner setting not enabled by default')
+bnetSetting[5](false)
+assert(not bnetSetting[4]() and Scan.DB.settings.scan_bnet_whispers==false)
+bnetSetting[5](true)
 Scan.Settings:Open()
 assert(openedCategory == 17)
 realOnLoad(function() later = later + 1 end)
