@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Character rename migration (0.3.20)
+
+Explicit account-owned rename records migrate monitored recipes, profession
+settings, conversation ownership, crafter references and editable reply templates.
+Existing settings win over fresh default profiles, while new-only recipes and
+fresh concentration data are retained. Profile snapshots are kept for recovery;
+customer identities, chat text and order-status identities are not rewritten.
+
+Full linked accounts receive rename records from the owning account during
+character-data synchronization. Remembered aliases suppress stale old-name
+profiles and normalize later status/template packets. Conflicting profile owners
+or cyclic renames are refused. All linked clients must use this version or newer;
+no personal names or migration records are bundled in the release. Player-chat
+replies still require a click.
+
 ## Customer class for generic armor requests (0.3.19)
 
 Generic requests such as `need wrist` can now use the author's class from the

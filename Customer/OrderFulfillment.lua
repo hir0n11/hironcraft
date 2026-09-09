@@ -368,7 +368,9 @@ local function SanitizeEntry(entry)
         clean.craftingOrderID = entry.craftingOrderID
     end
     if type(entry.crafterFullName) == 'string' then
-        clean.crafterFullName = entry.crafterFullName:sub(1, 128)
+        local name = HironCraftScan.CharacterRenames and HironCraftScan.CharacterRenames.Resolve(entry.crafterFullName)
+            or entry.crafterFullName
+        clean.crafterFullName = name:sub(1, 128)
     end
     if type(entry.origin) == 'string' then
         clean.origin = entry.origin:sub(1, 128)
@@ -417,7 +419,10 @@ local function SanitizeCompletionNotice(notice)
         clean.parentProfessionID = notice.parentProfessionID
     end
     if type(notice.crafterFullName) == 'string' then
-        clean.crafterFullName = notice.crafterFullName:sub(1, 128)
+        local name = HironCraftScan.CharacterRenames and HironCraftScan.CharacterRenames.Resolve(notice.crafterFullName)
+            or notice.crafterFullName
+        clean.crafterFullName = name:sub(1, 128)
+        if name ~= notice.crafterFullName and not notice.origin then clean.origin = notice.crafterFullName end
     end
     if type(notice.origin) == 'string' then
         clean.origin = notice.origin:sub(1, 128)

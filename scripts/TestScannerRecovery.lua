@@ -44,6 +44,7 @@ function IsLoggedIn() return loggedIn end
 C_AddOns = { IsAddOnLoaded = function() return true, true end }
 HironCraftScanComm = { ShareCharacterData = noop }
 
+loadSource('Utils/CharacterRenames.lua')
 loadSource('Utils/Utils.lua')
 local realOnLoad = Scan.Utils.onLoad
 Scan.Utils.onLoad = function(fn) queued[#queued + 1] = fn end
@@ -109,6 +110,10 @@ local keep, keepInfo = addOrder('Healthy', 1, {time=999})
 Scan.DB.listed_orders.noResponseID = {customerName='Healthy'}
 local realm = { customers=Scan.DB.customers, listed_orders=Scan.DB.listed_orders, characters={} }
 HironCraftScan_DB = { realms={TestRealm=realm}, settings={customer_timeout=5, alert_icon_scale=123} }
+realm.characters['Oldsmith-TestRealm']={sourceID='test-owner',professions={},parent_professions={}}
+HironCraftScan_DB.settings.character_renames={
+    ['Oldsmith-TestRealm']={to='Newsmith-TestRealm',sourceID='test-owner'},
+}
 local button = { SetButtonText=noop, Init=noop }
 HironCraftScanCraftingOrderPage.EnableMouse = noop
 HironCraftScanCraftingOrderPage.BrowseFrame = {
@@ -156,6 +161,8 @@ local login = frames[1]
 loggedIn = true
 login:GetScript('OnEvent')(login, 'PLAYER_LOGIN')
 assert(hooked == 1, 'stale rows interrupted the page initializer')
+assert(Scan.DB.characters['Newsmith-TestRealm'] and not Scan.DB.characters['Oldsmith-TestRealm'],
+    'startup did not migrate character profiles before initializing the scanner')
 assert(later == 1, 'one failed initializer blocked later modules')
 assert(#errors == 1 and errors[1]:find('injected UI initializer failure', 1, true), table.concat(errors, '\n'))
 assert(not login.events.PLAYER_LOGIN and not login:GetScript('OnEvent'))

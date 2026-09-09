@@ -391,4 +391,26 @@ CraftScan.OrderFulfillment:ApplyRemoteCompletion(lateCompletion)
 assert(CraftScan.OrderFulfillment:GetStatus(lateOrder).status=='failed',
     'old optimistic completion erased an authoritative server error')
 
+-- A delayed packet after a rename must use the new crafter name without
+-- changing a legacy completion's journal key or its request identity.
+assert(loadfile('Utils/CharacterRenames.lua'))('HironCraft',CraftScan)
+HironCraftScan_DB={settings={character_renames={
+    ['Oldsmith-Realm']={to='Newsmith-Realm',sourceID='rename-owner'},
+}},realms={}}
+CraftScan.CharacterRenames.Apply(HironCraftScan_DB)
+local renamedNotice={orderID=99001,customerName='RenameBuyer',spellID=98765,itemID=87654,
+    crafterFullName='Oldsmith-Realm',updatedAt=now,status='fulfilled'}
+local legacyKey=CraftScan.OrderFulfillment:CompletionNoticeKey(renamedNotice)
+assert(CraftScan.OrderFulfillment:ApplyRemoteCompletion(renamedNotice))
+local canonicalNotice=CraftScan.OrderFulfillment:GetCompletionNotices()[legacyKey]
+assert(canonicalNotice and canonicalNotice.crafterFullName=='Newsmith-Realm'
+    and canonicalNotice.origin=='Oldsmith-Realm', 'rename changed a legacy journal identity')
+assert(not CraftScan.OrderFulfillment:ApplyRemoteCompletion(renamedNotice), 'replay created another completion')
+local renamedStatus={customerName='RenameBuyer',responseID=98765,status='fulfilled',
+    crafterFullName='Oldsmith-Realm',origin='rename-owner',rev=1,updatedAt=now,
+    requestToken='rename-request',requestTime=now-5}
+assert(CraftScan.OrderFulfillment:ApplyRemoteStatus(renamedStatus))
+local canonicalStatus=CraftScan.OrderFulfillment:GetStatuses()['RenameBuyer-98765']
+assert(canonicalStatus.crafterFullName=='Newsmith-Realm' and canonicalStatus.requestToken=='rename-request')
+
 print("Order status merge tests passed.")

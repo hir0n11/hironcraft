@@ -1003,6 +1003,11 @@ local function doOnce()
         HironCraftScan_DB = HironCraftScan_DB or {}
 
         UpgradeRealmStorage()
+        if HironCraftScan.CharacterRenames then
+            local count, failures = HironCraftScan.CharacterRenames.Apply(HironCraftScan_DB)
+            if count > 0 then print('|cff45ff78HironCraft:|r Обновлены имена крафтеров: ' .. count .. '. Настройки сохранены.') end
+            if #failures > 0 then print('|cffffd200HironCraft:|r Конфликт переноса имён: ' .. table.concat(failures, ', ')) end
+        end
 
         HironCraftScan.DB.settings = HironCraftScan.Utils.saved(HironCraftScan_DB, 'settings', {})
         HironCraftScan.DB.settings.inclusions = HironCraftScan.DB.settings.inclusions

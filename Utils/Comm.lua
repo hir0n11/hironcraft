@@ -314,6 +314,7 @@ local function QuickRepliesRevision()
 end
 
 local function SendShareCharacterData(target, data)
+    if HironCraftScan.CharacterRenames then data.character_renames = HironCraftScan.CharacterRenames.ExportOwn() end
     HironCraftScanComm:Transmit(data, HironCraftScanComm.Operations.ShareCharacterData, target)
 end
 
@@ -375,6 +376,7 @@ local function ReceiveShareCustomGreeting_(greeting)
         or ((HironCraftScan.DB.settings.greeting.rev or 0) < greeting.rev)
     then
         HironCraftScan.DB.settings.greeting = greeting
+        if HironCraftScan.CharacterRenames then HironCraftScan.CharacterRenames.NormalizeEditable(greeting) end
     end
 end
 
@@ -384,16 +386,35 @@ local function ReceiveShareCustomExplanations_(explanations)
         or ((HironCraftScan.DB.settings.explanations.rev or 0) < explanations.rev)
     then
         HironCraftScan.DB.settings.explanations = explanations
+        if HironCraftScan.CharacterRenames then HironCraftScan.CharacterRenames.NormalizeEditable(explanations) end
     end
 end
 
 local function ReceiveShareQuickReplies_(quickReplies)
     if HironCraftScan.QuickReplies then
         HironCraftScan.QuickReplies:ApplyRemoteConfig(quickReplies)
+        if HironCraftScan.CharacterRenames then
+            HironCraftScan.CharacterRenames.NormalizeEditable(HironCraftScan.DB.settings.quick_replies)
+        end
     end
 end
 
 local function ReceiveShareCharacterData(sender, data, senderID)
+    local renamed = 0
+    if HironCraftScan.CharacterRenames then
+        renamed = HironCraftScan.CharacterRenames.AcceptRemote(HironCraftScan_DB,data.character_renames,senderID) or 0
+        data.characters = HironCraftScan.CharacterRenames.FilterIncomingCharacters(data.characters,HironCraftScan_DB)
+        for _, targets in pairs(remoteTargets or {}) do
+            local replacements = {}
+            for name in pairs(targets) do
+                local canonical = HironCraftScan.CharacterRenames.Resolve(name)
+                if canonical ~= name then replacements[name] = canonical end
+            end
+            for old, current in pairs(replacements) do
+                targets[current], targets[old] = math.max(targets[current] or 0, targets[old]), nil
+            end
+        end
+    end
     if data.state == SharingState.InitialInquiry then
         -- The other side is requesting data, so we do the same to make sure
         -- everything is in sync.
@@ -453,11 +474,14 @@ local function ReceiveShareCharacterData(sender, data, senderID)
                 end
             end
         end
-        if next(characters) then
-            HironCraftScanComm.applying_remote_state = true
-            HironCraftScan.OnCrafterListModified()
-            HironCraftScanComm.applying_remote_state = false
+        if next(characters) and HironCraftScan.CharacterRenames then
+            HironCraftScan.CharacterRenames.Apply(HironCraftScan_DB)
         end
+    end
+    if renamed > 0 or (characters and next(characters)) then
+        HironCraftScanComm.applying_remote_state = true
+        HironCraftScan.OnCrafterListModified()
+        HironCraftScanComm.applying_remote_state = false
     end
 
     if data.greeting then

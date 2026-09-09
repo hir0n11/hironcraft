@@ -575,6 +575,7 @@ function QuickReplies:RememberConversationCharacter(response, character)
         if HironCraftScanComm and HironCraftScanComm.applying_remote_state then return end
         character = HironCraftScan.GetPlayerName(true)
     end
+    if HironCraftScan.CharacterRenames then character = HironCraftScan.CharacterRenames.Resolve(character) end
     if type(character) == 'string' and character ~= '' and not response.conversationCharacter then
         response.conversationCharacter = character
     end
