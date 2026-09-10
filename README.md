@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Save chat text into scanner settings (0.3.27)
+
+Right-click a chat message and choose **HironCraftScan - Save chat text** to
+open an editable copy of that message. The three explicit buttons save it as a
+**Prepared response**, a global **Scan keyword**, or an **Exclusion**, in that
+order. Nothing is sent to chat by opening or using this editor.
+
+Prepared responses retain complete item links and ask for their menu name.
+Keywords and exclusions remove chat colors and textures, convert item links to
+visible item names, normalize whitespace and avoid exact duplicates. New filter
+phrases reload the active scanner immediately and update the visible global
+settings field when it is not being edited.
+
 ## Saved order selection and configurable knowledge queue (0.3.26)
 
 Crafting-order checkboxes now survive closing the profession window, shopping,

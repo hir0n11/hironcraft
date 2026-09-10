@@ -223,6 +223,24 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
         end
 
+        do
+            local lineID = contextData.lineID
+            if type(lineID) == 'string' then
+                lineID = lineID:match('^%d+$') and tonumber(lineID) or nil
+            end
+            if
+                type(lineID) == 'number'
+                and lineID > 0
+                and not (issecretvalue and issecretvalue(lineID))
+                and HironCraftScan.ChatTextCapture
+            then
+                subMenu:CreateDivider()
+                subMenu:CreateButton(prefix .. L('Save chat text'), function()
+                    HironCraftScan.ChatTextCapture.ShowForLine(lineID)
+                end)
+            end
+        end
+
         if next(HironCraftScan.DB.settings.explanations) then
             subMenu:CreateDivider();
             subMenu:CreateTitle(prefix .. L("Custom Explanations"));

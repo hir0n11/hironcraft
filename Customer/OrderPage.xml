@@ -2,6 +2,7 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
 	<Script file="OrderPage.lua"/>
+	<Script file="ChatTextCapture.lua"/>
 	<Script file="CustomExplanations.lua"/>
 
 	<Button name="HironCraftScanCrafterOrderListElementTemplate" mixin="HironCraftScanCrafterOrderListElementMixin" registerForClicks="LeftButtonUp, RightButtonUp, MiddleButtonUp" virtual="true">
