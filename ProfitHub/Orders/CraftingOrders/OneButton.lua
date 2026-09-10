@@ -240,7 +240,7 @@ function CO:GetOneButtonPersonalOrders()
 end
 
 function CO:FinishOneButtonPersonalFlow(pageFrame, count)
-    self:SelectAllVisibleOrders(pageFrame)
+    self:SelectAllVisibleOrders(pageFrame, true)
     self._oneButtonFlowRunning = false
     self._oneButtonPreparedForOpen = true
     self._oneButtonRetryScheduled = false
@@ -339,7 +339,6 @@ function CO:BeginOneButtonPersonalFlow()
     self._oneButtonFlowStartedAt = Now()
     self._oneButtonFlowRunning = true
     self._oneButtonRetryScheduled = false
-    self:ClearSelectedOrders()
     self:SetStatus(T("COA_ONE_BUTTON_OPENING", "Opening personal crafting orders..."))
     self:ScheduleOneButtonPersonalStep(0)
 end
@@ -416,7 +415,7 @@ function CO:ContinueEmptyPersonalOrdersRefresh()
         if self.CustomList and self.CustomList.Refresh then
             self.CustomList:Refresh(pageFrame)
         end
-        self:SelectAllVisibleOrders(pageFrame)
+        self:SelectAllVisibleOrders(pageFrame, true)
         self:RefreshVisibleRowsSoon(0.05)
         self:UpdateControlPanel()
         self:SetStatus(string.format(T("COA_ONE_BUTTON_REFRESHED", "New personal orders selected: %d."), personalCount))
@@ -466,7 +465,7 @@ function CO:StartEmptyPersonalOrdersRefresh(pageFrame)
     self._oneButtonEmptyRefreshScheduled = false
     self._oneButtonEmptyRefreshResponseSeen = false
     self._oneButtonEmptyRefreshResponseAt = nil
-    self:ClearSelectedOrders()
+    self:ClearSelectedOrders(true)
     self:PrepareFreshOrderSearch(pageFrame)
     self:SetStatus(T("COA_ONE_BUTTON_REFRESHING", "Refreshing personal orders..."))
 
@@ -529,11 +528,11 @@ function CO:HandleEmptyPersonalOrdersHotkey()
         -- and selection still reflect the just-completed order. Rebind the
         -- visible rows, select the current Personal orders and, when possible,
         -- spend this same hardware press on their first action.
-        self:ClearSelectedOrders()
+        self:ClearSelectedOrders(true)
         if self.CustomList and self.CustomList.Refresh then
             self.CustomList:Refresh(pageFrame)
         end
-        self:SelectAllVisibleOrders(pageFrame)
+        self:SelectAllVisibleOrders(pageFrame, true)
         self:RefreshVisibleRowsSoon(0.01)
         self:UpdateControlPanel()
 

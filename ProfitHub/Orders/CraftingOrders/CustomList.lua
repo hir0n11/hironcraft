@@ -1463,6 +1463,7 @@ function CL:Refresh(pageFrame)
     if not pageFrame:IsShown() then return end
     if not CO:IsEnabled() then return end
 
+    if CO.EnsureOrderSelectionContext then CO:EnsureOrderSelectionContext(pageFrame) end
     local container = self:EnsureScrollFrame(pageFrame)
     if not container then return end
     self:ResizeList(container)
@@ -1477,7 +1478,7 @@ function CL:Refresh(pageFrame)
         container._lastGoodOrders = nil
         container._lastGoodType = nil
         container._allowEmptyOnce = true
-        if CO.selectedOrders then wipe(CO.selectedOrders) end
+        if not CO.EnsureOrderSelectionContext and CO.selectedOrders then wipe(CO.selectedOrders) end
         CO.currentQueueOrderID = nil
         container._stablePositions = nil
         for _, row in ipairs(container.rows) do HideRowTooltip(row); row:Hide() end
@@ -1544,6 +1545,7 @@ function CL:Refresh(pageFrame)
     end
     container._allowEmptyOnce = false
     container._lastOrderCount = #orders
+    if CO.RestoreOrderSelection then CO:RestoreOrderSelection(pageFrame, orders) end
     container.countText:SetText(string.format(L("COA_CLASSIC_ORDER_COUNT", "Orders: %d"), #orders))
     container.emptyText:SetShown(#orders == 0)
 

@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.3.25
+## Version: 0.3.26
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -90,6 +90,7 @@ ProfitHub\Orders\Locale.lua
 ProfitHub\Orders\Core\CraftingOrders_Core.lua
 ProfitHub\Orders\CraftingOrders\Table.lua
 ProfitHub\Orders\CraftingOrders\State.lua
+ProfitHub\Orders\CraftingOrders\SelectionMemory.lua
 ProfitHub\Orders\CraftingOrders\QualityReagents.lua
 ProfitHub\Orders\CraftingOrders\FinishingReagents.lua
 ProfitHub\Orders\CraftingOrders\Rows.lua

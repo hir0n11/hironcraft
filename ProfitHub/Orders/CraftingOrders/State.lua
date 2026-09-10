@@ -161,6 +161,7 @@ end
 function CO:SetOrderSelected(orderID, selected)
     local key = OrderKey(orderID)
     if not key then return end
+    if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext() end
 
     if selected then
         self.selectedOrders[key] = true
@@ -172,11 +173,17 @@ function CO:SetOrderSelected(orderID, selected)
         end
     end
 
+    if self.RememberOrderSelection then self:RememberOrderSelection(orderID, selected) end
     self:RefreshVisibleRowsSoon()
     self:UpdateControlPanel()
 end
 
-function CO:ClearSelectedOrders()
+function CO:ClearSelectedOrders(preserveMemory)
+    if not preserveMemory then
+        for key in pairs(self.selectedOrders) do
+            if self.RememberOrderSelection then self:RememberOrderSelection(key, false) end
+        end
+    end
     wipe(self.selectedOrders)
     self.currentQueueOrderID = nil
     self:RefreshVisibleRowsSoon()
@@ -190,8 +197,9 @@ function CO:HasSelectedOrders()
     return false
 end
 
-function CO:SelectAllVisibleOrders(pageFrame)
+function CO:SelectAllVisibleOrders(pageFrame, automatic)
     pageFrame = pageFrame or self.activePageFrame or (_G.ProfessionsFrame and ProfessionsFrame.OrdersPage)
+    if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     local currentType = pageFrame and pageFrame.orderType
 
     local orders
@@ -209,8 +217,9 @@ function CO:SelectAllVisibleOrders(pageFrame)
             local fulfilled = self.fulfilledOrderIDs and self.fulfilledOrderIDs[o.orderID]
             if typeOk and not fulfilled then
                 local key = OrderKey(o.orderID)
-                if key then
+                if key and not (automatic and self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(o.orderID)) then
                     self.selectedOrders[key] = true
+                    if self.RememberOrderSelection then self:RememberOrderSelection(o.orderID, true, o) end
                     self.currentQueueOrderID = self.currentQueueOrderID or o.orderID
                     added = true
                 end

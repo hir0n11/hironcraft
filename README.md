@@ -25,6 +25,40 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Saved order selection and configurable knowledge queue (0.3.26)
+
+Crafting-order checkboxes now survive closing the profession window, shopping,
+tab changes and `/reload`. Choices are isolated by character GUID, profession,
+expansion and order tab. Only orders in the current list enter the active queue;
+missing orders do not contribute to shopping or selected counts. A temporarily
+empty/filtered list does not erase saved choices. Completed/rejected orders are
+cleared, recipe changes invalidate a reused ID, and unseen choices expire after
+30 days. This stores checkbox decisions, not cached actionable orders.
+
+Automatic selection adds qualifying orders without clearing the existing queue
+or restoring manually unchecked orders. Explicit **Queue**, **Queue: knowledge**
+and **Select all** clicks can select them again. Startup navigation to Personal
+no longer erases the saved Patron queue; Personal auto-selection also respects
+manual exclusions. Delayed queue/shopping callbacks are cancelled when the
+window closes or its selection context changes.
+
+The sidebar's **Queue** settings page has two independent options:
+
+- **Knowledge (patrons)** under **Auto on open** adds knowledge orders in the
+  same pass as the normal queue. It also works with normal auto-queue disabled.
+  Existing auto-queue users start with this enabled; subsequent choices persist.
+- **Knowledge: ignore profit** controls both the automatic knowledge pass and
+  the manual knowledge button. Enabled preserves the former knowledge behavior,
+  including negative/unknown profit. Disabled applies the usual minimum-profit
+  filter; set its minimum to `0` to exclude losses. Previously checked orders
+  stay selected until the user changes them or explicitly rebuilds the queue.
+
+Knowledge selection still excludes unknown recipes and concentration-required
+orders; missing reagents can be collected in Shopping. Selection and shopping
+list preparation never claim, craft, complete, buy, or send customer chat. Those
+actions retain their existing click requirements. Regression tests cover both
+settings, real row/menu callbacks, persistence and asynchronous open/close races.
+
 ## Request lifecycle and stable order lists (0.3.25)
 
 A new public search for the same craft can renew an unanswered request once

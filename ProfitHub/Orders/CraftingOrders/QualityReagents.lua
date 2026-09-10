@@ -2123,6 +2123,8 @@ function CO:EnsurePageBindingHooks(pageFrame)
         end)
 
         pageFrame:HookScript("OnHide", function()
+            CO._autoQueueStamp = (CO._autoQueueStamp or 0) + 1
+            if CO.CancelQueueSelection then CO:CancelQueueSelection() end
             if CO.activePageFrame == pageFrame then
                 CO.activePageFrame = nil
             end

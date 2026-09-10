@@ -60,6 +60,10 @@ function CO:GetQueueOptions()
     if q.reagentMode ~= "t1" and q.reagentMode ~= "t2" and q.reagentMode ~= "profit" and q.reagentMode ~= "manual" then q.reagentMode = "auto" end
     q.minProfitCopper = tonumber(q.minProfitCopper)
     if q.autoQueueOnOpen == nil then q.autoQueueOnOpen = false end
+    -- Existing auto-queue users get the requested combined patron selection.
+    -- Once explicitly changed, the independent knowledge setting is retained.
+    if q.autoKnowledgeOnOpen == nil then q.autoKnowledgeOnOpen = q.autoQueueOnOpen == true end
+    if q.knowledgeIgnoreProfit == nil then q.knowledgeIgnoreProfit = true end
     if q.autoShoppingOnOpen == nil then q.autoShoppingOnOpen = false end
     if q.autoTool == nil then q.autoTool = false end
     if q.autoFinishingEnabled == nil then q.autoFinishingEnabled = false end
@@ -167,6 +171,23 @@ end
 
 function CO:IsAutoShoppingOnOpen()
     return self:GetQueueOptions().autoShoppingOnOpen == true
+end
+
+function CO:IsAutoKnowledgeOnOpen()
+    return self:GetQueueOptions().autoKnowledgeOnOpen == true
+end
+
+function CO:SetAutoKnowledgeOnOpen(value)
+    self:GetQueueOptions().autoKnowledgeOnOpen = value == true
+    self._autoRanForOpen = false
+end
+
+function CO:IsKnowledgeProfitIgnored()
+    return self:GetQueueOptions().knowledgeIgnoreProfit == true
+end
+
+function CO:SetKnowledgeProfitIgnored(value)
+    self:GetQueueOptions().knowledgeIgnoreProfit = value == true
 end
 
 function CO:SetAutoShoppingOnOpen(value)
@@ -507,6 +528,16 @@ function CO:OpenQueueReagentModeMenu(owner)
                     and T("COA_STATUS_AUTOSHOP_ON", "Авто-закуп включён.")
                     or T("COA_STATUS_AUTOSHOP_OFF", "Авто-закуп выключен."))
             end,
+        }
+        items[#items + 1] = {
+            text = T("COA_AUTO_KNOWLEDGE_TITLE", "Auto-select knowledge orders"),
+            checked = CO:IsAutoKnowledgeOnOpen(),
+            onClick = function() CO:SetAutoKnowledgeOnOpen(not CO:IsAutoKnowledgeOnOpen()) end,
+        }
+        items[#items + 1] = {
+            text = T("COA_KNOWLEDGE_IGNORE_PROFIT", "Knowledge: ignore min. profit"),
+            checked = CO:IsKnowledgeProfitIgnored(),
+            onClick = function() CO:SetKnowledgeProfitIgnored(not CO:IsKnowledgeProfitIgnored()) end,
         }
     end
 
@@ -1226,6 +1257,7 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
 
     self.selectedOrders[key] = true
     self.useConcentration[key] = analysis and analysis.useConcentration == true or nil
+    if self.RememberOrderSelection then self:RememberOrderSelection(order.orderID, true, order) end
     self.currentQueueOrderID = self.currentQueueOrderID or order.orderID
 
     return true
@@ -1238,13 +1270,24 @@ function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     if not self.GetOrderActionAvailabilitySortRank then return false end
     if not self:ApplyQueueReagentModeToOrder(order) then return false end
     if self:OrderRequiresConcentrationForQueue(order) then return false end
-    if not knowledgeOnly and not self:OrderPassesQueueProfitFilter(order) then return false end
+    if (not knowledgeOnly or opts.knowledgeIgnoreProfit == false) and not self:OrderPassesQueueProfitFilter(order) then return false end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
     return rank == 1 or rank == 2
 end
 
 function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
+    if opts and opts.automatic then
+        if self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(order.orderID) then return nil end
+        if opts.includeKnowledge and orderType == Enum.CraftingOrderType.Npc and self:OrderGivesKnowledge(order) then
+            local knowledgeOptions = {}
+            for key, value in pairs(opts) do knowledgeOptions[key] = value end
+            knowledgeOptions.knowledgeOnly = true
+            opts = knowledgeOptions
+        elseif not opts.includeProfit then
+            return nil
+        end
+    end
     if not self:ShouldQueueOrderByAvailabilityColor(order, opts) then return nil end
 
     local analysis = self:AnalyzeOrderForQueue(order, orderType, opts, pageFrame)
@@ -1282,21 +1325,43 @@ function CO:FinishQueueWorkOrdersSelection(session)
     self:SetStatus(string.format(T("COA_STATUS_QUEUED_ORDERS", "Queued orders: %d."), selected))
 end
 
-function CO:GetQueueSelectionOptions(knowledgeOnly)
+function CO:GetQueueSelectionOptions(knowledgeOnly, mode)
     -- Never put transient selection modes into the saved queue settings.
     local opts = {}
     for key, value in pairs(self:GetQueueOptions()) do opts[key] = value end
     opts.knowledgeOnly = knowledgeOnly == true
+    if mode then
+        opts.automatic = mode.automatic == true
+        opts.includeKnowledge = mode.includeKnowledge == true
+        opts.includeProfit = mode.includeProfit == true
+    end
     return opts
 end
 
-function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly)
+function CO:ResetQueueCheckboxes()
+    for key in pairs(self.selectedOrders) do
+        if self.RememberOrderSelection then self:RememberOrderSelection(key, false) end
+    end
+    wipe(self.selectedOrders)
+    self.currentQueueOrderID = nil
+end
+
+function CO:CancelQueueSelection()
+    self._queueSelectionToken = (self._queueSelectionToken or 0) + 1
+    self.queueSelectionRunning = false
+    if self.controlPanel and self.controlPanel.selectAllButton then
+        self.controlPanel.selectAllButton:Enable()
+        self.controlPanel.selectAllButton.text:SetText(T("COA_QUEUE_BUTTON", "Queue"))
+    end
+end
+
+function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
+    if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     local session = { selected = 0, seen = {} }
 
-    if not knowledgeOnly then
-        wipe(self.selectedOrders)
-        self.currentQueueOrderID = nil
+    if not knowledgeOnly and not (mode and mode.automatic) then
+        self:ResetQueueCheckboxes()
     end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
@@ -1304,7 +1369,7 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly)
 
     local buttons = self:GetVisibleOrderButtonsSorted()
 
-    local opts = self:GetQueueSelectionOptions(knowledgeOnly)
+    local opts = self:GetQueueSelectionOptions(knowledgeOnly, mode)
     for _, btn in ipairs(buttons) do
         local order = btn.order
         local key = OrderKey(order and order.orderID)
@@ -1324,7 +1389,7 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly)
     self:FinishQueueWorkOrdersSelection(session)
 end
 
-function CO:QueueWorkOrdersSelection(knowledgeOnly)
+function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
     if self.queueSelectionRunning then return end
     knowledgeOnly = knowledgeOnly == true
     if self.viewingCachedOrders then
@@ -1333,9 +1398,10 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
+    if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     local profession = GetProfessionFromPage(pageFrame)
     if not profession or not C_CraftingOrders or type(C_CraftingOrders.RequestCrafterOrders) ~= "function" then
-        self:QueueVisibleWorkOrdersSelection(knowledgeOnly)
+        self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
         return
     end
 
@@ -1349,15 +1415,14 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     self.queueSelectionRunning = true
-    if not knowledgeOnly then
-        wipe(self.selectedOrders)
-        self.currentQueueOrderID = nil
+    if not knowledgeOnly and not (mode and mode.automatic) then
+        self:ResetQueueCheckboxes()
     end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
 
-    local opts = self:GetQueueSelectionOptions(knowledgeOnly)
+    local opts = self:GetQueueSelectionOptions(knowledgeOnly, mode)
 
     if self.controlPanel and self.controlPanel.selectAllButton then
         self.controlPanel.selectAllButton:Disable()
@@ -1369,6 +1434,19 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
         publicCandidates = {},
         seen = {},
     }
+    self._queueSelectionToken = (self._queueSelectionToken or 0) + 1
+    local token, context, initialType = self._queueSelectionToken, self._orderSelectionContext, pageFrame and pageFrame.orderType
+    local function current()
+        if session.finished or self._queueSelectionToken ~= token then return false end
+        if self._orderSelectionContext ~= context or (pageFrame and pageFrame.orderType ~= initialType)
+            or (self.GetOrderSelectionContext and self:GetOrderSelectionContext(pageFrame) ~= context)
+            or GetProfessionFromPage(pageFrame) ~= profession
+            or (pageFrame and pageFrame.IsShown and not pageFrame:IsShown()) then
+            self:CancelQueueSelection()
+            return false
+        end
+        return true
+    end
 
     local function selectOrder(order, analysis)
         local key = OrderKey(order and order.orderID)
@@ -1404,14 +1482,14 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     local function finish()
-        if session.finished then return end
+        if not current() then return end
         session.finished = true
         flushPublicCandidates()
 
 
         if session.selected == 0 then
             self.queueSelectionRunning = false
-            self:QueueVisibleWorkOrdersSelection(knowledgeOnly)
+            self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
             return
         end
         self:FinishQueueWorkOrdersSelection(session)
@@ -1422,7 +1500,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
         local isPublic = Enum and Enum.CraftingOrderType and orderType == Enum.CraftingOrderType.Public
 
         local function step()
-            if session.finished then return end
+            if not current() then return end
             local limit = math.min(#orders, i + 3)
             while i <= limit do
                 local order = orders[i]
@@ -1458,7 +1536,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
     end
 
     local function requestType(index)
-        if session.finished then return end
+        if not current() then return end
         local orderType = orderTypes[index]
         if not orderType then
             finish()
@@ -1470,7 +1548,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
         end
 
         local callback = function(result)
-            if session.finished then return end
+            if not current() then return end
             if not IsResultOk(result) then
                 requestType(index + 1)
                 return
@@ -1528,8 +1606,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly)
 end
 
 function CO:SelectCraftableVisibleOrders()
-    wipe(self.selectedOrders)
-    self.currentQueueOrderID = nil
+    self:ResetQueueCheckboxes()
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
@@ -1547,6 +1624,7 @@ function CO:SelectCraftableVisibleOrders()
 
     for _, btn in ipairs(buttons) do
         self.selectedOrders[OrderKey(btn.orderID)] = true
+        if self.RememberOrderSelection then self:RememberOrderSelection(btn.orderID, true, btn.order) end
         self.currentQueueOrderID = self.currentQueueOrderID or btn.orderID
     end
 

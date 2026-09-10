@@ -131,6 +131,11 @@ function CO:HookBlizzardProfessions()
     local function afterExternalPageRefresh(pageFrame)
         if not CO:IsEnabled() then return end
         pageFrame = pageFrame or CO:FindOrderPageFrame()
+        if CO.EnsureOrderSelectionContext then CO:EnsureOrderSelectionContext(pageFrame) end
+        if CO.RestoreOrderSelection and pageFrame and C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
+            local ok, orders = pcall(C_CraftingOrders.GetCrafterOrders)
+            if ok then CO:RestoreOrderSelection(pageFrame, orders) end
+        end
         CO:ProtectExternalOrderPageSoon(pageFrame)
         CO:EnsureControlPanel(pageFrame)
         CO:UpdatePageBackground(pageFrame)
@@ -155,17 +160,25 @@ function CO:HookBlizzardProfessions()
             end
         end
 
-        if onClientsTab(pageFrame) and CO.IsAutoQueueOnOpen and CO:IsAutoQueueOnOpen() and CO.QueueWorkOrdersSelection
+        local function autoSelectionEnabled()
+            return (CO.IsAutoQueueOnOpen and CO:IsAutoQueueOnOpen())
+                or (CO.IsAutoKnowledgeOnOpen and CO:IsAutoKnowledgeOnOpen())
+        end
+        if onClientsTab(pageFrame) and autoSelectionEnabled() and CO.QueueWorkOrdersSelection
             and not CO._autoRanForOpen
         then
             local stamp = (CO._autoQueueStamp or 0) + 1
             CO._autoQueueStamp = stamp
+            local context = CO._orderSelectionContext
+            local function current()
+                return CO._autoQueueStamp == stamp and CO._orderSelectionContext == context
+                    and onClientsTab(pageFrame) and pageFrame:IsShown()
+                    and not pageFrame.ahuiCraftingOrdersOrderOpen
+            end
             C_Timer.After(0.6, function()
-                if CO._autoQueueStamp ~= stamp then return end
+                if not current() then return end
                 if CO._autoRanForOpen then return end
-                if not CO:IsAutoQueueOnOpen() then return end
-                if not onClientsTab(pageFrame) then return end
-                if pageFrame and pageFrame.ahuiCraftingOrdersOrderOpen then return end
+                if not autoSelectionEnabled() then return end
 
                 local haveOrders = false
                 if C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
@@ -175,15 +188,18 @@ function CO:HookBlizzardProfessions()
                 if not haveOrders then return end
 
                 CO._autoRanForOpen = true
-                pcall(function() CO:QueueWorkOrdersSelection() end)
+                pcall(function() CO:QueueWorkOrdersSelection(false, {
+                    automatic=true,
+                    includeProfit=CO.IsAutoQueueOnOpen and CO:IsAutoQueueOnOpen(),
+                    includeKnowledge=CO.IsAutoKnowledgeOnOpen and CO:IsAutoKnowledgeOnOpen(),
+                }) end)
 
                 if CO.IsAutoShoppingOnOpen and CO:IsAutoShoppingOnOpen() and CO.CreateShoppingListForSelectedOrders then
                     local startedAt = GetTime()
                     local function whenReady()
-                        if not CO:IsAutoShoppingOnOpen() then return end
-                        if pageFrame and pageFrame.ahuiCraftingOrdersOrderOpen then return end
-                        if CO.queueSelectionRunning and (GetTime() - startedAt) < 5 then
-                            C_Timer.After(0.2, whenReady)
+                        if not current() or not CO:IsAutoShoppingOnOpen() then return end
+                        if CO.queueSelectionRunning then
+                            if (GetTime() - startedAt) < 6 then C_Timer.After(0.2, whenReady) end
                             return
                         end
                         if CO.HasSelectedOrders and not CO:HasSelectedOrders() then return end
@@ -335,6 +351,8 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "TRADE_SKILL_CLOSE" then
+        self._autoQueueStamp = (self._autoQueueStamp or 0) + 1
+        if self.CancelQueueSelection then self:CancelQueueSelection() end
         self.qualityWarmSerial = (tonumber(self.qualityWarmSerial) or 0) + 1
         self.preparedFinisherOrderID = nil
         self.preparedFinisherReagent = nil
@@ -457,6 +475,7 @@ function CO:OnEvent(event, ...)
         if orderID then
             self:InvalidateOrderCaches(orderID)
             self.selectedOrders[OrderKey(orderID)] = manualRejection and true or nil
+            if not manualRejection and self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(orderID) end
             self.orderIssues[OrderKey(orderID)] = nil
         end
         if self.currentQueueOrderID and orderID and SameOrderID(self.currentQueueOrderID, orderID) then
@@ -517,6 +536,7 @@ function CO:OnEvent(event, ...)
                 self.fulfilledOrderIDs = self.fulfilledOrderIDs or {}
                 self.fulfilledOrderIDs[orderID] = true
                 self.selectedOrders[OrderKey(orderID)] = nil
+                if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(orderID) end
                 self.orderIssues[OrderKey(orderID)] = nil
                 if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, orderID) then
                     self.currentQueueOrderID = nil

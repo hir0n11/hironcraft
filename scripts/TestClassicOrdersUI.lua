@@ -46,7 +46,7 @@ local factors = { TOPLEFT={0,0},TOP={.5,0},TOPRIGHT={1,0},LEFT={0,.5},CENTER={.5
 local function bounds(f)
     if not f then return 0, 0, 0, 0 end
     local w, h = f.w or 0, f.h or (f.kind == 'FontString' and 14 or 0)
-    if f.kind == 'FontString' and not f.w then w = #(f.text or '') * 6 end
+    if f.kind == 'FontString' and not f.w then w = utf8.len(f.text or '') * 6 end
     local points = {}
     for point, a in pairs(f.anchors) do
         local x0, y0, w0, h0 = bounds(a[1])
@@ -92,7 +92,7 @@ function methods:SetFont(path, size) self.fontPath, self.fontSize = path, size e
 function methods:SetFontObject() self.fontPath, self.fontSize = STANDARD_TEXT_FONT, 12 end
 function methods:SetJustifyH(value) self.justify = value end
 function methods:SetJustifyV(value) self.justifyV = value end
-function methods:GetStringWidth() return #(self.text or '') * 6 end
+function methods:GetStringWidth() return utf8.len(self.text or '') * 6 end
 function methods:GetUnboundedStringWidth()
     local plain, textureCount = (self.text or ''):gsub('|T.-|t', '')
     return #plain * 7 + textureCount * 13
@@ -537,6 +537,20 @@ CO.ApplyQueueReagentModeToOrder=nil
 CO.GetOrderProfitInfo=nil
 CO.OrderRequiresConcentrationForQueue=nil
 
+-- Both new settings are independent, persisted UI controls inside the scroll
+-- body. The profit gate also applies to the manual knowledge button.
+local beforeKnowledge=CO:IsAutoKnowledgeOnOpen()
+local beforeKnowledgeProfit=CO:IsKnowledgeProfitIgnored()
+panel.autoKnowledgeCheck:Click()
+assert(CO:IsAutoKnowledgeOnOpen()~=beforeKnowledge and CO:IsKnowledgeProfitIgnored()==beforeKnowledgeProfit)
+panel.knowledgeProfitCheck:Click()
+assert(CO:IsKnowledgeProfitIgnored()~=beforeKnowledgeProfit)
+panel.autoKnowledgeCheck:Click();panel.knowledgeProfitCheck:Click()
+for _,check in ipairs({panel.autoKnowledgeCheck,panel.knowledgeProfitCheck}) do
+    assert(check:GetParent()==queue.body, 'knowledge setting escaped the scrollable queue page')
+    assert(check.label:GetStringWidth()<=check.label:GetWidth(), 'knowledge setting label is clipped')
+end
+
 -- Selecting a lower row may repaint it, but must not promote it above the
 -- list order (the recorded regression was the third row jumping to first).
 local sortOrders = {
@@ -605,6 +619,26 @@ assert(container.rows[1].action.orderID==103, 'explicit header sort did not reor
 CL._sortColumn=nil;page.orderType=Enum.CraftingOrderType.Personal
 CO.GetOrderProfitInfo=function() return {profit=0,reagentCost=0} end
 CL:Refresh(page)
+
+-- Run the real row click and selection memory through a close/reopen and tab
+-- switch; plain redraws must not restore a manually cleared checkbox.
+dofile('ProfitHub/Orders/CraftingOrders/State.lua')
+dofile('ProfitHub/Orders/CraftingOrders/SelectionMemory.lua')
+UnitGUID=function() return 'Player-LayoutTest' end
+GetServerTime=function() return 10000000 end
+page.professionInfo={profession=1}
+CL:Refresh(page)
+local savedRow=container.rows[2]
+savedRow.checkbox:SetChecked(true);savedRow.checkbox:Click()
+CL:Refresh(page);assert(savedRow.checkbox:GetChecked())
+page:Hide();container._orderType=nil;page:Show();CL:Refresh(page)
+assert(savedRow.checkbox:GetChecked(),'closing the profession window lost the selected checkbox')
+page.orderType=Enum.CraftingOrderType.Npc;CL:Refresh(page)
+assert(not savedRow.checkbox:GetChecked(),'Personal selection leaked into Patron')
+page.orderType=Enum.CraftingOrderType.Personal;CL:Refresh(page)
+assert(savedRow.checkbox:GetChecked(),'tab switch erased saved Personal selection')
+savedRow.checkbox:SetChecked(false);savedRow.checkbox:Click();CL:Refresh(page)
+assert(not savedRow.checkbox:GetChecked(),'refresh restored a manually unchecked checkbox')
 
 dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
 UIParent = frame('Frame')

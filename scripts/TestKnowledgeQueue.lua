@@ -124,6 +124,16 @@ for _, serverBacked in ipairs({false,true}) do
     CO:QueueWorkOrdersSelection()
     if serverBacked then completeRequest() end
     assertSelection('1,7') -- normal queue must still honor the profit filter
+
+    opts.knowledgeIgnoreProfit=false
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('7') -- only knowledge orders meeting the configured minimum
+    opts.knowledgeIgnoreProfit=true
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('2,6,7,9') -- opt back in to negative/unknown-profit knowledge
 end
 
 hasProfession=false

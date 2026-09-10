@@ -176,7 +176,8 @@ function CO:SelectProfessionExpansion(option, owner)
 
     self.suppressExpansionSyncUntil = CacheNow() + 0.5
     self:StoreSelectedProfessionExpansion(option)
-    wipe(self.selectedOrders)
+    if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame)
+    else wipe(self.selectedOrders) end
     self.currentQueueOrderID = nil
     self.currentQueueStep = nil
     self.orderExpansionCache = {}

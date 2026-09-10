@@ -1119,6 +1119,8 @@ function CO:UpdateQueueSettingWidgets()
     self:UpdateSegmentedControl(panel.concSeg)
 
     self:UpdateCheckToggle(panel.autoQueueCheck)
+    self:UpdateCheckToggle(panel.autoKnowledgeCheck)
+    self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
 
     if panel.minProfitInput and panel.minProfitInput.RefreshValue then
@@ -1468,6 +1470,20 @@ function CO:EnsureControlPanel(pageFrame)
     panel.kpValueInput:SetPoint("TOPRIGHT", -PADX, y)
     y = y - 28
 
+    panel.knowledgeProfitCheck = self:CreateCheckToggle(body, T("COA_KNOWLEDGE_IGNORE_PROFIT", "Знания: без мин. профита"),
+        function() return CO.IsKnowledgeProfitIgnored and CO:IsKnowledgeProfitIgnored() end,
+        function(v) CO:SetKnowledgeProfitIgnored(v) end, INNER)
+    panel.knowledgeProfitCheck:SetPoint("TOPLEFT", PADX, y)
+    panel.knowledgeProfitCheck:HookScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_KNOWLEDGE_IGNORE_PROFIT", "Knowledge: ignore min. profit"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_KNOWLEDGE_IGNORE_PROFIT_TIP", "When disabled, knowledge orders must pass the normal minimum-profit filter. Applies to the knowledge button and automatic selection."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.knowledgeProfitCheck:HookScript("OnLeave", HideStyledTooltip)
+    y = y - 26
+
     -- Auto on open (stacked)
     AddHeader(T("COA_QUEUE_AUTO_ON_OPEN_HEADER", "При открытии"))
     panel.autoQueueCheck = self:CreateCheckToggle(body, T("COA_AUTO_QUEUE_SHORT", "Очередь"),
@@ -1486,6 +1502,20 @@ function CO:EnsureControlPanel(pageFrame)
         function() return CO:IsAutoShoppingOnOpen() end,
         function(v) CO:SetAutoShoppingOnOpen(v) end, INNER - 74)
     panel.autoShopCheck:SetPoint("TOPLEFT", PADX + 74, y)
+    y = y - 24
+
+    panel.autoKnowledgeCheck = self:CreateCheckToggle(body, T("COA_AUTO_KNOWLEDGE_SHORT", "Знания (патроны)"),
+        function() return CO.IsAutoKnowledgeOnOpen and CO:IsAutoKnowledgeOnOpen() end,
+        function(v) CO:SetAutoKnowledgeOnOpen(v) end, INNER)
+    panel.autoKnowledgeCheck:SetPoint("TOPLEFT", PADX, y)
+    panel.autoKnowledgeCheck:HookScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_AUTO_KNOWLEDGE_TITLE", "Auto-select knowledge orders"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_AUTO_KNOWLEDGE_TIP", "Adds patron knowledge orders alongside profitable orders, keeping saved selections and manual exclusions."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.autoKnowledgeCheck:HookScript("OnLeave", HideStyledTooltip)
     y = y - 24
 
     body:SetHeight(-y + 8)
@@ -1703,6 +1733,8 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateSegmentedControl(panel.reagentSeg)
     self:UpdateSegmentedControl(panel.concSeg)
     self:UpdateCheckToggle(panel.autoQueueCheck)
+    self:UpdateCheckToggle(panel.autoKnowledgeCheck)
+    self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
     for _, w in ipairs({ panel.minProfitInput, panel.bagValueInput, panel.kpValueInput }) do
         if w then self:StyleWidget(w) end

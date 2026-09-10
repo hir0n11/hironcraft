@@ -410,6 +410,7 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     end
 
     self.selectedOrders[key] = nil
+    if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(order.orderID) end
     self.orderIssues[key] = nil
     if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
         self.currentQueueOrderID = nil
