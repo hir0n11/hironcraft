@@ -89,6 +89,19 @@ function Capture.SaveFilter(setting, text)
     return true
 end
 
+function Capture.ConfigureMessageScrollFrame(scrollFrame)
+    -- InputScrollFrameTemplate otherwise treats the unlimited value as a
+    -- zero-character limit and renders a large negative counter in the corner.
+    scrollFrame.maxLetters = 0
+    scrollFrame.hideCharCount = true
+    scrollFrame.scrollBarHideIfUnscrollable = true
+    scrollFrame.scrollBarHideTrackIfThumbExceedsTrack = true
+    scrollFrame.scrollBarX = -10
+    scrollFrame.scrollBarTopY = 2
+    scrollFrame.scrollBarBottomY = -2
+    if scrollFrame.CharCount then scrollFrame.CharCount:Hide() end
+end
+
 local function SetStatus(frame, reason)
     local messages = {
         missing_label = L('Enter a response name.'),
@@ -151,7 +164,9 @@ local function CreateEditor()
     editBox:SetWidth(500)
     editBox:SetMaxLetters(0)
     if editBox.SetHyperlinksEnabled then editBox:SetHyperlinksEnabled(true) end
+    Capture.ConfigureMessageScrollFrame(frame.Message)
     InputScrollFrame_OnLoad(frame.Message)
+    Capture.ConfigureMessageScrollFrame(frame.Message)
     editBox:SetScript('OnTextChanged', InputScrollFrame_OnTextChanged)
     editBox:SetScript('OnEscapePressed', function(self) self:ClearFocus(); frame:Hide() end)
 

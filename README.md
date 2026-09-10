@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Save chat text into scanner settings (0.3.27)
+## Save chat text into scanner settings (0.3.28)
 
 Right-click a chat message and choose **HironCraftScan - Save chat text** to
 open an editable copy of that message. The three explicit buttons save it as a
@@ -36,7 +36,8 @@ Prepared responses retain complete item links and ask for their menu name.
 Keywords and exclusions remove chat colors and textures, convert item links to
 visible item names, normalize whitespace and avoid exact duplicates. New filter
 phrases reload the active scanner immediately and update the visible global
-settings field when it is not being edited.
+settings field when it is not being edited. The message editor uses unlimited
+text without displaying Blizzard's misleading negative character counter.
 
 ## Saved order selection and configurable knowledge queue (0.3.26)
 

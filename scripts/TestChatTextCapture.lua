@@ -23,6 +23,11 @@ local link = '|cffa335ee|Hitem:123::::::::|h[Thalassian Competitor\'s Cloth Cloa
 assert(Capture.NormalizeFilterText('  LF ' .. link .. ', please\n ') ==
     "LF Thalassian Competitor's Cloth Cloak please")
 assert(Capture.DefaultLabel('one two three four five six seven') == 'one two three four five')
+local hidden = 0
+local scrollFrame = { CharCount = { Hide = function() hidden = hidden + 1 end } }
+Capture.ConfigureMessageScrollFrame(scrollFrame)
+assert(scrollFrame.maxLetters == 0 and scrollFrame.hideCharCount == true and
+    scrollFrame.scrollBarHideIfUnscrollable == true and hidden == 1)
 
 local ok, reason = Capture.SaveExplanation('', 'text')
 assert(not ok and reason == 'missing_label')
