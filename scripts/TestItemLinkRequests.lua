@@ -26,7 +26,8 @@ bit = {bxor=function() return 0 end, band=function() return 0 end}
 function UnitName() return 'Seller' end
 function GetRealmName() return 'Realm' end
 function GetTime() return 100 end
-function time() return 1000 end
+local now=1000
+function time() return now end
 function issecretvalue() return false end
 function strsplit(separator, value)
     local lines = {}; for line in (value .. separator):gmatch('(.-)' .. separator) do lines[#lines+1]=line end
@@ -90,6 +91,7 @@ loadSource('Utils/Utils.lua')
 Scan.Utils.onLoad = noop
 loadSource('Utils/FStrings.lua')
 loadSource('Customer/ChatHistory.lua')
+loadSource('Customer/RequestTracking.lua')
 loadSource('Customer/ClassMatching.lua')
 loadSource('Customer/ChatScanner.lua')
 loadSource('Customer/OrderGreetings.lua')
@@ -118,6 +120,7 @@ end
 local function order(id, customer) return {customerName=customer or 'Buyer', responseID=id} end
 local function response(id) return Scan.OrderToResponse(order(id)) end
 local function reset()
+    now=1000
     Scan.DB.customers, Scan.DB.listed_orders, Scan.LIVE.customers = {}, {}, {}
     sent, shared, timers, refreshes, opened = {}, {}, {}, 0, 0
     Scan.auto_replies_enabled=false
@@ -187,7 +190,7 @@ assert(#Scan.DB.customers.Buyer.chat_history==1, 'multi-item request duplicated 
 assert(shared[1][7][101]==response(101).requestToken and shared[1][7][102]==response(102).requestToken)
 assert(response(101).requestToken~=response(102).requestToken, 'requests must have distinct identities')
 scan(a .. b .. c)
-assert(countRows()==3 and #Scan.DB.customers.Buyer.chat_history==1, 'repeat changed row/history count')
+assert(countRows()==3 and #Scan.DB.customers.Buyer.chat_history==2, 'repeat duplicated rows or lost the new chat message')
 Scan.GreetCustomer('LeftButton', order(102)) -- Clicking any row sends the block in source order.
 assert(#sent==3)
 assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller.')
@@ -293,6 +296,33 @@ assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent,
     'loaded long-link batch did not send exactly once on click')
 Item.CreateFromItemID=createItem
 
+-- Deferred linked scans must retain the remote context after the receive
+-- handler returns, including replacement identities and multi-item batches.
+local originalShare=HironCraftScanComm.ShareCustomerOrder
+for _,message in ipairs({a,a..b}) do
+    reset();scan(message);Scan.GreetCustomer('LeftButton',order(101))
+    now=1031
+    local callbacks={}
+    Item.CreateFromItemID=function(_,id) return {
+        GetItemLink=function() return link(id) end,
+        ContinueOnItemLoad=function(_,callback) callbacks[#callbacks+1]=callback end,
+    } end
+    HironCraftScanComm.ShareCustomerOrder=function()
+        assert(HironCraftScanComm.applying_remote_state, 'deferred linked order escaped its remote context')
+    end
+    HironCraftScanComm.applying_remote_state=true
+    scan(message,{requestTokens={[101]='linked-retry-a',[102]='linked-retry-b'},
+        chatEntry={message=message,receivedAt=1031,syncID='linked-retry',inquiry={id='linked-retry-a',startedAt=1031}}})
+    HironCraftScanComm.applying_remote_state=false
+    local sentBefore=#sent
+    for _,callback in ipairs(callbacks) do callback() end
+    assert(response(101).requestToken=='linked-retry-a' and not response(101).greeting_sent)
+    if message~=a then assert(response(102).requestToken=='linked-retry-b') end
+    assert(not HironCraftScanComm.applying_remote_state and #sent==sentBefore)
+    Item.CreateFromItemID=createItem
+    HironCraftScanComm.ShareCustomerOrder=originalShare
+end
+
 -- A long greeting may require extra whispers, but never an incomplete link.
 reset()
 local namedLink='|cnIQ4:|Hitem:1001:0|h[A long item name with spaces]|h|r'
@@ -321,6 +351,89 @@ Scan.DB.settings.ignored={Buyer=true}
 scan(a .. b)
 assert(countRows()==0 and #shared==0, 'ignored customer bypassed exclusion')
 print('Item-link request tests passed (filters, unique rows, grouped replies, tokens, timers, long links, saved repair).')
+
+-- Retry the SAME unanswered craft after 30 seconds from the actual greeting,
+-- not the initial channel request. Replace the row identity without sending.
+reset();Scan.DB.settings.ignored=nil
+scan(a);now=1010;Scan.GreetCustomer('LeftButton',order(101))
+local originalToken=response(101).requestToken
+now=1039;scan(a)
+assert(response(101).requestToken==originalToken and response(101).greeting_sent)
+now=1040;scan(a)
+assert(countRows()==1 and not response(101).greeting_sent and not response(101).customer_answered)
+assert(response(101).requestToken~=originalToken and response(101).time==1040)
+assert(#Scan.DB.customers.Buyer.chat_history==3, 'repeat history was lost')
+flushTimers();assert(#sent==1, 'repeat search sent a greeting automatically')
+Scan.GreetCustomer('LeftButton',order(101));assert(#sent==2 and response(101).greetingSentAt==1040)
+Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
+now=1080;local answeredToken=response(101).requestToken;scan(a)
+assert(response(101).requestToken==answeredToken and response(101).customer_answered,
+    'an active answered conversation was reopened as unanswered')
+
+reset();scan(a);Scan.GreetCustomer('LeftButton',order(101))
+now=1031;scan(a)
+assert(not response(101).greeting_sent)
+Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
+assert(response(101).customer_answered and response(101).greeting_sent and #sent==1,
+    'late answer to the first greeting was lost while its replacement was only proposed')
+
+reset();scan(a);Scan.GreetCustomer('LeftButton',order(101))
+now=1031;scan(b);Scan.GreetCustomer('LeftButton',order(102))
+Scan.OnMessage('CHAT_MSG_WHISPER','hi','Buyer','Buyer-GUID')
+assert(not response(101).customer_answered and response(102).customer_answered, 'reply checked an older inquiry')
+local replyEntry=Scan.DB.customers.Buyer.chat_history[#Scan.DB.customers.Buyer.chat_history]
+assert(#replyEntry.replyContext.members==1 and replyEntry.replyContext.members[1].responseID==102)
+Scan.OnMessage('CHAT_MSG_WHISPER','hi','Buyer','Buyer-GUID')
+Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
+assert(#Scan.Utils.GetUniqueChatHistory(Scan.DB.customers.Buyer.chat_history)==5, 'short/repeated replies disappeared')
+
+reset();scan(a);Scan.GreetCustomer('LeftButton',order(101))
+now=1029;scan(b);Scan.GreetCustomer('LeftButton',order(102))
+Scan.OnMessage('CHAT_MSG_WHISPER','sent both','Buyer','Buyer-GUID')
+assert(response(101).customer_answered and response(102).customer_answered, 'nearby related requests split too early')
+reset();scan(a..b);Scan.GreetCustomer('LeftButton',order(102))
+Scan.OnMessage('CHAT_MSG_WHISPER','sent both','Buyer','Buyer-GUID')
+assert(response(101).customer_answered and response(102).customer_answered, 'multi-item inquiry was not answered together')
+reset();scan(a);Scan.GreetCustomer('LeftButton',order(101))
+now=1031;scan(b) -- no greeting for the later inquiry
+Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
+assert(response(101).customer_answered and not response(102).customer_answered, 'ungreeted search stole the active reply')
+
+-- The manual menu is a real synchronous click-to-send path. It must use the
+-- chosen crafter even when the selected text matches a different profession.
+reset()
+Scan.DB.settings.explanations={}
+local getSorted, colorCrafter, colorProfession, professionName=Scan.GetSortedCrafters, Scan.ColorizeCrafterName,
+    Scan.Utils.ColorizeProfessionName, Scan.Utils.ProfessionNameByID
+Scan.ColorizeCrafterName=function(name) return name end
+Scan.Utils.ColorizeProfessionName=function(_,name) return name end
+Scan.Utils.ProfessionNameByID=function(id) return tostring(id) end
+Scan.GetSortedCrafters=function() return {{name='Seller-Realm',parentProfessionID=164},
+    {name='Tailor-Realm',parentProfessionID=197}} end
+local menus={}
+Menu={ModifyMenu=function(name,callback) menus[name]=callback end}
+loadSource('Customer/CustomExplanations.lua')
+Scan.CONST.TEXT.MANUAL_MATCH='Match %s %s'
+HironCraftScan_CustomExplanationsButtonMixin.Init({SetupMenu=noop})
+local buttons={}
+local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end,
+    CreateButton=function(_,label,click) buttons[#buttons+1]={label=label,click=click};return {SetTooltip=noop} end}
+local chatReads=0
+C_ChatInfo={GetChatLineText=function(id) assert(id==44);chatReads=chatReads+1;return 'LF '..a end,
+    GetChatLineSenderGUID=function() return 'Manual-GUID' end}
+menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ManualBuyer-Realm',lineID='44'})
+assert(#sent==0 and countRows()==0, 'opening the manual menu took an action')
+buttons[2].click()
+assert(#sent==1 and sent[1].customer=='ManualBuyer-Realm' and chatReads==1)
+local manualResponse=Scan.DB.customers['ManualBuyer-Realm'].responses[197]
+assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.itemID and manualResponse.greeting_sent)
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Expired-Realm'})
+buttons[1].click()
+assert(#sent==2 and sent[2].customer=='Expired-Realm' and chatReads==1, 'expired line blocked the clicked profession greeting')
+flushTimers();assert(#sent==2, 'manual matching scheduled more messages')
+Scan.GetSortedCrafters, Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName, Scan.Utils.ProfessionNameByID=
+    getSorted, colorCrafter, colorProfession, professionName
+print('Request lifecycle tests passed (30-second reoffer, independent inquiries, latest greeted reply, full history, synchronous manual matching).')
 
 -- Generic armor requests: deliberately put the WRONG armor crafter first.
 -- Exercise matching, actual order creation, whisper follow-ups and manual send.
@@ -371,6 +484,13 @@ end
 local preferred,_,preferredRecipe=forClass('need wrist','WARRIOR')
 assert(preferred.crafter=='Smith-Realm' and preferredRecipe.recipeID==201,
     'local tailor or wrong-slot plate recipe took precedence')
+for _,text in ipairs({'need plate wrist','LF plate bracers','need wristguards','need armguards',
+    'need shoulderpads','need gauntlets','need sabatons','need greaves'}) do
+    assert(forClass(text,'WARRIOR').crafter=='Smith-Realm', 'armor/slot alias picked a tailor: '..text)
+end
+assert(forClass('need plate wrist','MAGE').crafter=='Smith-Realm', 'explicit plate lost to mage class')
+assert(forClass('LF leather craft','WARRIOR').crafter=='Leather-Realm', 'explicit material without a slot was ignored')
+assert(forClass('need bs wrist','MAGE').crafter=='Smith-Realm', 'explicit profession lost to generic slot keywords')
 for _,text in ipairs({'need wrist!','NEED WRIST','нужны наручи','need boots','need gloves',
     'need shoulders','need chest','need belt','need pants','need helm'}) do
     local crafter=forClass(text,'WARRIOR')
@@ -402,27 +522,29 @@ assert(not forClass('need wrist '..link(9999),'WARRIOR'))
 assert(forClass('need tailor wrist','WARRIOR').crafter=='Seller-Realm')
 assert(forClass('need wrist','WARRIOR',{forceCrafterInfo={crafter='Seller-Realm',parentProfID=197}}).crafter=='Seller-Realm')
 assert(forClass('need cloak','WARRIOR').crafter=='Seller-Realm')
-for _,text in ipairs({'need wrist enchant','need cloth wrist','need wrist for alt',
+assert(Scan.ClassMatching.GetContext('need wrist enchant','Class-WARRIOR').parentProfID==333)
+assert(Scan.ClassMatching.GetContext('need cloth wrist','Class-WARRIOR').armor==1)
+for _,text in ipairs({'need wrist for alt',
     'need ring','need weapon','need tool','need bag','need necklace','need shield'}) do
     assert(not Scan.ClassMatching.GetContext(text,'Class-WARRIOR'), 'class overrode explicit/non-armor request')
 end
 assert(not Scan.ClassMatching.GetContext('need wristwatch','Class-WARRIOR'), 'substring matched as an armor slot')
-assert(forClass('need wrist','UNKNOWN').crafter=='Seller-Realm', 'unknown class changed normal matching')
+assert(not forClass('need wrist','UNKNOWN'), 'unknown class guessed an armor crafter')
 Scan.DB.settings.match_customer_class=false
 assert(forClass('need wrist','WARRIOR').crafter=='Seller-Realm', 'opt-out ignored')
 Scan.DB.settings.match_customer_class=true
 local getClass=GetPlayerInfoByGUID
 GetPlayerInfoByGUID=function() error('unavailable') end
-assert(forClass('need wrist','WARRIOR').crafter=='Seller-Realm', 'API error did not fall back safely')
+assert(forClass('need wrist','WARRIOR').crafter=='Smith-Realm', 'cached class was discarded after an API error')
 GetPlayerInfoByGUID=getClass
 local classAPI=GetPlayerInfoByGUID
 GetPlayerInfoByGUID=nil
 HironCraftScanComm.applying_remote_state=true
 assert(forClass('need wrist','UNKNOWN',{customerClass='WARRIOR'}).crafter=='Smith-Realm',
     'linked request lost its known class when the receiving client lacked GUID data')
-assert(forClass('need wrist','UNKNOWN',{customerClass='INVALID'}).crafter=='Seller-Realm')
+assert(not forClass('need wrist','UNKNOWN',{customerClass='INVALID'}))
 HironCraftScanComm.applying_remote_state=false
-assert(forClass('need wrist','UNKNOWN',{customerClass='WARRIOR'}).crafter=='Seller-Realm',
+assert(not forClass('need wrist','UNKNOWN',{customerClass='WARRIOR'}),
     'local override was accepted as remote class metadata')
 GetPlayerInfoByGUID=classAPI
 local getItemInfo=C_Item.GetItemInfoInstant
@@ -439,6 +561,16 @@ Scan.Utils.GetOutputItems=getOutputs
 Scan.DB.customers.ClassBuyer={guid='Class-WARRIOR'}
 assert(Scan.Scanner.GetCrafterForMessage('ClassBuyer','need wrist').crafter=='Smith-Realm',
     'stored GUID was not used when the current event omitted it')
+
+reset()
+Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','LateClass','Late-GUID')
+assert(countRows()==0 and #sent==0 and #timers==1, 'unknown class guessed or sent a response')
+classByGUID['Late-GUID']='WARRIOR';flushTimers()
+assert(countRows()==1 and Scan.DB.customers.LateClass.responses[201].crafterFullName=='Smith-Realm')
+assert(#sent==0, 'class-cache retry sent player chat')
+reset();Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','NeverClass','Never-GUID')
+for i=1,4 do flushTimers() end
+assert(countRows()==0 and #timers==0 and #sent==0, 'unknown class retries did not stop safely')
 
 reset()
 classByGUID['Buyer-GUID']='WARRIOR'

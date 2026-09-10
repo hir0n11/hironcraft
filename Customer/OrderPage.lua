@@ -121,6 +121,9 @@ function HironCraftScan.GreetCustomer(button, order)
         -- Middle button to begin chat without the generated greeting
         if HironCraftScan.Utils.OpenCustomerChat(order.customerName) ~= false then
             response.greeting_sent = true
+            if HironCraftScan.RequestTracking then
+                HironCraftScan.RequestTracking.GreetingSent(HironCraftScan.OrderToCustomerInfo(order), {response})
+            end
         end
     elseif button == "RightButton" then
         HironCraftScan.DismissOrder(order);
@@ -428,8 +431,10 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
     local hasNewOrder = self.renderedOrderIDs == nil
     for _, order in ipairs(orders) do
         local orderID = HironCraftScan.OrderToOrderID(order)
-        orderIDs[orderID] = true
-        if self.renderedOrderIDs and not self.renderedOrderIDs[orderID] then
+        local response = HironCraftScan.OrderToResponse(order)
+        local identity = response and response.requestToken or true
+        orderIDs[orderID] = identity
+        if self.renderedOrderIDs and self.renderedOrderIDs[orderID] ~= identity then
             hasNewOrder = true
         end
     end

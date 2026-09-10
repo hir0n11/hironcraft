@@ -72,7 +72,7 @@ checkManualCalls('SendResponses', [
     'Customer/CustomExplanations.lua', 'Customer/OrderGreetings.lua',
     'Customer/QuickReplies.lua', 'Utils/Comm.lua',
 ]);
-checkManualCalls('SendOrderGreeting', ['Customer/OrderPage.lua']);
+checkManualCalls('SendOrderGreeting', ['Customer/OrderPage.lua', 'Customer/CustomExplanations.lua']);
 checkManualCalls('RequestCraft', ['Customer/CustomerPage.lua']);
 
 function checkGuard(key) {

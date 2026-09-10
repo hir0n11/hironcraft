@@ -187,21 +187,38 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                     string.format(L(LID.MANUAL_MATCH), HironCraftScan.ColorizeCrafterName(char),
                         HironCraftScan.Utils.ColorizeProfessionName(ppID, profName)),
                     function()
-                        -- Force the message through as if it were a match for the specified profession.
-                        if (issecretvalue and issecretvalue(contextData.lineID))
-                            or type(contextData.lineID) ~= 'number' then return end
+                        -- Numeric hyperlink IDs can be strings; expired lines
+                        -- still allow the explicitly chosen generic profession.
+                        local lineID = contextData.lineID
+                        if issecretvalue and issecretvalue(lineID) then return end
+                        if type(lineID) == 'string' then lineID = lineID:match('^%d+$') and tonumber(lineID) end
                         local customer = target;
-                        local message = C_ChatInfo.GetChatLineText(contextData.lineID)
-                        local customerGuid = C_ChatInfo.GetChatLineSenderGUID(contextData.lineID)
+                        local message, customerGuid
+                        if type(lineID) == 'number' and lineID > 0 and C_ChatInfo then
+                            if C_ChatInfo.GetChatLineText then
+                                local ok, text = pcall(C_ChatInfo.GetChatLineText, lineID)
+                                if ok then message = text end
+                            end
+                            if C_ChatInfo.GetChatLineSenderGUID then
+                                local ok, guid = pcall(C_ChatInfo.GetChatLineSenderGUID, lineID)
+                                if ok then customerGuid = guid end
+                            end
+                        end
                         if issecretvalue and (issecretvalue(message) or issecretvalue(customerGuid)) then return end
                         if isBattleNet then customerGuid = nil end
-                        HironCraftScan.OnMessage(nil, message, customer, customerGuid, {
+                        local response = HironCraftScan.OnMessage(nil, type(message) == 'string' and message or '', customer, customerGuid, {
                             battleNet = isBattleNet,
+                            manualMatch = true,
+                            chatEntry = not message and {chatType='SYSTEM', message='[Manual matching] ' .. profName} or nil,
                             forceCrafterInfo = {
                                 crafter = char,
                                 parentProfID = ppID,
                             }
                         });
+                        if type(response) == 'table' then
+                            HironCraftScan.SendOrderGreeting({customerName=customer, responseID=response.responseID}, true)
+                            HironCraftScanCraftingOrderPage:ShowGeneric()
+                        end
                     end);
             end
         end

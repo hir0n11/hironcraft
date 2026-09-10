@@ -25,6 +25,42 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Request lifecycle and stable order lists (0.3.25)
+
+A new public search for the same craft can renew an unanswered request once
+30 seconds have passed since the greeting was actually sent. The existing row
+is replaced by a fresh request at the bottom of the default chronological list;
+the greeting is only proposed, never sent automatically. Claimed, crafted,
+completed and answered requests are not reopened by this rule.
+
+Different items in one message share one inquiry. New items less than 30 seconds
+apart can join that inquiry; later searches start a separate one. An incoming
+reply checks only the latest greeted inquiry, not every old order from the
+customer. A newer ungreeted search cannot steal that reply. A late reply to the
+previous greeting remains recognizable while its replacement is only proposed.
+Linked chat carries exact inquiry/request identities and individual greeting
+times; delayed packets cannot check a replacement request with a different token.
+Battle.net history remains local. Deferred item/class lookups preserve linked
+context without echoing orders or assigning ownership to the receiving character.
+
+Manual Matching now sends the selected crafter's profession greeting directly
+from the menu click, including numeric-string or expired chat-line IDs. Opening
+the menu does not send anything. Tooltip history records raw chat events with
+unique identities, preserves repeated short replies, and updates while hovered.
+
+Explicit item links still outrank class inference. Explicit armor words such as
+plate, mail, leather and cloth now select the matching profession instead of
+disabling the class filter. Explicit professions override class as well. Generic
+armor slots use the sender GUID and a verified class cache; missing class data is
+retried briefly, then the ambiguous request is skipped rather than guessed.
+
+Red problem highlighting applies only to personal crafting orders, never patrons.
+Background refreshes update existing rows and reagent/reward icons in place;
+they no longer hide/re-show the whole list or dismiss unchanged row tooltips.
+Row positions are stable during background quality/profit recalculations.
+Clicking a sort header or changing tabs applies a fresh sort. Tests cover these
+cases alongside the existing click-only chat/crafting safety checks.
+
 ## Battle.net order checkmarks (0.3.24)
 
 Incoming friend requests now show established contact in the first indicator,

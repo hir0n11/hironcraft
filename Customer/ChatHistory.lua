@@ -1,5 +1,19 @@
 local HironCraftScan = select(2, ...)
 local Utils = HironCraftScan.Utils
+local sequence = 0
+
+function Utils.StampChatHistory(entry)
+    if type(entry) ~= 'table' then return entry end
+    entry.receivedAt = tonumber(entry.receivedAt) or time()
+    if not entry.syncID then
+        sequence = sequence + 1
+        local settings = HironCraftScan.DB and HironCraftScan.DB.settings
+        local precise = GetTimePreciseSec and GetTimePreciseSec() or (GetTime and GetTime()) or 0
+        entry.syncID = table.concat({tostring(settings and settings.my_uuid or 'local'),
+            tostring(entry.receivedAt), tostring(precise), tostring(sequence)}, ':')
+    end
+    return entry
+end
 
 local function StableIdentity(entry)
     if type(entry) ~= 'table' then return nil end
@@ -17,6 +31,9 @@ local function StableIdentity(entry)
             'line',
             tostring(entry.chatType or ''),
             tostring(lineID),
+            -- Legacy ChatFrame argument packs are not event payloads. A reused
+            -- formatting ID must never collapse different incoming messages.
+            tostring(entry.message or ''),
         }, '\30')
     end
     return nil

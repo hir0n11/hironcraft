@@ -433,6 +433,7 @@ function QuickReplies:ResolveResponses(customer, customerInfo)
                 response.crafterFullName
                 and response.professionID
                 and IsListedOrder(customer, responseID)
+                and (not HironCraftScan.RequestTracking or HironCraftScan.RequestTracking.IsActiveResponse(customerInfo, response))
             then
                 table.insert(candidates, {
                     response = response,
@@ -599,7 +600,9 @@ end
 
 function QuickReplies:RememberCustomerConversation(customerInfo)
     for _, response in pairs(customerInfo.responses or {}) do
-        self:RememberConversationCharacter(response)
+        if not HironCraftScan.RequestTracking or HironCraftScan.RequestTracking.IsActiveResponse(customerInfo, response) then
+            self:RememberConversationCharacter(response)
+        end
     end
     return self:GetConversationOwners(customerInfo)
 end

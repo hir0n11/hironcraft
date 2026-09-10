@@ -55,6 +55,8 @@ order=reset();order.reagentState=1
 assert(CO:GetOrderProblemReason(order)=='COA_PROBLEM_CUSTOMER_REAGENTS')
 order.orderType=4
 assert(not CO:GetOrderProblemReason(order), 'patron missing customer mats was treated as a decline')
+known=false;supply=false;CO.orderIssues['42']='Patron issue'
+assert(not CO:GetOrderProblemReason(order), 'patron was painted red for another problem')
 order=reset();known=false
 assert(CO:GetOrderProblemReason(order)=='COA_ACTION_UNKNOWN_RECIPE')
 known=true;supply=false

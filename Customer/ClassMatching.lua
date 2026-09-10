@@ -22,6 +22,13 @@ AddSlot('INVTYPE_HAND', 'hand hands glove gloves перчатки перчатк
 AddSlot('INVTYPE_WAIST', 'waist belt belts пояс пояса ремень')
 AddSlot('INVTYPE_LEGS', 'leg legs leggings pants штаны поножи ноги')
 AddSlot('INVTYPE_FEET', 'feet boot boots shoe shoes сапоги ботинки обувь')
+AddSlot('INVTYPE_WRIST', 'wristguard wristguards armguard armguards wristwrap wristwraps bindings manacles')
+AddSlot('INVTYPE_SHOULDER', 'shoulderpad shoulderpads spaulder spaulders mantle')
+AddSlot('INVTYPE_CHEST', 'chestguard chestplate breastplate vest robe robes tunic')
+AddSlot('INVTYPE_HAND', 'gauntlet gauntlets grips handguards')
+AddSlot('INVTYPE_WAIST', 'waistguard waistguards girdle girdles sash')
+AddSlot('INVTYPE_LEGS', 'legguard legguards legplates trousers')
+AddSlot('INVTYPE_FEET', 'sabatons treads slippers greaves footwraps')
 
 -- Explicit professions/materials and non-armor requests must not be inferred
 -- from the speaker's class (alts, transmogs, enchants and profession tools).
@@ -39,6 +46,28 @@ staff tool tools profession transmog mog alt alts плащ сумка сумки
     explicitWords[word] = true
 end
 
+local explicitArmor = {}
+local function ArmorWords(armor, words)
+    for word in words:gmatch('%S+') do explicitArmor[word]=armor; explicitWords[word]=nil end
+end
+ArmorWords(4, 'plate plates латы латные латный латная латное')
+ArmorWords(3, 'mail chainmail кольчуга кольчужные кольчужный кольчужная')
+ArmorWords(2, 'leather кожа кожаные кожаный кожаная')
+ArmorWords(1, 'cloth ткань тканевые тканевый тканевая')
+local explicitProfessions = {}
+local function ProfessionWords(id, words)
+    for word in words:gmatch('%S+') do explicitProfessions[word]=id end
+end
+ProfessionWords(164, 'bs blacksmith blacksmithing smith кузнец кузнеца кузня кузнечка кузнечное')
+ProfessionWords(165, 'lw leatherworker leatherworking кожевник кожевника кожевничество')
+ProfessionWords(197, 'tailor tailoring портной портного портняга портняжка портняжное')
+ProfessionWords(755, 'jc jewelcraft jewelcrafter jewelcrafting ювелир ювелира ювелирка')
+ProfessionWords(333, 'enchanter enchanting enchant ench enchants чантер чант чары зачарование зачарователь')
+ProfessionWords(202, 'engineer engineering engi инженер инженера')
+ProfessionWords(773, 'inscription inscriber scribe начертатель')
+ProfessionWords(171, 'alchemy alchemist алхимик')
+local classCache = {}
+
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
 end
@@ -48,12 +77,14 @@ function M.ResolveClass(guid, sharedClass)
         and type(GetPlayerInfoByGUID) == 'function' then
         local ok, _, class = pcall(GetPlayerInfoByGUID, guid)
         if ok and not IsSecret(class) and type(class) == 'string' and armorByClass[class] then
+            classCache[guid] = class
             return class
         end
     end
     if not IsSecret(sharedClass) and type(sharedClass) == 'string' and armorByClass[sharedClass] then
         return sharedClass
     end
+    if not IsSecret(guid) and type(guid) == 'string' then return classCache[guid] end
 end
 
 function M.GetContext(message, guid, sharedClass)
@@ -63,20 +94,27 @@ function M.GetContext(message, guid, sharedClass)
     -- Links are authoritative, including an unmonitored item/recipe link.
     if message:find('|hitem:', 1, true) or message:find('|henchant:', 1, true)
         or message:find('|hrecipe:', 1, true) then return nil end
-    local slots = {}
+    local slots, armor, profession, bypass = {}, nil, nil, false
     for word in message:gmatch('[^%s%p]+') do
-        if explicitWords[word] then return nil end
+        if explicitArmor[word] then armor = explicitArmor[word] end
+        if explicitProfessions[word] then profession = explicitProfessions[word] end
+        if explicitWords[word] then bypass = true end
         if slotWords[word] then slots[slotWords[word]] = true end
     end
+    if profession then return {parentProfID=profession, explicitProfession=true, slots=slots} end
+    if bypass then return nil end
+    if armor then return {armor=armor, parentProfID=professionByArmor[armor], slots=slots} end
     if not next(slots) then return nil end
     local class = M.ResolveClass(guid, sharedClass)
-    if not class then return nil end
-    local armor = armorByClass[class]
+    if not class then return {unknownClass=true, slots=slots} end
+    armor = armorByClass[class]
     return { class=class, armor=armor, parentProfID=professionByArmor[armor], slots=slots }
 end
 
 function M.MatchesRecipe(context, recipeInfo)
     if not context then return true end
+    if context.unknownClass or (context.explicitProfession and not context.armor and next(context.slots)) then return false end
+    if context.explicitProfession and not next(context.slots) then return true end
     if type(recipeInfo) ~= 'table' then return false end
     local getInfo = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
     if type(getInfo) ~= 'function' then return false end

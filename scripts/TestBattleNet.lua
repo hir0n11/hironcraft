@@ -66,7 +66,7 @@ assert(sent[2].customer=='Normal-Realm', 'ordinary whisper context changed')
 assert(#menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=999})==0, 'unknown friend has actionable menu')
 buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30})
 find(buttons,'Match Smith Blacksmithing').click()
-assert(#matched==1, 'friend-list menu tried to read a missing chat line')
+assert(#matched==2 and matched[2].message=='' and matched[2].options.manualMatch, 'friend-list click did not create the selected generic greeting')
 
 -- Blizzard's BNPlayer hyperlink handler passes the split account ID as a
 -- STRING to FriendsFrame_ShowBNDropdown, and does not forward the chat line ID.
@@ -74,11 +74,11 @@ assert(#matched==1, 'friend-list menu tried to read a missing chat line')
 local chatContext={name='Friend',chatTarget='Friend',chatType='BN_WHISPER',
     bnetIDAccount='30',accountInfo=friend}
 buttons=menu('MENU_UNIT_BN_FRIEND',chatContext)
-assert(#sent==2 and #matched==1, 'opening the real chat context took an action')
+assert(#sent==2 and #matched==2, 'opening the real chat context took an action')
 find(buttons,'Price').click()
 assert(#sent==3 and sent[3].customer==key, 'chat hyperlink reply lost its Battle.net recipient')
 find(buttons,'Match Smith Blacksmithing').click()
-assert(#matched==1, 'chat hyperlink menu tried to read an absent line ID')
+assert(#matched==3 and matched[3].message=='', 'missing line ID prevented explicit generic matching')
 Scan.DB.settings.collapse_chat_context=true
 buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount='30',chatTarget='Friend'})
 find(buttons,'HironCraftScan')

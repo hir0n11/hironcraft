@@ -765,7 +765,7 @@ end
 
 local function GetIconButton(row, parent, store, index)
     local b = store[index]
-    if b then return b end
+    if b then b._active = true; return b end
     b = CreateFrame("Button", nil, parent, "BackdropTemplate")
     b:SetSize(CL.SMALL_ICON, CL.SMALL_ICON)
     b:SetBackdrop({
@@ -793,6 +793,7 @@ local function GetIconButton(row, parent, store, index)
     b.gold:SetPoint("LEFT", b, "RIGHT", 2, 0)
     b.gold:SetTextColor(1, 0.82, 0.20)
     b.gold:Hide()
+    b._active = true
     store[index] = b
     return b
 end
@@ -882,6 +883,8 @@ end
 function CL:ApplyRowLayout(row)
     local compact = self:IsCompact()
     local columns = self:ActiveCols()
+    if row._layoutColumns == columns and row._layoutCompact == compact then return end
+    row._layoutColumns, row._layoutCompact = columns, compact
     row:SetHeight(self:RowHeight())
     row.iconBtn:SetSize(compact and self.ICON_COMPACT or self.ICON_SIZE, compact and self.ICON_COMPACT or self.ICON_SIZE)
     row.iconBtn:ClearAllPoints()
@@ -927,7 +930,11 @@ end
 function CL:FitIconBar(bar, icons, maxRows, title)
     local shown = {}
     for _, icon in ipairs(icons) do
-        if icon:IsShown() then shown[#shown + 1] = icon end
+        if icon._active ~= false then
+            shown[#shown + 1] = icon
+        elseif icon:IsShown() then
+            icon:Hide()
+        end
     end
     local left = bar.isReagentBar and 8 or 0
     local gap = bar.isReagentBar and 10 or 6
@@ -959,20 +966,29 @@ function CL:FitIconBar(bar, icons, maxRows, title)
     end
     bar.allIcons, bar.moreTitle = shown, title
     for index, icon in ipairs(shown) do
-        icon:SetShown(index <= visible)
+        local shouldShow = index <= visible
+        if icon:IsShown() ~= shouldShow then icon:SetShown(shouldShow) end
         if index <= visible then
-            icon:ClearAllPoints()
-            icon:SetPoint("TOPLEFT", bar, "TOPLEFT", left + ((index - 1) % columns) * step, -math.floor((index - 1) / columns) * step)
+            local x, y = left + ((index - 1) % columns) * step, -math.floor((index - 1) / columns) * step
+            if icon._layoutX ~= x or icon._layoutY ~= y then
+                icon:ClearAllPoints()
+                icon:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
+                icon._layoutX, icon._layoutY = x, y
+            end
             if icon.gold then
                 icon.gold:SetWidth(math.max(1, bar:GetWidth() - self.SMALL_ICON - 4))
                 icon.gold:SetWordWrap(false)
             end
         end
     end
-    bar.more:SetShown(overflow)
+    if bar.more:IsShown() ~= overflow then bar.more:SetShown(overflow) end
     if overflow then
-        bar.more:ClearAllPoints()
-        bar.more:SetPoint("TOPLEFT", bar, "TOPLEFT", left + (visible % columns) * step, -math.floor(visible / columns) * step)
+        local x, y = left + (visible % columns) * step, -math.floor(visible / columns) * step
+        if bar.more._layoutX ~= x or bar.more._layoutY ~= y then
+            bar.more:ClearAllPoints()
+            bar.more:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
+            bar.more._layoutX, bar.more._layoutY = x, y
+        end
         bar.more.text:SetText("+" .. (#shown - visible))
     end
 end
@@ -1049,12 +1065,11 @@ function CL:PopulateRow(row, order)
         row.qualityBadge:Hide()
     end
 
-    for _, b in pairs(row.reagentIcons) do b:Hide() end
+    for _, b in pairs(row.reagentIcons) do b._active = false end
     if CO.BuildDisplayReagents then
         if CO.ApplyQueueReagentModeToOrder then CO:ApplyQueueReagentModeToOrder(order) end
         local manual = (CO.GetQueueReagentMode and CO:GetQueueReagentMode()) == "manual"
         local reagents = CO:BuildDisplayReagents(order) or {}
-        local x = 0
         local i = 1
         for _, reagent in ipairs(reagents) do
             local selected = CO.GetSelectedReagentForEntry and CO:GetSelectedReagentForEntry(order.orderID, reagent)
@@ -1128,12 +1143,8 @@ function CL:PopulateRow(row, order)
                         b:SetScript("OnClick", nil)
                     end
 
-                    b:ClearAllPoints()
-                    b:SetPoint("LEFT", row.reagentsBar, "LEFT", x, 0)
                     b:SetScript("OnEnter", ShowItemTooltip)
                     b:SetScript("OnLeave", HideTooltip)
-                    b:Show()
-                    x = x + self.SMALL_ICON + 4
                     i = i + 1
                 end
             end
@@ -1149,25 +1160,17 @@ function CL:PopulateRow(row, order)
     end
     if cost > 0 then self:SetMoneyText(row.cost, cost) else row.cost:SetText("—") end
 
-    local compact = self:IsCompact()
     local isNpcReward = Enum and Enum.CraftingOrderType and order.orderType == Enum.CraftingOrderType.Npc
-    for _, b in pairs(row.rewardIcons) do b:Hide() end
+    for _, b in pairs(row.rewardIcons) do b._active = false end
     row.reward:SetText("")
     local rewards = order.npcOrderRewards or order.rewards or {}
 
     do
         local GR, GG, GB = 1.00, 0.82, 0.20
-        local perRow = compact and 99 or 4
-        local step = self.SMALL_ICON + 2
         local i = 1
 
         local function place(b)
-            local col = (i - 1) % perRow
-            local rowIdx = math.floor((i - 1) / perRow)
-            b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", row.rewardBar, "TOPLEFT", col * step, -rowIdx * step)
             b:SetBackdropBorderColor(GR, GG, GB, 1)
-            b:Show()
             i = i + 1
         end
 
@@ -1444,26 +1447,21 @@ function CL:PopulateRow(row, order)
     self:FitIconBar(row.rewardBar, row.rewardIcons, self:IsCompact() and 1 or 2, L("COA_HDR_REWARD", "Reward"))
 end
 
+local function HideRowTooltip(row)
+    if not GameTooltip or not GameTooltip:IsShown() or not GameTooltip.GetOwner then return end
+    local owner = GameTooltip:GetOwner()
+    for _ = 1, 8 do
+        if not owner then return end
+        if owner == row then GameTooltip:Hide(); return end
+        owner = owner.GetParent and owner:GetParent()
+    end
+end
+
 function CL:Refresh(pageFrame)
     pageFrame = pageFrame or CO.activePageFrame
     if not pageFrame then return end
     if not pageFrame:IsShown() then return end
     if not CO:IsEnabled() then return end
-
-    if GameTooltip and GameTooltip:IsShown() and GameTooltip.GetOwner then
-        local owner = GameTooltip:GetOwner()
-        if owner and owner.GetParent then
-            local p = owner
-            for _ = 1, 6 do
-                if not p then break end
-                if p == pageFrame.ahuiCustomList then
-                    GameTooltip:Hide()
-                    break
-                end
-                p = p.GetParent and p:GetParent() or nil
-            end
-        end
-    end
 
     local container = self:EnsureScrollFrame(pageFrame)
     if not container then return end
@@ -1481,7 +1479,8 @@ function CL:Refresh(pageFrame)
         container._allowEmptyOnce = true
         if CO.selectedOrders then wipe(CO.selectedOrders) end
         CO.currentQueueOrderID = nil
-        for _, row in ipairs(container.rows) do row:Hide() end
+        container._stablePositions = nil
+        for _, row in ipairs(container.rows) do HideRowTooltip(row); row:Hide() end
     end
 
     if CO.EnsureControlPanel then CO:EnsureControlPanel(pageFrame) end
@@ -1550,6 +1549,11 @@ function CL:Refresh(pageFrame)
 
     local sortCol = CL._sortColumn
     local sortAsc = (CL._sortDir == "asc")
+    local sortKey = tostring(currentType) .. ':' .. tostring(sortCol) .. ':' .. tostring(CL._sortDir)
+    if container._stableSortKey ~= sortKey then
+        container._stableSortKey, container._stablePositions = sortKey, nil
+    end
+    local stablePositions = container._stablePositions or {}
 
     local function isActiveCraft(order)
         if not order or not order.orderID then return false end
@@ -1576,6 +1580,10 @@ function CL:Refresh(pageFrame)
     for index, order in ipairs(orders) do originalPosition[order] = index end
 
     table.sort(orders, function(a, b)
+        -- Background quality/price recalculations update cells, not positions.
+        -- A deliberate header sort or tab change starts a new ordering.
+        local ap, bp = stablePositions[tostring(a.orderID)], stablePositions[tostring(b.orderID)]
+        if ap or bp then return (ap or math.huge) < (bp or math.huge) end
         local aDone = isDoneOrder(a) and 1 or 0
         local bDone = isDoneOrder(b) and 1 or 0
         if aDone ~= bDone then return aDone < bDone end
@@ -1619,7 +1627,7 @@ function CL:Refresh(pageFrame)
 
     if container.header and UpdateHeaderArrows then UpdateHeaderArrows(container.header) end
 
-    for _, row in ipairs(container.rows) do row:Hide() end
+    local positions = {}
     local y = 0
     for i, order in ipairs(orders) do
         local row = container.rows[i]
@@ -1627,12 +1635,23 @@ function CL:Refresh(pageFrame)
             row = self:CreateRow(container.content, i)
             container.rows[i] = row
         end
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", container.content, "TOPLEFT", 0, -y)
-        row:SetPoint("TOPRIGHT", container.content, "TOPRIGHT", 0, -y)
-        row:Show()
+        if row._order and row._order.orderID ~= order.orderID then HideRowTooltip(row) end
+        if row._listY ~= y then
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", container.content, "TOPLEFT", 0, -y)
+            row:SetPoint("TOPRIGHT", container.content, "TOPRIGHT", 0, -y)
+            row._listY = y
+        end
         self:PopulateRow(row, order)
+        if not row:IsShown() then row:Show() end
+        positions[tostring(order.orderID)] = i
         y = y + self:RowHeight()
+    end
+    container._stablePositions = positions
+    for i = #orders + 1, #container.rows do
+        local row = container.rows[i]
+        HideRowTooltip(row)
+        if row:IsShown() then row:Hide() end
     end
 
     local oldScroll = container.scroll:GetVerticalScroll()

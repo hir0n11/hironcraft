@@ -240,12 +240,14 @@ QuickReplies:RememberConversationCharacter(remoteResponse)
 assert(remoteResponse.conversationCharacter == currentCharacter, "new request cannot select a new conversation character")
 
 -- Exercise the actual outgoing-whisper event path, not just the owner helper.
+function time() return 1000 end
 CraftScan.CONST = { TEXT = {} }
 CraftScan.Utils.onLoad = function() end
 CraftScan.Utils.DeepCopy = function(value) return value end
 EnumUtil = { MakeEnum = function() return {} end }
 CreateFrame = function() return {} end
 assert(loadfile('Customer/ChatHistory.lua'))('HironCraft', CraftScan)
+assert(loadfile('Customer/RequestTracking.lua'))('HironCraft', CraftScan)
 assert(loadfile('Customer/ChatScanner.lua'))('HironCraft', CraftScan)
 assert(loadfile('Customer/OrderGreetings.lua'))('HironCraft', CraftScan)
 CraftScan.GetPlayerName = function() return currentCharacter end

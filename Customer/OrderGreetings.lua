@@ -51,6 +51,7 @@ function Scan.SendOrderGreeting(order, userInitiated)
     if #pending == 0 or #messages == 0 then return false end
 
     if Scan.Utils.SendResponses(messages, order.customerName, true) == false then return false end
+    Scan.RequestTracking.GreetingSent(Scan.OrderToCustomerInfo(order), pending)
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end
         sentResponse.greeting_sent = true

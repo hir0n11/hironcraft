@@ -2962,6 +2962,7 @@ end
 function CO:GetOrderProblemReason(order, pageFrame, action)
     if not order or not order.orderID or action == "fulfill" or action == "fulfilling" then return nil end
     if self.GetEffectiveOrder then order = self:GetEffectiveOrder(order.orderID, order) or order end
+    if not self:IsPersonalCraftingOrder(order, pageFrame) then return nil end
     if self:ShouldRejectForMissingCustomerReagents(order, pageFrame) then
         return T("COA_PROBLEM_CUSTOMER_REAGENTS", "Likely decline: the customer has not supplied all required reagents.")
     end

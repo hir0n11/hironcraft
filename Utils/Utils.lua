@@ -1299,11 +1299,29 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     end
 
     local tooltip = self.tooltip
+    local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
+    local response = HironCraftScan.OrderToResponse(order)
+    if not response or not customerInfo then tooltip:Hide(); return end
+    local historyCount = #(customerInfo.chat_history or {})
+    local greetingSent, requestToken = response.greeting_sent, response.requestToken
+    local elapsed = 0
+    tooltip:SetScript('OnUpdate', function(_, delta)
+        elapsed = elapsed + delta
+        if elapsed < 0.25 then return end
+        elapsed = 0
+        if anchor.order and anchor.order ~= order then tooltip:Hide(); return end
+        local current = HironCraftScan.OrderToResponse(order)
+        local info = HironCraftScan.OrderToCustomerInfo(order)
+        if not current or not info then tooltip:Hide(); return end
+        if #(info.chat_history or {}) ~= historyCount or current.greeting_sent ~= greetingSent
+            or current.requestToken ~= requestToken then
+            self:Show(name, anchor, order, header, includeBinds)
+        end
+    end)
     tooltip:ClearLines()
 
     tooltip:SetOwner(anchor, 'ANCHOR_TOPLEFT')
 
-    local response = HironCraftScan.OrderToResponse(order)
     if response.greeting_sent then
         tooltip:AddDoubleLine(header, L('Chat Help'), 1, 1, 1)
     else

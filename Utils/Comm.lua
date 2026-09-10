@@ -799,6 +799,9 @@ function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, inc
             chatType = entry.chatType,
             syncID = entry.syncID,
             conversationOwners = entry.conversationOwners,
+            receivedAt = entry.receivedAt,
+            greetingContext = entry.greetingContext,
+            replyContext = entry.replyContext,
         },
     }
     TransmitToFullLinkedAccounts(data, HironCraftScanComm.Operations.ShareCustomerChat)
@@ -839,7 +842,7 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
     if not HironCraftScan.DB.settings.proxy_receive_enabled then
         return
     end
-    if
+    if not (data.lastChatFrameMessage and data.lastChatFrameMessage.syncID) and
         not HironCraftScan.InjectLastChatFrameMessage(
             data.customer,
             data.message,
@@ -872,6 +875,7 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
             restartTerminalRequest = data.restartTerminalRequest == true,
             customerClass = data.customerClass,
             conversationOwners = data.lastChatFrameMessage and data.lastChatFrameMessage.conversationOwners,
+            chatEntry = data.lastChatFrameMessage and HironCraftScan.Utils.DeepCopy(data.lastChatFrameMessage),
         }
     )
 

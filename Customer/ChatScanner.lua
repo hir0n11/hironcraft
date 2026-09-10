@@ -9,6 +9,9 @@ local saved = HironCraftScan.Utils.saved
 local requestTokenSerial = 0
 
 local function NewRequestToken(customer, responseID, chatEntry)
+    if chatEntry and type(chatEntry.syncID) == 'string' then
+        return chatEntry.syncID .. ':' .. tostring(responseID)
+    end
     local args = chatEntry and chatEntry.args
     local lineID = args and args[11]
     if lineID ~= nil and not (issecretvalue and issecretvalue(lineID)) then
@@ -831,6 +834,20 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     local originalMessage = message
     message = string.lower(message)
 
+    -- An explicit UI choice wins over every keyword/link and never depends on
+    -- item-cache callbacks. Offer the chosen profession, not an unverified item.
+    if overrides and overrides.forceCrafterInfo then
+        local forced = overrides.forceCrafterInfo
+        local char = HironCraftScan.DB.characters[forced.crafter]
+        local parent = char and char.parent_professions[forced.parentProfID]
+        if not parent or not parent.scanning_enabled or parent.character_disabled then return nil end
+        local newest
+        for id, profession in pairs(char.professions or {}) do
+            if profession.parentProfID == forced.parentProfID and (not newest or id > newest) then newest = id end
+        end
+        return newest and {crafter=forced.crafter, profID=newest} or nil
+    end
+
     if not overrides or (not overrides.forceCrafterInfo and not overrides.itemInfo) then
         if HasMatch(message, config.exclusions) then
             return nil
@@ -926,6 +943,7 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             customerGuid or (existing and existing.guid),
             HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass)
     end
+    if armorContext and armorContext.unknownClass then return nil, nil, nil, nil, true end
     local bestMatch = nil
 
     local function FindBestCrafter(crafterInfo)
@@ -1094,7 +1112,7 @@ HironCraftScan.ColorizePlayerName = function(name, guid)
         return '|cff00ffff' .. HironCraftScan.BattleNet.DisplayName(name) .. '|r'
     end
     name = HironCraftScan.NameAndRealmToName(name)
-    local _, class = GetPlayerInfoByGUID(guid)
+    local class = HironCraftScan.ClassMatching.ResolveClass(guid)
     local cc = RAID_CLASS_COLORS[class]
     if cc then
         return cc:WrapTextInColorCode(name)
@@ -1194,19 +1212,21 @@ end
 
 local function MakeChatHistoryEntryDefault(customer, message, event)
     if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
-        return HironCraftScan.BattleNet.HistoryEntry(customer, message, event)
-    end
-    local found = MakeChatHistoryEntry(customer, message, event)
-    if found then
-        return found
+        return HironCraftScan.Utils.StampChatHistory(HironCraftScan.BattleNet.HistoryEntry(customer, message, event))
     end
     local chatType = ChatTypeFromEvent(event) or 'WHISPER'
     local color = ChatTypeInfo and ChatTypeInfo[chatType]
-    return {
-        message = message,
+    -- Record the actual event, not a fuzzy match in a rotating ChatFrame buffer.
+    -- Chat addons/window filters and repeated short replies can otherwise make
+    -- an unrelated older line impersonate this message and be deduplicated.
+    local prefix = chatType == 'WHISPER_INFORM' and '→ ' or (chatType == 'WHISPER' and '← ' or '')
+    local stamp = date and (date('%H:%M:%S') .. ' ') or ''
+    return HironCraftScan.Utils.StampChatHistory({
+        message = stamp .. prefix .. customer .. ': ' .. message,
+        rawMessage = message,
         args = color and { color.r, color.g, color.b } or nil,
         chatType = chatType,
-    }
+    })
 end
 
 local function GetGreeting(tag)
@@ -1429,7 +1449,30 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local firstInteraction = not next(response)
     local restartingTerminalRequest = overrides
         and overrides.restartTerminalRequest == true
+        and (not overrides.requestToken or overrides.requestToken ~= response.requestToken)
         or false
+    local requestChatEntry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, chatEvent)
+    local chat_history = saved(customerInfo, 'chat_history', {})
+    if not needsResultCallbackOnly then
+        local _, inserted = HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, requestChatEntry)
+        if inserted and response.greeting_sent and chatEvent ~= 'CHAT_MSG_WHISPER'
+            and chatEvent ~= 'CHAT_MSG_BN_WHISPER' and HironCraftScanComm.ShareCustomerChat then
+            HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, requestChatEntry, false)
+        end
+    end
+    -- A delayed proxy/cache callback is history, not a fresh request.
+    if not firstInteraction and requestChatEntry.receivedAt and response.time
+        and requestChatEntry.receivedAt < response.time then return end
+    local publicRequest = chatEvent == 'CHAT_MSG_CHANNEL' or chatEvent == 'CHAT_MSG_SAY'
+        or chatEvent == 'CHAT_MSG_PARTY' or chatEvent == 'CHAT_MSG_GUILD'
+    local statusEntry = HironCraftScan.OrderFulfillment and HironCraftScan.OrderFulfillment:GetStatus({customerName=customer, responseID=responseID})
+    local reoffer = publicRequest and HironCraftScan.RequestTracking.CanReoffer(
+        response, requestChatEntry.receivedAt or time(), statusEntry and statusEntry.status)
+    restartingTerminalRequest = restartingTerminalRequest or reoffer or (overrides and overrides.manualMatch == true)
+    if HironCraftScanComm.applying_remote_state and overrides and type(overrides.requestToken) == 'string'
+        and response.requestToken and response.requestToken ~= overrides.requestToken then
+        restartingTerminalRequest = true
+    end
     if
         overrides
         and overrides.existingCustomerRequest
@@ -1489,14 +1532,6 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     end
 
     response.message = SplitResponse(greeting)
-    local chat_history = saved(customerInfo, 'chat_history', {})
-    local requestChatEntry
-    if not (overrides and overrides.chatHistoryAlreadyStored) then
-        requestChatEntry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, chatEvent)
-    else
-        requestChatEntry = chat_history[#chat_history]
-    end
-
     local requestToken = response.requestToken
     if firstInteraction or restartingTerminalRequest then
         requestToken = overrides and overrides.requestToken
@@ -1513,11 +1548,19 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         )
     end
     if firstInteraction or restartingTerminalRequest then
+        -- A late answer to our first greeting can arrive while the replacement
+        -- row is merely proposed. Keep that conversation eligible until another
+        -- greeting is actually sent; do not mark this new row as greeted yet.
+        response.previousGreeting = reoffer and {id=response.inquiryID or response.requestToken} or nil
         response.requestToken = requestToken
         response.conversationCharacter = nil
         response.greetingGroup = nil
         response.battleNetCharacters = nil
+        response.inquiryID = nil
+        response.greetingSentAt = nil
+        response.customer_answered = false
     end
+    HironCraftScan.RequestTracking.AssignInquiry(customerInfo, response, requestChatEntry, restartingTerminalRequest)
 
     -- Save the request at higher granularities as well so that we don't
     -- respond to someone a second time for something more generic. E.g. we
@@ -1543,7 +1586,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.itemID = itemID
     response.itemLink = itemLink
     response.recipeID = recipeID
-    response.time = now
+    response.time = (firstInteraction or restartingTerminalRequest) and (requestChatEntry.receivedAt or now) or response.time or now
     response.responseID = responseID
     if overrides and overrides.battleNet then
         -- Receiving a request is not the same as sending our proposed reply.
@@ -1576,7 +1619,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
     end
 
-    if firstInteraction then
+    if firstInteraction or restartingTerminalRequest then
         local order = {
             customerName = customer,
             responseID = responseID,
@@ -1667,7 +1710,7 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
 
     local customerInfo = HironCraftScan.DB.customers[customer]
     local history = customerInfo.chat_history
-    local entry = history and history[#history]
+    local entry = overrides and overrides.chatEntry or (history and history[#history])
     if entry and HironCraftScan.QuickReplies then
         entry.conversationOwners = HironCraftScan.QuickReplies:GetConversationOwners(customerInfo)
     end
@@ -1740,17 +1783,22 @@ function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, i
         HironCraftScan.QuickReplies:ApplyConversationOwners(customerInfo, entry.conversationOwners)
     end
     if not inserted then return false end
-    if incoming then
-        for _, response in pairs(customerInfo.responses or {}) do
-            if response.greeting_sent then
-                response.customer_answered = true
-            end
-        end
-    end
+    if entry.greetingContext then HironCraftScan.RequestTracking.ApplyContext(customerInfo, entry.greetingContext, false) end
+    if incoming then HironCraftScan.RequestTracking.MarkReply(customerInfo, entry) end
     if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
         HironCraftScanCraftingOrderPage:ShowGeneric()
     end
     return true
+end
+
+local function RunRequestCallback(options, callback)
+    -- Item/class data may arrive after the linked-packet handler has returned.
+    -- Keep that work remote so it cannot echo packets or claim a local owner.
+    local previous = HironCraftScanComm.applying_remote_state
+    if options.remoteRequest then HironCraftScanComm.applying_remote_state = true end
+    local ok, err = pcall(callback)
+    HironCraftScanComm.applying_remote_state = previous
+    if not ok then error(err, 0) end
 end
 
 function HironCraftScan.OnMessage(event, message, customer, customerGuid, overrides)
@@ -1772,8 +1820,12 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if ignored then
         return false
     end
+    overrides = overrides or {}
+    overrides.remoteRequest = overrides.remoteRequest == true or HironCraftScanComm.applying_remote_state == true
+    overrides.chatEntry = HironCraftScan.Utils.StampChatHistory(overrides.chatEntry
+        or MakeChatHistoryEntryDefault(customer, message, event))
 
-    local crafterInfo, itemID, recipeInfo, itemMatches
+    local crafterInfo, itemID, recipeInfo, itemMatches, classPending
 
     if event == 'CHAT_MSG_WHISPER_INFORM' or event == 'CHAT_MSG_BN_WHISPER_INFORM' then
         if customerInfo then
@@ -1782,7 +1834,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             if HironCraftScan.QuickReplies then
                 entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
             end
-            table.insert(chat_history, entry)
+            entry.greetingContext = HironCraftScan.RequestTracking.GetReplyContext(customerInfo)
+            HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, entry)
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, entry, false)
             end
@@ -1790,23 +1843,19 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
-    if event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER' then
+    if (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER') and not overrides.classRetry then
         if customerInfo then
             local chat_history = saved(customerInfo, 'chat_history', {})
             local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
             if HironCraftScan.QuickReplies then
                 entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
             end
-            table.insert(chat_history, entry)
+            HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, entry)
+            HironCraftScan.RequestTracking.MarkReply(customerInfo, entry)
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)
             end
 
-            for _, response in pairs(customerInfo.responses) do
-                if response.greeting_sent then
-                    response.customer_answered = true
-                end
-            end
             if HironCraftScan.QuickReplies then
                 HironCraftScan.QuickReplies:OnWhisper(customer, message, customerInfo)
             end
@@ -1817,13 +1866,13 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             -- message that independently matches the craft scanner continues
             -- below, where a terminal row can be reopened as a new request.
             overrides = overrides or {}
-            crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(
+            crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(
                 customer,
                 message,
                 overrides,
                 customerGuid
             )
-            if not crafterInfo then
+            if not crafterInfo and not classPending then
                 return false
             end
             overrides.customerStartedInteraction = true
@@ -1841,14 +1890,31 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     end
 
     if not crafterInfo then
-        crafterInfo, itemID, recipeInfo, itemMatches = GetCrafterForMessage(customer, message, overrides, customerGuid)
+        crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
     if not crafterInfo then
+        if classPending and (overrides.classRetry or 0) < 3 and C_Timer and C_Timer.After then
+            local options = {}
+            for key, value in pairs(overrides) do options[key] = value end
+            options.classRetry = (overrides.classRetry or 0) + 1
+            C_Timer.After(options.classRetry == 1 and 0.1 or 0.5, function()
+                -- Only re-evaluate the request; never send chat from a timer.
+                if time() - options.chatEntry.receivedAt > 5 then return end
+                local guid = customerGuid
+                if not guid and type(options.lineID) == 'number' and C_ChatInfo and C_ChatInfo.GetChatLineSenderGUID then
+                    local ok, value = pcall(C_ChatInfo.GetChatLineSenderGUID, options.lineID)
+                    if ok and not (issecretvalue and issecretvalue(value)) then guid = value end
+                end
+                RunRequestCallback(options, function()
+                    HironCraftScan.OnMessage(event, message, customer, guid, options)
+                end)
+            end)
+        end
         return false
     end
 
     local customerInfo = saved(HironCraftScan.DB.customers, customer, {})
-    customerInfo.guid = customerGuid
+    customerInfo.guid = customerGuid or customerInfo.guid
 
     if itemMatches and #itemMatches > 1 then
         -- Load every base-item link before creating/sending the group. This is
@@ -1858,7 +1924,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             Item:CreateFromItemID(match.itemID):ContinueOnItemLoad(function()
                 pending = pending - 1
                 if pending == 0 and HironCraftScan.DB.customers[customer] then
-                    HandleItemBatch(message, customer, itemMatches, overrides, event)
+                    RunRequestCallback(overrides, function()
+                        HandleItemBatch(message, customer, itemMatches, overrides, event)
+                    end)
                 end
             end)
         end
@@ -1881,13 +1949,18 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         if itemID then
             local item = Item:CreateFromItemID(itemID)
             item:ContinueOnItemLoad(function()
-                handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, event)
+                RunRequestCallback(overrides, function()
+                    if HironCraftScan.DB.customers[customer] then
+                        handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, event)
+                    end
+                end)
             end)
             return false
         end
     end
 
-    handleResponse(message, customer, crafterInfo, itemID, recipeInfo, nil, overrides, event)
+    local response = handleResponse(message, customer, crafterInfo, itemID, recipeInfo, nil, overrides, event)
+    if overrides.manualMatch then return response end
 
     return false
 end
@@ -1902,7 +1975,7 @@ local function OnMessage_(self, event, ...)
     if issecretvalue(message) then return end
 
     local customerGuid = select(12, ...)
-    HironCraftScan.OnMessage(event, message, customer, customerGuid)
+    HironCraftScan.OnMessage(event, message, customer, customerGuid, {lineID=select(11, ...)})
 end
 
 local frame = CreateFrame('frame')

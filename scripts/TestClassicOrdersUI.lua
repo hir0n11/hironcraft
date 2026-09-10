@@ -116,9 +116,10 @@ function methods:HookScript(event, fn)
     self.scripts[event] = function(...) if previous then previous(...) end; fn(...) end
 end
 function methods:Click() if self.scripts.OnClick then self.scripts.OnClick(self, 'LeftButton') end end
-function methods:Show() self.visible = true end
-function methods:Hide() self.visible = false end
+function methods:Show() self.visible = true;self.showCalls=(self.showCalls or 0)+1 end
+function methods:Hide() self.visible = false;self.hideCalls=(self.hideCalls or 0)+1 end
 function methods:SetShown(value) self.visible = not not value end
+methods.SetShadowColor,methods.SetShadowOffset=noop,noop
 function methods:IsShown() return self.visible end
 function methods:IsVisible() return self.visible and (not self.parent or self.parent:IsVisible()) end
 function methods:IsEnabled() return true end
@@ -443,6 +444,13 @@ for _, icon in ipairs(icons) do
     end
 end
 assert(count == 2, 'too many icons entered the next column')
+CL:FitIconBar(row.reagentsBar, icons, 1, 'Reagents')
+assert(row.reagentsBar.more:IsShown() and #row.reagentsBar.allIcons==12,
+    'a repeated layout forgot overflow icons')
+row.reagentsBar:SetWidth(400)
+CL:FitIconBar(row.reagentsBar, icons, 1, 'Reagents')
+assert(not row.reagentsBar.more:IsShown() and icons[12]:IsShown(), 'widening did not restore hidden icons')
+for _,icon in ipairs(icons) do icon:Hide() end
 local moneyText = frame('FontString', row)
 for _, width in ipairs({54,70,94}) do
     moneyText:SetWidth(width)
@@ -553,6 +561,50 @@ CO.selectedOrders = {}
 CL:Refresh(page)
 assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
     and container.rows[3].action.orderID == 103, 'unchecking an order changed its position')
+
+local stableRow=container.rows[2]
+local hideCalls,showCalls=stableRow.hideCalls or 0,stableRow.showCalls or 0
+local oldTooltip=GameTooltip
+local tooltipHides=0
+GameTooltip={IsShown=function() return true end,GetOwner=function() return stableRow end,
+    Hide=function() tooltipHides=tooltipHides+1 end}
+CL:Refresh(page)
+assert((stableRow.hideCalls or 0)==hideCalls and (stableRow.showCalls or 0)==showCalls,
+    'unchanged rows were hidden/shown during background refresh')
+assert(tooltipHides==0, 'background refresh dismissed the hovered row tooltip')
+GameTooltip=oldTooltip
+local oldBuildDisplayReagents,oldItemAPI=CO.BuildDisplayReagents,C_Item
+CO.BuildDisplayReagents=function() return {{itemID=11,quantity=1},{itemID=12,quantity=1}} end
+C_Item={GetItemIconByID=function(id) return tostring(id) end,GetItemCount=function() return 0 end}
+sortOrders[2].tipAmount=10000
+sortOrders[2].rewards={{itemID=13,count=2}}
+CL:Refresh(page)
+local reagent,reward=stableRow.reagentIcons[1],stableRow.rewardIcons[1]
+local reagentHides,rewardHides=reagent.hideCalls or 0,reward.hideCalls or 0
+local reagentShows,rewardShows=reagent.showCalls or 0,reward.showCalls or 0
+CL:Refresh(page)
+assert((reagent.hideCalls or 0)==reagentHides and (reward.hideCalls or 0)==rewardHides
+    and (reagent.showCalls or 0)==reagentShows and (reward.showCalls or 0)==rewardShows,
+    'unchanged reagent/reward icons were hidden and shown again')
+CO.BuildDisplayReagents=function() return {} end
+sortOrders[2].tipAmount,sortOrders[2].rewards=0,{}
+CL:Refresh(page)
+assert(not reagent:IsShown() and not reward:IsShown(), 'removed icons remained visible on a reused row')
+CO.BuildDisplayReagents,C_Item=oldBuildDisplayReagents,oldItemAPI
+page.orderType=Enum.CraftingOrderType.Npc
+local profits={[101]=30,[102]=20,[103]=10}
+CO.GetOrderProfitInfo=function(_,order) return {profit=profits[order.orderID],reagentCost=0} end
+CL:Refresh(page)
+assert(container.rows[1].action.orderID==101)
+profits[101],profits[103]=0,100
+CL:Refresh(page)
+assert(container.rows[1].action.orderID==101 and container.rows[3].action.orderID==103,
+    'background profit recalculation shuffled patron rows')
+CL._sortColumn,CL._sortDir='profit','desc';CL:Refresh(page)
+assert(container.rows[1].action.orderID==103, 'explicit header sort did not reorder the stable list')
+CL._sortColumn=nil;page.orderType=Enum.CraftingOrderType.Personal
+CO.GetOrderProfitInfo=function() return {profit=0,reagentCost=0} end
+CL:Refresh(page)
 
 dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
 UIParent = frame('Frame')
