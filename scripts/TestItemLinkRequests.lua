@@ -469,6 +469,9 @@ local friends={
     {bnetAccountID=70,battleTag='Friend#1234',accountName='Friend',isFriend=true},
     {bnetAccountID=71,battleTag='Friend#5678',accountName='Friend',isFriend=true},
 }
+WOW_PROJECT_ID=1
+friends[1].gameAccountInfo={characterName='Friendbuyer',realmName='Realm',clientProgram='WoW',
+    isOnline=true,wowProjectID=1,isInCurrentRegion=true}
 local bnetSent, bnetOpened, sendOK={},0,true
 function BNGetNumFriends() return #friends end
 C_BattleNet={
@@ -494,6 +497,8 @@ assert(countRows()==2 and #bnetSent==0 and #sent==0, 'BN scan sent chat or dupli
 local info=Scan.DB.customers[key]
 local firstOrder=order(101,key)
 assert(info and not info.guid and not info.responses[101].greeting_sent)
+assert(info.responses[101].customer_answered and info.responses[101].battleNetCharacters['friendbuyer-realm'])
+assert(info.responses[102].battleNetCharacters['friendbuyer-realm'], 'second item lost the verified buyer')
 assert(#info.chat_history==1 and info.chat_history[1].chatType=='BN_WHISPER')
 assert(not info.chat_history[1].message:find('Real name',1,true))
 assert(Scan.NameAndRealmToName(key)=='friend#1234 (Battle.net)')
@@ -548,4 +553,14 @@ HironCraftScanComm.applying_remote_state=true
 Scan.OnMessage('CHAT_MSG_CHANNEL',b,key,nil,{battleNet=true})
 assert(countRows()==previous, 'linked packet injected a private BNet conversation')
 HironCraftScanComm.applying_remote_state=false
+-- Reusing a completed item's row must start a new character snapshot too.
+Scan.QuickReplies.OnWhisper=function() end
+Scan.OrderFulfillment={Status={Fulfilled='fulfilled',Rejected='rejected',Failed='failed'},
+    GetStatus=function() return {status='fulfilled'} end}
+friends[1].gameAccountInfo.characterName='Nextbuyer'
+local beforeRestart=#bnetSent
+bn(a,99)
+assert(info.responses[101].battleNetCharacters['nextbuyer-realm']
+    and not info.responses[101].battleNetCharacters['friendbuyer-realm'], 'new request kept the old buyer snapshot')
+assert(not info.responses[101].greeting_sent and #bnetSent==beforeRestart, 'new friend request sent or consumed a greeting')
 print('Battle.net scanner tests passed (filters, unique rows, history, manual replies, transport, ID reuse, friends, secrets, opt-out, isolation).')

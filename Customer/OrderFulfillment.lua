@@ -60,6 +60,11 @@ local function NamesMatch(lhs, rhs)
     return lhsBase and rhsBase and lhsBase == rhsBase
 end
 
+local function PlayerGUID(value)
+    return not (issecretvalue and issecretvalue(value)) and type(value) == 'string'
+        and #value <= 128 and value:match('^Player%-%d+%-%x+$') and value or nil
+end
+
 local function PlainName(text)
     if type(text) ~= 'string' then
         return nil
@@ -142,6 +147,7 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID)
     local snapshot = {
         orderID = craftingOrderID or orderInfo.orderID,
         customerName = orderInfo.customerName,
+        customerGuid = PlayerGUID(orderInfo.customerGuid),
         spellID = tonumber(orderInfo.spellID),
         itemID = tonumber(orderInfo.itemID) or ItemIDFromLink(orderInfo.outputItemHyperlink),
         parentProfessionID = tonumber(orderInfo.parentProfessionID) or CurrentParentProfessionID(),
@@ -396,6 +402,7 @@ local function SanitizeCompletionNotice(notice)
 
     local clean = {
         customerName = notice.customerName,
+        customerGuid = PlayerGUID(notice.customerGuid),
         updatedAt = tonumber(notice.updatedAt) or 0,
         status = notice.status or OrderFulfillment.Status.Fulfilled,
     }
@@ -465,11 +472,19 @@ local function ResponseForOrder(order)
     return nil
 end
 
-local function CompletionNoticeMatchesOrder(notice, order)
-    if not NamesMatch(notice.customerName, order.customerName) then
-        return false
-    end
+local function IsBattleNetOrder(order)
+    return HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(order.customerName)
+end
 
+local function CustomerMatchesOrder(order, characterName, crafterFullName, customerGuid)
+    if IsBattleNetOrder(order) then
+        return HironCraftScan.BattleNet.MatchesCraftingCustomer
+            and HironCraftScan.BattleNet.MatchesCraftingCustomer(order.customerName, characterName, ResponseForOrder(order), crafterFullName, customerGuid)
+    end
+    return NamesMatch(characterName, order.customerName)
+end
+
+local function CompletionNoticeMatchesOrder(notice, order)
     local response = ResponseForOrder(order)
     if not response then
         return false
@@ -498,13 +513,14 @@ local function CompletionNoticeMatchesOrder(notice, order)
             and notice.spellID
             and responseRecipeID == notice.spellID
         local itemMatches = responseItemID and notice.itemID and responseItemID == notice.itemID
-        return recipeMatches or itemMatches or false
+        return (recipeMatches or itemMatches) and CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid) or false
     end
 
     local responseParentProfessionID = tonumber(response.parentProfID)
-    return not notice.parentProfessionID
+    return (not notice.parentProfessionID
         or not responseParentProfessionID
-        or notice.parentProfessionID == responseParentProfessionID
+        or notice.parentProfessionID == responseParentProfessionID)
+        and CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid)
 end
 
 local function FindCompletionNotice(order)
@@ -799,7 +815,7 @@ function OrderFulfillment:FindMatchingOrder(orderInfo)
     local tied = false
 
     for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
-        if NamesMatch(order.customerName, orderInfo.customerName) then
+        if CustomerMatchesOrder(order, orderInfo.customerName, nil, orderInfo.customerGuid) then
             local ok, response = pcall(HironCraftScan.OrderToResponse, order)
             local responseCrafter = ok
                 and response
@@ -861,7 +877,7 @@ function OrderFulfillment:FindGenericOrders(orderInfo)
     local matches = {}
 
     for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
-        if NamesMatch(order.customerName, orderInfo.customerName) then
+        if CustomerMatchesOrder(order, orderInfo.customerName, nil, orderInfo.customerGuid) then
             local ok, response = pcall(HironCraftScan.OrderToResponse, order)
             local responseCrafter = ok
                 and response
@@ -1112,6 +1128,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
     local notice = {
         orderID = craftingOrderID or orderInfo.orderID,
         customerName = orderInfo.customerName,
+        customerGuid = PlayerGUID(orderInfo.customerGuid),
         spellID = tonumber(orderInfo.spellID),
         itemID = tonumber(orderInfo.itemID),
         parentProfessionID = tonumber(orderInfo.parentProfessionID),
@@ -1184,7 +1201,8 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
 
     if order and orderInfo then
         local response = ResponseForOrder(order)
-        if response then
+        -- Private request tokens must never enter the shared game-order journal.
+        if response and not IsBattleNetOrder(order) then
             orderInfo.requestToken = response.requestToken
             orderInfo.requestTime = tonumber(response.time)
         end
@@ -1209,7 +1227,7 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
     then
         for _, genericOrder in ipairs(OrderFulfillment:FindGenericOrders(orderInfo)) do
             matched = true
-            if not orderInfo.requestToken then
+            if not orderInfo.requestToken and not IsBattleNetOrder(genericOrder) then
                 local genericResponse = ResponseForOrder(genericOrder)
                 if genericResponse then
                     orderInfo.requestToken = genericResponse.requestToken
@@ -1301,7 +1319,7 @@ local function OrderInfoFromDisplayedItem(customerName, itemName, craftingOrderI
     if displayedName then
         local currentCrafter = HironCraftScan.GetPlayerName(true)
         for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
-            if NamesMatch(order.customerName, customerName) then
+            if CustomerMatchesOrder(order, customerName) then
                 local response = ResponseForOrder(order)
                 local responseCrafter = response
                     and (response.crafterFullName or response.crafterName)

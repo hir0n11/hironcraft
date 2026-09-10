@@ -273,7 +273,13 @@ end
 function HironCraftScanCrafterTableCellInteractionMixin:Populate(rowData, dataIndex)
     self.order = rowData.order;
     local response = HironCraftScan.OrderToResponse(rowData.order);
-    if response.greeting_sent then
+    -- As with ordinary incoming whispers, a friend initiating a conversation
+    -- establishes contact. Keep greeting_sent separate: the proposed Battle.net
+    -- greeting still needs a click and must not be skipped by the sender.
+    local incomingBattleNet = HironCraftScan.BattleNet
+        and HironCraftScan.BattleNet.IsCustomer(self.order.customerName)
+        and response.customer_answered
+    if response.greeting_sent or incomingBattleNet then
         self.PlayerIcon:SetAtlas("common-icon-checkmark")
     else
         self.PlayerIcon:SetAtlas("common-icon-redx")

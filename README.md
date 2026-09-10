@@ -25,6 +25,26 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Battle.net order checkmarks (0.3.24)
+
+Incoming friend requests now show established contact in the first indicator,
+without marking the proposed greeting as sent: sending still requires a click.
+Crafting completion matches Battle.net rows through verified WoW character GUIDs
+(preferred), or character and realm names from the current friends list, never
+through a BattleTag/Real ID name. Game-order GUIDs survive completion snapshots
+and linked notices, including orders that omit the customer's realm in the name.
+Only online characters in the current WoW project and region are recorded. Each
+request retains its local character snapshot across logout/alt switches; a new
+request starts fresh. Existing rows can resolve currently available characters.
+
+Ordinary completion notices from linked crafters can update a matching private
+row locally. Battle.net conversations, character snapshots and private request
+tokens are not added to the shared game-order journal. Realm, recipe and request
+age checks still apply, and replaying a notice preserves a manually cleared mark.
+If Blizzard does not expose a verifiable character, the manual mark remains
+available; no character is guessed. Regression tests cover the scanner, contact
+renderer, claim/craft/fulfill events, linked notices, identity isolation and replay.
+
 ## Finisher selection and order warnings (0.3.23)
 
 Open **Finishers** in the right-hand crafting panel. Select one specific bonus

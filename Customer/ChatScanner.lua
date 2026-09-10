@@ -1516,6 +1516,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         response.requestToken = requestToken
         response.conversationCharacter = nil
         response.greetingGroup = nil
+        response.battleNetCharacters = nil
     end
 
     -- Save the request at higher granularities as well so that we don't
@@ -1547,6 +1548,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     if overrides and overrides.battleNet then
         -- Receiving a request is not the same as sending our proposed reply.
         response.greeting_sent = (not restartingTerminalRequest and response.greeting_sent) or overrides.greeted or false
+        HironCraftScan.BattleNet.RememberCharacters(customer, response)
     else
         response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
     end
