@@ -85,7 +85,22 @@ function M.HandleEvent(event, message, _, ...)
 end
 
 function M.ContextCustomer(context)
-    local id = context.bnetIDAccount or (context.accountInfo and context.accountInfo.bnetAccountID)
+    if Secret(context) or type(context) ~= 'table' then return nil end
+    local id = context.bnetIDAccount
+    if Secret(id) then return nil end
+    if id == nil then
+        local info = context.accountInfo
+        if Secret(info) or type(info) ~= 'table' then return nil end
+        id = info.bnetAccountID
+    end
+    if Secret(id) then return nil end
+    -- Chat hyperlinks pass a digit string through FriendsFrame_ShowBNDropdown;
+    -- friend-list menus use numbers. Never substitute a display/character name
+    -- (or a different accountInfo ID) when an explicit ID is invalid.
+    if type(id) == 'string' then
+        if not id:match('^%d+$') then return nil end
+        id = tonumber(id)
+    end
     return M.FromID(id)
 end
 

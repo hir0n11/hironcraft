@@ -24,7 +24,8 @@ local friend={isFriend=true,battleTag='Friend#1234',bnetAccountID=30,accountName
 function BNGetNumFriends() return 1 end
 C_BattleNet={GetAccountInfoByID=function(id) if id==friend.bnetAccountID then return friend end end,
     GetFriendAccountInfo=function() return friend end}
-function issecretvalue() return false end
+local secret={}
+function issecretvalue(value) return value==secret end
 C_ChatInfo={GetChatLineText=function(id) assert(id==44);return '[Item request]' end,
     GetChatLineSenderGUID=function() return 'BNet-GUID' end}
 assert(loadfile('Customer/BattleNet.lua'))('HironCraft',Scan)
@@ -37,7 +38,9 @@ local function menu(name,context)
     local buttons={}
     local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end}
     function root:CreateButton(label,click)
-        local button={label=label,click=click,SetTooltip=noop};buttons[#buttons+1]=button;return button
+        local button={label=label,click=click,SetTooltip=noop,
+            CreateButton=self.CreateButton,CreateDivider=noop,CreateTitle=self.CreateTitle}
+        buttons[#buttons+1]=button;return button
     end
     menus[name](nil,root,context)
     return buttons
@@ -64,6 +67,35 @@ assert(#menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=999})==0, 'unknown friend has 
 buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30})
 find(buttons,'Match Smith Blacksmithing').click()
 assert(#matched==1, 'friend-list menu tried to read a missing chat line')
+
+-- Blizzard's BNPlayer hyperlink handler passes the split account ID as a
+-- STRING to FriendsFrame_ShowBNDropdown, and does not forward the chat line ID.
+-- UnitPopup adds accountInfo, but retains the original string bnetIDAccount.
+local chatContext={name='Friend',chatTarget='Friend',chatType='BN_WHISPER',
+    bnetIDAccount='30',accountInfo=friend}
+buttons=menu('MENU_UNIT_BN_FRIEND',chatContext)
+assert(#sent==2 and #matched==1, 'opening the real chat context took an action')
+find(buttons,'Price').click()
+assert(#sent==3 and sent[3].customer==key, 'chat hyperlink reply lost its Battle.net recipient')
+find(buttons,'Match Smith Blacksmithing').click()
+assert(#matched==1, 'chat hyperlink menu tried to read an absent line ID')
+Scan.DB.settings.collapse_chat_context=true
+buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount='30',chatTarget='Friend'})
+find(buttons,'HironCraftScan')
+find(buttons,'Price').click()
+assert(#sent==4 and sent[4].customer==key, 'collapsed Battle.net reply menu failed')
+Scan.DB.settings.collapse_chat_context=false
+
+assert(Scan.BattleNet.ContextCustomer({accountInfo=friend})==key)
+assert(Scan.BattleNet.ContextCustomer({bnetIDAccount=30})==key)
+for _,badID in ipairs({'not-an-id','0','-30','30.5','3e1',' 30 ',false,{},secret}) do
+    assert(#menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=badID,accountInfo=friend})==0,
+        'invalid/secret explicit ID fell back to another recipient')
+end
+assert(not Scan.BattleNet.ContextCustomer(nil))
+assert(not Scan.BattleNet.ContextCustomer(secret))
+assert(not Scan.BattleNet.ContextCustomer({accountInfo=secret}))
+assert(not Scan.BattleNet.ContextCustomer({accountInfo='invalid'}))
 
 local comm={}
 LibStub=function() return {NewAddon=function() return comm end} end
@@ -92,4 +124,4 @@ end
 local newest=assert(findUpvalue(comm.ShareCharacterData,'NewestOrderEntries'))
 local exported=newest(Scan.OrderFulfillment:GetStatuses())
 assert(#exported==1 and exported[1].customerName=='Normal-Realm', 'private identity leaked into journal/snapshot')
-print('Battle.net menu/sync tests passed (manual matching, explanations, ignore, missing context, ordinary chat, private data isolation).')
+print('Battle.net menu/sync tests passed (chat hyperlink string IDs, collapsed replies, secret/invalid context, manual matching, explanations, ignore, ordinary chat, private data isolation).')

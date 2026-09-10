@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Battle.net right-click reply menu fix (0.3.22)
+
+Prepared replies now appear when right-clicking a Battle.net name in chat, not
+just in friend-list contexts. Chat hyperlinks supply the account ID as a numeric
+string; the menu now safely normalizes it before resolving the friend. Invalid
+or secret IDs still fail closed, without falling back to a character whisper.
+Opening the menu never sends a message; selecting a prepared reply sends it to
+the corresponding Battle.net conversation. Expanded and collapsed menus are
+covered by regression tests using the chat hyperlink's actual context shape.
+
 ## Battle.net friend whispers (0.3.21)
 
 The **Scan Battle.net whispers** setting is enabled by default. Incoming friend
