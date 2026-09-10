@@ -25,19 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Save chat text into scanner settings (0.3.28)
+## Select chat keywords and route them from one menu (0.3.29)
 
 Right-click a chat message and choose **HironCraftScan - Save chat text** to
-open an editable copy of that message. The three explicit buttons save it as a
-**Prepared response**, a global **Scan keyword**, or an **Exclusion**, in that
-order. Nothing is sent to chat by opening or using this editor.
+open a plain, selectable copy of that message. Item links are displayed as item
+names so they do not intercept selection. Select a word or phrase and right-click
+the selection to choose one of four actions:
 
-Prepared responses retain complete item links and ask for their menu name.
-Keywords and exclusions remove chat colors and textures, convert item links to
-visible item names, normalize whitespace and avoid exact duplicates. New filter
-phrases reload the active scanner immediately and update the visible global
-settings field when it is not being edited. The message editor uses unlimited
-text without displaying Blizzard's misleading negative character counter.
+- add the key to an existing quick response;
+- add it to global scanning;
+- add it to a selected crafter's profession scanning;
+- create a new quick response with the selected key prefilled.
+
+The editor supports multiline text, wraps to its actual width and uses unlimited
+text without Blizzard's misleading negative character counter. Duplicate keys
+are rejected. Scanner changes apply immediately; quick responses and profession
+changes continue through their existing linked-account synchronization. Nothing
+is sent to customer chat by any picker action.
 
 ## Saved order selection and configurable knowledge queue (0.3.26)
 

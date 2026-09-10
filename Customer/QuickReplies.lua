@@ -172,6 +172,32 @@ function QuickReplies:NotifyConfigChanged()
     end
 end
 
+function QuickReplies:AddKeyword(key, keyword)
+    keyword = Trim(keyword):gsub('[,\r\n]+', ' '):gsub('%s+', ' ')
+    if keyword == '' then return false, 'missing_text' end
+
+    local config = EnsureConfig()
+    local template = config.templates[key]
+    if type(template) ~= 'table' or key == REJECTED_ORDER_TEMPLATE_KEY then
+        return false, 'invalid_quick_reply'
+    end
+
+    local wanted = keyword:lower()
+    local current = template.keywords or ''
+    for entry in current:gmatch('[^,\n]+') do
+        if Trim(entry):lower() == wanted then
+            return false, 'duplicate_filter'
+        end
+    end
+
+    template.keywords = current == '' and keyword or current .. ', ' .. keyword
+    self:NotifyConfigChanged()
+    if HironCraftScan.Events then
+        HironCraftScan.Events:Emit('QUICK_REPLIES_UPDATED')
+    end
+    return true
+end
+
 function QuickReplies:CreateCustomTemplate(label, keywords, response)
     label = Trim(label)
     if not self:IsLabelAvailable(label) then

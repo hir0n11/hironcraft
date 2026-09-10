@@ -343,7 +343,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
     self:Layout(self.isCollapsed)
 end
 
-function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog()
+function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog(initialKeywords)
     local function Validator(index, value)
         if index == 1 and not HironCraftScan.QuickReplies:IsLabelAvailable(value) then
             return { error = L('Quick reply duplicate name') }
@@ -368,7 +368,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog()
         width = 520,
         OnAccept = function(label, keywords, response)
             if HironCraftScan.QuickReplies:CreateCustomTemplate(label, keywords, response) then
-                self:RefreshRows()
+                if self then self:RefreshRows() end
             end
         end,
         elements = {
@@ -387,6 +387,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog()
             {
                 type = HironCraftScan.Dialog.Element.EditBox,
                 multiline = true,
+                initial_text = initialKeywords,
             },
             {
                 type = HironCraftScan.Dialog.Element.Text,
@@ -398,6 +399,14 @@ function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog()
             },
         },
     })
+end
+
+function HironCraftScan.Config.ShowCreateQuickReplyDialog(initialKeywords)
+    if panel then
+        panel:ShowCreateDialog(initialKeywords)
+    else
+        HironCraftScanQuickReplyConfigPanelMixin.ShowCreateDialog(nil, initialKeywords)
+    end
 end
 
 local function ParseTemplateKeyword(keyword)

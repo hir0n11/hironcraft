@@ -16,8 +16,8 @@ local function LinkLabel(linkText)
     return (linkText:gsub('^%[(.*)%]$', '%1'))
 end
 
--- Filters are plain comma-separated phrases. Chat hyperlinks, textures and
--- colors must not be copied into them: item links become their visible names.
+-- The picker is only for matching keys. Display links as their readable names
+-- so Blizzard's hyperlink mouse handling cannot interfere with text selection.
 function Capture.NormalizeFilterText(text)
     if type(text) ~= 'string' then return '' end
     text = text:gsub('|H.-|h(.-)|h', LinkLabel)
@@ -31,20 +31,21 @@ function Capture.NormalizeFilterText(text)
     return Trim(text)
 end
 
-function Capture.DefaultLabel(text)
-    local words = {}
-    local length = 0
-    for word in Capture.NormalizeFilterText(text):gmatch('%S+') do
-        if #words >= 5 then break end
-        local nextLength = length + #word + (#words > 0 and 1 or 0)
-        if #words > 0 and nextLength > 60 then break end
-        words[#words + 1] = word
-        length = nextLength
+local function AppendPhrase(current, text)
+    local value = Capture.NormalizeFilterText(text)
+    if value == '' then return nil, 'missing_text' end
+
+    current = current or ''
+    local wanted = value:lower()
+    for entry in current:gmatch('([^,]+)') do
+        if Trim(entry):lower() == wanted then
+            return nil, 'duplicate_filter'
+        end
     end
-    return table.concat(words, ' ')
+    return current == '' and value or current .. ', ' .. value
 end
 
-local function RefreshVisibleFilter(setting)
+local function RefreshVisibleGlobalFilter(setting)
     local panel = _G.HironCraftScanGeneralConfigPanel
     local matching = panel and panel.Matching
     local field = matching and (setting == 'inclusions' and matching.Keywords or matching.Exclusions)
@@ -54,44 +55,47 @@ local function RefreshVisibleFilter(setting)
     end
 end
 
-function Capture.SaveExplanation(label, text)
-    label = Trim(label)
-    text = Trim(text)
-    if label == '' then return false, 'missing_label' end
-    if text == '' then return false, 'missing_text' end
-    if label == 'rev' then return false, 'reserved_label' end
-
-    local explanations = HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'explanations', {})
-    if explanations[label] ~= nil then return false, 'duplicate_label' end
-    explanations[label] = text
-    HironCraftScanComm:ShareCustomExplanations(explanations)
-    return true
-end
-
-function Capture.SaveFilter(setting, text)
-    if setting ~= 'inclusions' and setting ~= 'exclusions' then
-        return false, 'invalid_setting'
-    end
-    local value = Capture.NormalizeFilterText(text)
-    if value == '' then return false, 'missing_text' end
-
-    local current = HironCraftScan.DB.settings[setting] or ''
-    local wanted = string.lower(value)
-    for entry in current:gmatch('([^,]+)') do
-        if string.lower(Trim(entry)) == wanted then
-            return false, 'duplicate_filter'
-        end
-    end
-
-    HironCraftScan.DB.settings[setting] = current == '' and value or current .. ', ' .. value
-    RefreshVisibleFilter(setting)
+function Capture.SaveGlobalKeyword(text)
+    local updated, reason = AppendPhrase(HironCraftScan.DB.settings.inclusions, text)
+    if not updated then return false, reason end
+    HironCraftScan.DB.settings.inclusions = updated
+    RefreshVisibleGlobalFilter('inclusions')
     HironCraftScan.Scanner.LoadConfig()
     return true
 end
 
+function Capture.SaveProfessionKeyword(char, parentProfessionID, text)
+    local charConfig = HironCraftScan.DB.characters[char]
+    local ppConfig = charConfig and charConfig.parent_professions[parentProfessionID]
+    if not ppConfig then return false, 'invalid_profession' end
+
+    local current = ppConfig.keywords
+    if current == nil then
+        local defaultID = HironCraftScan.CONST.PROFESSION_DEFAULT_KEYWORDS[parentProfessionID]
+        current = defaultID and L(defaultID) or ''
+    end
+    local updated, reason = AppendPhrase(current, text)
+    if not updated then return false, reason end
+
+    ppConfig.keywords = updated
+    if HironCraftScanComm and HironCraftScanComm.ShareCharacterModification then
+        local ppChangeOnly = true
+        HironCraftScanComm:ShareCharacterModification(char, parentProfessionID, ppChangeOnly)
+    end
+    HironCraftScan.Scanner.LoadConfig()
+    return true
+end
+
+function Capture.SaveQuickReplyKeyword(templateKey, text)
+    local value = Capture.NormalizeFilterText(text)
+    if value == '' then return false, 'missing_text' end
+    if not HironCraftScan.QuickReplies or not HironCraftScan.QuickReplies.AddKeyword then
+        return false, 'quick_replies_unavailable'
+    end
+    return HironCraftScan.QuickReplies:AddKeyword(templateKey, value)
+end
+
 function Capture.ConfigureMessageScrollFrame(scrollFrame)
-    -- InputScrollFrameTemplate otherwise treats the unlimited value as a
-    -- zero-character limit and renders a large negative counter in the corner.
     scrollFrame.maxLetters = 0
     scrollFrame.hideCharCount = true
     scrollFrame.scrollBarHideIfUnscrollable = true
@@ -102,15 +106,116 @@ function Capture.ConfigureMessageScrollFrame(scrollFrame)
     if scrollFrame.CharCount then scrollFrame.CharCount:Hide() end
 end
 
-local function SetStatus(frame, reason)
-    local messages = {
-        missing_label = L('Enter a response name.'),
-        missing_text = L('The edited message is empty.'),
-        reserved_label = L("'rev' is a reserved response name."),
-        duplicate_label = L('A prepared response with this name already exists.'),
-        duplicate_filter = L('This phrase is already in the selected list.'),
+-- SimpleEditBoxAPI exposes HighlightText and Insert, but no selection getter.
+-- Insert replaces the current selection, so use a unique marker to discover
+-- its exact byte range, then immediately restore both the text and highlight.
+function Capture.ExtractSelectedText(editBox)
+    local original = editBox:GetText()
+    if type(original) ~= 'string' or original == '' then return nil end
+
+    local marker = '__HIRONCRAFT_SELECTED_TEXT__'
+    while original:find(marker, 1, true) do marker = marker .. '_' end
+    editBox:Insert(marker)
+    local changed = editBox:GetText()
+    local markerStart = type(changed) == 'string' and changed:find(marker, 1, true)
+    if not markerStart then
+        editBox:SetText(original)
+        return nil
+    end
+
+    local prefixLength = markerStart - 1
+    local suffixLength = #changed - (prefixLength + #marker)
+    local selectionEnd = #original - suffixLength
+    editBox:SetText(original)
+    editBox:SetCursorPosition(selectionEnd)
+    editBox:HighlightText(prefixLength, selectionEnd)
+    if selectionEnd <= prefixLength then return nil end
+    return original:sub(prefixLength + 1, selectionEnd)
+end
+
+local function SetStatus(frame, ok, reason)
+    local errors = {
+        missing_text = L('Select a word or phrase first.'),
+        duplicate_filter = L('This keyword is already present.'),
+        invalid_profession = L('This profession is no longer available.'),
+        invalid_quick_reply = L('This quick response is no longer available.'),
+        quick_replies_unavailable = L('Quick responses are not available.'),
     }
-    frame.Status:SetText(messages[reason] or L('The text could not be saved.'))
+    if ok then
+        frame.Status:SetTextColor(0.2, 1, 0.2)
+        frame.Status:SetText(L('Keyword added.'))
+    else
+        frame.Status:SetTextColor(1, 0.2, 0.2)
+        frame.Status:SetText(errors[reason] or L('The keyword could not be added.'))
+    end
+end
+
+local function ProfessionLabel(char, parentProfessionID)
+    local name = HironCraftScan.ColorizeCrafterName(char)
+    local professionName = HironCraftScan.Utils.ProfessionNameByID(parentProfessionID)
+    local profession = HironCraftScan.Utils.ColorizeProfessionName(parentProfessionID, professionName)
+    return name .. ' - ' .. profession
+end
+
+function Capture.PopulateSelectionMenu(rootDescription, frame, selectedText)
+    selectedText = Capture.NormalizeFilterText(selectedText)
+    if selectedText == '' then
+        SetStatus(frame, false, 'missing_text')
+        return false
+    end
+
+    rootDescription:CreateTitle(string.format(L('Selected: %s'), selectedText))
+
+    local existing = rootDescription:CreateButton(L('Add to existing quick response'))
+    local quickReplies = HironCraftScan.QuickReplies
+    if quickReplies then
+        for _, definition in ipairs(quickReplies:GetDefinitions()) do
+            if not definition.eventOnly then
+                local key = definition.key
+                existing:CreateButton(quickReplies:GetTemplateLabel(key), function()
+                    SetStatus(frame, Capture.SaveQuickReplyKeyword(key, selectedText))
+                end)
+            end
+        end
+    end
+
+    rootDescription:CreateButton(L('Add to global scanning'), function()
+        SetStatus(frame, Capture.SaveGlobalKeyword(selectedText))
+    end)
+
+    local professions = rootDescription:CreateButton(L('Add to profession scanning'))
+    for _, crafterInfo in ipairs(HironCraftScan:GetSortedCrafters()) do
+        local char = crafterInfo.name
+        local parentProfessionID = crafterInfo.parentProfessionID
+        professions:CreateButton(ProfessionLabel(char, parentProfessionID), function()
+            SetStatus(frame, Capture.SaveProfessionKeyword(char, parentProfessionID, selectedText))
+        end)
+    end
+
+    rootDescription:CreateButton(L('Create new quick response for this keyword'), function()
+        if HironCraftScan.Config.ShowCreateQuickReplyDialog then
+            HironCraftScan.Config.ShowCreateQuickReplyDialog(selectedText)
+        else
+            SetStatus(frame, false, 'quick_replies_unavailable')
+        end
+    end)
+    return true
+end
+
+function Capture.OpenSelectionMenu(editBox, frame, selectedText)
+    selectedText = selectedText or Capture.ExtractSelectedText(editBox)
+    if not selectedText or Trim(selectedText) == '' then
+        SetStatus(frame, false, 'missing_text')
+        return false
+    end
+    if not MenuUtil or not MenuUtil.CreateContextMenu then
+        SetStatus(frame, false, 'quick_replies_unavailable')
+        return false
+    end
+    MenuUtil.CreateContextMenu(editBox, function(_, rootDescription)
+        Capture.PopulateSelectionMenu(rootDescription, frame, selectedText)
+    end)
+    return true
 end
 
 local function CreateEditor()
@@ -120,12 +225,12 @@ local function CreateEditor()
         UIParent,
         'DefaultPanelFlatTemplate'
     )
-    frame:SetSize(570, 300)
+    frame:SetSize(620, 255)
     frame:SetFrameStrata('DIALOG')
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:SetMovable(true)
-    frame:SetTitle(L('Save chat text'))
+    frame:SetTitle(L('Select chat text'))
     HironCraftScan.Frames.makeMovable(frame)
 
     local close = CreateFrame('Button', nil, frame, 'UIPanelCloseButton')
@@ -133,76 +238,52 @@ local function CreateEditor()
     close:SetScript('OnClick', function() frame:Hide() end)
 
     local help = frame:CreateFontString(nil, 'ARTWORK', 'GameFontHighlight')
-    help:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, -38)
-    help:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -24, -38)
+    help:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, -40)
+    help:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -24, -40)
     help:SetJustifyH('LEFT')
-    help:SetText(L('Edit the message, then choose where to save it. Nothing is sent.'))
-
-    local labelCaption = frame:CreateFontString(nil, 'ARTWORK', 'GameFontNormal')
-    labelCaption:SetPoint('TOPLEFT', help, 'BOTTOMLEFT', 0, -12)
-    labelCaption:SetText(L('Prepared response name'))
-
-    frame.Label = CreateFrame('EditBox', nil, frame, 'InputBoxTemplate')
-    frame.Label:SetAutoFocus(false)
-    frame.Label:SetPoint('TOPLEFT', labelCaption, 'BOTTOMLEFT', 4, -4)
-    frame.Label:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -28, 0)
-    frame.Label:SetHeight(22)
-    frame.Label:SetScript('OnEscapePressed', function(self) self:ClearFocus(); frame:Hide() end)
-
-    local messageCaption = frame:CreateFontString(nil, 'ARTWORK', 'GameFontNormal')
-    messageCaption:SetPoint('TOPLEFT', frame.Label, 'BOTTOMLEFT', -4, -10)
-    messageCaption:SetText(L('Message text'))
+    help:SetText(L('Select a word or phrase in the message, then right-click the selection.'))
 
     frame.Message = CreateFrame('ScrollFrame', nil, frame, 'InputScrollFrameTemplate')
-    frame.Message:SetPoint('TOPLEFT', messageCaption, 'BOTTOMLEFT', 0, -4)
-    frame.Message:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -24, 73)
+    frame.Message:SetPoint('TOPLEFT', help, 'BOTTOMLEFT', 0, -14)
+    frame.Message:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -24, 52)
     local editBox = frame.Message.EditBox
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:SetFontObject('ChatFontNormal')
     editBox:SetPoint('TOPLEFT', frame.Message, 'TOPLEFT', 0, 0)
-    editBox:SetWidth(500)
     editBox:SetMaxLetters(0)
-    if editBox.SetHyperlinksEnabled then editBox:SetHyperlinksEnabled(true) end
     Capture.ConfigureMessageScrollFrame(frame.Message)
     InputScrollFrame_OnLoad(frame.Message)
     Capture.ConfigureMessageScrollFrame(frame.Message)
     editBox:SetScript('OnTextChanged', InputScrollFrame_OnTextChanged)
+    editBox:SetScript('OnEnterPressed', function(self) self:Insert('\n') end)
     editBox:SetScript('OnEscapePressed', function(self) self:ClearFocus(); frame:Hide() end)
+    editBox:SetScript('OnMouseDown', function(self, button)
+        if button == 'RightButton' then
+            self.hironCraftSelectedText = Capture.ExtractSelectedText(self)
+        end
+    end)
+    editBox:SetScript('OnMouseUp', function(self, button)
+        if button == 'RightButton' then
+            local selectedText = self.hironCraftSelectedText
+            self.hironCraftSelectedText = nil
+            Capture.OpenSelectionMenu(self, frame, selectedText)
+        end
+    end)
 
-    frame.Status = frame:CreateFontString(nil, 'ARTWORK', 'GameFontRedSmall')
-    frame.Status:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 24, 54)
-    frame.Status:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -24, 54)
+    local function UpdateMessageWidth()
+        local width = frame.Message:GetWidth()
+        if width and width > 30 then editBox:SetWidth(width - 20) end
+    end
+    frame.Message:HookScript('OnSizeChanged', UpdateMessageWidth)
+    if C_Timer and C_Timer.After then C_Timer.After(0, UpdateMessageWidth) end
+
+    frame.Status = frame:CreateFontString(nil, 'ARTWORK', 'GameFontHighlightSmall')
+    frame.Status:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 24, 24)
+    frame.Status:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -24, 24)
     frame.Status:SetJustifyH('LEFT')
 
-    local function AddButton(text, width, relative, offset, callback)
-        local button = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
-        button:SetSize(width, 22)
-        if relative then
-            button:SetPoint('LEFT', relative, 'RIGHT', offset, 0)
-        else
-            button:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 24, 20)
-        end
-        button:SetText(text)
-        button:SetScript('OnClick', callback)
-        return button
-    end
-
-    frame.ExplanationButton = AddButton(L('Prepared response'), 170, nil, 0, function()
-        local ok, reason = Capture.SaveExplanation(frame.Label:GetText(), editBox:GetText())
-        if ok then frame:Hide() else SetStatus(frame, reason) end
-    end)
-    frame.InclusionButton = AddButton(L('Scan keyword'), 150, frame.ExplanationButton, 8, function()
-        local ok, reason = Capture.SaveFilter('inclusions', editBox:GetText())
-        if ok then frame:Hide() else SetStatus(frame, reason) end
-    end)
-    frame.ExclusionButton = AddButton(L('Exclusion'), 150, frame.InclusionButton, 8, function()
-        local ok, reason = Capture.SaveFilter('exclusions', editBox:GetText())
-        if ok then frame:Hide() else SetStatus(frame, reason) end
-    end)
-
     frame:SetScript('OnHide', function()
-        frame.Label:ClearFocus()
         editBox:ClearFocus()
         frame.Status:SetText('')
     end)
@@ -216,8 +297,9 @@ function Capture.Show(text)
         return false
     end
     local frame = _G.HironCraftScanChatTextCaptureFrame or CreateEditor()
-    frame.Label:SetText(Capture.DefaultLabel(text))
-    frame.Message.EditBox:SetText(text)
+    local plainText = Capture.NormalizeFilterText(text)
+    if plainText == '' then return false end
+    frame.Message.EditBox:SetText(plainText)
     frame.Status:SetText('')
     frame:ClearAllPoints()
     frame:SetPoint('CENTER', UIParent, 'CENTER', 0, 0)
