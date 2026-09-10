@@ -2957,6 +2957,50 @@ function CO:ShouldRejectForMissingCustomerReagents(order, pageFrame)
     return #missing > 0, missing
 end
 
+-- Presentation only: never arm a rejection or prepare/mutate the live order
+-- while painting a row. The action still rechecks the authoritative order.
+function CO:GetOrderProblemReason(order, pageFrame, action)
+    if not order or not order.orderID or action == "fulfill" or action == "fulfilling" then return nil end
+    if self.GetEffectiveOrder then order = self:GetEffectiveOrder(order.orderID, order) or order end
+    if self:ShouldRejectForMissingCustomerReagents(order, pageFrame) then
+        return T("COA_PROBLEM_CUSTOMER_REAGENTS", "Likely decline: the customer has not supplied all required reagents.")
+    end
+    if self.IsOrderReadyForQualityRejection and self:IsOrderReadyForQualityRejection(order) then
+        return T("COA_PROBLEM_FINISHER_LIMIT", "Likely decline: the requested quality cannot be reached with available finishers within the skill limit.")
+    end
+    if self.GetRecipeKnownState and self:GetRecipeKnownState(order) == false then
+        return T("COA_ACTION_UNKNOWN_RECIPE", "Unknown recipe")
+    end
+    local key = OrderKey(order.orderID)
+    if key and self.orderIssues and self.orderIssues[key] then return self.orderIssues[key] end
+    if self.CanSupplyCrafterReagentsForQueue and not self:CanSupplyCrafterReagentsForQueue(order, false) then
+        return T("COA_ACTION_NO_REAGENTS", "Missing reagents")
+    end
+    if not self:IsPersonalCraftingOrder(order, pageFrame) then return nil end
+    local target = self:GetOrderRequestedQuality(order)
+    if target <= 0 then return nil end
+    local useConc = key and self.useConcentration and self.useConcentration[key] == true
+    local quality = self:GetOrderQualityInfo(order, useConc == true, false)
+    -- Missing/zero quality is unknown, not evidence that an order is bad.
+    if not quality or not tonumber(quality.quality) or quality.quality <= 0 or quality.quality >= target then return nil end
+    if not self.IsAutoFinishingEnabled or not self:IsAutoFinishingEnabled() then
+        return T("COA_PROBLEM_QUALITY", "Requested quality is not reached with the current settings.")
+    end
+    local skill, upper = tonumber(quality.skill), tonumber(quality.upper)
+    if not skill or not upper or upper <= skill or not self.GetFinishingReagentCandidates then return nil end
+    local candidates, ready = self:GetFinishingReagentCandidates(order)
+    if not ready then return nil end
+    local gap = math.ceil(upper - skill)
+    local limit = self:GetAutoFinishingMaxSkillBonus()
+    for _, candidate in ipairs(candidates) do
+        if candidate.skillBonus and candidate.skillBonus >= gap and candidate.skillBonus <= limit
+            and candidate.owned >= candidate.quantity then
+            return nil -- Potentially solvable. Confirm only on the player's action.
+        end
+    end
+    return T("COA_PROBLEM_FINISHER_LIMIT", "Likely decline: the requested quality cannot be reached with available finishers within the skill limit.")
+end
+
 function CO:GetReagentCandidates(order, reagentEntry)
     local candidates = {}
     if not order or not reagentEntry then return candidates end

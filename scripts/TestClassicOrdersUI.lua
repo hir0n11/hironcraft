@@ -70,6 +70,7 @@ function methods:GetHeight() local _,_,_,h = bounds(self); return h end
 function methods:GetParent() return self.parent end
 function methods:SetParent(parent) self.parent = parent end
 function methods:SetScale(scale) self.scale = scale end
+function methods:SetClampedToScreen(value) self.clamped = value end
 function methods:GetEffectiveScale() return (self.scale or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
 function methods:SetFrameStrata(strata) self.strata = strata end
 function methods:GetFrameStrata() return self.strata or 'MEDIUM' end
@@ -465,6 +466,69 @@ assert(rowCalls == 1, 'row action did not dispatch exactly once')
 row.scripts.OnEnter(row)
 assert(focusCalls == 1, 'row refresh accumulated hover callbacks')
 
+-- A warning must remain red when selected, and disappear on row reuse/recovery.
+CO.GetOrderProblemReason=function() return 'Missing customer reagents' end
+CO.IsOrderSelected=function() return true end
+CL:PopulateRow(row,{orderID=42,spellID=1234})
+assert(row._problemReason and row.bg.color[1]>.7 and row.bg.color[2]<.1 and row.bg.color[4]>.2,
+    'selection masked the red order warning')
+CO.GetOrderProblemReason=function() return nil end
+CL:PopulateRow(row,{orderID=43,spellID=1234})
+assert(not row._problemReason and row.bg.color[2]>.5, 'reused row retained a red warning')
+CO.IsOrderSelected=nil
+
+-- Exercise the actual finisher settings menu callbacks, including the picker.
+local originalLabel=CO.GetAutoFinishingLabel
+dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')
+dofile('ProfitHub/Orders/CraftingOrders/FinishingReagents.lua')
+CO.InvalidateOrderCaches=noop
+CO.RefreshVisibleRowsSoon=noop
+local menuOptions
+PT.Dropdown={Show=function(_,options) menuOptions=options end}
+local function menuEntry(key)
+    for _,item in ipairs(menuOptions.items) do if item.text==PT.L[key] then return item end end
+    error('Missing finisher menu entry '..key)
+end
+CO:OpenAutoFinishingMenu(panel.finisherButton)
+assert(menuOptions.keepOpen and menuOptions.maxHeight<=420)
+assert(menuEntry('COA_FINISHER_CRAFT').checked and not menuEntry('COA_FINISHER_RECRAFT').checked)
+menuEntry('COA_FINISHER_RECRAFT').onClick()
+assert(CO:GetQueueOptions().preferredFinisherRecraft==true)
+menuEntry('COA_FINISHER_CRAFT').onClick()
+assert(CO:GetQueueOptions().preferredFinisherCraft==false)
+menuEntry('COA_FINISHER_SKILL_PRIORITY').onClick()
+assert(CO:IsAutoFinishingEnabled())
+menuEntry('COA_FINISHER_PICK').onClick()
+local selectedEntry
+for _,item in ipairs(menuOptions.items) do if item.itemID==247726 then selectedEntry=item end end
+assert(selectedEntry, 'Resourceful Routing is absent from the item picker')
+selectedEntry.onClick()
+assert(CO:GetPreferredFinishingItemID()==247726)
+CO:OpenPreferredFinishingMenu(panel.finisherButton)
+menuEntry('COA_FINISHER_NONE').onClick()
+assert(not CO:GetPreferredFinishingItemID())
+UIParent=frame('Frame')
+UIParent:SetSize(1330,740)
+anchor:SetWidth(792);anchor:SetHeight(590)
+CO:AnchorControlPanelToOrderList(panel,page)
+dofile('ProfitHub/Core/UI/Dropdown.lua')
+CO:OpenAutoFinishingMenu(panel.finisherButton)
+assert(PT.Dropdown.frame:IsVisible() and PT.Dropdown.frame:GetHeight()<420)
+local dx,dy,dw,dh=bounds(PT.Dropdown.frame)
+assert(dx>=0 and dx+dw<=1330 and dy+dh<=740, string.format('finisher menu escapes the preview screen: %g %g %g %g',dx,dy,dw,dh))
+for _,itemRow in ipairs(PT.Dropdown.frame.items) do
+    assert(itemRow.text:GetWidth()>=itemRow.text:GetStringWidth(), 'finisher label is clipped')
+end
+PT.Dropdown:Hide()
+CO.GetAutoFinishingLabel=originalLabel
+-- Restore the lightweight row-fixture boundaries after testing real settings.
+CO.GetOrderProblemReason=nil
+CO.IsOrderCraftableForActionSort=nil
+CO.CanSupplyCrafterReagentsForQueue=nil
+CO.ApplyQueueReagentModeToOrder=nil
+CO.GetOrderProfitInfo=nil
+CO.OrderRequiresConcentrationForQueue=nil
+
 -- Selecting a lower row may repaint it, but must not promote it above the
 -- list order (the recorded regression was the third row jumping to first).
 local sortOrders = {
@@ -519,8 +583,10 @@ if arg[1] == '--scene' then
     panel.weeklyQuestIndicator.text:SetText('Квест')
     panel.shopCostText:SetText('39g')
     container.countText:SetText('Заказов: 3')
+    for _, existing in ipairs(container.rows or {}) do existing:Hide() end
     for i, name in ipairs({"Farstrider’s Plated Bracers", "Silvermoon Agent’s Deflectors", "Martyr’s Bindings"}) do
         local demo = i == 1 and row or CL:CreateRow(container.content, i)
+        demo:Show()
         demo:ClearAllPoints()
         demo:SetPoint('TOPLEFT', container.content, 'TOPLEFT', 0, -(i-1)*72)
         demo:SetPoint('TOPRIGHT', container.content, 'TOPRIGHT', 0, -(i-1)*72)
@@ -532,9 +598,11 @@ if arg[1] == '--scene' then
         demo.reward:SetWidth(82); demo.reward:SetText(({'6000 g','2000 g','1000 g'})[i])
         demo.concBtn.text:SetText(i == 2 and '84' or '—')
         demo.action.text:SetText(i == 1 and 'Крафт' or 'Взять')
+        CL:ApplyOrderProblemStyle(demo, i==2 and 'Клиент приложил не все обязательные реагенты' or nil, false)
     end
     if arg[3] == 'queue' then panel.classicTabs.queue:Click() end
     if arg[3] == 'collapsed' then panel.collapseButton:Click() end
+    if arg[3] == 'finishers' then CO:OpenAutoFinishingMenu(panel.finisherButton) end
     local function quote(value)
         return '"' .. tostring(value or ''):gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n'):gsub('\r','') .. '"'
     end
@@ -542,8 +610,10 @@ if arg[1] == '--scene' then
         if f:IsVisible() then
             local x,y,w,h = bounds(f)
             if w > 0 and h > 0 then
-                print('UI ' .. string.format('{"kind":%s,"x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"text":%s,"size":%d,"justify":%s,"skin":%s}',
-                    quote(f.kind),x,y,w,h,quote(f.text),f.fontSize or 12,quote(f.justify),quote(f.backdrop and 'inset' or (f.hironClassic and 'button' or ''))))
+                local color=f.color or {0,0,0,0}
+                print('UI ' .. string.format('{"kind":%s,"x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"text":%s,"size":%d,"justify":%s,"skin":%s,"color":[%.3f,%.3f,%.3f,%.3f]}',
+                    quote(f.kind),x,y,w,h,quote(f.text),f.fontSize or 12,quote(f.justify),quote(f.backdrop and 'inset' or (f.hironClassic and 'button' or '')),
+                    color[1],color[2],color[3],color[4]))
             end
         end
     end

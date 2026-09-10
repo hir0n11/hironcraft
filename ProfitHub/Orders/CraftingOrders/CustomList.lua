@@ -535,6 +535,7 @@ function CL:CreateRow(parent, index)
     row:SetScript("OnEnter", function(self)
         self.hover:SetColorTexture(1, 0.82, 0.2, 0.10)
         if self.action and CO.SetActiveRowButton then CO:SetActiveRowButton(self.action) end
+        CL:ShowOrderProblemTooltip(self)
     end)
     row:SetScript("OnLeave", function(self)
         self.hover:SetColorTexture(1, 1, 1, 0)
@@ -976,6 +977,26 @@ function CL:FitIconBar(bar, icons, maxRows, title)
     end
 end
 
+function CL:ShowOrderProblemTooltip(row)
+    if not row._problemReason then return end
+    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines()
+    GameTooltip:AddLine(L("COA_PROBLEM_TITLE", "Order needs attention"), 1, 0.35, 0.30)
+    GameTooltip:AddLine(row._problemReason, 1, 0.75, 0.70, true)
+    GameTooltip:Show()
+end
+
+function CL:ApplyOrderProblemStyle(row, reason, selected)
+    row._problemReason = reason
+    if reason then
+        row.bg:SetColorTexture(0.80, 0.06, 0.04, selected and 0.26 or 0.17)
+    elseif selected then
+        row.bg:SetColorTexture(0.80, 0.58, 0.18, 0.12)
+    else
+        row.bg:SetColorTexture(1, 0.90, 0.70, (row._index or 0) % 2 == 0 and 0.035 or 0)
+    end
+end
+
 function CL:PopulateRow(row, order)
     row._order = order
     self:ApplyRowLayout(row)
@@ -1368,11 +1389,9 @@ function CL:PopulateRow(row, order)
     else
         nr, ng, nb = 0.95, 0.95, 0.95
     end
-    if CO.IsOrderSelected and CO:IsOrderSelected(order.orderID) then
-        row.bg:SetColorTexture(0.80, 0.58, 0.18, 0.12)
-    else
-        row.bg:SetColorTexture(1, 0.90, 0.70, (row._index or 0) % 2 == 0 and 0.035 or 0)
-    end
+    local problem = CO.GetOrderProblemReason and CO:GetOrderProblemReason(order, CO.activePageFrame, action)
+    self:ApplyOrderProblemStyle(row, problem, CO.IsOrderSelected and CO:IsOrderSelected(order.orderID))
+    if problem then nr, ng, nb = 1, 0.45, 0.40 end
     row.name:SetTextColor(nr, ng, nb)
 
     row.checkbox:SetChecked(CO.IsOrderSelected and CO:IsOrderSelected(order.orderID) or false)

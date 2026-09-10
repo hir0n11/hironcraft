@@ -64,6 +64,8 @@ function CO:GetQueueOptions()
     if q.autoTool == nil then q.autoTool = false end
     if q.autoFinishingEnabled == nil then q.autoFinishingEnabled = false end
     q.autoFinishingMaxSkill = tonumber(q.autoFinishingMaxSkill) or 5
+    if q.preferredFinisherCraft == nil then q.preferredFinisherCraft = true end
+    if q.preferredFinisherRecraft == nil then q.preferredFinisherRecraft = false end
 
     return q
 end
@@ -74,7 +76,7 @@ end
 
 function CO:SetAutoFinishingEnabled(value)
     self:GetQueueOptions().autoFinishingEnabled = value == true
-    if self.UpdateControlPanel then self:UpdateControlPanel() end
+    self:FinishingSettingsChanged()
 end
 
 function CO:GetAutoFinishingMaxSkillBonus()
@@ -84,10 +86,47 @@ end
 function CO:SetAutoFinishingMaxSkillBonus(value)
     value = math.max(0, math.floor((tonumber(value) or 5) + 0.5))
     self:GetQueueOptions().autoFinishingMaxSkill = value
+    self:FinishingSettingsChanged()
+end
+
+function CO:FinishingSettingsChanged()
+    -- A staged transaction must be rebuilt on the next click after a setting
+    -- change; neither an old reagent nor an old quality rejection may survive.
+    self.preparedFinisherOrderID = nil
+    self.preparedFinisherReagent = nil
+    self.preparedFinisherReadyAt = nil
+    self.preparedFinisherUseEngineOrderID = nil
+    self.qualityRejectOrderIDs = {}
+    if self.InvalidateOrderCaches then self:InvalidateOrderCaches() end
     if self.UpdateControlPanel then self:UpdateControlPanel() end
+    if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
+end
+
+function CO:GetPreferredFinishingItemID()
+    local id = tonumber(self:GetQueueOptions().preferredFinisherItemID)
+    return id and id > 0 and id == math.floor(id) and id or nil
+end
+
+function CO:SetPreferredFinishingItemID(itemID)
+    self:GetQueueOptions().preferredFinisherItemID = tonumber(itemID)
+    self:FinishingSettingsChanged()
+end
+
+function CO:SetPreferredFinishingScope(isRecraft, enabled)
+    self:GetQueueOptions()[isRecraft and 'preferredFinisherRecraft' or 'preferredFinisherCraft'] = enabled == true
+    self:FinishingSettingsChanged()
+end
+
+function CO:ShouldUsePreferredFinisher(order)
+    local q = self:GetQueueOptions()
+    return self:GetPreferredFinishingItemID() ~= nil
+        and q[order and order.isRecraft and 'preferredFinisherRecraft' or 'preferredFinisherCraft'] == true
 end
 
 function CO:GetAutoFinishingLabel()
+    if self:GetPreferredFinishingItemID() then
+        return T("COA_FINISHER_CONFIGURE", "Настроить")
+    end
     if not self:IsAutoFinishingEnabled() then
         return T("COA_FINISHER_OFF", "Выкл")
     end

@@ -25,6 +25,43 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Finisher selection and order warnings (0.3.23)
+
+Open **Finishers** in the right-hand crafting panel. Select one specific bonus
+item and independently enable **Use for crafts** / **Use for recrafts**. These
+apply only to personal orders, never patrons. No bonus item is selected by
+default; craft is enabled and recraft disabled until explicitly changed.
+The existing skill setting/limit is preserved and now labelled **Skill when
+needed (highest priority)**. When enabled, requested quality takes priority over
+the bonus item, using the weakest sufficient owned skill finisher within the
+limit. If quality is already met, the selected bonus item may be used instead.
+
+The Midnight picker distinguishes these exact item IDs:
+
+| Bonus | Lesser item | Combined item (5 lesser items) |
+| --- | --- | --- |
+| Resourcefulness | [Resourceful Rebar, 247725](https://www.wowhead.com/item=247725) | [Resourceful Routing, 247726](https://www.wowhead.com/item=247726) |
+| Multicraft | [Multicraft Matrix, 247719](https://www.wowhead.com/item=247719) | [Multicraft Manifold, 247724](https://www.wowhead.com/item=247724) |
+| Ingenuity | [Ingenious Identifier, 260630](https://www.wowhead.com/item=260630) | [Ingenious Identity, 247788](https://www.wowhead.com/item=247788) |
+
+Skill finishers remain Apprentice's Scribbles (246447, +5), Artisan's Ledger
+(246448, +10), Mentor's Helpful Handiwork (246449, +20), and Artisan's Consortium
+Gold Star (246450, +50). Other non-skill finishing items found in the current
+recipe schematics are also offered. Names, item-quality colors and tooltips come
+from the client; external tooltip stat values are not used for crafting decisions.
+The live recipe must support/unlock the selected item, with enough owned quantity.
+Missing items are skipped, never silently replaced or automatically combined.
+Customer finishing slots and manually filled bonus slots are preserved. Skill
+simulations restore the original allocation when unsuccessful; unavailable data
+does not authorize a decline or a bare craft. Selection and submission still
+require separate clicks, for both skill and non-skill finishers.
+
+Problem rows are tinted red, including while selected. Hover the row for the
+reason: missing customer/crafter reagents, unknown recipe, a recorded issue, or
+insufficient quality under the current settings. Preview warnings do not prepare
+the live transaction or trigger rejection. Unknown quality/schematic data is not
+treated as proof of failure; the action rechecks the order before declining it.
+
 ## Battle.net right-click reply menu fix (0.3.22)
 
 Prepared replies now appear when right-clicking a Battle.net name in chat, not

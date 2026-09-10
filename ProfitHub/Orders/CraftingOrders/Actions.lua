@@ -757,7 +757,10 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             useConcentration,
             pageFrame
         )
-        if finisherResult == "reject" then
+        if finisherResult == "unknown" then
+            self:SetStatus(T("COA_STATUS_FINISHER_UNKNOWN", "Could not verify the finishing reagent. Press Action again after the order loads."))
+            return false
+        elseif finisherResult == "reject" then
             self.preparedFinisherOrderID = nil
             self.preparedFinisherReagent = nil
             self.preparedFinisherReadyAt = nil
@@ -774,10 +777,17 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
             self.preparedFinisherUseEngineOrderID = nil
             self.activeOrderID = order.orderID
             self.activePageFrame = pageFrame
-            self:SetStatus(string.format(
-                T("COA_STATUS_FINISHER_READY", "Finishing reagent +%d selected. Press Action again to craft."),
-                finisher.skillBonus or 0
-            ))
+            if finisher.skillBonus then
+                self:SetStatus(string.format(
+                    T("COA_STATUS_FINISHER_READY", "Finishing reagent +%d selected. Press Action again to craft."),
+                    finisher.skillBonus
+                ))
+            else
+                self:SetStatus(string.format(
+                    T("COA_STATUS_BONUS_FINISHER_READY", "%s selected. Press Action again to craft."),
+                    self:GetFinishingItemLabel(finisher.itemID)
+                ))
+            end
             self:RefreshVisibleRowsSoon(0.01)
             return true
         end

@@ -1138,6 +1138,43 @@ function CO:UpdateQueueSettingWidgets()
     end
 end
 
+local function ShowFinishingMenu(owner, items)
+    PT.Dropdown:Show({owner=owner, items=items, keepOpen=true, maxHeight=420,
+        anchorPoint="TOPRIGHT", anchorRelativePoint="BOTTOMRIGHT"})
+    for index, item in ipairs(items) do
+        local row = PT.Dropdown.frame and PT.Dropdown.frame.items[index]
+        if row and item.itemID then
+            row:HookScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetItemByID(item.itemID)
+                GameTooltip:Show()
+            end)
+            row:HookScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+    end
+end
+
+function CO:OpenPreferredFinishingMenu(owner)
+    if not owner or not PT.Dropdown or not PT.Dropdown.Show then return end
+    local selected = self:GetPreferredFinishingItemID()
+    local items = {
+        {text=T("COA_FINISHER_PICKER", "Один финишер: выберите предмет"), header=true},
+        {text=T("COA_FINISHER_NONE", "Не использовать"), checked=not selected, onClick=function()
+            CO:SetPreferredFinishingItemID(nil)
+            CO:OpenAutoFinishingMenu(owner)
+        end},
+    }
+    for _, item in ipairs(self:GetPreferredFinishingMenuItems()) do
+        local id = item.itemID
+        items[#items+1] = {text=item.name, itemID=id, amount=tostring(item.owned), checked=id==selected,
+            onClick=function()
+                CO:SetPreferredFinishingItemID(id)
+                CO:OpenAutoFinishingMenu(owner)
+            end}
+    end
+    ShowFinishingMenu(owner, items)
+end
+
 function CO:OpenAutoFinishingMenu(owner)
     if not owner or not PT.Dropdown or not PT.Dropdown.Show then return end
 
@@ -1149,10 +1186,11 @@ function CO:OpenAutoFinishingMenu(owner)
             header = true,
         },
         {
-            text = T("COA_FINISHER_ENABLE", "Использовать автоматически"),
+            text = T("COA_FINISHER_SKILL_PRIORITY", "Мастерство при необходимости (приоритет)"),
             checked = enabled,
             onClick = function()
                 CO:SetAutoFinishingEnabled(not enabled)
+                CO:OpenAutoFinishingMenu(owner)
             end,
         },
         {
@@ -1168,11 +1206,28 @@ function CO:OpenAutoFinishingMenu(owner)
             checked = currentLimit == selectedLimit,
             onClick = function()
                 CO:SetAutoFinishingMaxSkillBonus(selectedLimit)
+                CO:OpenAutoFinishingMenu(owner)
             end,
         }
     end
 
-    PT.Dropdown:Show({ owner = owner, items = items })
+    local q = self:GetQueueOptions()
+    local preferred = self:GetPreferredFinishingItemID()
+    items[#items+1] = {text=T("COA_FINISHER_BONUS_HEADER", "Другой бонус — только личные заказы"), header=true}
+    items[#items+1] = {text=preferred and self:GetFinishingItemLabel(preferred)
+        or T("COA_FINISHER_PICK", "Выбрать предмет..."), itemID=preferred,
+        onClick=function() CO:OpenPreferredFinishingMenu(owner) end}
+    items[#items+1] = {text=T("COA_FINISHER_CRAFT", "Подставлять при крафте"), checked=q.preferredFinisherCraft,
+        onClick=function()
+            CO:SetPreferredFinishingScope(false, not q.preferredFinisherCraft)
+            CO:OpenAutoFinishingMenu(owner)
+        end}
+    items[#items+1] = {text=T("COA_FINISHER_RECRAFT", "Подставлять при рекрафте"), checked=q.preferredFinisherRecraft,
+        onClick=function()
+            CO:SetPreferredFinishingScope(true, not q.preferredFinisherRecraft)
+            CO:OpenAutoFinishingMenu(owner)
+        end}
+    ShowFinishingMenu(owner, items)
 end
 
 function CO:AnchorControlPanelToOrderList(panel, pageFrame)

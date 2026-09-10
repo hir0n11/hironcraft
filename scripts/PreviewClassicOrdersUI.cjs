@@ -25,6 +25,7 @@ async function render(tab) {
     for (const [i,f] of scene.entries()) {
         if (f.x < 250) continue;
         if(f.skin) content+=`<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="${f.skin==='button'?3:4}" fill="url(#${f.skin==='button'?'button':'panel'})" stroke="#827052" stroke-width="1"/>`;
+        if(f.kind==='Texture' && f.color?.[3]>0) content+=`<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="rgb(${f.color.slice(0,3).map(c=>Math.round(c*255)).join(',')})" fill-opacity="${f.color[3]}"/>`;
         if(f.kind==='EditBox') content+=`<rect x="${f.x+4}" y="${f.y+3}" width="${f.w-8}" height="${f.h-6}" fill="#13110f" stroke="#766143"/>`;
         if(f.kind==='FontString' && f.text) {
             const cx = f.justify==='CENTER' ? f.x+f.w/2 : f.x;
@@ -37,4 +38,4 @@ async function render(tab) {
     await sharp(Buffer.from(content)).png().toFile(out);
     console.log(out);
 }
-render('craft').then(()=>render('queue')).then(()=>render('collapsed')).catch(e=>{console.error(e);process.exitCode=1;});
+render('craft').then(()=>render('queue')).then(()=>render('collapsed')).then(()=>render('finishers')).catch(e=>{console.error(e);process.exitCode=1;});

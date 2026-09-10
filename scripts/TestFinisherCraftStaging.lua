@@ -263,4 +263,25 @@ assert(CO.pendingCraftOrderID == nil and CO.preparedFinisherOrderID == nil)
 assert(recraftCalls == 1 and craftCalls == 1)
 assert(CO.lastStatus:find('Finishing reagent is missing', 1, true))
 
+-- Non-skill finishers use the same two-click, exact-payload handoff, without a
+-- misleading +0 skill message. Unknown analysis must never submit a bare craft.
+order.isRecraft=false
+transaction.CreateCraftingReagentInfoTblIf=nil
+engine.reagentSlotProvidedByCustomer=nil
+CO.PrepareAutoFinishingReagent=function()
+    liveReagents[2]={reagent={itemID=247726},dataSlotIndex=9,quantity=1}
+    return 'applied',{itemID=247726,slotIndex=2,dataSlotIndex=9,quantity=1}
+end
+E.C_Item={GetItemNameByID=function() return 'Resourceful Routing' end}
+assert(CO:CraftOrderFromRow(order,page,button)==true)
+assert(CO.pendingCraftOrderID==nil and apiCraftCalls==1)
+assert(CO.lastStatus:find('Resourceful Routing',1,true) and not CO.lastStatus:find('+0',1,true))
+now=now+.3
+assert(CO:CraftOrderFromRow(order,page,button)==true)
+assert(apiCraftCalls==2 and #apiCraftReagents==1 and apiCraftReagents[1].reagent.itemID==247726)
+CO:ClearPendingCraftAttempt(order.orderID)
+CO.PrepareAutoFinishingReagent=function() return 'unknown' end
+assert(CO:CraftOrderFromRow(order,page,button)==false)
+assert(apiCraftCalls==2 and craftCalls==1 and not CO.pendingCraftOrderID)
+
 print("Finisher craft staging tests passed.")
