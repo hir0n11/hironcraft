@@ -5,6 +5,71 @@ local function L(id)
     return HironCraftScan.LOCAL:GetText(id);
 end
 
+local allowedContext = {
+    crafter = true,
+    item = true,
+    profession = true,
+    profession_link = true,
+    commission = true,
+}
+
+local function UnknownPlaceholders(text)
+    local expanded = HironCraftScan.Config.SubstituteTags(text)
+    local unknown = {}
+    for placeholder in expanded:gmatch('{(.-)}') do
+        if not allowedContext[placeholder] then
+            table.insert(unknown, '{' .. placeholder .. '}')
+        end
+    end
+    return unknown
+end
+
+local function ExplanationTextValidator(_, text)
+    local unknown = UnknownPlaceholders(text)
+    if #unknown > 0 then
+        return { error = string.format(L('Unknown quick reply placeholders'), table.concat(unknown, ', ')) }
+    end
+end
+
+local CustomExplanations = {}
+HironCraftScan.CustomExplanations = CustomExplanations
+
+-- Custom explanations are follow-up messages for the selected customer, so use
+-- the same order selection and substitution rules as contextual quick replies.
+-- Plain explanations continue to work even when the customer has no order.
+function CustomExplanations:Render(text, target)
+    local raw = HironCraftScan.Config.SubstituteTags(text)
+    if not raw:find('%b{}') then
+        return raw
+    end
+
+    local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
+    local quickReplies = HironCraftScan.QuickReplies
+    if not customerInfo or not quickReplies or not quickReplies.ResolveResponses then
+        return nil
+    end
+
+    for _, candidate in ipairs(quickReplies:ResolveResponses(target, customerInfo)) do
+        local context = HironCraftScan.BuildResponseContext(candidate.response)
+        if context then
+            local rendered = HironCraftScan.Utils.FString(raw, context)
+            if not rendered:find('%b{}') then
+                return rendered
+            end
+        end
+    end
+    return nil
+end
+
+function CustomExplanations:Send(text, target)
+    local rendered = self:Render(text, target)
+    if not rendered then
+        print('|cffffd100HironCraftScan:|r ' .. L('Custom explanation context unavailable.'))
+        return false
+    end
+    return HironCraftScan.Utils.SendResponses(HironCraftScan.Utils.SplitResponse(rendered), target, true)
+end
+
 HironCraftScan_CustomExplanationsButtonMixin = {}
 
 function HironCraftScan_CustomExplanationsButtonMixin:OnLoad()
@@ -40,11 +105,12 @@ local function OnCreate()
         },
         {
             type = HironCraftScan.Dialog.Element.Text,
-            text = L(LID.EXPLANATION_TEXT_DESC),
+            text = L(LID.EXPLANATION_TEXT_DESC) .. '\n' .. L('Custom explanation tags description'),
         },
         {
             type = HironCraftScan.Dialog.Element.EditBox,
             multiline = true,
+            Validator = ExplanationTextValidator,
         },
     }
     HironCraftScan.Dialog.Show({
@@ -88,7 +154,7 @@ local function OnModify(label, text)
         },
         {
             type = HironCraftScan.Dialog.Element.Text,
-            text = L(LID.EXPLANATION_TEXT_DESC),
+            text = L(LID.EXPLANATION_TEXT_DESC) .. '\n' .. L('Custom explanation tags description'),
         },
         {
             type = HironCraftScan.Dialog.Element.EditBox,
@@ -96,6 +162,7 @@ local function OnModify(label, text)
             default_text = text,
             default_label = L("Reset"),
             multiline = true,
+            Validator = ExplanationTextValidator,
         },
     }
     HironCraftScan.Dialog.Show({
@@ -249,8 +316,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local label = entry.label;
                 local text = entry.text;
                 local button = subMenu:CreateButton(label, function()
-                    local message = HironCraftScan.Utils.SplitResponse(text);
-                    HironCraftScan.Utils.SendResponses(message, target, true)
+                    CustomExplanations:Send(text, target)
                 end);
 
                 button:SetTooltip(function(tooltip, elementDescription)

@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Context tags in Custom Explanations (0.3.30)
+
+Custom Explanations now expand the same order-context placeholders as greetings
+and quick replies: `{crafter}`, `{item}`, `{profession}`, `{profession_link}` and
+`{commission}`. User-defined substitution tags are expanded first, so their
+values may contain these context placeholders too. The most relevant active or
+newest listed request for the selected customer supplies the values. Plain saved
+messages still work without an order; a contextual message is not sent when its
+order data is unavailable, preventing a raw placeholder from reaching chat.
+Sending remains an explicit click action.
+
 ## Select chat keywords and route them from one menu (0.3.29)
 
 Right-click a chat message and choose **HironCraftScan - Save chat text** to
