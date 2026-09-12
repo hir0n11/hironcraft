@@ -25,6 +25,10 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Auction House tab spacing (0.3.38)
+
+- The Auction House tab row now sits flush against the bottom edge of the Auction House frame.
+
 ## Generic crafting requests (0.3.37)
 
 Messages such as `LF crafter`, `LF craft` and `LF recraft` create a temporary

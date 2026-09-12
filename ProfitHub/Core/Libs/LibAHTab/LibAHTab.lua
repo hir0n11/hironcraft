@@ -1,10 +1,11 @@
-local lib = LibStub:NewLibrary("LibAHTab-1-0", 5)
+local lib = LibStub:NewLibrary("LibAHTab-1-0", 6)
 
 if not lib then return end
 
 local MIN_TAB_WIDTH = 70
 local TAB_PADDING = 20
 local OFFSET_X = 3
+local ATTACHED_OFFSET_Y = 18
 if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then
   OFFSET_X = -14
 end
@@ -33,7 +34,13 @@ local function PositionTabs(state)
 
     local anchor = state.auctionTabsOriginalAnchor
     state.rootFrame:ClearAllPoints()
-    state.rootFrame:SetPoint(anchor[1], anchor[2], anchor[3], (anchor[4] or 0) - OFFSET_X, anchor[5] or 0)
+    state.rootFrame:SetPoint(
+      anchor[1],
+      anchor[2],
+      anchor[3],
+      (anchor[4] or 0) - OFFSET_X,
+      (anchor[5] or 0) + ATTACHED_OFFSET_Y
+    )
 
     local frontTab = state.Tabs[1]
     if frontTab then

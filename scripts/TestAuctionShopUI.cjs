@@ -37,6 +37,11 @@ check(
   "the HironCraft tab is not moved before the standard Auction House tabs",
 );
 check(
+  tabLib.includes("local ATTACHED_OFFSET_Y = 18") &&
+    tabLib.includes("(anchor[5] or 0) + ATTACHED_OFFSET_Y"),
+  "Auction House tabs still leave a vertical gap below the frame",
+);
+check(
   ui.includes('f.stopScanBtn:SetPoint("TOPRIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -36)') &&
     ui.includes("f.stopScanBtn:SetShown(scanning)"),
   "the stop-scan control is not isolated in the status row",
