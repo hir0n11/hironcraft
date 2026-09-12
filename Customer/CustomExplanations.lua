@@ -159,7 +159,9 @@ local function Assignment(candidate)
     if not context or not context.crafter then return nil end
     local subject = ResponseSubject(response, context)
     if not subject then return nil end
-    return subject .. ' → ' .. context.crafter,
+    -- Keep the separator inside WoW's universally supported font range. The
+    -- arrow glyph renders as an empty square with some client fonts/locales.
+    return subject .. ' - ' .. context.crafter,
         table.concat({
             response.itemID and ('item:' .. tostring(response.itemID))
                 or ('profession:' .. tostring(response.parentProfID or response.professionID)),
@@ -496,7 +498,9 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         local pending = CustomExplanations:GetPendingResponses(target)
-        if #pending > 0 then
+        -- A single unfinished order is useful here too: the customer may ask
+        -- for the destination character without having requested two items.
+        if #pending >= 1 then
             subMenu:CreateDivider()
             local assignments = subMenu:CreateButton(prefix .. L('To who send'), function()
                 CustomExplanations:SendAssignments(target)

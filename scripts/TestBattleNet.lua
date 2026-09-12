@@ -102,8 +102,13 @@ assert(sent[1].customer==key and sent[1].message=='You choose the price.')
 find(buttons,'Crafter').click()
 assert(sent[2].customer==key and sent[2].message=="Try Favu for Spellbreaker's Rebuke.",
     'Battle.net explanation did not expand order context')
+local oneOrderAssignments=#sent
+find(buttons,'HironCraftScan - To who send').click()
+assert(#sent==oneOrderAssignments+1
+    and sent[#sent].message=="Spellbreaker's Rebuke - Favu",
+    'a single unfinished order did not offer its crafter assignment')
 find(buttons,'Support').click()
-assert(sent[3].customer==key and sent[3].message=='Ask Favu.',
+assert(sent[4].customer==key and sent[4].message=='Ask Favu.',
     'custom substitution tag did not expand contextual tag')
 find(buttons,'HironCraftScan - IGNORE').click()
 assert(Scan.DB.settings.ignored[key]==1)
@@ -112,7 +117,7 @@ find(buttons,'HironCraftScan - UNIGNORE').click()
 assert(not Scan.DB.settings.ignored[key])
 buttons=menu('MENU_UNIT_FRIEND',{chatTarget='Normal-Realm',lineID=44})
 find(buttons,'Price').click()
-assert(sent[4].customer=='Normal-Realm', 'ordinary whisper context changed')
+assert(sent[5].customer=='Normal-Realm', 'ordinary whisper context changed')
 assert(#menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=999})==0, 'unknown friend has actionable menu')
 buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30})
 find(buttons,'Match Smith Blacksmithing').click()
@@ -124,16 +129,16 @@ assert(#matched==2 and matched[2].message=='' and matched[2].options.manualMatch
 local chatContext={name='Friend',chatTarget='Friend',chatType='BN_WHISPER',
     bnetIDAccount='30',accountInfo=friend}
 buttons=menu('MENU_UNIT_BN_FRIEND',chatContext)
-assert(#sent==4 and #matched==2, 'opening the real chat context took an action')
+assert(#sent==5 and #matched==2, 'opening the real chat context took an action')
 find(buttons,'Price').click()
-assert(#sent==5 and sent[5].customer==key, 'chat hyperlink reply lost its Battle.net recipient')
+assert(#sent==6 and sent[6].customer==key, 'chat hyperlink reply lost its Battle.net recipient')
 find(buttons,'Match Smith Blacksmithing').click()
 assert(#matched==3 and matched[3].message=='', 'missing line ID prevented explicit generic matching')
 Scan.DB.settings.collapse_chat_context=true
 buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount='30',chatTarget='Friend'})
 find(buttons,'HironCraftScan')
 find(buttons,'Price').click()
-assert(#sent==6 and sent[6].customer==key, 'collapsed Battle.net reply menu failed')
+assert(#sent==7 and sent[7].customer==key, 'collapsed Battle.net reply menu failed')
 Scan.DB.settings.collapse_chat_context=false
 
 -- One explicit button combines every unfinished request. Item requests use the
@@ -155,10 +160,10 @@ buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30,chatTarget='Friend'})
 local beforeAssignments=#sent
 find(buttons,'HironCraftScan - To who send').click()
 assert(#sent==beforeAssignments+1)
-assert(sent[#sent].message=="Spellbreaker's Rebuke → Favu; Jewelcrafting → Lavu",
+assert(sent[#sent].message=="Spellbreaker's Rebuke - Favu; Jewelcrafting - Lavu",
     'unfinished item/profession assignments were not combined')
 find(buttons,'HironCraftScan - Active order')
-local selected=find(buttons,'Jewelcrafting → Lavu')
+local selected=find(buttons,'Jewelcrafting - Lavu')
 assert(not selected.selected(), 'manual order context started selected')
 local beforeSelection=#sent
 selected.click()
@@ -171,7 +176,7 @@ assert(#Scan.CustomExplanations:GetPendingResponses(key)==1, 'crafted order rema
 assert(Scan.CustomExplanations:Render('Try {crafter}.',key)=='Try Favu.',
     'completed manual context did not fall back to the remaining request')
 local remaining=Scan.CustomExplanations:BuildAssignments(key)
-assert(#remaining==1 and remaining[1]=="Spellbreaker's Rebuke → Favu",
+assert(#remaining==1 and remaining[1]=="Spellbreaker's Rebuke - Favu",
     'completed order was included in the combined assignment')
 fulfillmentStatuses[Scan.OrderToOrderID({customerName=key,responseID=1})]={status='rejected'}
 assert(#Scan.CustomExplanations:GetPendingResponses(key)==0)

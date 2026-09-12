@@ -25,6 +25,11 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Single-order destination reply (0.3.39)
+
+- **To who send** is explicitly available for customers with one unfinished order as well as several.
+- Assignment labels use a client-font-safe separator instead of an arrow glyph that could render as a square.
+
 ## Auction House tab spacing (0.3.38)
 
 - The Auction House tab row now sits flush against the bottom edge of the Auction House frame.
