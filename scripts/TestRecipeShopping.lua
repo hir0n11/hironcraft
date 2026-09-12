@@ -20,6 +20,7 @@ local itemNames = {
 }
 local qualities = { [201] = 1, [202] = 2, [203] = 3 }
 local captured = {}
+local shoppingUnavailable = false
 
 C_Item = {
     GetItemCount = function(itemID) return itemCounts[itemID] or 0 end,
@@ -43,6 +44,7 @@ function wipe(tbl) for key in pairs(tbl) do tbl[key] = nil end end
 
 HironCraftProfit.ShoppingList = {
     CreateTemporaryImportedList = function(_, name, materials, sourceKind, allowEmpty)
+        if shoppingUnavailable then return false, "shopping_unavailable" end
         captured[#captured + 1] = {
             name = name,
             materials = materials,
@@ -202,13 +204,88 @@ assert(fallback and fallback.unresolvedName == "Fallback Recipe"
     "unlearned recipe without a source link did not retain a recipe-class auction lookup")
 assert(RS:GetPlannedRecipeItemCount() == 2, "planned recipe count was not updated")
 
+-- Exact-quality stock accounting and independently editable reagent snapshots.
+RS:ClearPlan(false)
+local function ClothTransaction(required)
+    return {
+        GetRecipeSchematic=function() return {recipeType=1,reagentSlotSchematics={
+            {slotIndex=1,reagentType=1,quantityRequired=required,
+                reagents={{itemID=201},{itemID=202},{itemID=203}}},
+        }} end,
+        IsSlotRequired=function() return true end,
+        allocationTbls={[1]=Allocations({
+            {reagent={itemID=202},quantity=15}, {reagent={itemID=201},quantity=20},
+        })},
+    }
+end
+itemCounts[201], itemCounts[202] = 20, 15
+RS:SetQuality(1)
+assert(RS:AddRecipe(3001,1,ClothTransaction(40)))
+local exact=MaterialMap(captured[#captured].materials)
+assert(exact[201].quantity==20 and exact[201].tier==1 and not exact[202],
+    '40 T1 minus 20 T1 and 15 T2 must buy 20 T1, not 5 or T2')
+local firstID=RS.plan.entries[1].id
+assert(RS:AddRecipe(3002,1,ClothTransaction(10)))
+assert(MaterialMap(captured[#captured].materials)[201].quantity==30,'shared stock was subtracted twice')
+local secondID=RS.plan.entries[2].id
+assert(RS:AddRecipe(3001,1,ClothTransaction(40)))
+assert(#RS.plan.entries==2 and RS.plan.entries[1].count==2,'identical recipe additions did not merge')
+assert(MaterialMap(captured[#captured].materials)[201].quantity==70)
+assert(RS:SetEntryQuantity(firstID,1))
+assert(MaterialMap(captured[#captured].materials)[201].quantity==30,'partial removal did not recalculate missing stock')
+assert(RS:SetEntryQuantity(secondID,0))
+assert(#RS.plan.entries==1 and MaterialMap(captured[#captured].materials)[201].quantity==20)
+RS:SetQuality(2)
+assert(RS.plan.entries[1].quality==1,'changing future quality rewrote an existing entry')
+assert(RS:AddRecipe(3001,1,ClothTransaction(40)))
+exact=MaterialMap(captured[#captured].materials)
+assert(#RS.plan.entries==2 and exact[201].quantity==20 and exact[202].quantity==25,
+    'different quality selections merged or consumed other-tier inventory')
+assert(RS:SetUseInventory(false))
+exact=MaterialMap(captured[#captured].materials)
+assert(exact[201].quantity==40 and exact[202].quantity==40,'stock toggle did not use full quantities')
+assert(RS:SetUseInventory(true))
+assert(RS:SetEntryQuantity(firstID,0))
+assert(not MaterialMap(captured[#captured].materials)[201] and RS.plan.entries[1].quality==2,
+    'removing T1 recipe affected the T2 entry')
+assert(not RS:SetEntryQuantity(secondID,2),'stale removed row changed a different recipe')
+assert(not RS:SetEntryQuantity(RS.plan.entries[1].id,-1))
+assert(not RS:SetEntryQuantity(RS.plan.entries[1].id,1.5))
+assert(not RS:SetEntryQuantity(RS.plan.entries[1].id,10000))
+local before=RS.plan
+shoppingUnavailable=true
+assert(not RS:AddRecipe(3003,1,ClothTransaction(10)))
+assert(RS.plan==before,'failed add left a phantom recipe in the plan')
+assert(not RS:SetEntryQuantity(before.entries[1].id,0))
+assert(RS.plan==before,'failed delete changed the plan')
+assert(not RS:ClearPlan())
+assert(RS.plan==before,'failed clear lost the plan')
+shoppingUnavailable=false
+local saved=HironCraftProfit_DB.recipeShoppingPlan
+RS.plan={entries={},recipeItems={}}
+RS.planLoaded=false
+assert(#RS:GetPlanEntries()==1 and RS.plan.entries[1].count==1,'saved recipe plan did not restore')
+assert(MaterialMap(RS:BuildMissingMaterials())[202].quantity==25,'restored plan lost its reagent snapshot')
+assert(saved.entries[1].quality==2)
+RS:ClearPlan(false)
+local unavailable=ClothTransaction(40)
+unavailable.GetRecipeSchematic=function() return {recipeType=1,reagentSlotSchematics={
+    {slotIndex=1,reagentType=1,quantityRequired=40,reagents={{itemID=201},{itemID=202}}},
+}} end
+local qualityOK,qualityReason=RS:AddRecipe(3001,1,unavailable,nil,3)
+assert(not qualityOK and qualityReason=='quality_unavailable' and #RS.plan.entries==0,
+    'unavailable T3 silently substituted another quality')
+RS:SetQuality(0)
+itemCounts[201], itemCounts[202] = nil, nil
+
 -- UI regression: multiple clicks with one OnEnter and no timer/mouse movement.
 -- Both the persistent label and the existing tooltip must change synchronously.
 local function noop() end
 local function MockFrame()
     return {
         scripts={}, shown=true,
-        SetSize=noop, SetPoint=noop, SetFrameLevel=noop, SetAutoFocus=noop,
+        SetSize=noop, SetWidth=noop, SetPoint=noop, SetFrameLevel=noop, SetAutoFocus=noop,
+        SetPushedTextOffset=noop,
         SetNumeric=noop, SetMaxLetters=noop, SetJustifyH=noop,
         SetCursorPosition=noop, ClearFocus=noop, ClearAllPoints=noop,
         RegisterForClicks=noop, SetEnabled=noop, SetTextColor=noop,
@@ -264,6 +341,8 @@ ExpectDisplay('Planned crafts: 7')
 button:UpdateTooltip() -- Blizzard's normal tooltip update path.
 ExpectDisplay('Planned crafts: 7')
 button.scripts.OnClick(button,'RightButton')
+ExpectDisplay('Planned crafts: 7') -- Right click now opens the non-destructive editor.
+RS:ClearPlan()
 ExpectDisplay('Planned crafts: 0')
 
 selectedRecipe={recipeID=2001,name='Test Recipe',learned=false}
@@ -276,6 +355,8 @@ ExpectDisplay('Planned recipes: 1') -- Duplicate recipe stays deduplicated.
 assert(RS:AddUnlearnedRecipe({recipeID=2002,name='Fallback Recipe',learned=false}))
 ExpectDisplay('Planned recipes: 2') -- Non-button plan updates repaint too.
 button.scripts.OnClick(button,'RightButton')
+ExpectDisplay('Planned recipes: 2')
+RS:ClearPlan()
 ExpectDisplay('Planned recipes: 0')
 assert(ownerChanges==1,'refresh reset tooltip ownership while continuously hovered')
 button.scripts.OnHide(button)

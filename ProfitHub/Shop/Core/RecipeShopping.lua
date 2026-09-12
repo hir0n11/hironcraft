@@ -9,6 +9,7 @@ local MAX_CRAFT_COUNT = 9999
 local Unpack = unpack or table.unpack
 
 RS.plan = RS.plan or {
+    entries = {},
     materials = {},
     recipes = {},
     recipeItems = {},
@@ -19,6 +20,36 @@ local function T(key, fallback)
     local value = PT.L and PT.L[key]
     if value and value ~= "" then return value end
     return fallback or key
+end
+
+function RS:GetSettings()
+    self:EnsurePlanLoaded()
+    HironCraftProfit_DB = HironCraftProfit_DB or {}
+    HironCraftProfit_DB.recipeShopping = HironCraftProfit_DB.recipeShopping or {}
+    local settings = HironCraftProfit_DB.recipeShopping
+    settings.quality = math.max(0, math.min(3, math.floor(tonumber(settings.quality) or 0)))
+    if settings.useInventory == nil then settings.useInventory = true end
+    return settings
+end
+
+function RS:GetQualityLabel(quality)
+    quality = tonumber(quality) or 0
+    return quality == 0 and T("PG_RECIPE_PLAN_AS_SELECTED", "As in recipe") or ("T" .. quality)
+end
+
+function RS:SetQuality(quality)
+    self:GetSettings().quality = math.max(0, math.min(3, math.floor(tonumber(quality) or 0)))
+    self:UpdatePlanDisplay()
+end
+
+function RS:SetUseInventory(enabled)
+    local settings = self:GetSettings()
+    local previous = settings.useInventory
+    settings.useInventory = enabled == true
+    local ok, reason = self:RefreshShoppingList()
+    if not ok then settings.useInventory = previous end
+    self:UpdatePlanDisplay()
+    return ok, reason
 end
 
 local function SafeCall(method, owner, ...)
@@ -79,6 +110,7 @@ local function GetItemMetadata(itemID, candidateCount)
     if C_TradeSkillUI and type(C_TradeSkillUI.GetItemReagentQualityByItemInfo) == "function" then
         local ok, value = pcall(C_TradeSkillUI.GetItemReagentQualityByItemInfo, itemID)
         qualityTier = ok and tonumber(value) or nil
+        if qualityTier and qualityTier <= 0 then qualityTier = nil end
     end
 
     return {
@@ -181,7 +213,21 @@ local function GetPreferredCandidate(slot, parts, form)
     return GetReagentItemID(candidate)
 end
 
-function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form)
+local function GetExactQualityCandidate(slot, quality)
+    local candidates = slot.reagents or {}
+    local tiered = #candidates > 1
+    for _, candidate in ipairs(candidates) do
+        local itemID = GetReagentItemID(candidate)
+        local tier = itemID and GetItemMetadata(itemID).qualityTier
+        if tier then tiered = true end
+        if tier == quality then return itemID, true end
+    end
+    -- A reagent without quality (e.g. thread) keeps its normal selection.
+    -- Never silently substitute T2/T3 when the requested tier is unavailable.
+    return nil, tiered
+end
+
+function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form, quality)
     recipeID = tonumber(recipeID)
     craftCount = math.floor(tonumber(craftCount) or 0)
     if not recipeID or craftCount <= 0 then return nil, "bad_quantity" end
@@ -202,6 +248,7 @@ function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form)
     local materials = {}
     local unresolved = 0
     local slots = schematic.reagentSlotSchematics or {}
+    quality = tonumber(quality) or 0
 
     for schematicIndex, slot in ipairs(slots) do
         local slotIndex = slot.slotIndex or slot.dataSlotIndex or schematicIndex
@@ -212,6 +259,13 @@ function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form)
         local parts = GetAllocatedParts(transaction, slotIndex, dataSlotIndex)
 
         if required and requiredQuantity > 0 then
+            if quality > 0 then
+                local itemID, tiered = GetExactQualityCandidate(slot, quality)
+                if tiered then
+                    if not itemID then return nil, "quality_unavailable" end
+                    parts = { { itemID = itemID, quantity = requiredQuantity } }
+                end
+            end
             local remaining = requiredQuantity
             for _, part in ipairs(parts) do
                 if remaining <= 0 then break end
@@ -244,8 +298,12 @@ end
 
 function RS:BuildMissingMaterials()
     local materials = {}
+    local useInventory = self:GetSettings().useInventory
     for itemID, planned in pairs(self.plan.materials or {}) do
-        local missing = math.max(0, math.floor((tonumber(planned.quantity) or 0) - GetItemCountForShopping(itemID)))
+        -- Each quality has its own itemID. Reserve its stock once across the
+        -- entire plan, never by item name or by summing other quality tiers.
+        local owned = useInventory and GetItemCountForShopping(itemID) or 0
+        local missing = math.max(0, math.floor((tonumber(planned.quantity) or 0) - owned))
         if missing > 0 then
             local row = {}
             for key, value in pairs(planned) do row[key] = value end
@@ -260,7 +318,7 @@ function RS:BuildMissingMaterials()
 
         if row.itemID then
             row.quantity = math.max(0,
-                math.floor((tonumber(row.quantity) or 1) - GetItemCountForShopping(row.itemID)))
+                math.floor((tonumber(row.quantity) or 1) - (useInventory and GetItemCountForShopping(row.itemID) or 0)))
         else
             row.quantity = math.max(1, math.floor(tonumber(row.quantity) or 1))
         end
@@ -295,41 +353,172 @@ function RS:RefreshShoppingList()
     return ok, reason, #materials
 end
 
-function RS:AddRecipe(recipeID, craftCount, transaction, form)
-    craftCount = math.max(1, math.min(MAX_CRAFT_COUNT, math.floor(tonumber(craftCount) or 1)))
-    local materials, reason = self:CollectRecipeMaterials(recipeID, craftCount, transaction, form)
-    if not materials then return false, reason end
+local function CopyTable(source)
+    local copy = {}
+    for key, value in pairs(source or {}) do copy[key] = value end
+    return copy
+end
 
-    self.plan.materials = self.plan.materials or {}
-    self.plan.recipes = self.plan.recipes or {}
-    for itemID, material in pairs(materials) do
-        local existing = self.plan.materials[itemID]
-        if not existing then
-            existing = {}
-            for key, value in pairs(material) do existing[key] = value end
-            existing.quantity = 0
-            self.plan.materials[itemID] = existing
-        end
-        existing.quantity = (tonumber(existing.quantity) or 0) + (tonumber(material.quantity) or 0)
+local function CopyPlan(plan)
+    local copy = { entries = {}, recipeItems = CopyTable(plan.recipeItems) }
+    for _, entry in ipairs(plan.entries or {}) do
+        -- Per-craft reagent snapshots are immutable; only counts are edited.
+        copy.entries[#copy.entries + 1] = CopyTable(entry)
     end
+    return copy
+end
 
-    recipeID = tonumber(recipeID)
-    self.plan.recipes[recipeID] = (tonumber(self.plan.recipes[recipeID]) or 0) + craftCount
-    self.plan.totalCrafts = (tonumber(self.plan.totalCrafts) or 0) + craftCount
+local function RebuildPlan(plan)
+    plan.materials, plan.recipes, plan.totalCrafts = {}, {}, 0
+    for _, entry in ipairs(plan.entries or {}) do
+        plan.recipes[entry.recipeID] = (plan.recipes[entry.recipeID] or 0) + entry.count
+        plan.totalCrafts = plan.totalCrafts + entry.count
+        for itemID, material in pairs(entry.materials) do
+            local total = plan.materials[itemID]
+            if not total then
+                total = CopyTable(material)
+                total.quantity = 0
+                plan.materials[itemID] = total
+            end
+            total.quantity = total.quantity + material.quantity * entry.count
+        end
+    end
+end
+
+function RS:EnsurePlanLoaded()
+    if self.planLoaded then return end
+    self.planLoaded = true
+    local saved = HironCraftProfit_DB and HironCraftProfit_DB.recipeShoppingPlan
+    if type(saved) ~= "table" then return end
+    local plan = { entries = {}, recipeItems = {} }
+    for _, source in ipairs(type(saved.entries) == "table" and saved.entries or {}) do
+        if type(source) == "table" and type(source.materials) == "table" then
+            local recipeID, count = tonumber(source.recipeID), tonumber(source.count)
+            local materials, valid = {}, true
+            for id, material in pairs(source.materials) do
+                local itemID = tonumber(id)
+                local amount = type(material) == "table" and tonumber(material.quantity)
+                if not itemID or itemID <= 0 or not amount or amount <= 0 or amount ~= math.floor(amount) then
+                    valid = false; break
+                end
+                materials[itemID] = CopyTable(material)
+            end
+            if valid and next(materials) and recipeID and recipeID > 0 and count
+                and count >= 1 and count <= MAX_CRAFT_COUNT and count == math.floor(count) then
+                local entry = CopyTable(source)
+                self.nextEntryID = (self.nextEntryID or 0) + 1
+                entry.id, entry.recipeID, entry.count = self.nextEntryID, recipeID, count
+                entry.name = type(source.name) == "string" and source.name or ("#" .. recipeID)
+                entry.materials = materials
+                plan.entries[#plan.entries + 1] = entry
+            end
+        end
+    end
+    for id, item in pairs(type(saved.recipeItems) == "table" and saved.recipeItems or {}) do
+        local recipeID = tonumber(id)
+        if recipeID and type(item) == "table" and (tonumber(item.itemID)
+            or (type(item.unresolvedName) == "string" and item.unresolvedName ~= "")) then
+            plan.recipeItems[recipeID] = CopyTable(item)
+        end
+    end
+    RebuildPlan(plan)
+    self.plan = plan
+end
+
+function RS:ApplyPlan(plan, refresh)
+    self:EnsurePlanLoaded()
+    local previous = self.plan
+    RebuildPlan(plan)
+    self.plan = plan
+    local ok, reason, missingTypes = true, nil, 0
+    if refresh ~= false then ok, reason, missingTypes = self:RefreshShoppingList() end
+    if not ok then self.plan = previous else
+        HironCraftProfit_DB = HironCraftProfit_DB or {}
+        HironCraftProfit_DB.recipeShoppingPlan = plan
+    end
     self:UpdatePlanDisplay()
+    if not ok then return false, reason end
+    return true, missingTypes
+end
 
-    local refreshed, refreshReason, missingTypes = self:RefreshShoppingList()
-    if not refreshed then return false, refreshReason end
-    return true, missingTypes or 0
+function RS:AddRecipe(recipeID, craftCount, transaction, form, quality)
+    self:EnsurePlanLoaded()
+    craftCount = math.max(1, math.min(MAX_CRAFT_COUNT, math.floor(tonumber(craftCount) or 1)))
+    quality = tonumber(quality) or self:GetSettings().quality
+    local materials, reason = self:CollectRecipeMaterials(recipeID, 1, transaction, form, quality)
+    if not materials then return false, reason end
+    recipeID = tonumber(recipeID)
+
+    local parts = {}
+    for itemID, material in pairs(materials) do
+        parts[#parts + 1] = tostring(itemID) .. ":" .. tostring(material.quantity)
+    end
+    table.sort(parts)
+    local signature = recipeID .. "/" .. quality .. "/" .. table.concat(parts, ",")
+    local plan = CopyPlan(self.plan)
+    local entry
+    for _, existing in ipairs(plan.entries) do
+        if existing.signature == signature then entry = existing; break end
+    end
+    if not entry then
+        local recipeInfo = form and SafeCall(form.GetRecipeInfo, form)
+        if not recipeInfo and C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+            local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+            if ok then recipeInfo = info end
+        end
+        self.nextEntryID = (self.nextEntryID or 0) + 1
+        entry = {
+            id = self.nextEntryID, recipeID = recipeID, signature = signature,
+            name = recipeInfo and recipeInfo.name or ("#" .. recipeID),
+            count = 0, quality = quality, materials = materials,
+        }
+        plan.entries[#plan.entries + 1] = entry
+    end
+    if entry.count + craftCount > MAX_CRAFT_COUNT then return false, "bad_quantity" end
+    entry.count = entry.count + craftCount
+    return self:ApplyPlan(plan)
+end
+
+function RS:GetPlanEntries()
+    self:EnsurePlanLoaded()
+    local entries = {}
+    for _, entry in ipairs(self.plan.entries or {}) do entries[#entries + 1] = entry end
+    local recipeIDs = {}
+    for recipeID in pairs(self.plan.recipeItems or {}) do recipeIDs[#recipeIDs + 1] = recipeID end
+    table.sort(recipeIDs)
+    for _, recipeID in ipairs(recipeIDs) do
+        local item = self.plan.recipeItems[recipeID]
+        entries[#entries + 1] = {
+            id = "recipe:" .. recipeID, recipeID = recipeID, count = 1,
+            name = item.label, kind = "recipe_item",
+        }
+    end
+    return entries
+end
+
+function RS:SetEntryQuantity(entryID, quantity)
+    self:EnsurePlanLoaded()
+    quantity = tonumber(quantity)
+    if not quantity or quantity ~= quantity or quantity < 0 or quantity > MAX_CRAFT_COUNT
+        or quantity ~= math.floor(quantity) then return false, "bad_quantity" end
+    local plan = CopyPlan(self.plan)
+    for index, entry in ipairs(plan.entries) do
+        if entry.id == entryID then
+            if quantity == 0 then table.remove(plan.entries, index) else entry.count = quantity end
+            return self:ApplyPlan(plan)
+        end
+    end
+    local recipeID = type(entryID) == "string" and tonumber(entryID:match("^recipe:(%d+)$"))
+    if recipeID and plan.recipeItems[recipeID] then
+        if quantity > 1 then return false, "bad_quantity" end
+        if quantity == 0 then plan.recipeItems[recipeID] = nil end
+        return self:ApplyPlan(plan)
+    end
+    return false, "entry_missing"
 end
 
 function RS:ClearPlan(refresh)
-    self.plan = { materials = {}, recipes = {}, recipeItems = {}, totalCrafts = 0 }
-    self:UpdatePlanDisplay()
-    if refresh ~= false then
-        return self:RefreshShoppingList()
-    end
-    return true
+    return self:ApplyPlan({ entries = {}, recipeItems = {} }, refresh)
 end
 
 local function GetRecipeSourceItem(recipeInfo)
@@ -366,6 +555,7 @@ local function GetRecipeSourceItem(recipeInfo)
 end
 
 function RS:AddUnlearnedRecipe(recipeInfo)
+    self:EnsurePlanLoaded()
     local purchase = GetRecipeSourceItem(recipeInfo)
     if not purchase then return false, "no_recipe_item" end
 
@@ -375,14 +565,10 @@ function RS:AddUnlearnedRecipe(recipeInfo)
         return true, "already_added"
     end
 
-    self.plan.recipeItems[recipeID] = purchase
-    self:UpdatePlanDisplay()
-    local refreshed, reason = self:RefreshShoppingList()
-    if not refreshed then
-        self.plan.recipeItems[recipeID] = nil
-        self:UpdatePlanDisplay()
-        return false, reason
-    end
+    local plan = CopyPlan(self.plan)
+    plan.recipeItems[recipeID] = purchase
+    local refreshed, reason = self:ApplyPlan(plan)
+    if not refreshed then return false, reason end
     return true, "added"
 end
 
@@ -395,6 +581,11 @@ local function Notify(message, isError)
     elseif DEFAULT_CHAT_FRAME and type(DEFAULT_CHAT_FRAME.AddMessage) == "function" then
         DEFAULT_CHAT_FRAME:AddMessage("|cffffd200HironCraft:|r " .. message)
     end
+end
+
+function RS:NotifyPlanError(reason)
+    Notify(T("PG_RECIPE_SHOP_ERROR_" .. string.upper(tostring(reason or "unknown")),
+        "Could not update the recipe shopping list."), true)
 end
 
 local function GetCraftingPage()
@@ -457,12 +648,14 @@ function RS:AddSelectedUnlearnedRecipe()
 end
 
 function RS:GetPlannedRecipeItemCount()
+    self:EnsurePlanLoaded()
     local count = 0
     for _ in pairs(self.plan.recipeItems or {}) do count = count + 1 end
     return count
 end
 
 function RS:GetPlanSummary()
+    self:EnsurePlanLoaded()
     local recipeInfo = self:GetSelectedRecipe()
     local isUnlearned = recipeInfo and recipeInfo.learned ~= true
     if isUnlearned then
@@ -472,9 +665,11 @@ function RS:GetPlanSummary()
 end
 
 function RS:UpdatePlanDisplay()
+    if self.RefreshPlanWindow then self:RefreshPlanWindow() end
     local controls = self.controls
     if not controls then return end
     controls.counter:SetText(self:GetPlanSummary())
+    if controls.quality then controls.quality:SetText(self:GetQualityLabel(self:GetSettings().quality)) end
     if controls.button.recipeShoppingHovered then self:UpdateTooltip(controls.button) end
 end
 
@@ -506,7 +701,7 @@ function RS:EnsureControls()
     if not page or not form or type(CreateFrame) ~= "function" then return nil end
 
     local controls = CreateFrame("Frame", "HironCraftRecipeShoppingControls", page)
-    controls:SetSize(142, 22)
+    controls:SetSize(248, 22)
     controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -44)
     controls:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
 
@@ -537,15 +732,16 @@ function RS:EnsureControls()
     button.UpdateTooltip = function(self) RS:UpdateTooltip(self) end
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
-            RS:ClearPlan()
-            Notify(T("PG_RECIPE_SHOP_CLEARED", "Recipe shopping list cleared."))
+            if RS.ShowPlanWindow then RS:ShowPlanWindow() end
         else
             local recipeInfo = RS:GetSelectedRecipe()
+            local added
             if recipeInfo and recipeInfo.learned ~= true then
-                RS:AddSelectedUnlearnedRecipe()
+                added = RS:AddSelectedUnlearnedRecipe()
             else
-                RS:AddSelectedRecipe()
+                added = RS:AddSelectedRecipe()
             end
+            if added and RS.ShowPlanWindow then RS:ShowPlanWindow() end
         end
         RS:UpdatePlanDisplay()
     end)
@@ -563,9 +759,23 @@ function RS:EnsureControls()
     end)
 
     local counter = controls:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    counter:SetPoint("TOPRIGHT", controls, "BOTTOMRIGHT", 0, -4)
-    counter:SetJustifyH("RIGHT")
+    counter:SetPoint("TOPLEFT", controls, "BOTTOMLEFT", 0, -8)
+    counter:SetWidth(186)
+    counter:SetJustifyH("LEFT")
     counter:SetTextColor(0.65, 0.85, 1)
+    local list = CreateFrame("Button", nil, controls, "UIPanelButtonTemplate")
+    list:SetSize(56, 18)
+    list:SetPoint("TOPRIGHT", controls, "BOTTOMRIGHT", 0, -4)
+    list:SetText(T("PG_RECIPE_PLAN_OPEN", "List"))
+    list:SetPushedTextOffset(0, 0)
+    list:SetScript("OnClick", function() if RS.ShowPlanWindow then RS:ShowPlanWindow() end end)
+    local quality = CreateFrame("Button", nil, controls, "UIPanelButtonTemplate")
+    quality:SetSize(100, 22)
+    quality:SetPoint("TOPRIGHT", controls, "TOPRIGHT", 0, 0)
+    quality:SetPushedTextOffset(0, 0)
+    quality:SetScript("OnClick", function(self) if RS.ShowQualityMenu then RS:ShowQualityMenu(self) end end)
+    controls.quality = quality
+    controls.list = list
     controls.counter = counter
     controls.quantity = quantity
     controls.button = button
@@ -602,16 +812,18 @@ function RS:OnRecipeSelected()
     if not supported then return end
 
     if recipeInfo.learned == true then
+        controls.quality:Show()
         controls.quantity:Show()
         controls.button:ClearAllPoints()
         controls.button:SetSize(106, 22)
         controls.button:SetPoint("LEFT", controls.quantity, "RIGHT", 4, 0)
         controls.button:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"))
     else
+        controls.quality:Hide()
         controls.quantity:Hide()
         controls.button:ClearAllPoints()
         controls.button:SetSize(142, 22)
-        controls.button:SetPoint("RIGHT", controls, "RIGHT", 0, 0)
+        controls.button:SetPoint("LEFT", controls, "LEFT", 0, 0)
         controls.button:SetText(T("PG_RECIPE_ITEM_BUTTON", "Add recipe"))
     end
     controls.button:SetEnabled(true)

@@ -1953,7 +1953,32 @@ function CombineImportResolveMaterials(materials)
     return out
 end
 
+function IsRecipeLookupMaterial(material)
+    local recipeClassID = Enum and Enum.ItemClass and Enum.ItemClass.Recipe
+    return material and recipeClassID ~= nil
+        and tonumber(material.itemClassID or material.classID) == tonumber(recipeClassID)
+end
+
+function RemoveResolvedRecipePlaceholders(rows, materials)
+    local queries = {}
+    for _, material in ipairs(materials or {}) do
+        if IsRecipeLookupMaterial(material) then
+            local query = NormalizeSearchComparable(material.recipeLookupName or material.importSearchName
+                or material.unresolvedName or material.importName or "")
+            if query ~= "" then queries[query] = true end
+        end
+    end
+    for index = #(rows or {}), 1, -1 do
+        local row = rows[index]
+        local query = NormalizeSearchComparable(row.importSearchName or row.unresolvedName or row.importName or "")
+        if not row.itemID and IsRecipeLookupMaterial(row) and queries[query] then
+            table.remove(rows, index)
+        end
+    end
+end
+
 function AppendImportedMaterialsToTarget(targetListID, materials, sessionSerial)
+    if sessionSerial and not IsCurrentImportSessionSerial(sessionSerial) then return 0 end
     local normalized = NormalizeAndMergeMaterials(materials or {})
     if #normalized == 0 then
         return 0
@@ -1962,6 +1987,7 @@ function AppendImportedMaterialsToTarget(targetListID, materials, sessionSerial)
     local savedList = FindSavedListByID(targetListID)
     if savedList then
         savedList.rows = savedList.rows or {}
+        RemoveResolvedRecipePlaceholders(savedList.rows, materials)
         for _, row in ipairs(normalized) do
             local exported = ExportMaterialRows({ row })[1]
             if exported then
@@ -1985,6 +2011,7 @@ function AppendImportedMaterialsToTarget(targetListID, materials, sessionSerial)
         end
 
         S.session.rows = S.session.rows or {}
+        RemoveResolvedRecipePlaceholders(S.session.rows, materials)
         for _, row in ipairs(normalized) do
             MergeRowIntoSessionRows(row)
         end
@@ -2097,6 +2124,7 @@ function BuildImportMaterialFromBrowseResult(result, sourceMaterial)
     local material = {
         itemID = itemID,
         quantity = quantity,
+        recipeLookupName = IsRecipeLookupMaterial(sourceMaterial) and query or nil,
         label = name or staticInfo.name or query or GetItemName(itemID),
         quality = staticInfo.quality,
         itemClassID = staticInfo.classID,
@@ -3538,7 +3566,8 @@ function S:CleanupTemporaryLists()
     if not db.savedLists then return end
     local removed = 0
     for i = #db.savedLists, 1, -1 do
-        if db.savedLists[i].temporary then
+        -- User-managed recipe plans remain until explicitly edited/cleared.
+        if db.savedLists[i].temporary and db.savedLists[i].sourceKind ~= "profession_recipes" then
             table.remove(db.savedLists, i)
             removed = removed + 1
         end
@@ -3820,6 +3849,16 @@ function S:LoadSavedList(listID)
         end
     end
     return false, "not_found"
+end
+
+function S:RestoreRecipeShoppingListOnOpen()
+    if self.session and self.session.active then return false end
+    for _, list in ipairs(GetDB().savedLists or {}) do
+        if list.sourceKind == "profession_recipes" and #(list.rows or {}) > 0 then
+            return self:LoadSavedList(list.id)
+        end
+    end
+    return false
 end
 
 function S:CreateManualList(name)
@@ -4825,7 +4864,15 @@ function S:ResolveUnresolvedSessionRowsByBrowse(afterDone)
                 itemSubClassID = row.itemSubClassID,
             })
 
-            table.remove(rows, index)
+            if IsRecipeLookupMaterial(row) then
+                -- Keep the user's requested recipe visible and saved until
+                -- browse results actually replace it. Closing AH mid-query
+                -- must not discard the only copy of the requested recipe.
+                row.importResolveAttempted = true
+                row.status = T("PG_SHOP_STATUS_SCANNING", "Scanning...")
+            else
+                table.remove(rows, index)
+            end
         end
     end
 
@@ -4907,6 +4954,11 @@ function CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty
     local canExpand = #expand > 0 and CanResolveImportByBrowse()
     expand = CombineImportResolveMaterials(expand)
     local source = canExpand and immediate or (materials or {})
+    if canExpand then
+        for _, material in ipairs(expand) do
+            if IsRecipeLookupMaterial(material) then source[#source + 1] = material end
+        end
+    end
     local rows = NormalizeAndMergeMaterials(source)
 
     if #rows == 0 and not canExpand and not allowEmpty then
@@ -7073,6 +7125,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
     if event == "AUCTION_HOUSE_SHOW" then
         S.isAuctionHouseOpen = true
+        S:RestoreRecipeShoppingListOnOpen()
         C_Timer.After(0, function()
             if ShouldShowAuctionTab() then
                 S:EnsureAuctionTab()
@@ -7102,6 +7155,13 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         S.pendingItemPurchases = {}
         S.pendingSearchItemPurchases = {}
         S.importResolveState = nil
+        for _, row in ipairs(S.session and S.session.rows or {}) do
+            if not row.itemID and IsRecipeLookupMaterial(row) then
+                row.importResolveAttempted = nil
+                row.status = T("PG_SHOP_STATUS_OPEN_AH", "Open AH")
+            end
+        end
+        SyncActiveSavedList()
         S.directSearchBuy = nil
         S._auctionatorPlanMirrorActiveKey = nil
         if S.ClearSearchText then S:ClearSearchText(true) end

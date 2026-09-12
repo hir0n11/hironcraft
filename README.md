@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Editable recipe shopping plan (0.3.50)
+
+- Adding a recipe opens a small, movable side window (360 wide, at most five
+  visible rows). It never takes keyboard focus. Close it with X/Escape and
+  reopen it with **List** or by right-clicking **Add to shopping**.
+- Each row has minus/plus, an editable quantity (Enter or focus loss to apply)
+  and X to remove it. Quantity zero removes that row. **Clear** requires a
+  second click. Removing or reducing one recipe rebuilds only the accumulated
+  recipe list, preserving the other recipes and their reagent selections.
+- The quality selector applies to new additions: **As in recipe**, **T1**,
+  **T2**, **T3**. Explicit quality overrides required quality-reagent slots,
+  while selected optional/finishing reagents remain as selected. An unavailable
+  tier produces an error instead of silently buying another tier.
+- Identical recipe/reagent selections merge. Different quality or optional
+  reagent selections retain separate rows and immutable per-craft snapshots.
+- **Use owned reagents** deducts stock once from the combined requirement for
+  each exact item ID/quality. For 40 T1 required, 20 T1 owned and 15 T2 owned,
+  the list buys 20 T1. Other quality stock does not reduce that amount.
+  **Recalculate** refreshes missing amounts after inventory changes.
+- Recipe plans and settings survive reload/login. Shopping's temporary-list
+  cleanup no longer deletes user-managed recipe lists.
+- Unlearned recipe items also appear in the editor and can be removed
+  individually. Auction lookup keeps their unresolved rows visible and saved
+  until results arrive; interruption or no matching auction cannot delete the
+  request. Lookup accepts recipe-learning items, not the crafted output.
+- Plan mutations roll back when the shopping backend rejects an update.
+
 ## First-open navigation and release packaging (0.3.49)
 
 - Clicking Recipes, Specializations, Crafting Orders or Chat Orders cancels
@@ -59,8 +86,8 @@ The original CraftScan and ProfitHUB folders are not required after migration an
 - Current reagent-quality allocations and explicitly selected optional or
   finishing reagents are preserved. The best-quality checkbox controls an
   otherwise unallocated quality slot.
-- Right-clicking the button clears the accumulated recipe plan and its
-  temporary list.
+- In 0.3.50, right-clicking opens the editor; full clearing moved into its
+  explicit two-click **Clear** button.
 
 ## Specific item request guard (0.3.45)
 
