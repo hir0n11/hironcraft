@@ -2,7 +2,8 @@
 local noop=function() end
 local Scan={DB={settings={my_uuid='local-account',substitution_tags={support='Ask {crafter}.'},
         explanations={Price='You choose the price.',Crafter='Try {crafter} for {item}.',Support='{support}'}},
-    characters={Smith={parent_professions={[164]={scanning_enabled=true}}}},realm={},customers={}},
+    characters={Smith={parent_professions={[164]={scanning_enabled=true}}}},realm={},customers={},
+    listed_orders={}},
     Utils={onLoad=noop,Contains=function(values,wanted)
         for _,value in ipairs(values) do if value==wanted then return true end end
     end}, CONST={TEXT=setmetatable({MANUAL_MATCH='Match %s %s'}, {__index=function(_,k) return k end})},
@@ -16,8 +17,15 @@ Scan.Config={SubstituteTags=function(text) return Scan.Utils.FString(text,Scan.D
 Scan.Utils.ProfessionNameByID=function() return 'Blacksmithing' end
 Scan.Utils.ColorizeProfessionName=function(_,name) return name end
 Scan.Utils.SplitResponse=function(text) return {text} end
+Scan.Utils.GetReplyItemLink=function(_,link) return link end
 Scan.GetSortedCrafters=function() return {{name='Smith',parentProfessionID=164}} end
 Scan.ColorizeCrafterName=function(name) return name end
+Scan.OrderToOrderID=function(order) return order.customerName..'-'..order.responseID end
+local fulfillmentStatuses={}
+Scan.OrderFulfillment={
+    Status={Crafted='crafted',Fulfilled='fulfilled',Rejected='rejected'},
+    GetStatus=function(_,order) return fulfillmentStatuses[Scan.OrderToOrderID(order)] end,
+}
 local matched, sent={},{}
 Scan.OnMessage=function(event,message,customer,guid,options)
     matched[#matched+1]={customer=customer,message=message,options=options}
@@ -36,13 +44,23 @@ C_ChatInfo={GetChatLineText=function(id) assert(id==44);return '[Item request]' 
 assert(loadfile('Customer/BattleNet.lua'))('HironCraft',Scan)
 local key=Scan.BattleNet.FromID(30)
 local response={crafterName='Favu',crafterFullName='Favu-Kazzak',professionID=164,
-    professionName='Blacksmithing',itemID=100,responseID=1,time=100}
+    professionName='Blacksmithing',itemID=100,itemLink="Spellbreaker's Rebuke",
+    responseID=1,requestToken='first-request',time=100}
 Scan.DB.customers[key]={responses={[1]=response}}
 Scan.DB.customers['Normal-Realm']={responses={[1]=response}}
+Scan.DB.listed_orders[Scan.OrderToOrderID({customerName=key,responseID=1})]=
+    {customerName=key,responseID=1}
+Scan.DB.listed_orders[Scan.OrderToOrderID({customerName='Normal-Realm',responseID=1})]=
+    {customerName='Normal-Realm',responseID=1}
+local second, duplicate
 Scan.BuildResponseContext=function(value)
-    assert(value==response)
-    return {crafter='Favu',item="Spellbreaker's Rebuke",profession='Blacksmithing',
-        profession_link='Blacksmithing',commission='10k'}
+    if value==response or value==duplicate then
+        return {crafter='Favu',item="Spellbreaker's Rebuke",profession='Blacksmithing',
+            profession_link='Blacksmithing',commission='10k'}
+    end
+    assert(value==second)
+    return {crafter='Lavu',item='that',profession='Jewelcrafting',
+        profession_link='Jewelcrafting',commission='5k'}
 end
 Scan.QuickReplies={ResolveResponses=function(_,customer,customerInfo)
     assert(customerInfo==Scan.DB.customers[customer])
@@ -57,7 +75,15 @@ local function menu(name,context)
     local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end}
     function root:CreateButton(label,click)
         local button={label=label,click=click,SetTooltip=noop,
-            CreateButton=self.CreateButton,CreateDivider=noop,CreateTitle=self.CreateTitle}
+            CreateButton=self.CreateButton,CreateRadio=self.CreateRadio,
+            CreateDivider=noop,CreateTitle=self.CreateTitle}
+        buttons[#buttons+1]=button;return button
+    end
+    function root:CreateRadio(label,isSelected,setSelected,data)
+        local button={label=label,click=function() setSelected(data) end,
+            selected=function() return isSelected(data) end,SetTooltip=noop,
+            CreateButton=self.CreateButton,CreateRadio=self.CreateRadio,
+            CreateDivider=noop,CreateTitle=self.CreateTitle}
         buttons[#buttons+1]=button;return button
     end
     menus[name](nil,root,context)
@@ -109,6 +135,48 @@ find(buttons,'HironCraftScan')
 find(buttons,'Price').click()
 assert(#sent==6 and sent[6].customer==key, 'collapsed Battle.net reply menu failed')
 Scan.DB.settings.collapse_chat_context=false
+
+-- One explicit button combines every unfinished request. Item requests use the
+-- item, while generic requests fall back to the profession. Selecting context
+-- only affects subsequent tagged explanations and never sends by itself.
+second={crafterName='Lavu',crafterFullName='Lavu-Kazzak',professionID=755,
+    parentProfID=755,professionName='Jewelcrafting',responseID=2,
+    requestToken='second-request',time=120}
+Scan.DB.customers[key].responses[2]=second
+Scan.DB.listed_orders[Scan.OrderToOrderID({customerName=key,responseID=2})]=
+    {customerName=key,responseID=2}
+duplicate={crafterName='Favu',crafterFullName='Favu-Kazzak',professionID=164,
+    professionName='Blacksmithing',itemID=100,itemLink="Spellbreaker's Rebuke"}
+local pending=Scan.CustomExplanations:GetPendingResponses(key)
+local deduplicated=Scan.CustomExplanations:BuildAssignments(key,
+    {pending[1],{response=duplicate},pending[2]})
+assert(#deduplicated==2, 'duplicate item/crafter assignment was repeated')
+buttons=menu('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30,chatTarget='Friend'})
+local beforeAssignments=#sent
+find(buttons,'HironCraftScan - To who send').click()
+assert(#sent==beforeAssignments+1)
+assert(sent[#sent].message=="Spellbreaker's Rebuke → Favu; Jewelcrafting → Lavu",
+    'unfinished item/profession assignments were not combined')
+find(buttons,'HironCraftScan - Active order')
+local selected=find(buttons,'Jewelcrafting → Lavu')
+assert(not selected.selected(), 'manual order context started selected')
+local beforeSelection=#sent
+selected.click()
+assert(#sent==beforeSelection and selected.selected(), 'choosing context sent chat or was not retained')
+find(buttons,'Crafter').click()
+assert(sent[#sent].message=='Try Lavu for that.', 'custom tags ignored the manual order context')
+
+fulfillmentStatuses[Scan.OrderToOrderID({customerName=key,responseID=2})]={status='crafted'}
+assert(#Scan.CustomExplanations:GetPendingResponses(key)==1, 'crafted order remained available')
+assert(Scan.CustomExplanations:Render('Try {crafter}.',key)=='Try Favu.',
+    'completed manual context did not fall back to the remaining request')
+local remaining=Scan.CustomExplanations:BuildAssignments(key)
+assert(#remaining==1 and remaining[1]=="Spellbreaker's Rebuke → Favu",
+    'completed order was included in the combined assignment')
+fulfillmentStatuses[Scan.OrderToOrderID({customerName=key,responseID=1})]={status='rejected'}
+assert(#Scan.CustomExplanations:GetPendingResponses(key)==0)
+assert(Scan.CustomExplanations:Render('Try {crafter}.',key)==nil,
+    'completed/rejected response was reused as a custom tag context')
 
 assert(Scan.BattleNet.ContextCustomer({accountInfo=friend})==key)
 assert(Scan.BattleNet.ContextCustomer({bnetIDAccount=30})==key)

@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Multi-order reply context (0.3.33)
+
+The chat name context menu now offers **To who send** for customers with
+unfinished requests. One explicit click sends a compact, chronological list of
+unique assignments: item requests use item to crafter, while generic requests
+use profession to crafter. Crafted, fulfilled and rejected orders are excluded.
+
+When several unfinished requests exist, **Active order** can pin one of them as
+the source for the crafter, item, profession, profession link and commission
+placeholders in Custom Explanations. **Automatic** keeps the previous
+latest-relevant behavior. The choice is per customer and session-only, and is
+discarded as soon as that exact request is completed, rejected, replaced or
+removed. Choosing a context sends nothing; chat is still sent only by a direct
+click on an answer.
+
 ## Order hotkey lifecycle fix (0.3.32)
 
 The configured order hotkey is now applied as soon as an already visible

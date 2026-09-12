@@ -34,6 +34,171 @@ end
 local CustomExplanations = {}
 HironCraftScan.CustomExplanations = CustomExplanations
 
+-- A customer can have several unfinished requests at once. Keep a manual
+-- context choice in memory only: it must not outlive a reload or silently bind
+-- a future request to an old response ID.
+local selectedContexts = {}
+
+local function IsTerminalOrder(order)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if not fulfillment or not fulfillment.GetStatus or not fulfillment.Status then
+        return false
+    end
+    local ok, entry = pcall(fulfillment.GetStatus, fulfillment, order)
+    if not ok or type(entry) ~= 'table' then
+        return false
+    end
+    local status = entry.status
+    return status == fulfillment.Status.Crafted
+        or status == fulfillment.Status.Fulfilled
+        or status == fulfillment.Status.Rejected
+end
+
+local function ResponseContext(response)
+    local ok, context = pcall(HironCraftScan.BuildResponseContext, response)
+    return ok and type(context) == 'table' and context or nil
+end
+
+-- Unlike automatic quick replies, this list intentionally spans every active
+-- inquiry from the customer. That is what lets the user answer "where do I
+-- send both items?" after two different profession requests.
+function CustomExplanations:GetPendingResponses(target)
+    local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
+    local listedOrders = HironCraftScan.DB.listed_orders
+    if type(customerInfo) ~= 'table'
+        or type(customerInfo.responses) ~= 'table'
+        or type(listedOrders) ~= 'table'
+    then
+        selectedContexts[target] = nil
+        return {}
+    end
+
+    local candidates, seen = {}, {}
+    for responseKey, response in pairs(customerInfo.responses) do
+        if type(response) == 'table' and not seen[response] then
+            seen[response] = true
+            local responseID = response.responseID or responseKey
+            local order = { customerName = target, responseID = responseID }
+            local orderID = HironCraftScan.OrderToOrderID(order)
+            if response.crafterFullName
+                and response.professionID
+                and listedOrders[orderID]
+                and not IsTerminalOrder(order)
+            then
+                candidates[#candidates + 1] = {
+                    order = order,
+                    response = response,
+                    responseID = responseID,
+                    requestToken = response.requestToken,
+                    responseTime = response.time,
+                }
+            end
+        end
+    end
+
+    table.sort(candidates, function(lhs, rhs)
+        local lhsTime = tonumber(lhs.response.time) or 0
+        local rhsTime = tonumber(rhs.response.time) or 0
+        if lhsTime == rhsTime then
+            return tostring(lhs.responseID) < tostring(rhs.responseID)
+        end
+        return lhsTime < rhsTime
+    end)
+    return candidates
+end
+
+local function MatchesSelection(candidate, selection)
+    if not selection or candidate.responseID ~= selection.responseID then
+        return false
+    end
+    if selection.requestToken ~= nil or candidate.requestToken ~= nil then
+        return candidate.requestToken == selection.requestToken
+    end
+    return candidate.response == selection.response
+        and candidate.responseTime == selection.responseTime
+end
+
+function CustomExplanations:GetSelectedResponse(target, pending)
+    local selection = selectedContexts[target]
+    if not selection then return nil end
+    for _, candidate in ipairs(pending or self:GetPendingResponses(target)) do
+        if MatchesSelection(candidate, selection) then
+            return candidate.response
+        end
+    end
+    selectedContexts[target] = nil
+    return nil
+end
+
+function CustomExplanations:SetSelectedResponse(target, candidate)
+    if not candidate then
+        selectedContexts[target] = nil
+        return
+    end
+    selectedContexts[target] = {
+        response = candidate.response,
+        responseID = candidate.responseID,
+        requestToken = candidate.requestToken,
+        responseTime = candidate.responseTime,
+    }
+end
+
+local function ResponseSubject(response, context)
+    if response.itemID then
+        local link = HironCraftScan.Utils.GetReplyItemLink(response.itemID, response.itemLink)
+        if type(link) == 'string' and link ~= '' then return link end
+    end
+    return context.profession
+        or response.professionName
+        or HironCraftScan.Utils.ProfessionNameByID(response.parentProfID or response.professionID)
+end
+
+local function Assignment(candidate)
+    local response = candidate.response
+    local context = ResponseContext(response)
+    if not context or not context.crafter then return nil end
+    local subject = ResponseSubject(response, context)
+    if not subject then return nil end
+    return subject .. ' → ' .. context.crafter,
+        table.concat({
+            response.itemID and ('item:' .. tostring(response.itemID))
+                or ('profession:' .. tostring(response.parentProfID or response.professionID)),
+            tostring(response.crafterFullName),
+        }, '\31')
+end
+
+function CustomExplanations:BuildAssignments(target, pending)
+    local result, seen = {}, {}
+    for _, candidate in ipairs(pending or self:GetPendingResponses(target)) do
+        local text, key = Assignment(candidate)
+        if text and not seen[key] then
+            seen[key] = true
+            result[#result + 1] = text
+        end
+    end
+    return result
+end
+
+local function SendManualMessages(messages, target)
+    return HironCraftScan.Utils.SendResponses(messages, target, true)
+end
+
+local function SendManualText(text, target)
+    return SendManualMessages(HironCraftScan.Utils.SplitResponse(text), target)
+end
+
+function CustomExplanations:SendAssignments(target)
+    local assignments = self:BuildAssignments(target)
+    if #assignments == 0 then
+        print('|cffffd100HironCraftScan:|r ' .. L('No unfinished order contexts are available.'))
+        return false
+    end
+    local message = table.concat(assignments, '; ')
+    -- Prefer one compact whisper. If several links exceed Blizzard's 255-byte
+    -- chat limit, keep each mapping intact as its own line from the same click.
+    return SendManualMessages(#message <= 255 and { message } or assignments, target)
+end
+
 -- Custom explanations are follow-up messages for the selected customer, so use
 -- the same order selection and substitution rules as contextual quick replies.
 -- Plain explanations continue to work even when the customer has no order.
@@ -49,7 +214,29 @@ function CustomExplanations:Render(text, target)
         return nil
     end
 
-    for _, candidate in ipairs(quickReplies:ResolveResponses(target, customerInfo)) do
+    local pending = self:GetPendingResponses(target)
+    local selected = self:GetSelectedResponse(target, pending)
+    local candidates = {}
+    if selected then
+        candidates[1] = { response = selected }
+    else
+        local pendingResponses = {}
+        for _, candidate in ipairs(pending) do
+            pendingResponses[candidate.response] = true
+        end
+        for _, candidate in ipairs(quickReplies:ResolveResponses(target, customerInfo)) do
+            if pendingResponses[candidate.response] then
+                candidates[#candidates + 1] = candidate
+            end
+        end
+        -- The reply tracker can still point at an older inquiry that just
+        -- finished. Fall back to the newest unfinished row instead of reviving
+        -- the completed context or refusing a valid manual follow-up.
+        if #candidates == 0 and #pending > 0 then
+            candidates[1] = pending[#pending]
+        end
+    end
+    for _, candidate in ipairs(candidates) do
         local context = HironCraftScan.BuildResponseContext(candidate.response)
         if context then
             local rendered = HironCraftScan.Utils.FString(raw, context)
@@ -67,7 +254,7 @@ function CustomExplanations:Send(text, target)
         print('|cffffd100HironCraftScan:|r ' .. L('Custom explanation context unavailable.'))
         return false
     end
-    return HironCraftScan.Utils.SendResponses(HironCraftScan.Utils.SplitResponse(rendered), target, true)
+    return SendManualText(rendered, target)
 end
 
 HironCraftScan_CustomExplanationsButtonMixin = {}
@@ -305,6 +492,46 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 subMenu:CreateButton(prefix .. L('Save chat text'), function()
                     HironCraftScan.ChatTextCapture.ShowForLine(lineID)
                 end)
+            end
+        end
+
+        local pending = CustomExplanations:GetPendingResponses(target)
+        if #pending > 0 then
+            subMenu:CreateDivider()
+            local assignments = subMenu:CreateButton(prefix .. L('To who send'), function()
+                CustomExplanations:SendAssignments(target)
+            end)
+            assignments:SetTooltip(function(tooltip, elementDescription)
+                GameTooltip_AddNormalLine(tooltip,
+                    HironCraftScan.MakeTextWhite(L('Send every unfinished item or profession with its crafter.')))
+            end)
+
+            if #pending > 1 then
+                local activeOrder = subMenu:CreateButton(prefix .. L('Active order'))
+                activeOrder:SetTooltip(function(tooltip, elementDescription)
+                    GameTooltip_AddNormalLine(tooltip,
+                        HironCraftScan.MakeTextWhite(L('Choose which unfinished order supplies custom message tags.')))
+                end)
+                activeOrder:CreateRadio(L('Automatic (latest relevant order)'),
+                    function()
+                        return CustomExplanations:GetSelectedResponse(target, pending) == nil
+                    end,
+                    function()
+                        CustomExplanations:SetSelectedResponse(target, nil)
+                    end)
+                for _, candidate in ipairs(pending) do
+                    local label = Assignment(candidate)
+                    if label then
+                        activeOrder:CreateRadio(label,
+                            function(value)
+                                return CustomExplanations:GetSelectedResponse(target, pending) == value.response
+                            end,
+                            function(value)
+                                CustomExplanations:SetSelectedResponse(target, value)
+                            end,
+                            candidate)
+                    end
+                end
             end
         end
 
