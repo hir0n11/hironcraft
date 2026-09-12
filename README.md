@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Contained Auction House hotkey labels (0.3.42)
+
+- Assigned keys on Buy, Refresh, Skip, Post and sell-side Skip buttons use a
+  smaller single-line caption inset from the upper-right edge, so the caption
+  remains entirely inside the Blizzard button border.
+
 ## Follow-up replies and Auction House controls (0.3.41)
 
 - A new craft request from an existing conversation uses a compact

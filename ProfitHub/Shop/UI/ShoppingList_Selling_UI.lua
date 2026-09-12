@@ -534,9 +534,11 @@ function S:EnsureSellPanel()
             if labelColor then
                 btn.label:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
             end
-            btn.key = MakeText(btn, 8, "RIGHT")
-            btn.key:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -3, -2)
-            btn.key:SetSize(28, 8)
+            btn.key = MakeText(btn, 7, "RIGHT")
+            btn.key:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -5)
+            btn.key:SetSize(26, 7)
+            btn.key:SetWordWrap(false)
+            if btn.key.SetMaxLines then btn.key:SetMaxLines(1) end
             btn.key:SetTextColor(0.98, 0.86, 0.42)
             btn:SetScript("OnClick", function(self, button)
                 if button == "RightButton" then
@@ -580,8 +582,11 @@ function S:EnsureSellPanel()
         btn.label:SetPoint("CENTER", 0, -1)
         btn.label:SetText(labelText)
         if labelColor then btn.label:SetTextColor(labelColor[1], labelColor[2], labelColor[3]) end
-        btn.key = MakeText(btn, 8, "RIGHT")
-        btn.key:SetPoint("TOPRIGHT", -3, -2)
+        btn.key = MakeText(btn, 7, "RIGHT")
+        btn.key:SetPoint("TOPRIGHT", -6, -5)
+        btn.key:SetSize(26, 7)
+        btn.key:SetWordWrap(false)
+        if btn.key.SetMaxLines then btn.key:SetMaxLines(1) end
         btn.key:SetTextColor(0.98, 0.86, 0.42)
         btn:SetScript("OnClick", function(self, button)
             if button == "RightButton" then

@@ -49,11 +49,13 @@ check(
 );
 check(
   ui.includes('btn.label:SetPoint("CENTER", btn, "CENTER", 0, 0)') &&
-    ui.includes('btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -4, -2)'),
+    ui.includes('btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -5)') &&
+    ui.includes('btn.value:SetSize(26, 7)'),
   "buy actions do not keep the action centered and the hotkey in the corner",
 );
 check(
-  (sellUi.match(/btn\.key = MakeText\(btn, 8, "RIGHT"\)/g) || []).length >= 2 &&
+  (sellUi.match(/btn\.key = MakeText\(btn, 7, "RIGHT"\)/g) || []).length >= 2 &&
+    (sellUi.match(/btn\.key:SetPoint\("TOPRIGHT"[^\n]*-6, -5\)/g) || []).length >= 2 &&
     sellUi.includes('btn.label:SetSize(32, 18)'),
   "selling actions or duration buttons still use unstable native captions",
 );

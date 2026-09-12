@@ -3447,9 +3447,11 @@ function S:CreateWindow()
             btn.label:SetSize(BIND_BTN_W - 10, BIND_BTN_H - 2)
             btn.label:SetTextColor(1, 0.82, 0.20, 1)
             btn.label:SetText(labelText)
-            btn.value = MakeText(btn, 8, "RIGHT")
-            btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -4, -2)
-            btn.value:SetSize(30, 8)
+            btn.value = MakeText(btn, 7, "RIGHT")
+            btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, -5)
+            btn.value:SetSize(26, 7)
+            btn.value:SetWordWrap(false)
+            if btn.value.SetMaxLines then btn.value:SetMaxLines(1) end
             btn.value:SetTextColor(1, 1, 1, 1)
 
             local function CurrentKeyText()
@@ -4213,7 +4215,7 @@ function S:CreateWindow()
     end
     for _, button in ipairs({ f.refreshAction, f.bindAction, f.skipBindAction }) do
         if button and button.label then button.label:SetFont(FONT, 11, "") end
-        if button and button.value then button.value:SetFont(FONT, 8, "") end
+        if button and button.value then button.value:SetFont(FONT, 7, "") end
     end
     return f
 end
