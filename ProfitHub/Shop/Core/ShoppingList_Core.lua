@@ -4862,14 +4862,14 @@ function ScheduleTemporaryAuctionatorPlanScan(sessionSerial)
     end
 end
 
-function CreateTemporaryImportedList(listName, materials, sourceKind)
+function CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty)
     local immediate, expand = SplitImportExpansionMaterials(materials or {})
     local canExpand = #expand > 0 and CanResolveImportByBrowse()
     expand = CombineImportResolveMaterials(expand)
     local source = canExpand and immediate or (materials or {})
     local rows = NormalizeAndMergeMaterials(source)
 
-    if #rows == 0 and not canExpand then
+    if #rows == 0 and not canExpand and not allowEmpty then
         return false, "empty", 0
     end
 
@@ -5024,8 +5024,8 @@ function CreateTemporaryImportedList(listName, materials, sourceKind)
     return true, "created", totalCount
 end
 
-function S:CreateTemporaryImportedList(listName, materials, sourceKind)
-    return CreateTemporaryImportedList(listName, materials, sourceKind)
+function S:CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty)
+    return CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty)
 end
 
 function BuildMirroredAuctionatorPlanName(callerID, listName)

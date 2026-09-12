@@ -370,6 +370,10 @@ local function CreateMenuShownButton()
     )
     attachButton = button
 
+    if HironCraftProfit and HironCraftProfit.RecipeShopping then
+        HironCraftProfit.RecipeShopping:AttachScannerLabel(button.ScanningLabel)
+    end
+
     HironCraftScan.Events:Register({
         'RECIPE_SELECTED',
         'PROFESSION_SCAN_BEGIN',
@@ -488,6 +492,9 @@ function HironCraftScan_ScannerConfigButtonMixin:UpdateHeight()
         2,
         -4 + offset
     )
+    if HironCraftProfit and HironCraftProfit.RecipeShopping then
+        HironCraftProfit.RecipeShopping:UpdatePosition(offset)
+    end
 end
 
 function HironCraftScan_ScannerConfigButtonMixin:UpdateRecipeLabel(recipeID, ctxt)
@@ -563,6 +570,10 @@ local function OnRecipeSelected()
     -- frame.
     if not ProfessionsFrame.CraftingPage.SchematicForm:IsShown() then
         return
+    end
+
+    if HironCraftProfit and HironCraftProfit.RecipeShopping then
+        HironCraftProfit.RecipeShopping:OnRecipeSelected()
     end
 
     local ctxt = GetParentContext()

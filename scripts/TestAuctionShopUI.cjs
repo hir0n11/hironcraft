@@ -73,5 +73,10 @@ check(
   !core.includes('if HasShoppingSession() then\n                        S:ShowWindow()'),
   "Auction House landing still depends on an active shopping session",
 );
+check(
+  core.includes("function CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty)") &&
+    core.includes("if #rows == 0 and not canExpand and not allowEmpty then"),
+  "recipe shopping cannot replace its temporary list after all reagents become available",
+);
 
 console.log("Auction Shop UI tests passed (classic frame, centered controls, default landing tab).");

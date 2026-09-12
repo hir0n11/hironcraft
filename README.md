@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Regular-recipe shopping list (0.3.46)
+
+- Learned recipes on the standard profession crafting page have a quantity
+  field and **Add to shopping** button; this does not require Profession
+  Shopping List.
+- Repeated clicks and different recipes accumulate into one temporary
+  **Profession recipes** list in HironCraft Shop. Player inventory, bank and
+  reagent storage are reserved once across the complete plan, so only the
+  combined missing amount is listed.
+- Current reagent-quality allocations and explicitly selected optional or
+  finishing reagents are preserved. The best-quality checkbox controls an
+  otherwise unallocated quality slot.
+- Right-clicking the button clears the accumulated recipe plan and its
+  temporary list.
+
 ## Specific item request guard (0.3.45)
 
 - `LF craft [item]` no longer falls back to the general-request row when the
