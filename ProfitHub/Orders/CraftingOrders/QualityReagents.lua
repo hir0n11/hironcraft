@@ -2102,7 +2102,23 @@ function CO:FindOrderPageFrame(seed)
 end
 
 function CO:EnsurePageBindingHooks(pageFrame)
-    if not pageFrame or pageFrame.ahuiCraftingOrdersBindingHooked then
+    if not pageFrame then
+        return
+    end
+
+    -- The page can be discovered and hooked before it becomes visible. In
+    -- that case its first OnShow has already been missed by the time native
+    -- order rows are initialized. Reusing the hook function from row setup
+    -- must also restore a missing binding; hovering a row must never be the
+    -- event that makes the configured hotkey start working.
+    if pageFrame.ahuiCraftingOrdersBindingHooked then
+        if not self.bindingOwner
+            and pageFrame.IsShown and pageFrame:IsShown()
+            and self.ApplyTemporaryBinding
+        then
+            self.activePageFrame = pageFrame
+            self:ApplyTemporaryBinding()
+        end
         return
     end
 
@@ -2164,6 +2180,14 @@ function CO:EnsurePageBindingHooks(pageFrame)
 
     hookVisibility(pageFrame.OrderView)
     hookVisibility(pageFrame.BrowseFrame)
+
+    if not self.bindingOwner
+        and pageFrame.IsShown and pageFrame:IsShown()
+        and self.ApplyTemporaryBinding
+    then
+        self.activePageFrame = pageFrame
+        self:ApplyTemporaryBinding()
+    end
 end
 
 function CO:SetActiveRowButton(btn)

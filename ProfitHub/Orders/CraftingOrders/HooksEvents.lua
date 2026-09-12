@@ -131,6 +131,10 @@ function CO:HookBlizzardProfessions()
     local function afterExternalPageRefresh(pageFrame)
         if not CO:IsEnabled() then return end
         pageFrame = pageFrame or CO:FindOrderPageFrame()
+        if pageFrame then
+            CO.activePageFrame = pageFrame
+            if CO.EnsurePageBindingHooks then CO:EnsurePageBindingHooks(pageFrame) end
+        end
         if CO.EnsureOrderSelectionContext then CO:EnsureOrderSelectionContext(pageFrame) end
         if CO.RestoreOrderSelection and pageFrame and C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
             local ok, orders = pcall(C_CraftingOrders.GetCrafterOrders)

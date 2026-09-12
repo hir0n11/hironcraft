@@ -75,6 +75,12 @@ function CO:SetOrderTablePresence(value, pageFrame)
     self:RefreshVisibleRowsSoon(0.05)
 
     if value == true then
+        -- Interaction events can arrive after the page's OnShow. Apply the
+        -- configured key here as well so the first press works before any row
+        -- receives mouse focus.
+        if not self.bindingOwner and self.ApplyTemporaryBinding then
+            self:ApplyTemporaryBinding()
+        end
         self:WarmVisibleOrderQualitySoon(pageFrame, QUALITY_WARM_START_DELAY)
         if C_Timer then
             for _, delay in ipairs({ 0.1, 0.3, 0.6, 1.0 }) do

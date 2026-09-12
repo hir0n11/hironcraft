@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order hotkey lifecycle fix (0.3.32)
+
+The configured order hotkey is now applied as soon as an already visible
+crafting-order page or crafting table is detected. Native rows can initialize
+after the page's first `OnShow`; that missed lifecycle event previously left the
+hotkey inactive until the mouse entered an action button and forced a binding
+refresh. Hovering a row is no longer required before processing the queue.
+
 ## Safe concentration queue checks (0.3.31)
 
 Patron orders are no longer treated as concentration-free while Blizzard's
