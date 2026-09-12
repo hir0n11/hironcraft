@@ -3221,21 +3221,32 @@ function CO:BuildCraftingReagentInfoTbl(order)
 
     local seenSlot = {}
 
+    -- Since 12.0 CraftingReagentInfo no longer accepts itemID at the top
+    -- level. Operation-info APIs require a nested CraftingReagent payload.
+    local function AddCraftingReagent(itemID, dataSlotIndex, quantity)
+        itemID = tonumber(itemID)
+        dataSlotIndex = tonumber(dataSlotIndex)
+        quantity = tonumber(quantity)
+        if not itemID or not dataSlotIndex or not quantity or quantity <= 0
+            or seenSlot[dataSlotIndex] then
+            return false
+        end
+        seenSlot[dataSlotIndex] = true
+        list[#list + 1] = {
+            reagent = { itemID = itemID },
+            dataSlotIndex = dataSlotIndex,
+            quantity = quantity,
+        }
+        return true
+    end
+
     if order.reagents and type(order.reagents) == "table" then
         for _, r in ipairs(order.reagents) do
-            local reagentInfo = r.reagentInfo or r
-            local reagent = reagentInfo and reagentInfo.reagent
-            local slot = r.slotIndex or (reagentInfo and reagentInfo.dataSlotIndex)
-            local itemID = reagent and reagent.itemID
-            local quantity = (reagentInfo and reagentInfo.quantity) or r.quantity or 1
-            if slot and itemID and quantity > 0 and not seenSlot[slot] then
-                seenSlot[slot] = true
-                list[#list + 1] = {
-                    itemID = itemID,
-                    dataSlotIndex = slot,
-                    quantity = quantity,
-                }
-            end
+            AddCraftingReagent(
+                GetOrderReagentItemID(r),
+                GetOrderReagentDataSlotIndex(r) or GetOrderReagentSlotIndex(r),
+                GetOrderReagentQuantity(r)
+            )
         end
     end
 
@@ -3246,14 +3257,7 @@ function CO:BuildCraftingReagentInfoTbl(order)
             local quantity = (selected and selected.quantity) or reagentEntry.quantity or 0
             local dataSlotIndex = (selected and selected.dataSlotIndex) or reagentEntry.dataSlotIndex or reagentEntry.slotIndex
 
-            if itemID and dataSlotIndex and quantity and quantity > 0 and not seenSlot[dataSlotIndex] then
-                seenSlot[dataSlotIndex] = true
-                list[#list + 1] = {
-                    itemID = itemID,
-                    dataSlotIndex = dataSlotIndex,
-                    quantity = quantity,
-                }
-            end
+            AddCraftingReagent(itemID, dataSlotIndex, quantity)
         end
     end
 
@@ -3272,22 +3276,26 @@ function CO:BuildFastCraftingReagentInfoTbl(order)
     if not order or not order.spellID then return list end
 
     local providedSlots = {}
+    local function AddCraftingReagent(itemID, dataSlotIndex, quantity)
+        itemID = tonumber(itemID)
+        dataSlotIndex = tonumber(dataSlotIndex)
+        quantity = tonumber(quantity)
+        if not itemID or not dataSlotIndex or not quantity or quantity <= 0 then
+            return false
+        end
+        list[#list + 1] = {
+            reagent = { itemID = itemID },
+            dataSlotIndex = dataSlotIndex,
+            quantity = quantity,
+        }
+        return true
+    end
     if order.reagents and type(order.reagents) == "table" then
         for _, r in ipairs(order.reagents) do
-            local reagentInfo = r.reagentInfo or r
-            local reagent = reagentInfo and reagentInfo.reagent
-            local slot = r.slotIndex or (reagentInfo and reagentInfo.dataSlotIndex)
-            local itemID = reagent and reagent.itemID
-            local qty = (reagentInfo and reagentInfo.quantity) or r.quantity or 1
+            local slot = GetOrderReagentDataSlotIndex(r) or GetOrderReagentSlotIndex(r)
             if slot then
                 providedSlots[slot] = true
-                if itemID and qty > 0 then
-                    list[#list + 1] = {
-                        itemID = itemID,
-                        dataSlotIndex = slot,
-                        quantity = qty,
-                    }
-                end
+                AddCraftingReagent(GetOrderReagentItemID(r), slot, GetOrderReagentQuantity(r))
             end
         end
     end
@@ -3305,13 +3313,7 @@ function CO:BuildFastCraftingReagentInfoTbl(order)
                     local pick = slot.reagents[1]
                     local itemID = pick and pick.itemID
                     local qty = tonumber(slot.quantityRequired) or tonumber(pick and pick.quantity) or 1
-                    if itemID and qty > 0 then
-                        list[#list + 1] = {
-                            itemID = itemID,
-                            dataSlotIndex = slotIndex,
-                            quantity = qty,
-                        }
-                    end
+                    AddCraftingReagent(itemID, slotIndex, qty)
                 end
             end
         end
@@ -3343,8 +3345,7 @@ function CO:GetFastConcentrationCost(order)
         for _, a in ipairs(attempts) do
             local ok, info = pcall(a[1], unpack(a[2]))
             if ok and info then
-                local cost = tonumber(info.concentrationCost)
-                    or (info.concentrationCosts and tonumber(info.concentrationCosts[1]))
+                local cost = ReadConcentrationCostFromInfo(info)
                 if cost and cost > 0 then return cost end
             end
         end
@@ -4959,7 +4960,8 @@ function CO:DebugCollectOrderLines(order, title)
     add("CRAFTING_REAGENT_INFO_TBL count=%s", tostring(type(craftingTbl) == "table" and #craftingTbl or "nil"))
     if type(craftingTbl) == "table" then
         for i, reagentInfo in ipairs(craftingTbl) do
-            add("CRAFT[%02d] item=%s name=%s qty=%s dataSlot=%s keys={%s}", i, tostring(reagentInfo.itemID or "nil"), self:DebugSafeItemName(reagentInfo.itemID), tostring(reagentInfo.quantity or "nil"), tostring(reagentInfo.dataSlotIndex or "nil"), self:DebugTableKeys(reagentInfo, 12))
+            local itemID = GetOrderReagentItemID(reagentInfo)
+            add("CRAFT[%02d] item=%s name=%s qty=%s dataSlot=%s keys={%s}", i, tostring(itemID or "nil"), self:DebugSafeItemName(itemID), tostring(reagentInfo.quantity or "nil"), tostring(reagentInfo.dataSlotIndex or "nil"), self:DebugTableKeys(reagentInfo, 12))
         end
     end
 

@@ -15,6 +15,9 @@ local now=100
 local E=setmetatable({PT={},CO=CO,SlashCmdList={},
     T=function(key) return key end,GetTime=function() return now end,
     OrderKey=function(id) return id and tostring(id) end,
+    GetOrderRevision=function() return 0 end,
+    CacheNow=function() return now end,REAGENT_CACHE_TTL=1,
+    unpack=table.unpack,
     Enum={CraftingOrderType={Personal=2,Npc=4},CraftingOrderReagentsType={None=0,Some=1,All=2}},
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv=E
@@ -48,6 +51,34 @@ local function reset()
 end
 local order=reset()
 assert(not CO:GetOrderProblemReason(order))
+
+-- WoW 12.x operation-info APIs require CraftingReagentInfo.reagent instead of
+-- the pre-12.0 top-level itemID. Both the full and fallback concentration paths
+-- must submit the current shape or concentrationCost is omitted.
+CO.craftingReagentInfoCache={}
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=true} end
+local concentrationOrder={orderID=77,spellID=8,reagentState=2,reagents={{
+    slotIndex=4,
+    reagentInfo={reagent={itemID=12345},dataSlotIndex=4,quantity=2},
+}}}
+local fullReagents=CO:BuildCraftingReagentInfoTbl(concentrationOrder)
+local fastReagents=CO:BuildFastCraftingReagentInfoTbl(concentrationOrder)
+for _, reagents in ipairs({fullReagents,fastReagents}) do
+    assert(#reagents==1 and reagents[1].reagent.itemID==12345
+        and reagents[1].itemID==nil and reagents[1].dataSlotIndex==4
+        and reagents[1].quantity==2,
+        'operation-info reagents still use the pre-12.0 schema')
+end
+E.C_TradeSkillUI={GetCraftingOperationInfo=function(_,reagents,_,applyConcentration)
+    assert(applyConcentration==true and reagents[1].reagent.itemID==12345,
+        'concentration fallback submitted malformed reagents')
+    return {concentrationCosts={{amount=137}}}
+end}
+assert(CO:GetFastConcentrationCost(concentrationOrder)==137,
+    'concentration fallback did not read the operation cost')
+E.C_TradeSkillUI=nil
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=false} end
+
 order.reagents={}
 assert(CO:GetOrderProblemReason(order)=='COA_PROBLEM_CUSTOMER_REAGENTS')
 assert(not CO:GetOrderProblemReason(order,nil,'fulfill'), 'finished row retained a warning')

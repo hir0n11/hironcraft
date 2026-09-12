@@ -353,6 +353,26 @@ function CE:Probe(spellID, orderID)
     end
 end
 
+local function ReadOperationConcentrationCost(info)
+    if type(info) ~= "table" then return 0 end
+    for _, key in ipairs({
+        "concentrationCost", "concentrationAmount",
+        "concentrationRequired", "requiredConcentration",
+    }) do
+        local value = tonumber(info[key])
+        if value and value > 0 then return value end
+    end
+    if type(info.concentrationCosts) == "table" then
+        for _, entry in pairs(info.concentrationCosts) do
+            local value = type(entry) == "table"
+                and tonumber(entry.amount or entry.quantity or entry.cost or entry.value)
+                or tonumber(entry)
+            if value and value > 0 then return value end
+        end
+    end
+    return 0
+end
+
 function CE:Normalize(info, source)
     if type(info) ~= "table" then return nil end
     local qFloat = tonumber(info.quality)
@@ -380,7 +400,7 @@ function CE:Normalize(info, source)
         difficulty          = difficulty,
         lowerThreshold      = tonumber(info.lowerSkillThreshold),
         upperThreshold      = tonumber(info.upperSkillThreshold) or tonumber(info.upperSkillTreshold),
-        concentrationCost   = tonumber(info.concentrationCost) or 0,
+        concentrationCost   = ReadOperationConcentrationCost(info),
         concentrationCurrencyID = tonumber(info.concentrationCurrencyID),
         isQualityCraft      = info.isQualityCraft,
     }

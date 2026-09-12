@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Concentration cost compatibility (0.3.43)
+
+- Crafting-order quality probes now submit the nested `CraftingReagentInfo`
+  format required by WoW 12.x instead of the removed top-level `itemID` form.
+- The fast fallback accepts both the direct `concentrationCost` result and
+  concentration-specific cost collections returned by operation-info variants.
+
 ## Contained Auction House hotkey labels (0.3.42)
 
 - Assigned keys on Buy, Refresh, Skip, Post and sell-side Skip buttons use a
