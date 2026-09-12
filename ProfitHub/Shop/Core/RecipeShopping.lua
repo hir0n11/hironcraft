@@ -316,6 +316,7 @@ function RS:AddRecipe(recipeID, craftCount, transaction, form)
     recipeID = tonumber(recipeID)
     self.plan.recipes[recipeID] = (tonumber(self.plan.recipes[recipeID]) or 0) + craftCount
     self.plan.totalCrafts = (tonumber(self.plan.totalCrafts) or 0) + craftCount
+    self:UpdatePlanDisplay()
 
     local refreshed, refreshReason, missingTypes = self:RefreshShoppingList()
     if not refreshed then return false, refreshReason end
@@ -324,6 +325,7 @@ end
 
 function RS:ClearPlan(refresh)
     self.plan = { materials = {}, recipes = {}, recipeItems = {}, totalCrafts = 0 }
+    self:UpdatePlanDisplay()
     if refresh ~= false then
         return self:RefreshShoppingList()
     end
@@ -374,9 +376,11 @@ function RS:AddUnlearnedRecipe(recipeInfo)
     end
 
     self.plan.recipeItems[recipeID] = purchase
+    self:UpdatePlanDisplay()
     local refreshed, reason = self:RefreshShoppingList()
     if not refreshed then
         self.plan.recipeItems[recipeID] = nil
+        self:UpdatePlanDisplay()
         return false, reason
     end
     return true, "added"
@@ -458,21 +462,39 @@ function RS:GetPlannedRecipeItemCount()
     return count
 end
 
+function RS:GetPlanSummary()
+    local recipeInfo = self:GetSelectedRecipe()
+    local isUnlearned = recipeInfo and recipeInfo.learned ~= true
+    if isUnlearned then
+        return string.format(T("PG_RECIPE_ITEM_TOTAL", "Planned recipes: %d"), self:GetPlannedRecipeItemCount())
+    end
+    return string.format(T("PG_RECIPE_SHOP_TOTAL", "Planned crafts: %d"), tonumber(self.plan.totalCrafts) or 0)
+end
+
+function RS:UpdatePlanDisplay()
+    local controls = self.controls
+    if not controls then return end
+    controls.counter:SetText(self:GetPlanSummary())
+    if controls.button.recipeShoppingHovered then self:UpdateTooltip(controls.button) end
+end
+
 function RS:UpdateTooltip(owner)
     if not GameTooltip then return end
     local recipeInfo = self:GetSelectedRecipe()
     local isUnlearned = recipeInfo and recipeInfo.learned ~= true
 
-    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    -- Keep the same visible tooltip alive when its count changes. SetOwner
+    -- resets the tooltip; only establish ownership when opening it.
+    if GameTooltip:GetOwner() ~= owner then GameTooltip:SetOwner(owner, "ANCHOR_TOP") end
+    GameTooltip:ClearLines()
     if isUnlearned then
         GameTooltip:SetText(T("PG_RECIPE_ITEM_BUTTON", "Add recipe"), 1, 0.82, 0)
         GameTooltip:AddLine(T("PG_RECIPE_ITEM_TOOLTIP", "Adds the item that teaches this recipe to the accumulating shopping list."), 1, 1, 1, true)
-        GameTooltip:AddLine(string.format(T("PG_RECIPE_ITEM_TOTAL", "Planned recipes: %d"), self:GetPlannedRecipeItemCount()), 0.65, 0.85, 1)
     else
         GameTooltip:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"), 1, 0.82, 0)
         GameTooltip:AddLine(T("PG_RECIPE_SHOP_TOOLTIP", "Adds the missing reagents for this recipe and quantity to one accumulating shopping list."), 1, 1, 1, true)
-        GameTooltip:AddLine(string.format(T("PG_RECIPE_SHOP_TOTAL", "Planned crafts: %d"), tonumber(self.plan.totalCrafts) or 0), 0.65, 0.85, 1)
     end
+    GameTooltip:AddLine(self:GetPlanSummary(), 0.65, 0.85, 1)
     GameTooltip:AddLine(T("PG_RECIPE_SHOP_CLEAR_HINT", "Right click: clear this recipe shopping list."), 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
 end
@@ -485,7 +507,7 @@ function RS:EnsureControls()
 
     local controls = CreateFrame("Frame", "HironCraftRecipeShoppingControls", page)
     controls:SetSize(142, 22)
-    controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -38)
+    controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -44)
     controls:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
 
     local quantity = CreateFrame("EditBox", nil, controls, "InputBoxTemplate")
@@ -511,6 +533,8 @@ function RS:EnsureControls()
     button:SetPoint("LEFT", quantity, "RIGHT", 4, 0)
     button:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"))
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- GameTooltip's native update loop calls this on the owner while shown.
+    button.UpdateTooltip = function(self) RS:UpdateTooltip(self) end
     button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
             RS:ClearPlan()
@@ -523,33 +547,26 @@ function RS:EnsureControls()
                 RS:AddSelectedRecipe()
             end
         end
-        if GameTooltip then
-            RS:UpdateTooltip(self)
-        end
+        RS:UpdatePlanDisplay()
     end)
     button:SetScript("OnEnter", function(self)
-        self.recipeShoppingTooltipElapsed = 0
-        self.recipeShoppingTooltipRevision = nil
-        RS:UpdateTooltip(self)
+        self.recipeShoppingHovered = true
+        self:UpdateTooltip()
     end)
     button:SetScript("OnLeave", function(self)
-        self.recipeShoppingTooltipRevision = nil
-        if GameTooltip then GameTooltip:Hide() end
+        self.recipeShoppingHovered = false
+        if GameTooltip and GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end)
-    button:SetScript("OnUpdate", function(self, elapsed)
-        if not self.IsMouseOver or not self:IsMouseOver() then return end
-        self.recipeShoppingTooltipElapsed = (self.recipeShoppingTooltipElapsed or 0) + elapsed
-        if self.recipeShoppingTooltipElapsed < 0.05 then return end
-        self.recipeShoppingTooltipElapsed = 0
-
-        local revision = tostring(tonumber(RS.plan.totalCrafts) or 0)
-            .. ":" .. tostring(RS:GetPlannedRecipeItemCount())
-        if revision ~= self.recipeShoppingTooltipRevision then
-            self.recipeShoppingTooltipRevision = revision
-            RS:UpdateTooltip(self)
-        end
+    button:SetScript("OnHide", function(self)
+        self.recipeShoppingHovered = false
+        if GameTooltip and GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end)
 
+    local counter = controls:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    counter:SetPoint("TOPRIGHT", controls, "BOTTOMRIGHT", 0, -4)
+    counter:SetJustifyH("RIGHT")
+    counter:SetTextColor(0.65, 0.85, 1)
+    controls.counter = counter
     controls.quantity = quantity
     controls.button = button
     self.controls = controls
@@ -603,6 +620,7 @@ function RS:OnRecipeSelected()
         controls.quantity:SetNumber(1)
         controls.quantity:SetCursorPosition(0)
     end
+    self:UpdatePlanDisplay()
 end
 
 RS.SOURCE_KIND = SOURCE_KIND

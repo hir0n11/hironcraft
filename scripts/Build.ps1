@@ -47,8 +47,29 @@ try {
         throw "Repository artifact leaked into release: $($repositoryArtifacts.FullName)"
     }
 
+    # Windows PowerShell's Compress-Archive writes backslashes into ZIP entry
+    # names. Use the ZIP-standard separator explicitly, including when built
+    # with Windows PowerShell 5.1, for Explorer drag-and-drop compatibility.
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $temporaryArchive = Join-Path $temporaryRoot 'release.zip'
+    $zip = [IO.Compression.ZipFile]::Open($temporaryArchive, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $prefix = $stagingAddon.TrimEnd([char[]]'\/') + [IO.Path]::DirectorySeparatorChar
+        foreach ($file in (Get-ChildItem -LiteralPath $stagingAddon -File -Recurse | Sort-Object FullName)) {
+            $relative = $file.FullName.Substring($prefix.Length).Replace('\', '/')
+            $entryName = 'HironCraft/' + $relative
+            $entry = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.ExternalAttributes = 32 # Normal Windows archive file; no inherited attributes.
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+
     $archive = Join-Path $OutputDirectory ("HironCraft-" + $version + ".zip")
-    Compress-Archive -LiteralPath $stagingAddon -DestinationPath $archive -Force
+    Copy-Item -LiteralPath $temporaryArchive -Destination $archive -Force
     Write-Output $archive
 }
 finally {

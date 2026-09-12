@@ -25,7 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Regular-recipe shopping list (0.3.48)
+## First-open navigation and release packaging (0.3.49)
+
+- Clicking Recipes, Specializations, Crafting Orders or Chat Orders cancels
+  pending automatic Personal-order navigation for this opening. Late retries
+  and order-count events no longer take navigation back from the user.
+  Automatic Personal opening remains enabled for the next visit.
+- Removed a delayed direct TabSystem selection and the blanket HIGH-layer
+  override for Blizzard tabs; native tab ownership and layers are preserved.
+- Release ZIPs use standard forward-slash entry names and plain Windows file
+  attributes, including builds made with Windows PowerShell 5.1.
+- The runtime addon version now comes from the TOC rather than a stale literal.
+
+## Regular-recipe shopping list (0.3.49)
 
 - Learned recipes on the standard profession crafting page have a quantity
   field and **Add to shopping** button below the native recipe-tracking control;
@@ -40,10 +52,10 @@ The original CraftScan and ProfitHUB folders are not required after migration an
 - HironCraft's recipe button and Profession Shopping List's **Track New Mogs**
   button are kept inside the recipe panel so they cannot cover Blizzard's
   Recipes, Specializations, Crafting Orders, or Chat Orders tabs on first open.
-- Blizzard's profession tabs are also raised above third-party controls after
-  opening and tab-layout updates, preserving their first-click hit targets.
-- The planned-craft count in the shopping tooltip watches the current plan
-  while hovered and refreshes immediately after every click.
+- The shopping controls have extra spacing below Track Recipe. A visible
+  planned-craft/recipe count sits below the button and updates when the plan
+  changes; the open tooltip refreshes at the same time, without re-hovering.
+  Tooltip refresh also uses Blizzard's native owner UpdateTooltip callback.
 - Current reagent-quality allocations and explicitly selected optional or
   finishing reagents are preserved. The best-quality checkbox controls an
   otherwise unallocated quality slot.
@@ -634,5 +646,15 @@ Commands:
 Only update or replace the `HironCraft` folder. Updates to `CraftScan`, `AhUI` or the old ProfitHUB module folders do not change this addon.
 
 Run `scripts/Build.ps1` to create a clean versioned ZIP without repository and development files.
+
+On Windows, `scripts/TestReleaseArchive.ps1 -Archive dist/HironCraft-<version>.zip`
+checks ZIP paths and every file hash, then copies the addon through Explorer's
+compressed-folder handler and verifies the extracted files against the source.
+
+For installation, use **Extract All** first, then copy the extracted `HironCraft`
+folder into `World of Warcraft/_retail_/Interface/AddOns`. If Explorer reports
+0x80004005 while dragging out of an older ZIP, cancel that copy and use the new
+release archive. Do not keep a partially extracted addon. Restart WoW or run
+`/reload` after replacing the files; keep your `WTF` folder/settings untouched.
 
 The editable high-resolution icon source is kept in `artwork/`; the game uses the optimized `Media/HironCraftIcon.tga` version. A PNG preview is stored beside it.

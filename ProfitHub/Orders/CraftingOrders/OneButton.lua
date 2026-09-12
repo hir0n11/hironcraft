@@ -125,6 +125,7 @@ function CO:PrepareFreshOrderSearch(pageFrame)
 end
 
 function CO:InstallFreshOrderSearchHooks()
+    self:InstallOneButtonNavigationHooks()
     local function HookOrderType(target)
         if not target or target.ahuiOneButtonOrderTypeHooked or type(target.SetCraftingOrderType) ~= "function" then return end
         target.ahuiOneButtonOrderTypeHooked = true
@@ -167,6 +168,42 @@ function CO:InstallFreshOrderSearchHooks()
     HookShowGeneric(_G.ProfessionsCraftingOrderPageMixin)
     if _G.ProfessionsFrame then
         HookShowGeneric(ProfessionsFrame.OrdersPage)
+    end
+end
+
+function CO:YieldOneButtonNavigation()
+    if self._oneButtonNavigating then return end
+    -- A hardware click owns this opening even before the first startup timer.
+    -- Invalidate both queued retries and later order-count event continuations.
+    self:CancelOneButtonPersonalFlow()
+    self._oneButtonPreparedForOpen = true
+end
+
+function CO:InstallOneButtonNavigationHooks()
+    local frame = _G.ProfessionsFrame
+    local tabSystem = frame and frame.TabSystem
+    if not frame or not tabSystem then return end
+
+    local function HookTab(tab)
+        if not tab or not tab.HookScript or tab.ahuiOneButtonNavigationHooked then return end
+        tab.ahuiOneButtonNavigationHooked = true
+        local function OnManualClick(_, button)
+            if button == nil or button == "LeftButton" then CO:YieldOneButtonNavigation() end
+        end
+        tab:HookScript("OnMouseDown", OnManualClick)
+        tab:HookScript("OnClick", OnManualClick)
+    end
+
+    for _, tab in pairs(tabSystem.tabs or {}) do HookTab(tab) end
+    HookTab(_G.HironCraftScanOpenChatOrdersButton)
+    if not frame.ahuiOneButtonNavigationHooked and frame.HookScript then
+        frame.ahuiOneButtonNavigationHooked = true
+        frame:HookScript("OnShow", function()
+            CO:InstallOneButtonNavigationHooks()
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0, function() CO:InstallOneButtonNavigationHooks() end)
+            end
+        end)
     end
 end
 
@@ -596,6 +633,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 
     if event == "TRADE_SKILL_SHOW" then
+        CO:InstallOneButtonNavigationHooks()
         if CO._oneButtonFlowRunning then CO:ContinueOneButtonPersonalFlow() end
         return
     end

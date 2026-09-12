@@ -202,4 +202,83 @@ assert(fallback and fallback.unresolvedName == "Fallback Recipe"
     "unlearned recipe without a source link did not retain a recipe-class auction lookup")
 assert(RS:GetPlannedRecipeItemCount() == 2, "planned recipe count was not updated")
 
-print("Recipe shopping tests passed (quantity, accumulation, inventory, qualities, clear, unlearned recipe items).")
+-- UI regression: multiple clicks with one OnEnter and no timer/mouse movement.
+-- Both the persistent label and the existing tooltip must change synchronously.
+local function noop() end
+local function MockFrame()
+    return {
+        scripts={}, shown=true,
+        SetSize=noop, SetPoint=noop, SetFrameLevel=noop, SetAutoFocus=noop,
+        SetNumeric=noop, SetMaxLetters=noop, SetJustifyH=noop,
+        SetCursorPosition=noop, ClearFocus=noop, ClearAllPoints=noop,
+        RegisterForClicks=noop, SetEnabled=noop, SetTextColor=noop,
+        SetNumber=function(self,n) self.number=n end,
+        GetNumber=function(self) return self.number end,
+        SetText=function(self,text) self.text=text end,
+        SetScript=function(self,event,fn) self.scripts[event]=fn end,
+        Show=function(self) self.shown=true end,
+        Hide=function(self) self.shown=false end,
+        SetShown=function(self,shown) self.shown=shown end,
+        CreateFontString=function() return MockFrame() end,
+    }
+end
+CreateFrame=MockFrame
+local selectedRecipe={recipeID=1001,learned=true}
+ProfessionsFrame={CraftingPage={
+    GetFrameLevel=function() return 5 end,
+    SchematicForm={
+        GetRecipeInfo=function() return selectedRecipe end,
+        GetTransaction=function() return transactionOne end,
+        IsShown=function() return true end,
+    },
+}}
+local ownerChanges=0
+GameTooltip={
+    GetOwner=function(self) return self.owner end,
+    SetOwner=function(self,owner) self.owner=owner; ownerChanges=ownerChanges+1 end,
+    ClearLines=function(self) self.lines={} end,
+    SetText=function(self,text) self.lines={text} end,
+    AddLine=function(self,text) table.insert(self.lines,text) end,
+    Show=function(self) self.shown=true end,
+    Hide=function(self) self.shown=false end,
+}
+RS:ClearPlan(false)
+RS:OnRecipeSelected()
+local controls=RS.controls
+local button=controls.button
+local function ExpectDisplay(text)
+    assert(controls.counter.text==text,'persistent count is stale: '..tostring(controls.counter.text))
+    assert(GameTooltip.shown and GameTooltip.lines[3]==text,
+        'hovered tooltip count is stale: '..tostring(GameTooltip.lines[3]))
+    assert(#GameTooltip.lines==4,'old tooltip lines accumulated')
+end
+button.scripts.OnEnter(button)
+ExpectDisplay('Planned crafts: 0')
+for count=1,3 do
+    button.scripts.OnClick(button,'LeftButton')
+    ExpectDisplay('Planned crafts: '..count)
+end
+controls.quantity:SetNumber(4)
+button.scripts.OnClick(button,'LeftButton')
+ExpectDisplay('Planned crafts: 7')
+button:UpdateTooltip() -- Blizzard's normal tooltip update path.
+ExpectDisplay('Planned crafts: 7')
+button.scripts.OnClick(button,'RightButton')
+ExpectDisplay('Planned crafts: 0')
+
+selectedRecipe={recipeID=2001,name='Test Recipe',learned=false}
+RS:OnRecipeSelected()
+ExpectDisplay('Planned recipes: 0')
+button.scripts.OnClick(button,'LeftButton')
+ExpectDisplay('Planned recipes: 1')
+button.scripts.OnClick(button,'LeftButton')
+ExpectDisplay('Planned recipes: 1') -- Duplicate recipe stays deduplicated.
+assert(RS:AddUnlearnedRecipe({recipeID=2002,name='Fallback Recipe',learned=false}))
+ExpectDisplay('Planned recipes: 2') -- Non-button plan updates repaint too.
+button.scripts.OnClick(button,'RightButton')
+ExpectDisplay('Planned recipes: 0')
+assert(ownerChanges==1,'refresh reset tooltip ownership while continuously hovered')
+button.scripts.OnHide(button)
+assert(not GameTooltip.shown and not button.recipeShoppingHovered,'hidden button retained tooltip')
+
+print("Recipe shopping tests passed (accumulation, inventory, qualities, unlearned recipes, live label and tooltip).")

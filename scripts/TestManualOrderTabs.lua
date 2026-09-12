@@ -16,6 +16,7 @@ end
 local function noop() end
 local CO, timers, events = {}, {}, {}
 local now, personalClicks, selected, searches = 0, 0, 0, 0
+local selectedTab = 3
 local orders = {}
 local types = {Public=1, Guild=2, Personal=3, Npc=4}
 local page = {
@@ -36,12 +37,34 @@ end}
 ProfessionsFrame={
     OrdersPage=page, craftingOrdersTabID=3,
     IsShown=function() return true end,
-    SetTab=function()
-        page.shown=true
+    SetTab=function(_, tabID)
+        selectedTab=tabID
+        page.shown=tabID==3
         -- Initial Blizzard page setup is programmatic, not a user choice.
-        page:SetCraftingOrderType(types.Public)
+        if page.shown then page:SetCraftingOrderType(types.Public) end
     end,
 }
+ProfessionsFrame.TabSystem={tabs={}, GetTabButton=function(self, id) return self.tabs[id] end}
+for id=1,3 do
+    local tabID=id
+    local tab={hooks={}}
+    function tab:HookScript(event, callback)
+        self.hooks[event]=self.hooks[event] or {}
+        table.insert(self.hooks[event],callback)
+    end
+    function tab:RunHooks(event, button)
+        for _, callback in ipairs(self.hooks[event] or {}) do callback(self,button) end
+    end
+    function tab:Click(button)
+        ProfessionsFrame:SetTab(tabID)
+        self:RunHooks('OnClick',button or 'LeftButton')
+    end
+    function tab:ManualClick()
+        self:RunHooks('OnMouseDown','LeftButton')
+        self:Click('LeftButton')
+    end
+    ProfessionsFrame.TabSystem.tabs[id]=tab
+end
 local E=setmetatable({
     PT={}, CO=CO, Enum={CraftingOrderType=types},
     GetTime=function() return now end,
@@ -86,6 +109,7 @@ end
 local function reopen()
     CO:CancelOneButtonPersonalFlow(true)
     timers={}
+    selectedTab=3
     page.shown=true
     page.orderType=types.Public
     CO:BeginOneButtonPersonalFlow()
@@ -127,6 +151,26 @@ CO._oneButtonEmptyRefreshToken=50
 page:SetCraftingOrderType(types.Guild)
 assert(not CO._oneButtonEmptyRefreshRunning and CO._oneButtonEmptyRefreshToken==51)
 
+-- Main navigation has a different callback from the Public/Guild/Patron tabs.
+-- Neither delayed startup retries nor late server updates may undo a click.
+for _, tabID in ipairs({1,2}) do
+    for _, afterFirstStep in ipairs({false,true}) do
+        reopen()
+        if afterFirstStep then tick() end
+        opened=personalClicks
+        CO._oneButtonEmptyRefreshRunning=true
+        ProfessionsFrame.TabSystem.tabs[tabID]:ManualClick()
+        assert(not CO._oneButtonFlowRunning and not CO._oneButtonEmptyRefreshRunning
+            and CO._oneButtonPreparedForOpen,'main navigation did not cancel both flows')
+        drainCancelled()
+        events.OnEvent(nil,'CRAFTINGORDERS_UPDATE_ORDER_COUNT')
+        events.OnEvent(nil,'TRADE_SKILL_SHOW')
+        CO:BeginOneButtonPersonalFlow()
+        assert(selectedTab==tabID and not page.shown and personalClicks==opened and #timers==0,
+            'startup or late event overrode Recipes/Specializations')
+    end
+end
+
 -- Normal auto-opening and selecting Personal still works next time.
 reopen()
 page.shown=false
@@ -135,5 +179,6 @@ tick()
 assert(page.orderType==types.Personal and selected==1 and not CO._oneButtonFlowRunning,
     'manual choice permanently disabled the next automatic opening')
 assert(CO:IsAutoQueueOnOpen(),'manual tab changed the saved auto-open setting')
+assert(selectedTab==3,'programmatic tab click was incorrectly treated as manual navigation')
 
 print('Manual order-tab tests passed.')

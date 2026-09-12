@@ -4,7 +4,7 @@ HironCraftProfit = HironCraftProfit or {}
 HironCraft = HironCraftProfit
 
 HironCraft.addonName = addonName
-HironCraft.version = "0.3.29"
+HironCraft.version = C_AddOns.GetAddOnMetadata(addonName, "Version")
 HironCraft.migration = HironCraft.migration or {
     imported = {},
 }

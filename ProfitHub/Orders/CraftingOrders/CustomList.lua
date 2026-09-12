@@ -1881,18 +1881,6 @@ function CL:Refresh(pageFrame)
     container:Show()
 end
 
-function CL:SettleOnRecipes()
-    local op = ProfessionsFrame and ProfessionsFrame.OrdersPage
-    if op and op:IsShown() then return end
-    local ts = ProfessionsFrame and ProfessionsFrame.TabSystem
-    if not ts or not ts.tabs then return end
-    local recipesTab = ts.tabs[1]
-    local tabID = recipesTab and (recipesTab.tabID or recipesTab:GetID())
-    if tabID and ts.SetTab then
-        pcall(ts.SetTab, ts, tabID)
-    end
-end
-
 function CL:StartLoadPoll(pageFrame)
     self._pollStamp = (self._pollStamp or 0) + 1
     local stamp = self._pollStamp
@@ -2047,10 +2035,6 @@ function CL:Init()
             AttachHooks()
         elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
             if not CO:IsEnabled() then return end
-            local pf = (ProfessionsFrame and ProfessionsFrame.OrdersPage)
-            if event == "TRADE_SKILL_SHOW" then
-                C_Timer.After(0, function() CL:SettleOnRecipes() end)
-            end
             QueueRefresh()
         else
             QueueRefresh()
