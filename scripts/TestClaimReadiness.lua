@@ -21,6 +21,8 @@ end
 local CO = {
     rowStates = {},
     orderIssues = {},
+    selectedOrders = {},
+    useConcentration = {},
 }
 local timers = {}
 local now = 100
@@ -50,6 +52,7 @@ local E = setmetatable({
             timers[#timers + 1] = callback
         end,
     },
+    Enum = { CraftingOrderType = { Npc = 4 } },
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
@@ -65,6 +68,31 @@ CO.InvalidateOrderCaches = function() end
 CO.SetStatus = function(_, value) CO.lastStatus = value end
 CO.RefreshVisibleRows = function() end
 CO.RefreshVisibleRowsSoon = function() end
+CO.UpdateControlPanel = function() end
+CO.IsOrderSelected = function(self, orderID)
+    return self.selectedOrders[tostring(orderID)] == true
+end
+
+-- A restored knowledge-queue checkbox must not claim an NPC order when the
+-- late quality calculation reveals concentration (or remains unknown).
+for _, concentrationState in ipairs({ true, "unknown" }) do
+    local unsafe = { orderID = 6999, orderState = 1, orderType = 4 }
+    CO.selectedOrders["6999"] = true
+    CO.useConcentration["6999"] = nil
+    CO.currentQueueOrderID = unsafe.orderID
+    CO._orderSelectionBucket = { choices = { ["6999"] = { checked = true } } }
+    CO.OrderRequiresConcentrationForQueue = function()
+        return concentrationState == "unknown" and nil or concentrationState
+    end
+    assert(CO:ClaimOrder(unsafe, page) == false)
+    assert(claimCalls == 0, "unsafe concentration order reached ClaimOrder API")
+    assert(CO.selectedOrders["6999"] == nil and CO.currentQueueOrderID == nil,
+        "unsafe concentration order remained selected")
+    assert(CO._orderSelectionBucket.choices["6999"] == nil,
+        "unsafe concentration selection was restored from memory")
+end
+
+CO.OrderRequiresConcentrationForQueue = function() return false end
 
 assert(CO:ClaimOrder(order, page) == true)
 assert(claimCalls == 1)
@@ -83,5 +111,14 @@ timers[2]()
 assert(CO.pendingClaimOrderID == nil)
 assert(CO.rowStates[order.orderID].order == liveClaim)
 assert(CO.currentQueueOrderID == order.orderID)
+
+-- Missing bag reagents are transient. They must not create the sticky issue
+-- that used to turn every later Tab press into "No available action".
+local craftOrder = { orderID = 7002, orderState = 2 }
+CO.CanSupplyCrafterReagentsForQueue = function() return false end
+CO.orderIssues["7002"] = "old issue"
+assert(CO:CraftOrderFromRow(craftOrder, page, {}) == false)
+assert(CO.orderIssues["7002"] == nil, "missing reagents permanently blocked the row")
+assert(CO.lastStatus == "Cannot craft: missing reagents.")
 
 print("Claim readiness tests passed.")

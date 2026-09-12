@@ -28,6 +28,7 @@ local orders = {
     {orderID=7, spellID=107, orderType=4, profit=700, npcOrderRewards={{itemID=900}}},
     {orderID=8, spellID=108, orderType=3, profit=800, npcOrderRewards={{itemID=900}}},
     {orderID=9, spellID=109, orderType=4, npcOrderRewards={{itemID=900}}}, -- unknown price
+    {orderID=10, spellID=110, orderType=4, profit=900, concentrationUnknown=true, npcOrderRewards={{itemID=900}}},
 }
 local timers, requests, applied = {}, {}, {}
 local hasProfession = false
@@ -52,6 +53,17 @@ local E = setmetatable({
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv = E
 dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')
+
+-- The production helper must preserve nil while Blizzard's quality data is
+-- still loading; nil must never collapse into the safe value false.
+local productionConcentrationCheck = CO.OrderRequiresConcentrationForQueue
+CO.GetCachedConcentrationRequirementVisualState = function() return nil, false end
+CO.GetOrderRequestedQuality = function() return 5 end
+CO.DoesOrderNeedConcentrationForTargetQuality = function() return nil end
+CO.PrepareOrderForQueueAnalysis = function() return true end
+assert(productionConcentrationCheck(CO, {orderID=99}, page) == nil,
+    'unknown concentration was treated as concentration-free')
+
 CO.FindOrderPageFrame=function() return page end
 CO.GetVisibleOrderButtonsSorted=function()
     local buttons={}
@@ -64,7 +76,10 @@ CO.PrepareOrderForQueueAnalysis=function() return true end
 CO.GetRecipeKnownState=function(_, order) return not order.unknown end
 CO.OrderMatchesSelectedProfessionExpansion=function() return true end
 CO.CanSupplyCrafterReagentsForQueue=function(_, order) return not order.missingReagents end
-CO.OrderRequiresConcentrationForQueue=function(_, order) return order.needsConcentration == true end
+CO.OrderRequiresConcentrationForQueue=function(_, order)
+    if order.concentrationUnknown then return nil end
+    return order.needsConcentration == true
+end
 CO.GetOrderQualityInfo=function() return {quality=5} end
 CO.ApplyQueueReagentModeToOrder=function(_, order)
     applied[order.orderID]=(applied[order.orderID] or 0)+1

@@ -1034,11 +1034,11 @@ function CO:OrderPassesQueueProfitFilter(order)
 end
 
 function CO:OrderRequiresConcentrationForQueue(order, pageFrame)
-    if not order or not order.orderID then return false end
+    if not order or not order.orderID then return nil end
 
     if self.GetCachedConcentrationRequirementVisualState then
         local visualNeeded, hasVisualState = self:GetCachedConcentrationRequirementVisualState(order)
-        if hasVisualState and visualNeeded == true then return true end
+        if hasVisualState then return visualNeeded == true end
     end
 
     local requestedQuality = self:GetOrderRequestedQuality(order)
@@ -1049,7 +1049,9 @@ function CO:OrderRequiresConcentrationForQueue(order, pageFrame)
         self:PrepareOrderForQueueAnalysis(order, pageFrame)
         needed = self:DoesOrderNeedConcentrationForTargetQuality(order, true)
     end
-    return needed == true
+    -- Keep the third state. While Blizzard is still loading the recipe/order
+    -- transaction, nil means "unknown", not "concentration is not needed".
+    return needed
 end
 
 function CO:BuildOwnedMixForEntry(order, reagentEntry, vInv)
@@ -1269,11 +1271,18 @@ function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     if knowledgeOnly and not self:OrderGivesKnowledge(order) then return false end
     if not self.GetOrderActionAvailabilitySortRank then return false end
     if not self:ApplyQueueReagentModeToOrder(order) then return false end
-    if self:OrderRequiresConcentrationForQueue(order) then return false end
+    local needsConcentration = self:OrderRequiresConcentrationForQueue(order)
+    local concentrationAllowed = not knowledgeOnly
+        and opts
+        and (opts.allowConcentration == true or opts.forceConcentration == true)
+    -- Never queue an order until concentration is known. Knowledge orders are
+    -- deliberately concentration-free even when the normal queue allows it.
+    if needsConcentration == nil then return false end
+    if needsConcentration == true and not concentrationAllowed then return false end
     if (not knowledgeOnly or opts.knowledgeIgnoreProfit == false) and not self:OrderPassesQueueProfitFilter(order) then return false end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
-    return rank == 1 or rank == 2
+    return rank == 1 or rank == 2 or (rank == 3 and concentrationAllowed)
 end
 
 function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
@@ -1300,7 +1309,13 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
     end
 
     -- Rank 2 orders can still need a reagent purchase. Preserve that path so
-    -- the Shopping action can prepare both normal and knowledge queues.
+    -- the Shopping action can prepare both normal and knowledge queues. This
+    -- fallback is only safe after a definitive concentration-free result;
+    -- otherwise a still-loading or concentration order could be claimed from
+    -- a queue that was built without concentration.
+    if self:OrderRequiresConcentrationForQueue(order, pageFrame) ~= false then
+        return nil
+    end
     return {
         queued = true,
         useConcentration = false,

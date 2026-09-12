@@ -514,6 +514,39 @@ function CO:ClaimOrder(order, pageFrame)
         return false
     end
 
+    -- Queue selection can be restored before Blizzard has finished loading the
+    -- transaction used for its quality calculation. Recheck at the protected
+    -- API boundary so an NPC order selected as concentration-free can never be
+    -- claimed after it later resolves to "requires concentration" (or is still
+    -- unknown). Orders explicitly queued with concentration remain valid.
+    local npcType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Npc
+    local key = OrderKey(order.orderID)
+    if npcType ~= nil
+        and order.orderType == npcType
+        and self.IsOrderSelected
+        and self:IsOrderSelected(order.orderID)
+        and not (self.useConcentration and self.useConcentration[key] == true)
+        and self.OrderRequiresConcentrationForQueue
+    then
+        local needsConcentration = self:OrderRequiresConcentrationForQueue(order, pageFrame)
+        if needsConcentration ~= false then
+            self.selectedOrders[key] = nil
+            if self.useConcentration then self.useConcentration[key] = nil end
+            if self._orderSelectionBucket and self._orderSelectionBucket.choices then
+                self._orderSelectionBucket.choices[key] = nil
+            end
+            if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
+                self.currentQueueOrderID = nil
+            end
+            self:SetStatus(needsConcentration == true
+                and T("COA_STATUS_QUEUE_CONCENTRATION_REMOVED", "Order removed from queue: it requires concentration.")
+                or T("COA_STATUS_QUEUE_CONCENTRATION_UNKNOWN", "Order removed from queue: concentration data is not loaded."))
+            self:RefreshVisibleRowsSoon()
+            if self.UpdateControlPanel then self:UpdateControlPanel() end
+            return false
+        end
+    end
+
     -- Keep the destructive safety rule at the API boundary as well as in the
     -- row label. Queue refreshes and stale button state must never be able to
     -- claim an order that should have been declined.
@@ -683,7 +716,10 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
     if self.CanSupplyCrafterReagentsForQueue and not self:CanSupplyCrafterReagentsForQueue(order, true) then
         local key = OrderKey(order.orderID)
-        self.orderIssues[key] = T("COA_ACTION_NO_REAGENTS", "Missing reagents")
+        -- Bag contents can change immediately after Shopping. Do not turn this
+        -- transient condition into a sticky disabled row: the next hardware
+        -- press must be able to recheck and craft once the reagents are owned.
+        self.orderIssues[key] = nil
         self:SetStatus(T("COA_STATUS_NO_REAGENTS", "Cannot craft: missing reagents."))
         self:RefreshVisibleRowsSoon()
         return false

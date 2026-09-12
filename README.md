@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Safe concentration queue checks (0.3.31)
+
+Patron orders are no longer treated as concentration-free while Blizzard's
+quality calculation is still loading. Unknown orders stay out of automatic and
+knowledge queues, and the concentration state is checked again before claiming
+an NPC order selected without concentration. If the late result is unsafe, its
+checkbox and saved selection are removed without calling the protected claim
+API. A missing crafter reagent is now a transient craft result rather than a
+sticky row error, so buying the material lets the next explicit Action press
+continue normally.
+
 ## Context tags in Custom Explanations (0.3.30)
 
 Custom Explanations now expand the same order-context placeholders as greetings
