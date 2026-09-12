@@ -1032,6 +1032,10 @@ end
 
 local function IsGenericRequest(message)
     if type(message) ~= 'string' then return false end
+    -- A linked item is already a specific request, even when none of the
+    -- enabled characters knows its recipe. Do not turn a failed item match
+    -- into the much broader "I can craft everything" placeholder.
+    if message:find('|Hitem:', 1, true) then return false end
     local lower = message:lower()
     return not HasMatch(lower, config.exclusions)
         and HasMatch(lower, config.inclusions) ~= nil

@@ -174,6 +174,18 @@ assert(countRows()==0, 'generic phrase matched a longer non-request word')
 scan('LF CRAFTER?')
 assert(countRows()==1, 'punctuation prevented a generic request match')
 
+-- An explicit item never falls back to the broad placeholder when its recipe
+-- is unknown or is not enabled for scanning.
+for _, explicitLink in ipairs({link(9999), link(1005)}) do
+    reset()
+    local message = 'LF craft ' .. explicitLink
+    assert(not Scan.Scanner.IsGenericRequest(message),
+        'linked item was classified as a generic request: ' .. message)
+    scan(message)
+    assert(countRows()==0 and next(Scan.DB.customers)==nil,
+        'unmatched linked item created a generic request: ' .. message)
+end
+
 for _, message in ipairs({a, 'LW ' .. a, 'LF ' .. a, 'need craft ' .. a}) do
     local crafter,id,recipe=match(message)
     assert(crafter and id==1001 and recipe.recipeID==101, 'tracked link was not recognized: ' .. message)

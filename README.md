@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Specific item request guard (0.3.45)
+
+- `LF craft [item]` no longer falls back to the general-request row when the
+  linked recipe is unknown, unlearned, disabled or unavailable on every
+  configured crafter.
+- The broad editable greeting remains limited to requests that contain no
+  explicit item link.
+
 ## Unapplied concentration cost projection (0.3.44)
 
 - Exact concentration cost is read from the operation projection before
