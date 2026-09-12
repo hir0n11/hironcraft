@@ -7,6 +7,7 @@ end
 
 local saved = HironCraftScan.Utils.saved
 local requestTokenSerial = 0
+local GENERAL_REQUEST_ID = '__hironcraft_general_request__'
 
 local function NewRequestToken(customer, responseID, chatEntry)
     if chatEntry and type(chatEntry.syncID) == 'string' then
@@ -165,6 +166,7 @@ local function resetConfig()
         -- Keywords require an inclusion; monitored item links may stand alone.
         exclusions = {},
         inclusions = {},
+        generic_requests = {},
         prof_keywords = {},
         items = {},
         recipes = {},
@@ -194,6 +196,7 @@ end
 ]]
 
 HironCraftScan.Scanner = {}
+HironCraftScan.Scanner.GENERAL_REQUEST_ID = GENERAL_REQUEST_ID
 
 HironCraftScan.Utils.GetOutputItems = function(recipeInfo)
     if recipeInfo.qualityItemIDs then
@@ -257,6 +260,10 @@ function HironCraftScan.Scanner.LoadConfig()
 
     config.exclusions = ParseStringList(HironCraftScan.DB.settings.exclusions)
     config.inclusions = ParseStringList(HironCraftScan.DB.settings.inclusions)
+    config.generic_requests = ParseStringList(
+        HironCraftScan.DB.settings.generic_request_keywords
+            or L(HironCraftScan.CONST.TEXT.GENERIC_REQUEST_KEYWORDS_DEFAULT)
+    )
 
     -- Sort professions so that when we scan for generic keyword matches, we
     -- find the local charcter first, then the primary crafter. We ignore
@@ -855,8 +862,10 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
 
         local hasKeywords = HasMatch(message, config.inclusions)
         local itemMatches = GetMonitoredItemMatches(originalMessage)
-        if not hasKeywords and (HironCraftScan.DB.settings.scan_item_links_without_keywords == false
-            or #itemMatches == 0) then
+        local genericFollowup = overrides and overrides.genericFollowup == true
+        if not hasKeywords and not genericFollowup
+            and (HironCraftScan.DB.settings.scan_item_links_without_keywords == false
+                or #itemMatches == 0) then
             return nil
         end
 
@@ -1003,6 +1012,34 @@ end
 -- generating or sending a customer response.
 HironCraftScan.Scanner.GetCrafterForMessage = GetCrafterForMessage
 
+local function HasDelimitedPhrase(message, phrases)
+    for phrase in pairs(phrases or {}) do
+        local start = 1
+        while true do
+            local first, last = message:find(phrase, start, true)
+            if not first then break end
+            local before = first > 1 and message:sub(first - 1, first - 1) or ''
+            local after = last < #message and message:sub(last + 1, last + 1) or ''
+            if (before == '' or not before:match('[%w]'))
+                and (after == '' or not after:match('[%w]')) then
+                return true
+            end
+            start = first + 1
+        end
+    end
+    return false
+end
+
+local function IsGenericRequest(message)
+    if type(message) ~= 'string' then return false end
+    local lower = message:lower()
+    return not HasMatch(lower, config.exclusions)
+        and HasMatch(lower, config.inclusions) ~= nil
+        and HasDelimitedPhrase(lower, config.generic_requests)
+end
+
+HironCraftScan.Scanner.IsGenericRequest = IsGenericRequest
+
 local function ConcatGreetings(lhs, rhs)
     if lhs and lhs ~= '' then
         if rhs and rhs ~= '' then
@@ -1072,6 +1109,41 @@ end
 
 HironCraftScan.OrderToOrderID = function(order)
     return order.customerName .. '-' .. order.responseID
+end
+
+local function HasGeneralRequest(customer, customerInfo)
+    local response = customerInfo and customerInfo.responses
+        and customerInfo.responses[GENERAL_REQUEST_ID]
+    if type(response) ~= 'table' then return false end
+    return HironCraftScan.DB.listed_orders[
+        HironCraftScan.OrderToOrderID({ customerName = customer, responseID = GENERAL_REQUEST_ID })
+    ] ~= nil
+end
+
+local function RemoveGeneralRequest(customer, customerInfo)
+    if not HasGeneralRequest(customer, customerInfo) then return nil end
+    local response = customerInfo.responses[GENERAL_REQUEST_ID]
+    local order = { customerName = customer, responseID = GENERAL_REQUEST_ID }
+    if HironCraftScanScannerMenu and HironCraftScanScannerMenu.ClearAlert then
+        HironCraftScanScannerMenu:ClearAlert(order)
+    end
+    HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = nil
+    customerInfo.responses[GENERAL_REQUEST_ID] = nil
+
+    local liveCustomer = HironCraftScan.LIVE and HironCraftScan.LIVE.customers
+        and HironCraftScan.LIVE.customers[customer]
+    if liveCustomer and liveCustomer.responses then
+        liveCustomer.responses[GENERAL_REQUEST_ID] = nil
+    end
+    local active = HironCraftScan.State.activeOrder
+    if active and active.customerName == customer and active.responseID == GENERAL_REQUEST_ID then
+        HironCraftScan.State.activeOrder = nil
+    end
+    if HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.DismissOrderGreeting then
+        HironCraftScan.QuickReplies:DismissOrderGreeting(
+            customer, GENERAL_REQUEST_ID, response.requestToken)
+    end
+    return response
 end
 
 HironCraftScan.GetUnitName = function(unit, forceRealm)
@@ -1424,6 +1496,135 @@ HironCraftScan.RebuildResponseMessage = function(order, force)
     response.alt_craft = newAltCraft
 end
 
+local function GenericAlertPreferences()
+    local visual, sound = false, false
+    local current = HironCraftScan.GetPlayerName(true)
+    for _, crafterInfo in ipairs(config.prof_keywords) do
+        local character = HironCraftScan.DB.characters[crafterInfo.crafter]
+        local parent = character and character.parent_professions
+            and character.parent_professions[crafterInfo.parentProfID]
+        if parent and parent.scanning_enabled and not parent.character_disabled then
+            local localAlertAllowed = not parent.local_alerts_only
+                or current == crafterInfo.crafter
+            if localAlertAllowed then
+                visual = visual or parent.visual_alert_enabled == true
+                sound = sound or parent.sound_alert_enabled == true
+            end
+        end
+    end
+    return visual, sound
+end
+
+local function HandleGeneralRequest(message, customer, customerInfo, overrides, chatEvent)
+    local responses = saved(customerInfo, 'responses', {})
+    local response = saved(responses, GENERAL_REQUEST_ID, {})
+    local firstInteraction = not next(response)
+    local requestChatEntry = overrides and overrides.chatEntry
+        or MakeChatHistoryEntryDefault(customer, message, chatEvent)
+    local chatHistory = saved(customerInfo, 'chat_history', {})
+    if not (overrides and overrides.chatHistoryAlreadyStored) then
+        requestChatEntry = HironCraftScan.Utils.AppendUniqueChatHistory(
+            chatHistory, requestChatEntry)
+    end
+    if not firstInteraction and requestChatEntry.receivedAt and response.time
+        and requestChatEntry.receivedAt < response.time then return nil end
+
+    local publicRequest = chatEvent == 'CHAT_MSG_CHANNEL' or chatEvent == 'CHAT_MSG_SAY'
+        or chatEvent == 'CHAT_MSG_PARTY' or chatEvent == 'CHAT_MSG_GUILD'
+    local reoffer = publicRequest and HironCraftScan.RequestTracking.CanReoffer(
+        response, requestChatEntry.receivedAt or time())
+    local remoteRestart = HironCraftScanComm.applying_remote_state and overrides
+        and type(overrides.requestToken) == 'string'
+        and response.requestToken and response.requestToken ~= overrides.requestToken
+    local restarting = reoffer or remoteRestart
+        or (overrides and overrides.restartTerminalRequest == true)
+    if response.greeting_sent and not restarting then return nil end
+
+    local fresh = firstInteraction or restarting
+    local requestToken = response.requestToken
+    if fresh then
+        requestToken = overrides and overrides.requestToken
+            or NewRequestToken(customer, GENERAL_REQUEST_ID, requestChatEntry)
+        response.previousGreeting = reoffer
+            and { id = response.inquiryID or response.requestToken } or nil
+        response.requestToken = requestToken
+        response.conversationCharacter = nil
+        response.greetingGroup = nil
+        response.battleNetCharacters = nil
+        response.inquiryID = nil
+        response.greetingSentAt = nil
+        response.customer_answered = false
+    end
+    if requestChatEntry and requestToken then
+        requestChatEntry.syncID = requestChatEntry.syncID
+            or ('order:' .. tostring(requestToken))
+    end
+    HironCraftScan.RequestTracking.AssignInquiry(
+        customerInfo, response, requestChatEntry, restarting)
+
+    local customerStartedInteraction = overrides
+        and overrides.customerStartedInteraction == true
+    response.message = SplitResponse(GetGreeting('GREETING_GENERIC_REQUEST'))
+    response.generic_request = true
+    response.responseID = GENERAL_REQUEST_ID
+    response.crafterName = L('All crafters')
+    response.professionName = L('Any profession')
+    response.time = fresh and (requestChatEntry.receivedAt or time())
+        or response.time or time()
+    if customerStartedInteraction and (fresh or not response.greeting_sent) then
+        response.greeting_sent = false
+    elseif overrides and overrides.battleNet then
+        response.greeting_sent = (not restarting and response.greeting_sent)
+            or overrides.greeted or false
+    else
+        response.greeting_sent = overrides and overrides.greeted
+            or customerStartedInteraction
+    end
+    if customerStartedInteraction then response.customer_answered = true end
+
+    if overrides and overrides.battleNet and HironCraftScan.BattleNet then
+        HironCraftScan.BattleNet.RememberCharacters(customer, response)
+    end
+    if HironCraftScan.QuickReplies then
+        HironCraftScan.QuickReplies:ApplyConversationOwners(
+            customerInfo, overrides and overrides.conversationOwners)
+        if customerStartedInteraction or (overrides and overrides.greeted) then
+            HironCraftScan.QuickReplies:RememberConversationCharacter(response)
+        end
+        requestChatEntry.conversationOwners =
+            HironCraftScan.QuickReplies:GetConversationOwners(customerInfo)
+    end
+
+    local order = { customerName = customer, responseID = GENERAL_REQUEST_ID }
+    if fresh then
+        HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
+        local visualAlert, soundAlert = GenericAlertPreferences()
+        if visualAlert then
+            HironCraftScan.State.activeOrder = order
+            FlashClientIcon()
+            if not customerStartedInteraction then
+                HironCraftScanScannerMenu:TriggerAlert(
+                    string.format('%s\n%s (%s)',
+                        HironCraftScan.ColorizePlayerName(customer, customerInfo.guid),
+                        L('General crafting request'), L('All crafters')),
+                    order)
+                if not HironCraftScanCraftingOrderPage:IsShown() then
+                    HironCraftScanScannerMenu:TriggerPulseLock('scanned')
+                end
+            end
+        end
+        if soundAlert and not (overrides and overrides.suppressBatchAlert) then
+            PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master')
+        end
+        HironCraftScanCraftingOrderPage:ShowGeneric()
+    end
+
+    HironCraftScanComm:ShareCustomerOrder(
+        message, customer, customerInfo.guid, requestChatEntry,
+        response.requestToken, restarting)
+    return response
+end
+
 local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, chatEvent)
     -- At this point, we have everything we need to generate a response to the message.
     local itemLink = item and item:GetItemLink() or nil
@@ -1443,6 +1644,10 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local responseID = recipeID or profID
 
     local needsResultCallbackOnly = overrides and overrides.resultCallback
+
+    if not needsResultCallbackOnly then
+        RemoveGeneralRequest(customer, customerInfo)
+    end
 
     local responses = saved(customerInfo, 'responses', {})
     local response = saved(responses, responseID, {})
@@ -1869,6 +2074,12 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     overrides.remoteRequest = overrides.remoteRequest == true or HironCraftScanComm.applying_remote_state == true
     overrides.chatEntry = HironCraftScan.Utils.StampChatHistory(overrides.chatEntry
         or MakeChatHistoryEntryDefault(customer, message, event))
+    if HasGeneralRequest(customer, customerInfo) then
+        -- Once we have asked what the customer needs, their clarification is
+        -- allowed to be just "BS", "wrist" or an item link without another LF.
+        -- Global and profession exclusions are still checked normally.
+        overrides.genericFollowup = true
+    end
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
     if incomingWhisper and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
@@ -1918,7 +2129,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 overrides,
                 customerGuid
             )
-            if not crafterInfo and not classPending then
+            if not crafterInfo and not classPending and not IsGenericRequest(message) then
                 OfferDeferredQuickReply(customer, message, customerInfo, overrides)
                 return false
             end
@@ -1956,6 +2167,13 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                     HironCraftScan.OnMessage(event, message, customer, guid, options)
                 end)
             end)
+        elseif IsGenericRequest(message) then
+            customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
+            customerInfo.guid = customerGuid or customerInfo.guid
+            local response = HandleGeneralRequest(
+                message, customer, customerInfo, overrides, event)
+            OfferDeferredQuickReply(
+                customer, message, customerInfo, overrides, response)
         else
             OfferDeferredQuickReply(customer, message, customerInfo, overrides)
         end

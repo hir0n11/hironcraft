@@ -583,6 +583,9 @@ local function Shorten(text, maxBytes)
 end
 
 local function ResponseLabel(response)
+    if response.generic_request then
+        return L('General crafting request')
+    end
     local crafter = response.crafterName
         or HironCraftScan.NameAndRealmToName(response.crafterFullName)
     local subject = response.professionName
@@ -789,6 +792,23 @@ local function DismissToast(toast)
     LayoutToasts()
 end
 
+function QuickReplies:DismissOrderGreeting(customer, responseID, requestToken)
+    local changed = false
+    for _, toast in ipairs(toastPool) do
+        local option = toast.option
+        if toast:IsShown() and option and option.action == ORDER_GREETING_ACTION
+            and option.customer == customer and option.responseID == responseID
+            and (requestToken == nil or option.requestToken == requestToken)
+        then
+            toast.option = nil
+            toast:Hide()
+            changed = true
+        end
+    end
+    if changed then LayoutToasts() end
+    return changed
+end
+
 local function CreateToast()
     local parent = HironCraftScanScannerMenu or UIParent
     local toast = CreateFrame('Button', nil, parent)
@@ -992,11 +1012,12 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
     toast.serial = serial
     toast.optionIndex = optionIndex
     toast.option = option
-    toast.Portrait:SetTexture(
-        C_TradeSkillUI.GetTradeSkillTexture(option.response.professionID)
-            or HironCraftScan.Utils.GetCurrentProfessionIcon()
-            or 4620670
-    )
+    local professionIcon = option.response.professionID
+        and C_TradeSkillUI.GetTradeSkillTexture(option.response.professionID)
+    toast.Portrait:SetTexture(professionIcon
+        or (HironCraftScan.Utils.GetCurrentProfessionIcon
+            and HironCraftScan.Utils.GetCurrentProfessionIcon())
+        or 4620670)
     toast.Customer:SetText(HironCraftScan.ColorizePlayerName(option.customer, customerInfo.guid))
     toast.Reply:SetText(Shorten(DisplayText(option.label), 54))
 

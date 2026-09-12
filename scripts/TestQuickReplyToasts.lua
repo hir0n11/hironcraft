@@ -216,6 +216,24 @@ click(staleGreeting)
 assert(#greetingClicks==1 and #visible('ReturningBuyer')==0,
     'stale new-order quick reply followed a reused row')
 
+-- A generic request has no profession ID yet, but still gets one safe
+-- click-to-send greeting. Replacing the row dismisses that obsolete action.
+local broadResponse={responseID='__hironcraft_general_request__',
+    requestToken='generic-request',time=now,generic_request=true,
+    crafterName='All crafters',professionName='Any profession',
+    message={"Hi! Tell me what you need."},greeting_sent=false}
+local broad={guid='broad-guid',responses={
+    ['__hironcraft_general_request__']=broadResponse}}
+Scan.DB.customers.BroadBuyer=broad
+Scan.DB.listed_orders['BroadBuyer-__hironcraft_general_request__']={
+    customerName='BroadBuyer',responseID='__hironcraft_general_request__'}
+assert(QuickReplies:ShowOrderGreeting(
+    'BroadBuyer','LF crafter',broad,{broadResponse}))
+assert(#visible('BroadBuyer')==1, 'generic request did not create one Quick Reply')
+assert(QuickReplies:DismissOrderGreeting(
+    'BroadBuyer','__hironcraft_general_request__','generic-request'))
+assert(#visible('BroadBuyer')==0, 'replaced generic row left its old Quick Reply visible')
+
 -- The event-only rejection answer must stay attached to its specific order.
 for _, id in ipairs({101,102}) do
     QuickReplies:OnOrderFulfillmentUpdated({customerName='Geete', responseID=id},

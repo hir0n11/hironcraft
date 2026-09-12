@@ -192,6 +192,12 @@ HironCraftScanCrafterTableCellItemNameMixin = CreateFromMixins(TableBuilderCellM
 function HironCraftScanCrafterTableCellItemNameMixin:Populate(rowData, dataIndex)
     local response = HironCraftScan.OrderToResponse(rowData.order);
 
+    if response.generic_request then
+        self.Icon:SetTexture(HironCraftScan.Utils.GetCurrentProfessionIcon() or 4620670)
+        self.Text:SetText('|cffffd100' .. L('General crafting request') .. '|r')
+        return
+    end
+
     if not response.itemID then
         self.Icon:SetTexture(C_TradeSkillUI.GetTradeSkillTexture(response.professionID))
         self.Text:SetText(HironCraftScan.Utils.ColorizeProfessionName(response.parentProfID, response.professionName))

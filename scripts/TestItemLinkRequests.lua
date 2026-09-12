@@ -15,6 +15,7 @@ local greetings = {
     GREETING_ALT_CAN_CRAFT_ITEM='Hi! Send {item} to {crafter}.',
     GREETING_I_HAVE_PROF='Hi! {profession}.', GREETING_ALT_HAS_PROF='Hi! {profession}.',
     GREETING_ALT_SUFFIX='',
+    GREETING_GENERIC_REQUEST="Hi! Tell me what you need and I'll name the crafter.",
 }
 Scan.LOCAL = {GetText=function(_, key) return greetings[key] or key end}
 local function loadSource(path) return assert(loadfile(path))('HironCraft', Scan) end
@@ -103,7 +104,8 @@ local function character(profID, keywords, recipeConfigs)
     }
 end
 Scan.DB = {
-    settings={inclusions='lf,need craft', exclusions='wts,crafting services', auto_reply_delay=1000},
+    settings={inclusions='lf,need craft', exclusions='wts,crafting services', auto_reply_delay=1000,
+        generic_request_keywords='lf crafter,lf craft,lf recraft'},
     analytics={enabled=false}, customers={}, listed_orders={},
     characters={
         ['Seller-Realm']=character(164, 'bs,blacksmith', {
@@ -133,6 +135,40 @@ local function flushTimers()
 end
 local a,b,c=link(1001),link(1002),link(1003)
 reloadConfig()
+
+-- A broad request creates one click-only placeholder row. A later profession
+-- or item clarification replaces it even when the customer does not repeat LF.
+reset()
+scan('LF CRAFTER')
+local generalID=Scan.Scanner.GENERAL_REQUEST_ID
+local general=response(generalID)
+assert(general and general.generic_request and countRows()==1,
+    'generic craft request did not create its placeholder row')
+assert(#sent==0, 'generic craft request sent a greeting without a click')
+Scan.GreetCustomer('LeftButton',order(generalID))
+assert(#sent==1 and sent[1].message==greetings.GREETING_GENERIC_REQUEST
+    and general.greeting_sent, 'generic greeting was not sent by the row click')
+Scan.OnMessage('CHAT_MSG_WHISPER','bs','Buyer','Buyer-GUID')
+assert(not response(generalID) and response(164) and countRows()==1,
+    'profession clarification did not replace the generic row')
+
+reset()
+scan('LF RECRAFT')
+Scan.OnMessage('CHAT_MSG_WHISPER',a..b,'Buyer','Buyer-GUID')
+assert(not response(generalID) and response(101) and response(102) and countRows()==2,
+    'multi-item clarification did not replace the generic row with item rows')
+
+reset()
+scan('WTS LF CRAFTER')
+assert(countRows()==0 and next(Scan.DB.customers)==nil,
+    'generic request bypassed the global exclusions')
+scan('LF')
+assert(countRows()==0, 'ordinary inclusion without a generic phrase created a row')
+scan('LF crafting')
+assert(countRows()==0, 'generic phrase matched a longer non-request word')
+scan('LF CRAFTER?')
+assert(countRows()==1, 'punctuation prevented a generic request match')
+
 for _, message in ipairs({a, 'LW ' .. a, 'LF ' .. a, 'need craft ' .. a}) do
     local crafter,id,recipe=match(message)
     assert(crafter and id==1001 and recipe.recipeID==101, 'tracked link was not recognized: ' .. message)

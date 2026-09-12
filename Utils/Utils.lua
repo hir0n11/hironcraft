@@ -1042,6 +1042,10 @@ local function doOnce()
             or L(LID.GLOBAL_INCLUSION_DEFAULT)
         HironCraftScan.DB.settings.exclusions = HironCraftScan.DB.settings.exclusions
             or L(LID.GLOBAL_EXCLUSION_DEFAULT)
+        if HironCraftScan.DB.settings.generic_request_keywords == nil then
+            HironCraftScan.DB.settings.generic_request_keywords =
+                L(LID.GENERIC_REQUEST_KEYWORDS_DEFAULT)
+        end
 
         local realmNames = GetAutoCompleteRealms()
         HironCraftScan.Utils.printTable('realmNames', realmNames)
@@ -1068,6 +1072,8 @@ local function doOnce()
         HironCraftScan.DB.settings = {}
         HironCraftScan.DB.settings.inclusions = L(LID.GLOBAL_INCLUSION_DEFAULT)
         HironCraftScan.DB.settings.exclusions = L(LID.GLOBAL_EXCLUSION_DEFAULT)
+        HironCraftScan.DB.settings.generic_request_keywords =
+            L(LID.GENERIC_REQUEST_KEYWORDS_DEFAULT)
         HironCraftScan.DB.characters = {}
         HironCraftScan.DB.listed_orders = {}
         HironCraftScan.DB.customers = {}

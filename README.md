@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Generic crafting requests (0.3.37)
+
+Messages such as `LF crafter`, `LF craft` and `LF recraft` create a temporary
+general request row when no monitored profession or item can be identified.
+Its editable greeting is sent only by an explicit click. A later clarification
+such as `BS`, an armor slot or one or more item links replaces the general row
+with the corresponding profession or item rows, without requiring another
+`LF`. Global and profession exclusions remain active throughout the exchange.
+
 ## Auction Shop layout refinements (0.3.36)
 
 The Auction House tab is named `HironCraft` and is placed before Blizzard's

@@ -37,6 +37,7 @@ function HironCraftScanGeneralConfigMatchingMixin:Init()
     self.Title:SetText(L('Base Filters'))
     HironCraftScan.SetupTextInput(self, self.Keywords, 'inclusions')
     HironCraftScan.SetupTextInput(self, self.Exclusions, 'exclusions')
+    HironCraftScan.SetupTextInput(self, self.GenericRequests, 'generic_request_keywords')
 end
 
 function HironCraftScanGeneralConfigMatchingMixin:GetConfigValue(keyword)
@@ -57,6 +58,7 @@ function HironCraftScanGreetingConfigPanelMixin:Init()
     self.tabGroup = self:GetParent():TabGroup()
     self.Title:SetText(L('Customer Greetings'))
     self.greetings = {
+        ['GREETING_GENERIC_REQUEST'] = { placeholders = {} },
         ['GREETING_I_CAN_CRAFT_ITEM'] = { placeholders = { '{crafter}', '{item}' } },
         ['GREETING_I_HAVE_PROF'] = {
             placeholders = { '{crafter}', '{profession}', '{profession_link}' },
@@ -67,7 +69,8 @@ function HironCraftScanGreetingConfigPanelMixin:Init()
         ['GREETING_BUSY'] = { placeholders = {} },
     }
 
-    for _, key in pairs({
+    for _, key in ipairs({
+        'GREETING_GENERIC_REQUEST',
         'GREETING_I_CAN_CRAFT_ITEM',
         'GREETING_I_HAVE_PROF',
         'GREETING_ALT_CAN_CRAFT_ITEM',

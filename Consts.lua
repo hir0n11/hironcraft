@@ -142,6 +142,8 @@ HironCraftScan.CONST.TEXT = {
     SCANNING_ON = 138,
     SCANNING_OFF = 139,
     UNLEARNED = 140,
+    GENERIC_REQUEST_KEYWORDS_DEFAULT = 141,
+    GREETING_GENERIC_REQUEST = 142,
 
     -- Release notes have multiple lines that are sequential. Spaced out by hundreds to give more than enough room.
     RN_WELCOME = 10000,
@@ -176,6 +178,7 @@ HironCraftScan.CONST.DEFAULT_SETTINGS = {
     scan_item_links_without_keywords = true,
     match_customer_class = true,
     scan_bnet_whispers = true,
+    generic_request_keywords = 'LF crafter, LF craft, LF recraft',
 }
 
 HironCraftScan.CONST.PROFESSION_COLORS = {
