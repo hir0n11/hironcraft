@@ -485,7 +485,7 @@ function RS:EnsureControls()
 
     local controls = CreateFrame("Frame", "HironCraftRecipeShoppingControls", page)
     controls:SetSize(142, 22)
-    controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -34)
+    controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -38)
     controls:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
 
     local quantity = CreateFrame("EditBox", nil, controls, "InputBoxTemplate")
@@ -523,12 +523,32 @@ function RS:EnsureControls()
                 RS:AddSelectedRecipe()
             end
         end
-        if GameTooltip and (type(GameTooltip.IsOwned) ~= "function" or GameTooltip:IsOwned(self)) then
+        if GameTooltip then
             RS:UpdateTooltip(self)
         end
     end)
-    button:SetScript("OnEnter", function(self) RS:UpdateTooltip(self) end)
-    button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    button:SetScript("OnEnter", function(self)
+        self.recipeShoppingTooltipElapsed = 0
+        self.recipeShoppingTooltipRevision = nil
+        RS:UpdateTooltip(self)
+    end)
+    button:SetScript("OnLeave", function(self)
+        self.recipeShoppingTooltipRevision = nil
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    button:SetScript("OnUpdate", function(self, elapsed)
+        if not self.IsMouseOver or not self:IsMouseOver() then return end
+        self.recipeShoppingTooltipElapsed = (self.recipeShoppingTooltipElapsed or 0) + elapsed
+        if self.recipeShoppingTooltipElapsed < 0.05 then return end
+        self.recipeShoppingTooltipElapsed = 0
+
+        local revision = tostring(tonumber(RS.plan.totalCrafts) or 0)
+            .. ":" .. tostring(RS:GetPlannedRecipeItemCount())
+        if revision ~= self.recipeShoppingTooltipRevision then
+            self.recipeShoppingTooltipRevision = revision
+            RS:UpdateTooltip(self)
+        end
+    end)
 
     controls.quantity = quantity
     controls.button = button

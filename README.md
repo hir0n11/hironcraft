@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Regular-recipe shopping list (0.3.47)
+## Regular-recipe shopping list (0.3.48)
 
 - Learned recipes on the standard profession crafting page have a quantity
   field and **Add to shopping** button below the native recipe-tracking control;
@@ -40,6 +40,10 @@ The original CraftScan and ProfitHUB folders are not required after migration an
 - HironCraft's recipe button and Profession Shopping List's **Track New Mogs**
   button are kept inside the recipe panel so they cannot cover Blizzard's
   Recipes, Specializations, Crafting Orders, or Chat Orders tabs on first open.
+- Blizzard's profession tabs are also raised above third-party controls after
+  opening and tab-layout updates, preserving their first-click hit targets.
+- The planned-craft count in the shopping tooltip watches the current plan
+  while hovered and refreshes immediately after every click.
 - Current reagent-quality allocations and explicitly selected optional or
   finishing reagents are preserved. The best-quality checkbox controls an
   otherwise unallocated quality slot.

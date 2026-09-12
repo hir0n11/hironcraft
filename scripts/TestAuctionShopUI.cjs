@@ -81,12 +81,13 @@ check(
   "recipe shopping cannot replace its temporary list after all reagents become available",
 );
 check(
-  recipeShopping.includes('controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -34)') &&
+  recipeShopping.includes('controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -38)') &&
     !recipeShopping.includes('controls:SetPoint("TOPLEFT", form, "BOTTOMLEFT"'),
   "regular-recipe shopping controls are not in the upper-right recipe area",
 );
 check(
-  recipeShopping.includes('GameTooltip:IsOwned(self)') &&
+  recipeShopping.includes('button:SetScript("OnUpdate"') &&
+    recipeShopping.includes('recipeShoppingTooltipRevision') &&
     recipeShopping.includes('RS:UpdateTooltip(self)'),
   "recipe shopping tooltip does not refresh while the button remains hovered",
 );
@@ -101,6 +102,12 @@ check(
     recipeMenu.includes("child:SetPoint('BOTTOMLEFT', form, 'BOTTOMLEFT', 2, 30 + offset)") &&
     !recipeMenu.includes("'TOPLEFT',\n        ProfessionsFrame.CraftingPage.SchematicForm,\n        'BOTTOMLEFT'"),
   "custom profession buttons can still overlap Blizzard's bottom tabs",
+);
+check(
+  recipeMenu.includes("tabSystem:SetFrameStrata('HIGH')") &&
+    recipeMenu.includes("tab:SetFrameLevel(tabLevel + 1)") &&
+    recipeMenu.includes("hooksecurefunc(ProfessionsFrame, 'UpdateTabs', ScheduleProfessionButtonLayout)"),
+  "Blizzard profession tabs are not kept above late-created addon controls",
 );
 
 console.log("Auction Shop UI tests passed (classic frame, centered controls, default landing tab).");

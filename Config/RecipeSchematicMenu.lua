@@ -362,10 +362,38 @@ HironCraftScan.Events:Register('TRADESKILL_OPENED', ScanAllRecipes)
 
 local attachButton = nil
 
+local function RaiseProfessionTabsAboveAddons()
+    local frame = ProfessionsFrame
+    local tabSystem = frame and frame.TabSystem
+    if not tabSystem then return end
+
+    local form = frame.CraftingPage and frame.CraftingPage.SchematicForm
+    local tabLevel = math.max(700, ((form and form:GetFrameLevel()) or 0) + 100)
+
+    tabSystem:SetFrameStrata('HIGH')
+    tabSystem:SetFrameLevel(tabLevel)
+
+    local tabChildren = { tabSystem:GetChildren() }
+    for _, tab in ipairs(tabChildren) do
+        if tab.IsObjectType and tab:IsObjectType('Button') then
+            tab:SetFrameStrata('HIGH')
+            tab:SetFrameLevel(tabLevel + 1)
+        end
+    end
+
+    local chatOrdersTab = HironCraftScanOpenChatOrdersButton
+    if chatOrdersTab then
+        chatOrdersTab:SetFrameStrata('HIGH')
+        chatOrdersTab:SetFrameLevel(tabLevel + 1)
+    end
+end
+
 local function ReanchorOverlappingProfessionButtons()
     local page = ProfessionsFrame and ProfessionsFrame.CraftingPage
     local form = page and page.SchematicForm
     if not page or not form then return end
+
+    RaiseProfessionTabsAboveAddons()
 
     local offset = math.max(0, tonumber(HironCraftScan.DB.settings.show_button_height) or 0)
     if attachButton then
@@ -627,6 +655,7 @@ end
 
 HironCraftScan.Utils.onLoad(function()
     hooksecurefunc(ProfessionsFrame.CraftingPage, 'SelectRecipe', OnRecipeSelected)
+    hooksecurefunc(ProfessionsFrame, 'UpdateTabs', ScheduleProfessionButtonLayout)
     ProfessionsFrame:HookScript('OnShow', ScheduleProfessionButtonLayout)
 
     local footerGuard = CreateFrame('Frame')
