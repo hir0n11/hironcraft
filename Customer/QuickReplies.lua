@@ -989,6 +989,13 @@ local function SendOption(toast, option)
         }, true) == false then
             return
         end
+        -- The normal row-click path refreshes the table after greeting. The
+        -- toast is a separate click path, so do the same here or its first
+        -- status icon remains a stale red X until another UI event arrives.
+        if HironCraftScanCraftingOrderPage
+            and HironCraftScanCraftingOrderPage.ShowGeneric then
+            HironCraftScanCraftingOrderPage:ShowGeneric()
+        end
         DismissEquivalentToasts(option)
         return
     end
@@ -1083,8 +1090,15 @@ function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, respons
     end
     if not selected then return false end
 
-    local reply = type(selected.message) == 'table'
-        and table.concat(selected.message, ' ') or ''
+    local reply
+    if selected.destination_only_greeting == true
+        and HironCraftScan.BuildOrderDestinationMessage then
+        reply = HironCraftScan.BuildOrderDestinationMessage(selected)
+    end
+    if not reply then
+        reply = type(selected.message) == 'table'
+            and table.concat(selected.message, ' ') or ''
+    end
     if reply == '' then
         reply = L('Reply to new crafting request')
     end

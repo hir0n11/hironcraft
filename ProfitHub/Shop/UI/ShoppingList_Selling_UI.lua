@@ -23,6 +23,7 @@ local function MakeText(parent, size, justify)
     local fs = parent:CreateFontString(nil, "ARTWORK")
     fs:SetFont(FONT, size or 11, "")
     fs:SetJustifyH(justify or "LEFT")
+    fs:SetJustifyV("MIDDLE")
     fs:SetTextColor(0.92, 0.92, 0.92)
     return fs
 end
@@ -95,8 +96,13 @@ local function MakeDurationButton(parent, label, code)
     if IsFantasy() then
         local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
         btn:SetSize(40, 22)
-        btn:SetText(label)
+        btn:SetText("")
         if S.StyleClassicTextButton then S.StyleClassicTextButton(btn) end
+        btn.label = MakeText(btn, 10, "CENTER")
+        btn.label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        btn.label:SetSize(32, 18)
+        btn.label:SetTextColor(1, 0.82, 0.20, 1)
+        btn.label:SetText(label)
         btn:SetScript("OnClick", function()
             if S.SetSellDuration then S:SetSellDuration(code) end
             if S.RefreshSellUI then S:RefreshSellUI() end
@@ -519,8 +525,19 @@ function S:EnsureSellPanel()
             local btn = CreateFrame("Button", nil, form, "UIPanelButtonTemplate")
             btn:SetSize(w, 24)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            btn:SetText(labelText)
+            btn:SetText("")
             if S.StyleClassicTextButton then S.StyleClassicTextButton(btn) end
+            btn.label = MakeText(btn, 11, "CENTER")
+            btn.label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            btn.label:SetSize(w - 8, 22)
+            btn.label:SetText(labelText)
+            if labelColor then
+                btn.label:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
+            end
+            btn.key = MakeText(btn, 8, "RIGHT")
+            btn.key:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -3, -2)
+            btn.key:SetSize(28, 8)
+            btn.key:SetTextColor(0.98, 0.86, 0.42)
             btn:SetScript("OnClick", function(self, button)
                 if button == "RightButton" then
                     if IsShiftKeyDown and IsShiftKeyDown() then

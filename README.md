@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Follow-up replies and Auction House controls (0.3.41)
+
+- A new craft request from an existing conversation uses a compact
+  `item/profession Send to crafter` reply instead of repeating the full greeting.
+- Clicking that Quick Reply refreshes the matching row immediately, including
+  its first status checkmark.
+- Buy and sell action labels stay centered while the assigned hotkey appears as
+  small text in the upper-right corner.
+- Auction House tabs attach cleanly to the frame, and selected tab and duration
+  captions no longer move with Blizzard's pressed-state offsets.
+
 ## Stable crafting-order list (0.3.40)
 
 - Crafting-order API bursts are coalesced into one repaint after a short quiet window.

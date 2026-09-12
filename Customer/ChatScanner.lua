@@ -1795,6 +1795,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.recipeID = recipeID
     response.time = (firstInteraction or restartingTerminalRequest) and (requestChatEntry.receivedAt or now) or response.time or now
     response.responseID = responseID
+    response.destination_only_greeting = customerStartedInteraction == true
+        and overrides and overrides.existingCustomerRequest == true or nil
     if offerIncomingGreeting then
         -- An incoming crafting request establishes contact, but it is not our
         -- answer. Leave the generated greeting pending so Quick Replies can

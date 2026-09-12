@@ -30,12 +30,16 @@ function Scan.BuildResponseContext(response)
     return {crafter=response.crafterName, item=response.itemName, commission=response.commission,
         profession=response.professionName}
 end
+function Scan.BuildOrderDestinationMessage(response)
+    return response.itemName .. ' Send to ' .. response.crafterName .. '.'
+end
 function GetItemInfo(id) return id==1 and 'Bracers' or 'Belt' end
 local now=100
 function GetTime() return now end
 C_TradeSkillUI={GetTradeSkillTexture=function() return 42 end}
 HironCraftScanScannerMenu={PageButton={}}
-local sent, frames, greetingClicks={}, {}, {}
+local sent, frames, greetingClicks, orderListRefreshes={}, {}, {}, 0
+HironCraftScanCraftingOrderPage={ShowGeneric=function() orderListRefreshes=orderListRefreshes+1 end}
 Scan.Utils.SendResponses=function(messages, customer, userInitiated)
     assert(userInitiated == true, 'quick reply bypassed the explicit-click sender')
     assert(#messages==1, 'one quick-reply click sent several messages')
@@ -47,6 +51,7 @@ Scan.SendOrderGreeting=function(order, userInitiated)
     local response=Scan.OrderToResponse(order)
     if not response or response.greeting_sent then return false end
     response.greeting_sent=true
+    response.destination_only_greeting=nil
     greetingClicks[#greetingClicks+1]={
         customerName=order.customerName,
         responseID=order.responseID,
@@ -197,15 +202,19 @@ assert(#visible()==0 and #sent==6, 'dismissal sent the merged reply')
 -- request-token change makes the old click harmless.
 local returning, newOrder=addCustomer('ReturningBuyer')
 newOrder.greeting_sent=false
+newOrder.destination_only_greeting=true
 newOrder.message={'Hi! I can craft [Bracers].'}
 returning.responses[102].greeting_sent=true
 assert(QuickReplies:ShowOrderGreeting('ReturningBuyer','can you also do wrist?',returning,{newOrder}))
 assert(#visible('ReturningBuyer')==1 and #greetingClicks==0)
+assert(visible('ReturningBuyer')[1].option.reply=='[Bracers] Send to Leathloring.',
+    'follow-up toast still displays a full introduction')
 assert(QuickReplies:ShowOrderGreeting('ReturningBuyer','can you also do wrist?',returning,{newOrder}))
 assert(#visible('ReturningBuyer')==1, 'same new request stacked greeting quick replies')
 click(visible('ReturningBuyer')[1])
 assert(#greetingClicks==1 and greetingClicks[1].responseID==101
     and greetingClicks[1].requestToken=='request-101', 'new-order quick reply targeted the wrong request')
+assert(orderListRefreshes==1, 'greeting toast did not refresh the first status checkmark')
 
 newOrder.greeting_sent=false
 newOrder.requestToken='request-before-reuse'

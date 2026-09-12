@@ -151,6 +151,11 @@ assert(#sent==1 and sent[1].message==greetings.GREETING_GENERIC_REQUEST
 Scan.OnMessage('CHAT_MSG_WHISPER','bs','Buyer','Buyer-GUID')
 assert(not response(generalID) and response(164) and countRows()==1,
     'profession clarification did not replace the generic row')
+assert(response(164).destination_only_greeting,
+    'generic-request clarification was offered another full introduction')
+Scan.GreetCustomer('LeftButton',order(164))
+assert(#sent==2 and sent[2].message=='Profession 164 Send to Seller.',
+    'generic-request clarification did not use the compact destination reply')
 
 reset()
 scan('LF RECRAFT')
@@ -467,11 +472,18 @@ Scan.QuickReplies.ShowOrderGreeting=function(_,customer,message,customerInfo,res
         'Quick Reply received the completed response instead of the new row')
     assert(not current.greeting_sent and current.customer_answered,
         'incoming new request consumed its pending greeting')
+    assert(current.destination_only_greeting,
+        'follow-up craft request was offered another full introduction')
     return true
 end
 now=1100
 Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist?','Buyer','Buyer-GUID')
 assert(offered==1 and countRows()==1, 'new whisper row did not trigger its Quick Reply')
+assert(Scan.SendOrderGreeting(order(164),true))
+assert(#sent==1 and sent[1].message=='Profession 164 Send to Seller.',
+    'follow-up profession request did not use the compact destination reply')
+assert(response(164).greeting_sent and not response(164).destination_only_greeting,
+    'compact destination reply did not finish greeting state')
 Scan.OrderFulfillment=previousFulfillment
 Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.DB.settings.inclusions=previousInclusions

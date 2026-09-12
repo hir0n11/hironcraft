@@ -3058,6 +3058,9 @@ function S:CreateWindow()
             if PanelTemplates_SetTab then pcall(PanelTemplates_SetTab, f, idx) end
             for _, tb in ipairs(f.Tabs) do
                 SetTabHeightForced(tb, SHOP_FTAB_H)
+                -- Blizzard's tab selector changes the font-string offsets for
+                -- the selected state. Restore our stable centered caption.
+                CenterButtonText(tb, 11, { 1, 0.82, 0.20, 1 })
             end
             if f.LayoutShopTabs then f.LayoutShopTabs() end
         else
@@ -3439,14 +3442,14 @@ function S:CreateWindow()
 
             btn:SetText("")
             StyleClassicTextButton(btn)
-            btn.label = MakeText(btn, 9, "CENTER")
-            btn.label:SetPoint("CENTER", btn, "CENTER", 0, 5)
-            btn.label:SetSize(BIND_BTN_W - 10, 10)
+            btn.label = MakeText(btn, 11, "CENTER")
+            btn.label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+            btn.label:SetSize(BIND_BTN_W - 10, BIND_BTN_H - 2)
             btn.label:SetTextColor(1, 0.82, 0.20, 1)
             btn.label:SetText(labelText)
-            btn.value = MakeText(btn, 10, "CENTER")
-            btn.value:SetPoint("CENTER", btn, "CENTER", 0, -6)
-            btn.value:SetSize(BIND_BTN_W - 10, 10)
+            btn.value = MakeText(btn, 8, "RIGHT")
+            btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -4, -2)
+            btn.value:SetSize(30, 8)
             btn.value:SetTextColor(1, 1, 1, 1)
 
             local function CurrentKeyText()
@@ -4209,8 +4212,8 @@ function S:CreateWindow()
         CenterButtonText(tab, 11, { 1, 0.82, 0.20, 1 })
     end
     for _, button in ipairs({ f.refreshAction, f.bindAction, f.skipBindAction }) do
-        if button and button.label then button.label:SetFont(FONT, 9, "") end
-        if button and button.value then button.value:SetFont(FONT, 10, "") end
+        if button and button.label then button.label:SetFont(FONT, 11, "") end
+        if button and button.value then button.value:SetFont(FONT, 8, "") end
     end
     return f
 end
@@ -4349,7 +4352,15 @@ function S:EnsureAuctionTab()
     if tabButton then
         tabButton:SetText(T(AH_TAB_TEXT_KEY, "HironCraft"))
         if PanelTemplates_TabResize then PanelTemplates_TabResize(tabButton, 20, nil, 70) end
-        if tabButton.SetPushedTextOffset then tabButton:SetPushedTextOffset(0, 0) end
+        CenterButtonText(tabButton, 11, { 1, 0.82, 0.20, 1 })
+        if not tabButton.ahuiCenteredTextHooked and tabButton.HookScript then
+            tabButton.ahuiCenteredTextHooked = true
+            tabButton:HookScript("OnClick", function(self)
+                -- LibAHTab selects the tab before this hook runs and Blizzard
+                -- moves the pressed caption; center it again afterwards.
+                CenterButtonText(self, 11, { 1, 0.82, 0.20, 1 })
+            end)
+        end
     end
     if tabLib.MoveTabToFront then
         tabLib:MoveTabToFront(AH_TAB_ID)

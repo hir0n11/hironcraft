@@ -10,6 +10,20 @@ function Scan.GroupOrderGreetings(responses)
     for _, response in ipairs(responses) do response.greetingGroup = group end
 end
 
+-- A customer who is already talking to us does not need another full
+-- introduction for every additional craft. Reuse the compact line used for
+-- the second and later items in a multi-item request.
+function Scan.BuildOrderDestinationMessage(response)
+    if type(response) ~= 'table' or type(response.crafterFullName) ~= 'string' then
+        return nil
+    end
+    local subject = Scan.Utils.GetReplyItemLink(response.itemID, response.itemLink)
+        or response.professionName
+    local crafter = Scan.NameAndRealmToName(response.crafterFullName)
+    if type(subject) ~= 'string' or subject == '' or not crafter then return nil end
+    return subject .. ' Send to ' .. crafter .. '.'
+end
+
 function Scan.SendOrderGreeting(order, userInitiated)
     if userInitiated ~= true then return false end
     local response = Scan.OrderToResponse(order)
@@ -29,19 +43,15 @@ function Scan.SendOrderGreeting(order, userInitiated)
             and not seen[member.responseID]
             and Scan.DB.listed_orders[Scan.OrderToOrderID(sibling)] then
             seen[member.responseID] = true
-            if #pending == 0 then
+            if #pending == 0 and siblingResponse.destination_only_greeting ~= true then
                 -- Rebuild even on the same character: older saved greetings
                 -- may contain hyperlink fragments from the whitespace splitter.
                 Scan.RebuildResponseMessage(sibling, true)
                 for _, line in ipairs(siblingResponse.message or {}) do messages[#messages + 1] = line end
             else
-                local itemLink = Scan.Utils.GetReplyItemLink(siblingResponse.itemID, siblingResponse.itemLink)
-                if type(itemLink) ~= 'string' or type(siblingResponse.crafterFullName) ~= 'string' then
-                    return false
-                end
-                local crafter = Scan.NameAndRealmToName(siblingResponse.crafterFullName)
-                if not crafter then return false end
-                for _, line in ipairs(Scan.Utils.SplitResponse(itemLink .. ' Send to ' .. crafter .. '.')) do
+                local destination = Scan.BuildOrderDestinationMessage(siblingResponse)
+                if not destination then return false end
+                for _, line in ipairs(Scan.Utils.SplitResponse(destination)) do
                     messages[#messages + 1] = line
                 end
             end
@@ -55,6 +65,7 @@ function Scan.SendOrderGreeting(order, userInitiated)
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end
         sentResponse.greeting_sent = true
+        sentResponse.destination_only_greeting = nil
     end
     return true
 end

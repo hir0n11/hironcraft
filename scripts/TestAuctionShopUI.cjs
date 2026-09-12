@@ -1,6 +1,7 @@
 const fs = require("fs");
 
 const ui = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_UI.lua", "utf8");
+const sellUi = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_Selling_UI.lua", "utf8");
 const core = fs.readFileSync("ProfitHub/Shop/Core/ShoppingList_Core.lua", "utf8");
 const locale = fs.readFileSync("ProfitHub/Shop/Locale.lua", "utf8");
 const tabLib = fs.readFileSync("ProfitHub/Core/Libs/LibAHTab/LibAHTab.lua", "utf8");
@@ -37,7 +38,7 @@ check(
   "the HironCraft tab is not moved before the standard Auction House tabs",
 );
 check(
-  tabLib.includes("local ATTACHED_OFFSET_Y = 18") &&
+  tabLib.includes("local ATTACHED_OFFSET_Y = 20") &&
     tabLib.includes("(anchor[5] or 0) + ATTACHED_OFFSET_Y"),
   "Auction House tabs still leave a vertical gap below the frame",
 );
@@ -45,6 +46,16 @@ check(
   ui.includes('f.stopScanBtn:SetPoint("TOPRIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -36)') &&
     ui.includes("f.stopScanBtn:SetShown(scanning)"),
   "the stop-scan control is not isolated in the status row",
+);
+check(
+  ui.includes('btn.label:SetPoint("CENTER", btn, "CENTER", 0, 0)') &&
+    ui.includes('btn.value:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -4, -2)'),
+  "buy actions do not keep the action centered and the hotkey in the corner",
+);
+check(
+  (sellUi.match(/btn\.key = MakeText\(btn, 8, "RIGHT"\)/g) || []).length >= 2 &&
+    sellUi.includes('btn.label:SetSize(32, 18)'),
+  "selling actions or duration buttons still use unstable native captions",
 );
 check(
   ui.includes("if AuctionHouseFrame and tabLib and ShouldShowAuctionTab() then"),

@@ -5,7 +5,7 @@ if not lib then return end
 local MIN_TAB_WIDTH = 70
 local TAB_PADDING = 20
 local OFFSET_X = 3
-local ATTACHED_OFFSET_Y = 18
+local ATTACHED_OFFSET_Y = 20
 if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then
   OFFSET_X = -14
 end
