@@ -660,11 +660,18 @@ function CE:NeedsConcentration(spellID, targetQ, orderID, pickTier, locked)
 
     local withConc = self:Evaluate(spellID, reagents, { orderID = orderID, useConcentration = true })
     local reachable = withConc and withConc.quality and withConc.quality >= targetQ
+    -- Blizzard reports the amount needed to reach the next quality on the
+    -- non-applied operation info. Once concentration is applied, some 12.x
+    -- recipes return zero for concentrationCost.
+    local concentrationCost = withConc and withConc.concentrationCost or 0
+    if concentrationCost <= 0 then
+        concentrationCost = best.concentrationCost or 0
+    end
     return {
         needs = true,
         reachable = reachable or false,
         reachableNoConc = false,
-        concentrationCost = withConc and withConc.concentrationCost or 0,
+        concentrationCost = concentrationCost,
         noConcQuality = best.quality,
         concQuality = withConc and withConc.quality,
     }
@@ -737,6 +744,11 @@ function CE:SolveTierPerSlot(spellID, targetQ, orderID, getPrice, locked)
         cur, ok = greedy(true)
         needsConc, reachable = true, ok
         concCost = cur and cur.concentrationCost or 0
+        if concCost <= 0 then
+            local withoutAppliedConcentration = evalConc(false)
+            concCost = withoutAppliedConcentration
+                and withoutAppliedConcentration.concentrationCost or 0
+        end
     end
 
     local tierMap = {}

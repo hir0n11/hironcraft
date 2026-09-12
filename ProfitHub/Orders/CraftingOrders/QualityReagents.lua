@@ -3337,10 +3337,13 @@ function CO:GetFastConcentrationCost(order)
     local function tryGetCost()
         local reagents = self:BuildFastCraftingReagentInfoTbl(order)
         local attempts = {
-            { C_TradeSkillUI.GetCraftingOperationInfo, { order.spellID, reagents, nil, true } },
+            -- The unapplied projection carries the cost required to reach the
+            -- next quality. With concentration already applied, several 12.x
+            -- recipes report concentrationCost as zero.
+            { C_TradeSkillUI.GetCraftingOperationInfo, { order.spellID, reagents, nil, false } },
         }
         if C_TradeSkillUI.GetCraftingOperationInfoForOrder and order.orderID then
-            attempts[#attempts + 1] = { C_TradeSkillUI.GetCraftingOperationInfoForOrder, { order.spellID, reagents, order.orderID, true } }
+            attempts[#attempts + 1] = { C_TradeSkillUI.GetCraftingOperationInfoForOrder, { order.spellID, reagents, order.orderID, false } }
         end
         for _, a in ipairs(attempts) do
             local ok, info = pcall(a[1], unpack(a[2]))
@@ -3517,6 +3520,12 @@ function CO:GetOrderQualityInfo(order, applyConcentrationOverride, allowPrepared
 
     local info = self:GetOrderOperationInfo(order, useConc)
     local result = self:BuildQualityInfoFromOperationInfo(order, info, useConc)
+
+    if result and useConc and (not result.concentrationCost or result.concentrationCost <= 0) then
+        local withoutAppliedConcentration = self:GetOrderOperationInfo(order, false)
+        local cost = ReadConcentrationCostFromInfo(withoutAppliedConcentration)
+        if cost and cost > 0 then result.concentrationCost = cost end
+    end
 
 
     if not result and allowPreparedOrderView then

@@ -70,8 +70,8 @@ for _, reagents in ipairs({fullReagents,fastReagents}) do
         'operation-info reagents still use the pre-12.0 schema')
 end
 E.C_TradeSkillUI={GetCraftingOperationInfo=function(_,reagents,_,applyConcentration)
-    assert(applyConcentration==true and reagents[1].reagent.itemID==12345,
-        'concentration fallback submitted malformed reagents')
+    assert(applyConcentration==false and reagents[1].reagent.itemID==12345,
+        'concentration fallback did not request the unapplied operation cost')
     return {concentrationCosts={{amount=137}}}
 end}
 assert(CO:GetFastConcentrationCost(concentrationOrder)==137,

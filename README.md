@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Unapplied concentration cost projection (0.3.44)
+
+- Exact concentration cost is read from the operation projection before
+  concentration is applied; WoW 12.x can return zero after application.
+- Quality reachability is still checked with concentration enabled, while both
+  reagent solvers retain the cost from the matching disabled projection.
+
 ## Concentration cost compatibility (0.3.43)
 
 - Crafting-order quality probes now submit the nested `CraftingReagentInfo`
