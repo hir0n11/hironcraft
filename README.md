@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Auction Shop layout refinements (0.3.36)
+
+The Auction House tab is named `HironCraft` and is placed before Blizzard's
+Buy tab while preserving the order of Auctionator's tabs. Pressing an internal
+Shop tab no longer shifts its centered label. The stop-scan action now occupies
+a separate status row and is hidden whenever a scan is not running.
+
 ## Classic Auction Shop interface (0.3.35)
 
 The HironCraft Auction House page now uses the same Blizzard-native visual

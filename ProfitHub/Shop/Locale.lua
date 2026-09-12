@@ -6,9 +6,9 @@ PT.L_ruRU = PT.L_ruRU or {}
 PT.L_enUS["PG_SELL_BUY_CONFIRM_CLICK"] = "Click again to confirm this purchase."
 PT.L_ruRU["PG_SELL_BUY_CONFIRM_CLICK"] = "Нажмите ещё раз для подтверждения покупки."
 
-PT.L_enUS["Settings_ShoppingListAlwaysShowTab"] = "PH:Shop"
+PT.L_enUS["Settings_ShoppingListAlwaysShowTab"] = "HironCraft"
 PT.L_enUS["Settings_ShoppingListAlwaysShowTab_Tooltip"] = "Always show the HironCraft Shop shopping tab"
-PT.L_enUS["PG_SHOP_TAB"] = "PH:Shop"
+PT.L_enUS["PG_SHOP_TAB"] = "HironCraft"
 PT.L_enUS["PG_SHOP_AFTER_SCAN"] = "after scan"
 PT.L_enUS["PG_SHOP_AH_CLOSED"] = "AH closed"
 PT.L_enUS["PG_SHOP_AH_OPEN"] = "AH open"
@@ -284,7 +284,7 @@ PT.L_enUS["PG_SHOP_CRAFTSIM_INTERCEPT_FAILED"] = "HironCraft Shop: failed to imp
 
 PT.L_ruRU["Settings_ShoppingListAlwaysShowTab"] = "Список покупок"
 PT.L_ruRU["Settings_ShoppingListAlwaysShowTab_Tooltip"] = "Всегда показывать вкладку HironCraft Shop"
-PT.L_ruRU["PG_SHOP_TAB"] = "PH:Shop"
+PT.L_ruRU["PG_SHOP_TAB"] = "HironCraft"
 PT.L_ruRU["PG_SHOP_AFTER_SCAN"] = "после скана"
 PT.L_ruRU["PG_SHOP_AH_CLOSED"] = "AH закрыт"
 PT.L_ruRU["PG_SHOP_AH_OPEN"] = "AH открыт"

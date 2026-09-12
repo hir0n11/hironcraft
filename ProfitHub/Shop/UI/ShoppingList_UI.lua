@@ -23,7 +23,7 @@ local ROW_GAP = S.ROW_GAP or 2
 
 local PANEL_PAD = 12
 local SIDEBAR_W = 176
-local TOP_H = 36
+local TOP_H = 50
 local HEADER_H = 22
 local ACTION_W = 28
 local STATUS_W = 72
@@ -361,7 +361,7 @@ local function CenterButtonText(button, fontSize, color)
     label:SetWordWrap(false)
     if label.SetMaxLines then label:SetMaxLines(1) end
     if color then label:SetTextColor(color[1], color[2], color[3], color[4] or 1) end
-    if button.SetPushedTextOffset then button:SetPushedTextOffset(0, -1) end
+    if button.SetPushedTextOffset then button:SetPushedTextOffset(0, 0) end
 end
 
 local function StyleClassicTextButton(button, selected, unavailable, fontSize)
@@ -3898,14 +3898,14 @@ function S:CreateWindow()
     end)
 
     f.hint = MakeText(f.panel, 10, "RIGHT")
-    f.hint:SetPoint("TOPRIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -34)
+    f.hint:SetPoint("RIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -47)
     f.hint:SetWidth(260)
     f.hint:SetText("")
 
     if IsFantasy() then
         f.stopScanBtn = CreateFrame("Button", nil, f.panel, "UIPanelButtonTemplate")
-        f.stopScanBtn:SetSize(90, 22)
-        f.stopScanBtn:SetPoint("RIGHT", f.hint, "RIGHT", -85, 0)
+        f.stopScanBtn:SetSize(100, 22)
+        f.stopScanBtn:SetPoint("TOPRIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -36)
         f.stopScanBtn:SetText(T("PG_SHOP_STOPSCAN", "STOP scan"))
         StyleClassicTextButton(f.stopScanBtn)
         f.stopScanBtn:SetScript("OnClick", function()
@@ -3914,8 +3914,8 @@ function S:CreateWindow()
         f.stopScanBtn:Disable()
     else
         f.stopScanBtn = CreateFrame("Button", nil, f.panel, "BackdropTemplate")
-        f.stopScanBtn:SetSize(90, 20)
-        f.stopScanBtn:SetPoint("RIGHT", f.hint, "RIGHT", -85, 0)
+        f.stopScanBtn:SetSize(100, 22)
+        f.stopScanBtn:SetPoint("TOPRIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -36)
         f.stopScanBtn:SetBackdrop({
             bgFile   = "Interface\\Buttons\\WHITE8x8",
             edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -4342,7 +4342,17 @@ function S:EnsureAuctionTab()
     end
 
     if not tabLib:DoesIDExist(AH_TAB_ID) then
-        tabLib:CreateTab(AH_TAB_ID, f, T(AH_TAB_TEXT_KEY, "Shopping"), T(TITLE, "HironCraft: shopping list"))
+        tabLib:CreateTab(AH_TAB_ID, f, T(AH_TAB_TEXT_KEY, "HironCraft"), T(TITLE, "HironCraft: shopping list"))
+    end
+
+    local tabButton = tabLib.GetButton and tabLib:GetButton(AH_TAB_ID)
+    if tabButton then
+        tabButton:SetText(T(AH_TAB_TEXT_KEY, "HironCraft"))
+        if PanelTemplates_TabResize then PanelTemplates_TabResize(tabButton, 20, nil, 70) end
+        if tabButton.SetPushedTextOffset then tabButton:SetPushedTextOffset(0, 0) end
+    end
+    if tabLib.MoveTabToFront then
+        tabLib:MoveTabToFront(AH_TAB_ID)
     end
 
     UpdateAuctionTabVisibility()
@@ -4721,11 +4731,13 @@ function S:RefreshWindow()
     if f.scanAll then f.scanAll:SetEnabled(self.isAuctionHouseOpen and hasRemaining) end
     if f.stopScanBtn then
         local scanning = self.scanAllState and self.scanAllState.active == true
-        if IsFantasy() then
-            f.stopScanBtn:Show()
-            f.stopScanBtn:SetEnabled(scanning)
+        f.stopScanBtn:SetShown(scanning)
+        f.stopScanBtn:SetEnabled(scanning)
+        f.hint:ClearAllPoints()
+        if scanning then
+            f.hint:SetPoint("RIGHT", f.stopScanBtn, "LEFT", -8, 0)
         else
-            f.stopScanBtn:SetShown(scanning)
+            f.hint:SetPoint("RIGHT", f.panel, "TOPRIGHT", -PANEL_PAD, -47)
         end
     end
     if f.buyAll then f.buyAll:SetEnabled(false) end
