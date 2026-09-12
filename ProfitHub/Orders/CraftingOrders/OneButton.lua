@@ -103,10 +103,13 @@ function CO:PrepareFreshOrderSearch(pageFrame)
     -- otherwise an old row can survive the real server response indefinitely.
     container._lastGoodOrders = nil
     container._lastGoodType = nil
+    container._lastGoodScope = nil
     container._lastOrderCount = 0
     container._allowEmptyOnce = true
     container._orderType = pageFrame.orderType
     container._freshSearchPending = true
+    container._actionOrders = nil
+    container._actionHoldUntil = nil
 
     for _, row in ipairs(container.rows or {}) do
         local action = row and row.action

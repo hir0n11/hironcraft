@@ -1626,9 +1626,14 @@ function CO:UpdateRowButton(btn)
 
     if btn:GetParent() then
         local row = btn:GetParent()
-        self:UpdateOrderColumnFrames(row, btn.order)
-        self:UpdateCraftableOrderBorder(row, btn, btn.order)
-        self:UpdateConcentrationRequiredBorder(row, btn.order)
+        -- The classic custom list owns its complete row presentation. Applying
+        -- the Blizzard-row overlays here creates duplicate state layers and
+        -- makes the row flash whenever the API emits a refresh burst.
+        if not row.ahuiCustomOrderRow then
+            self:UpdateOrderColumnFrames(row, btn.order)
+            self:UpdateCraftableOrderBorder(row, btn, btn.order)
+            self:UpdateConcentrationRequiredBorder(row, btn.order)
+        end
     end
 
     self:RefreshHoveredRowButtonTooltip(btn)
@@ -1645,7 +1650,7 @@ function CO:RefreshVisibleRows()
         if btn and btn:IsShown() then
             self:UpdateRowButton(btn)
             local row = btn.GetParent and btn:GetParent()
-            if row then
+            if row and not row.ahuiCustomOrderRow then
                 self:ProtectOrderRowSoon(row, btn)
             end
         end
@@ -1782,18 +1787,20 @@ function CO:ProtectVisibleRows()
     self:HideExternalOrderAddonRegions(pageFrame)
 
     for _, row in ipairs(self:GetVisibleOrderRows(pageFrame)) do
-        self:HideBlizzardColumnsUnderHironCraftProfit(row)
+        if not row.ahuiCustomOrderRow then
+            self:HideBlizzardColumnsUnderHironCraftProfit(row)
 
-        local btn = row.ahuiOrderActionButton
-        if btn then
-            self:SyncRowActionButtonLayers(row, btn)
+            local btn = row.ahuiOrderActionButton
+            if btn then
+                self:SyncRowActionButtonLayers(row, btn)
+            end
+
+            if row.ahuiOrderReagentsFrame then row.ahuiOrderReagentsFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
+            if row.ahuiOrderRewardsFrame then row.ahuiOrderRewardsFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
+            if row.ahuiOrderFocusFrame then row.ahuiOrderFocusFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
+            if row.ahuiOrderProfitFrame then row.ahuiOrderProfitFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
+            self:SyncRowStateBackgroundLayers(row)
         end
-
-        if row.ahuiOrderReagentsFrame then row.ahuiOrderReagentsFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
-        if row.ahuiOrderRewardsFrame then row.ahuiOrderRewardsFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
-        if row.ahuiOrderFocusFrame then row.ahuiOrderFocusFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
-        if row.ahuiOrderProfitFrame then row.ahuiOrderProfitFrame:SetFrameLevel((row:GetFrameLevel() or 1) + 75) end
-        self:SyncRowStateBackgroundLayers(row)
     end
 
     self:ApplyOrderNameFontsToVisibleRows(pageFrame)

@@ -22,6 +22,14 @@ CL.GAP = 6
 CL.ROW_H_COMPACT = 36
 CL.ICON_COMPACT = 26
 
+-- Blizzard can emit several list/data events for one server response. Waiting
+-- for a short quiet window prevents the custom list from repainting between
+-- those partial snapshots, while the maximum delay keeps it responsive.
+local REFRESH_QUIET_WINDOW = 0.14
+local REFRESH_MAX_WAIT = 0.40
+local EMPTY_SNAPSHOT_RETRY = 0.30
+local ACTION_SETTLE_HOLD = 0.40
+
 local QueueRefresh
 
 function CL:IsCompact()
@@ -389,6 +397,7 @@ end
 
 function CL:CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent)
+    row.ahuiCustomOrderRow = true
     row._index = index
     row:SetSize(800, self.ROW_H)
 
@@ -594,7 +603,12 @@ function CL:EnsureScrollFrame(pageFrame)
     container.content:SetSize(800, 1)
     container.scroll:SetScrollChild(container.content)
 
+    -- rows is the current visual order; rowPool owns every row frame. Keeping
+    -- a second map by order ID lets the same order retain the same frame even
+    -- when another order is inserted, removed, or explicitly sorted.
     container.rows = {}
+    container.rowPool = {}
+    container.rowsByOrderID = {}
     container.countText = MakeText(container, 11, "LEFT")
     container.countText:SetPoint("BOTTOMLEFT", 10, 9)
     container.countText:SetTextColor(0.8, 0.74, 0.60)
@@ -1457,6 +1471,143 @@ local function HideRowTooltip(row)
     end
 end
 
+local function ListScopeKey(pageFrame)
+    local profession = pageFrame and pageFrame.professionInfo
+        and pageFrame.professionInfo.profession
+    local env = _G.HironCraftProfitCraftingOrdersEnv
+    if not profession and env and type(env.GetProfessionFromPage) == "function" then
+        profession = env.GetProfessionFromPage(pageFrame)
+    end
+    if not profession and C_TradeSkillUI and C_TradeSkillUI.GetChildProfessionInfo then
+        local ok, info = pcall(C_TradeSkillUI.GetChildProfessionInfo)
+        if ok and info then profession = info.profession end
+    end
+    local expansion = CO.GetSelectedProfessionExpansionKey
+        and CO:GetSelectedProfessionExpansionKey() or "current"
+    return table.concat({
+        tostring(profession or "unknown"),
+        tostring(pageFrame and pageFrame.orderType or "unknown"),
+        tostring(expansion or "current"),
+    }, ":")
+end
+
+local function CopyOrderList(orders)
+    local copy = {}
+    for index, order in ipairs(orders or {}) do copy[index] = order end
+    return copy
+end
+
+local function IsFulfilledOrder(order)
+    local orderID = order and order.orderID
+    local fulfilled = CO.fulfilledOrderIDs
+    return orderID and fulfilled
+        and (fulfilled[orderID] == true or fulfilled[tostring(orderID)] == true)
+end
+
+-- While claim/craft/fulfill is in flight, Blizzard may briefly remove the
+-- active row or return only part of the list. Merge that snapshot with the
+-- last complete one and keep its order. Fresh data still replaces the cells,
+-- and newly arrived orders are appended without moving the user's target.
+function CL:StabilizeOrdersDuringAction(container, orders)
+    local now = GetTime and GetTime() or 0
+    local running = CO.IsOrderActionInProgress and CO:IsOrderActionInProgress() or false
+
+    if running then
+        container._actionHoldUntil = now + ACTION_SETTLE_HOLD
+        if not container._actionOrders then
+            container._actionOrders = CopyOrderList(container._lastGoodOrders or orders)
+        end
+    elseif not container._actionHoldUntil or now >= container._actionHoldUntil then
+        container._actionOrders = nil
+        container._actionHoldUntil = nil
+        return orders
+    end
+
+    local base = container._actionOrders or {}
+    local latest, used, merged = {}, {}, {}
+    for _, order in ipairs(orders or {}) do
+        if order and order.orderID then latest[tostring(order.orderID)] = order end
+    end
+    for _, oldOrder in ipairs(base) do
+        local key = oldOrder and oldOrder.orderID and tostring(oldOrder.orderID)
+        if key and not used[key] then
+            local order = latest[key] or oldOrder
+            if not IsFulfilledOrder(order) then
+                merged[#merged + 1] = order
+                used[key] = true
+            end
+        end
+    end
+    for _, order in ipairs(orders or {}) do
+        local key = order and order.orderID and tostring(order.orderID)
+        if key and not used[key] and not IsFulfilledOrder(order) then
+            merged[#merged + 1] = order
+            used[key] = true
+        end
+    end
+    container._actionOrders = CopyOrderList(merged)
+
+    if not container._actionSettleQueued and C_Timer and C_Timer.After then
+        container._actionSettleQueued = true
+        C_Timer.After(ACTION_SETTLE_HOLD + 0.02, function()
+            container._actionSettleQueued = nil
+            local ownerPage = container.pageFrame
+            if not ownerPage or not ownerPage.IsShown or ownerPage:IsShown() then
+                QueueRefresh()
+            end
+        end)
+    end
+    return merged
+end
+
+local function UnregisterRow(row)
+    if not row then return end
+    local action = row.action
+    if action and CO.visibleRowButtons then CO.visibleRowButtons[action] = nil end
+    local orderID = action and action.orderID
+    local key = orderID and tostring(orderID)
+    if key and CO.rowButtonsByOrderID and CO.rowButtonsByOrderID[key] == action then
+        CO.rowButtonsByOrderID[key] = nil
+    end
+end
+
+local function AddRowsToPool(container)
+    container.rowPool = container.rowPool or {}
+    local seen = {}
+    for _, row in ipairs(container.rowPool) do seen[row] = true end
+    for _, row in ipairs(container.rows or {}) do
+        if row and not seen[row] then
+            container.rowPool[#container.rowPool + 1] = row
+            seen[row] = true
+        end
+    end
+end
+
+local function CaptureScrollAnchor(container, rowHeight)
+    local scroll = container.scroll:GetVerticalScroll() or 0
+    local firstIndex = math.max(1, math.floor(scroll / math.max(1, rowHeight)) + 1)
+    local candidates = {}
+    for index = firstIndex, #(container.rows or {}) do
+        local order = container.rows[index] and container.rows[index]._order
+        if order and order.orderID then candidates[#candidates + 1] = tostring(order.orderID) end
+    end
+    return scroll, candidates, scroll - ((firstIndex - 1) * rowHeight)
+end
+
+local function RestoreScrollAnchor(container, positions, oldScroll, candidates, innerOffset, rowHeight, contentHeight)
+    local target = oldScroll
+    for index, key in ipairs(candidates or {}) do
+        local position = positions[key]
+        if position then
+            local offset = index == 1 and math.min(innerOffset, math.max(0, rowHeight - 1)) or 0
+            target = (position - 1) * rowHeight + offset
+            break
+        end
+    end
+    local maxScroll = math.max(0, contentHeight - container.scroll:GetHeight())
+    container.scroll:SetVerticalScroll(math.max(0, math.min(target, maxScroll)))
+end
+
 function CL:Refresh(pageFrame)
     pageFrame = pageFrame or CO.activePageFrame
     if not pageFrame then return end
@@ -1471,17 +1622,28 @@ function CL:Refresh(pageFrame)
     self:HideBlizzardList(pageFrame)
 
     local currentType = pageFrame.orderType
-    if container._orderType == nil then
+    local rowHeight = self:RowHeight()
+    local previousRowHeight = container._lastRowHeight or rowHeight
+    local oldScroll, scrollCandidates, scrollInnerOffset =
+        CaptureScrollAnchor(container, previousRowHeight)
+    local currentScope = ListScopeKey(pageFrame)
+    if container._listScope == nil then
+        container._listScope = currentScope
         container._orderType = currentType
-    elseif currentType ~= nil and currentType ~= container._orderType then
+    elseif currentScope ~= container._listScope then
+        container._listScope = currentScope
         container._orderType = currentType
         container._lastGoodOrders = nil
         container._lastGoodType = nil
+        container._lastGoodScope = nil
         container._allowEmptyOnce = true
         if not CO.EnsureOrderSelectionContext and CO.selectedOrders then wipe(CO.selectedOrders) end
         CO.currentQueueOrderID = nil
         container._stablePositions = nil
-        for _, row in ipairs(container.rows) do HideRowTooltip(row); row:Hide() end
+        container._actionOrders = nil
+        container._actionHoldUntil = nil
+        scrollCandidates = {}
+        oldScroll, scrollInnerOffset = 0, 0
     end
 
     if CO.EnsureControlPanel then CO:EnsureControlPanel(pageFrame) end
@@ -1528,20 +1690,30 @@ function CL:Refresh(pageFrame)
         orders = filtered
     end
 
+    orders = self:StabilizeOrdersDuringAction(container, orders)
+
     if #orders == 0 then
         if container._allowEmptyOnce then
             container._lastGoodOrders = nil
             container._lastGoodType = nil
+            container._lastGoodScope = nil
         elseif container._lastGoodOrders and #container._lastGoodOrders > 0
-            and container._lastGoodType == currentType then
+            and container._lastGoodType == currentType
+            and container._lastGoodScope == currentScope then
             orders = container._lastGoodOrders
-            C_Timer.After(0.3, function()
-                if pageFrame:IsShown() then CL:Refresh(pageFrame) end
-            end)
+            if not container._emptyRetryQueued and C_Timer and C_Timer.After then
+                container._emptyRetryQueued = true
+                C_Timer.After(EMPTY_SNAPSHOT_RETRY, function()
+                    container._emptyRetryQueued = nil
+                    if pageFrame:IsShown() then QueueRefresh() end
+                end)
+            end
         end
     else
         container._lastGoodOrders = orders
         container._lastGoodType = currentType
+        container._lastGoodScope = currentScope
+        container._emptyRetryQueued = nil
     end
     container._allowEmptyOnce = false
     container._lastOrderCount = #orders
@@ -1629,15 +1801,52 @@ function CL:Refresh(pageFrame)
 
     if container.header and UpdateHeaderArrows then UpdateHeaderArrows(container.header) end
 
+    AddRowsToPool(container)
+    local previousByID = container.rowsByOrderID or {}
+    for _, pooledRow in ipairs(container.rowPool) do
+        local pooledOrder = pooledRow and pooledRow._order
+        local pooledKey = pooledOrder and pooledOrder.orderID
+            and tostring(pooledOrder.orderID)
+        if pooledKey and not previousByID[pooledKey] then
+            previousByID[pooledKey] = pooledRow
+        end
+    end
+    local desiredKeys = {}
+    for _, order in ipairs(orders) do
+        if order and order.orderID then desiredKeys[tostring(order.orderID)] = true end
+    end
+
+    local usedRows, displayRows, nextByID = {}, {}, {}
+    local function acquireRow(order, index)
+        local key = order and order.orderID and tostring(order.orderID)
+        local row = key and previousByID[key]
+        if row and not usedRows[row] then return row end
+
+        -- Do not steal a frame that belongs to an order we have not laid out
+        -- yet. This is what keeps hovered/active rows stable across inserts.
+        for _, candidate in ipairs(container.rowPool) do
+            local oldOrder = candidate and candidate._order
+            local oldKey = oldOrder and oldOrder.orderID and tostring(oldOrder.orderID)
+            if candidate and not usedRows[candidate]
+                and (not oldKey or not desiredKeys[oldKey]) then
+                return candidate
+            end
+        end
+
+        row = self:CreateRow(container.content, index)
+        container.rowPool[#container.rowPool + 1] = row
+        return row
+    end
+
     local positions = {}
     local y = 0
     for i, order in ipairs(orders) do
-        local row = container.rows[i]
-        if not row then
-            row = self:CreateRow(container.content, i)
-            container.rows[i] = row
-        end
+        local row = acquireRow(order, i)
+        usedRows[row] = true
+        displayRows[i] = row
+        row._index = i
         if row._order and row._order.orderID ~= order.orderID then HideRowTooltip(row) end
+        if row._order and row._order.orderID ~= order.orderID then UnregisterRow(row) end
         if row._listY ~= y then
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", container.content, "TOPLEFT", 0, -y)
@@ -1646,19 +1855,29 @@ function CL:Refresh(pageFrame)
         end
         self:PopulateRow(row, order)
         if not row:IsShown() then row:Show() end
-        positions[tostring(order.orderID)] = i
-        y = y + self:RowHeight()
+        local key = order.orderID and tostring(order.orderID)
+        if key then
+            positions[key] = i
+            nextByID[key] = row
+        end
+        y = y + rowHeight
     end
+    container.rows = displayRows
+    container.rowsByOrderID = nextByID
     container._stablePositions = positions
-    for i = #orders + 1, #container.rows do
-        local row = container.rows[i]
-        HideRowTooltip(row)
-        if row:IsShown() then row:Hide() end
+    for _, row in ipairs(container.rowPool) do
+        if not usedRows[row] then
+            HideRowTooltip(row)
+            UnregisterRow(row)
+            if row:IsShown() then row:Hide() end
+        end
     end
 
-    local oldScroll = container.scroll:GetVerticalScroll()
     container.content:SetHeight(math.max(1, y))
-    container.scroll:SetVerticalScroll(math.max(0, math.min(oldScroll, y - container.scroll:GetHeight())))
+    RestoreScrollAnchor(
+        container, positions, oldScroll, scrollCandidates,
+        scrollInnerOffset, rowHeight, y)
+    container._lastRowHeight = rowHeight
     container:Show()
 end
 
@@ -1682,7 +1901,7 @@ function CL:StartLoadPoll(pageFrame)
     local function tick()
         if stamp ~= self._pollStamp then return end
         if not pageFrame:IsShown() then return end
-        self:Refresh(pageFrame)
+        QueueRefresh()
         local orders = self:GetOrders(pageFrame)
         if #orders > 0 then return end
         if (GetTime() - startedAt) > 5 then return end
@@ -1705,9 +1924,6 @@ local function AttachHooks()
         if not pageFrame then return end
         if not CO:IsEnabled() then return end
         CO.activePageFrame = CO.activePageFrame or pageFrame
-        if pageFrame.ahuiCustomList then
-            pageFrame.ahuiCustomList._allowEmptyOnce = true
-        end
         CL:StartLoadPoll(pageFrame)
         if pageFrame.HookScript and not pageFrame.ahuiCustomListHidehooked then
             pageFrame.ahuiCustomListHidehooked = true
@@ -1732,9 +1948,6 @@ local function AttachHooks()
         ProfessionsFrame.OrdersPage:HookScript("OnShow", function(self)
             if not CO:IsEnabled() then return end
             CO.activePageFrame = self
-            if self.ahuiCustomList then
-                self.ahuiCustomList._allowEmptyOnce = true
-            end
             CL:StartLoadPoll(self)
         end)
     end
@@ -1752,10 +1965,17 @@ local function AttachHooks()
                 pf.ahuiCustomList._lastOrderCount = 0
                 pf.ahuiCustomList._lastGoodOrders = nil
                 pf.ahuiCustomList._lastGoodType = nil
+                pf.ahuiCustomList._lastGoodScope = nil
                 pf.ahuiCustomList._orderType = nil
+                pf.ahuiCustomList._listScope = nil
                 pf.ahuiCustomList._allowEmptyOnce = true
+                pf.ahuiCustomList._actionOrders = nil
+                pf.ahuiCustomList._actionHoldUntil = nil
                 if pf.ahuiCustomList.rows then
-                    for _, row in ipairs(pf.ahuiCustomList.rows) do row:Hide() end
+                    for _, row in ipairs(pf.ahuiCustomList.rows) do
+                        UnregisterRow(row)
+                        row:Hide()
+                    end
                 end
             end
         end)
@@ -1765,14 +1985,40 @@ local function AttachHooks()
 end
 
 QueueRefresh = function()
-    if not CL._refreshQueued then
-        CL._refreshQueued = true
-        C_Timer.After(0.05, function()
-            CL._refreshQueued = false
-            local pf = CO.activePageFrame or (ProfessionsFrame and ProfessionsFrame.OrdersPage)
-            if pf then CL:Refresh(pf) end
-        end)
+    local now = GetTime and GetTime() or 0
+    CL._refreshLastRequestedAt = now
+    CL._refreshFirstRequestedAt = CL._refreshFirstRequestedAt or now
+    if CL._refreshQueued then return end
+    CL._refreshQueued = true
+
+    local function run()
+        local current = GetTime and GetTime() or 0
+        local quietFor = current - (CL._refreshLastRequestedAt or current)
+        local waitingFor = current - (CL._refreshFirstRequestedAt or current)
+        if C_Timer and C_Timer.After
+            and quietFor < REFRESH_QUIET_WINDOW and waitingFor < REFRESH_MAX_WAIT then
+            C_Timer.After(math.min(
+                REFRESH_QUIET_WINDOW - quietFor,
+                REFRESH_MAX_WAIT - waitingFor
+            ), run)
+            return
+        end
+
+        CL._refreshQueued = false
+        CL._refreshFirstRequestedAt = nil
+        local pf = CO.activePageFrame or (ProfessionsFrame and ProfessionsFrame.OrdersPage)
+        if pf then CL:Refresh(pf) end
     end
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(REFRESH_QUIET_WINDOW, run)
+    else
+        run()
+    end
+end
+
+function CL:QueueRefresh()
+    QueueRefresh()
 end
 
 function CL:Init()
@@ -1802,7 +2048,6 @@ function CL:Init()
         elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
             if not CO:IsEnabled() then return end
             local pf = (ProfessionsFrame and ProfessionsFrame.OrdersPage)
-            if pf and pf.ahuiCustomList then pf.ahuiCustomList._allowEmptyOnce = true end
             if event == "TRADE_SKILL_SHOW" then
                 C_Timer.After(0, function() CL:SettleOnRecipes() end)
             end

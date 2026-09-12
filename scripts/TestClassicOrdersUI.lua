@@ -260,6 +260,7 @@ assert(anchor.ResultsText:GetAlpha() == .8, 'native empty-message alpha was not 
 container:Show()
 assert(container.countText.fontPath == PT.FONT, 'list labels lost the Cyrillic-capable font')
 local row = CL:CreateRow(container.content, 1)
+assert(row.ahuiCustomOrderRow == true, 'custom row is not isolated from Blizzard row overlays')
 container.rows[1] = row
 row:SetPoint('TOPLEFT', container.content, 'TOPLEFT', 0, 0)
 row:SetPoint('TOPRIGHT', container.content, 'TOPRIGHT', 0, 0)
@@ -571,6 +572,10 @@ CL._sortColumn = nil
 CL:Refresh(page)
 assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
     and container.rows[3].action.orderID == 103, 'checking an order moved it to the top')
+local stableRowsByID={}
+for _,currentRow in ipairs(container.rows) do
+    stableRowsByID[tostring(currentRow.action.orderID)]=currentRow
+end
 CO.selectedOrders = {}
 CL:Refresh(page)
 assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
@@ -616,9 +621,81 @@ assert(container.rows[1].action.orderID==101 and container.rows[3].action.orderI
     'background profit recalculation shuffled patron rows')
 CL._sortColumn,CL._sortDir='profit','desc';CL:Refresh(page)
 assert(container.rows[1].action.orderID==103, 'explicit header sort did not reorder the stable list')
+assert(container.rows[1]==stableRowsByID['103'] and container.rows[2]==stableRowsByID['102']
+    and container.rows[3]==stableRowsByID['101'],
+    'sorting reassigned order data to different row frames')
 CL._sortColumn=nil;page.orderType=Enum.CraftingOrderType.Personal
 CO.GetOrderProfitInfo=function() return {profit=0,reagentCost=0} end
 CL:Refresh(page)
+
+-- API event bursts can expose an empty/partial order list between server
+-- snapshots. Keep every existing row and its identity until an in-flight
+-- action settles, then apply the final list once.
+local actionRunning=false
+local testNow=10
+GetTime=function() return testNow end
+CO.IsOrderActionInProgress=function() return actionRunning end
+CL.GetOrders=function() return {sortOrders[1],sortOrders[2],sortOrders[3]} end
+CL:Refresh(page)
+actionRunning=true
+CL.GetOrders=function() return {sortOrders[3]} end
+CL:Refresh(page)
+assert(#container.rows==3 and container.rowsByOrderID['102']==stableRowsByID['102'],
+    'a partial action snapshot removed or reassigned a stable row')
+actionRunning=false
+testNow=10.2
+CL:Refresh(page)
+assert(#container.rows==3, 'rows changed before the action settle hold elapsed')
+testNow=11
+CL:Refresh(page)
+assert(#container.rows==1 and container.rows[1]==stableRowsByID['103'],
+    'the final action snapshot did not apply after the settle hold')
+
+-- Preserve the first surviving visible order instead of retaining a raw
+-- pixel offset that would jump over it when a preceding row disappears.
+CL.GetOrders=function() return {sortOrders[1],sortOrders[2],sortOrders[3]} end
+container._stablePositions=nil
+CL:Refresh(page)
+local normalScrollHeight=container.scroll.GetHeight
+container.scroll.GetHeight=function() return CL:RowHeight() end
+container.scroll:SetVerticalScroll(CL:RowHeight())
+CL.GetOrders=function() return {sortOrders[2],sortOrders[3]} end
+CL:Refresh(page)
+assert(container.scroll:GetVerticalScroll()==0 and container.rows[1]==stableRowsByID['102'],
+    'removing a row above the viewport changed the visible order')
+container.scroll.GetHeight=normalScrollHeight
+container.scroll:SetVerticalScroll(0)
+CL.GetOrders=function() return {sortOrders[1],sortOrders[2],sortOrders[3]} end
+CO.IsOrderActionInProgress=nil
+CL:Refresh(page)
+
+-- Two nearby Blizzard events must produce one list repaint after the quiet
+-- window instead of exposing both intermediate states.
+local scheduled={}
+local oldAfter=C_Timer.After
+local oldRefresh=CL.Refresh
+C_Timer.After=function(delay,callback)
+    scheduled[#scheduled+1]={delay=delay,callback=callback}
+end
+local refreshPasses=0
+CL.Refresh=function() refreshPasses=refreshPasses+1 end
+CL._refreshQueued=nil
+CL._refreshFirstRequestedAt=nil
+testNow=20
+CL:QueueRefresh()
+testNow=20.05
+CL:QueueRefresh()
+assert(#scheduled==1 and refreshPasses==0, 'event burst scheduled multiple immediate repaints')
+local first=table.remove(scheduled,1)
+testNow=20.14
+first.callback()
+assert(#scheduled==1 and refreshPasses==0, 'refresh ignored the quiet window')
+local second=table.remove(scheduled,1)
+testNow=20.20
+second.callback()
+assert(refreshPasses==1 and #scheduled==0, 'event burst was not coalesced into one repaint')
+CL.Refresh=oldRefresh
+C_Timer.After=oldAfter
 
 -- Run the real row click and selection memory through a close/reopen and tab
 -- switch; plain redraws must not restore a manually cleared checkbox.

@@ -1245,6 +1245,7 @@ end
 
 function CO:ProtectOrderRowSoon(row, btn)
     if not row or not btn then return end
+    if row.ahuiCustomOrderRow then return end
 
     local function protect()
         if not CO:IsEnabled() then return end

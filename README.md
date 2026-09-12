@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable crafting-order list (0.3.40)
+
+- Crafting-order API bursts are coalesced into one repaint after a short quiet window.
+- Each order keeps a dedicated row frame keyed by order ID across refreshes and explicit sorts.
+- Partial server snapshots are merged with the last complete list while claim, craft, release or fulfillment is in progress.
+- Scroll position follows the first surviving visible order when rows above it disappear.
+- Repeated page callbacks no longer authorize transient empty snapshots to clear the visible list.
+- Custom rows no longer receive duplicate Blizzard-row overlays or delayed layer refreshes.
+
 ## Single-order destination reply (0.3.39)
 
 - **To who send** is explicitly available for customers with one unfinished order as well as several.
