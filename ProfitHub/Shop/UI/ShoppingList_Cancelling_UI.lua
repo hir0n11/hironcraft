@@ -99,6 +99,7 @@ local function MakeButton(parent, w, label, r, g, b)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetSize(w, 22)
     btn:SetText(label)
+    if S.StyleClassicTextButton then S.StyleClassicTextButton(btn) end
     return btn
 end
 
@@ -127,6 +128,7 @@ local function EnsureRows(box, count)
             row.cancel:SetSize(64, 22)
             row.cancel:SetPoint("RIGHT", -4, 0)
             row.cancel:SetText(T("PG_CANCEL_BTN", "Cancel"))
+            if S.StyleClassicTextButton then S.StyleClassicTextButton(row.cancel) end
             row.cancel.label = {
                 SetText = function(_, t) row.cancel:SetText(t) end,
                 SetTextColor = function() end,

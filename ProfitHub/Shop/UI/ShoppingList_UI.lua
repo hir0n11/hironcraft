@@ -243,19 +243,22 @@ local function Lower(value)
 end
 
 local function IsFantasy()
-    if PT.IsFantasyDesign then return PT:IsFantasyDesign() end
+    -- The auction workflow shares the same Blizzard-native presentation as
+    -- Crafting Orders. Keep the old helper name because the selling and
+    -- cancelling modules use it to select their native control layouts.
     return true
 end
 
 local function SetFrameBackdrop(frame, alpha)
     if not frame then return end
     frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    frame:SetBackdropColor(0.05, 0.05, 0.07, alpha or 0.92)
-    frame:SetBackdropBorderColor(1, 1, 1, 0.10)
+    frame:SetBackdropColor(0.35, 0.31, 0.24, alpha or 0.96)
+    frame:SetBackdropBorderColor(0.65, 0.57, 0.43, 1)
 end
 
 local function SetFrameAtlasBackground(frame, atlas, alpha)
@@ -273,33 +276,26 @@ local function SetFrameAtlasBackground(frame, atlas, alpha)
     frame.ahuiAtlasBG:Show()
 end
 
-local PURPLE_BORDER = { 0.694, 0.612, 0.851 }
+local CLASSIC_BORDER = { 0.65, 0.57, 0.43 }
+local PURPLE_BORDER = CLASSIC_BORDER -- compatibility for the other shop files
 
-local function ApplyBlockFrame(frame, bgAlpha)
+local function ApplyBlockFrame(frame, bgAlpha, raised)
     if not frame then return end
-    local bd
-    if IsFantasy() then
-        bd = {
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
-        }
-    else
-        bd = { edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 }
+    frame:SetBackdrop({
+        bgFile = bgAlpha and "Interface\\DialogFrame\\UI-DialogBox-Background" or nil,
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    if bgAlpha then
+        local shade = raised and 0.52 or 0.30
+        frame:SetBackdropColor(shade, shade * 0.88, shade * 0.70, bgAlpha)
     end
-    if bgAlpha then bd.bgFile = "Interface\\Buttons\\WHITE8x8" end
-    frame:SetBackdrop(bd)
-    if bgAlpha then frame:SetBackdropColor(0, 0, 0, bgAlpha) end
-    if IsFantasy() then
-        frame:SetBackdropBorderColor(0.62, 0.62, 0.62, 1)
-    else
-        frame:SetBackdropBorderColor(PURPLE_BORDER[1], PURPLE_BORDER[2], PURPLE_BORDER[3], 1)
-    end
+    frame:SetBackdropBorderColor(CLASSIC_BORDER[1], CLASSIC_BORDER[2], CLASSIC_BORDER[3], 1)
 end
 
 local function AccentRGB()
-    if IsFantasy() then return 1, 0.82, 0.35 end
-    return PURPLE_BORDER[1], PURPLE_BORDER[2], PURPLE_BORDER[3]
+    return 1, 0.82, 0.35
 end
 
 S.IsFantasy = IsFantasy
@@ -335,25 +331,13 @@ end
 
 local function ApplyPanelBackground(frame)
     if not frame then return end
-    if IsFantasy() then
-        if frame.ahuiBase then frame.ahuiBase:Hide() end
-        ApplyBlockFrame(frame, nil)
-        SetFrameAtlasBackground(frame, "auctionhouse-background-auctions", 1.0)
-    else
-        if not frame.ahuiBase then
-            frame.ahuiBase = frame:CreateTexture(nil, "BACKGROUND", nil, -2)
-            frame.ahuiBase:SetPoint("TOPLEFT", 1, -1)
-            frame.ahuiBase:SetPoint("BOTTOMRIGHT", -1, 1)
-        end
-        frame.ahuiBase:SetColorTexture(0, 0, 0, 0.86)
-        frame.ahuiBase:Show()
-        ApplyBlockFrame(frame, nil)
-        SetFrameAtlasBackground(frame, "shop-bg-toys", 0.45)
-    end
+    if frame.ahuiBase then frame.ahuiBase:Hide() end
+    if frame.ahuiAtlasBG then frame.ahuiAtlasBG:Hide() end
+    ApplyBlockFrame(frame, 0.97, true)
 end
 
-local function ApplyInnerBackdrop(frame, soullessAlpha)
-    ApplyBlockFrame(frame, 0.38)
+local function ApplyInnerBackdrop(frame)
+    ApplyBlockFrame(frame, 0.96, false)
 end
 
 local function MakeText(parent, size, justify)
@@ -363,6 +347,43 @@ local function MakeText(parent, size, justify)
     fs:SetJustifyV("MIDDLE")
     return fs
 end
+
+local function CenterButtonText(button, fontSize, color)
+    if not button then return end
+    local label = button.GetFontString and button:GetFontString() or button.text or button.label
+    if not label then return end
+    if label.SetFont then label:SetFont(FONT, fontSize or 11, "") end
+    label:ClearAllPoints()
+    label:SetPoint("CENTER", button, "CENTER", 0, 0)
+    label:SetSize(math.max(1, button:GetWidth() - 10), math.max(1, button:GetHeight() - 2))
+    label:SetJustifyH("CENTER")
+    label:SetJustifyV("MIDDLE")
+    label:SetWordWrap(false)
+    if label.SetMaxLines then label:SetMaxLines(1) end
+    if color then label:SetTextColor(color[1], color[2], color[3], color[4] or 1) end
+    if button.SetPushedTextOffset then button:SetPushedTextOffset(0, -1) end
+end
+
+local function StyleClassicTextButton(button, selected, unavailable, fontSize)
+    if not button then return end
+    button:SetNormalTexture("Interface\\Buttons\\UI-Panel-Button-" .. ((selected or unavailable) and "Disabled" or "Up"))
+    button:SetPushedTexture("Interface\\Buttons\\UI-Panel-Button-Down")
+    button:SetDisabledTexture("Interface\\Buttons\\UI-Panel-Button-Disabled")
+    button:SetHighlightTexture("Interface\\Buttons\\UI-Panel-Button-Highlight", "ADD")
+    for _, texture in ipairs({
+        button:GetNormalTexture(), button:GetPushedTexture(),
+        button:GetDisabledTexture(), button:GetHighlightTexture(),
+    }) do
+        if texture and texture.SetTexCoord then texture:SetTexCoord(0, 0.625, 0, 0.6875) end
+    end
+    if selected and button.LockHighlight then button:LockHighlight()
+    elseif button.UnlockHighlight then button:UnlockHighlight() end
+    CenterButtonText(button, fontSize or 11,
+        unavailable and { 0.55, 0.55, 0.55, 1 } or { 1, 0.82, 0.20, 1 })
+end
+
+S.CenterButtonText = CenterButtonText
+S.StyleClassicTextButton = StyleClassicTextButton
 
 local function ShowSimpleTooltip(owner, title, body)
     local TT = PT and PT.Tooltip
@@ -1088,6 +1109,10 @@ local function EnsureImportExportDialog(owner)
     d.done:SetScript("OnClick", function()
         d:Hide()
     end)
+
+    for _, button in ipairs({ d.ahui, d.auctionator, d.importNew, d.importMerge, d.selectAll, d.done }) do
+        StyleClassicTextButton(button)
+    end
 
     local function SetExportText(format)
         local text = S.ExportActiveList and S:ExportActiveList(format) or ""
@@ -1999,6 +2024,9 @@ local function ToggleSearchOptionsPanel(anchor)
         p.search:SetScript("OnClick", function()
             RunSearchFromBox()
         end)
+
+        StyleClassicTextButton(p.reset)
+        StyleClassicTextButton(p.search)
 
         f.searchOptionsPanel = p
     else
@@ -3085,6 +3113,7 @@ function S:CreateWindow()
                 PanelTemplates_TabResize(tb, 20, nil, 70)
             end
             SetTabHeightForced(tb, SHOP_FTAB_H)
+            CenterButtonText(tb, 11, { 1, 0.82, 0.20, 1 })
         end
 
         f.LayoutShopTabs = function()
@@ -3141,6 +3170,7 @@ function S:CreateWindow()
             f.priceScanButton:SetFrameLevel(f.panel:GetFrameLevel() + 10)
         end
         f.priceScanButton:SetText(T("PG_SHOP_PRICESCAN_SHORT", "SCAN"))
+        StyleClassicTextButton(f.priceScanButton)
 
         local dot = f.priceScanButton:CreateTexture(nil, "OVERLAY")
         dot:SetSize(10, 10)
@@ -3361,6 +3391,7 @@ function S:CreateWindow()
         f.sellExclusionsBtn:SetPoint("BOTTOMRIGHT", f.panel, "TOPRIGHT", -6, 1)
         f.sellExclusionsBtn:SetFrameLevel(f.panel:GetFrameLevel() + 10)
         f.sellExclusionsBtn:SetText(T("PG_SELL_EXCLUSIONS_BTN", "Exclusions"))
+        StyleClassicTextButton(f.sellExclusionsBtn)
         f.sellExclusionsBtn:SetScript("OnClick", function()
             if S.ShowSellExclusionsEditor then S:ShowSellExclusionsEditor() end
         end)
@@ -3406,8 +3437,17 @@ function S:CreateWindow()
             btn:SetSize(BIND_BTN_W, BIND_BTN_H)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
-            btn:SetText(labelText)
-            btn.value = { SetText = function() end }
+            btn:SetText("")
+            StyleClassicTextButton(btn)
+            btn.label = MakeText(btn, 9, "CENTER")
+            btn.label:SetPoint("CENTER", btn, "CENTER", 0, 5)
+            btn.label:SetSize(BIND_BTN_W - 10, 10)
+            btn.label:SetTextColor(1, 0.82, 0.20, 1)
+            btn.label:SetText(labelText)
+            btn.value = MakeText(btn, 10, "CENTER")
+            btn.value:SetPoint("CENTER", btn, "CENTER", 0, -6)
+            btn.value:SetSize(BIND_BTN_W - 10, 10)
+            btn.value:SetTextColor(1, 1, 1, 1)
 
             local function CurrentKeyText()
                 local binding
@@ -3867,6 +3907,7 @@ function S:CreateWindow()
         f.stopScanBtn:SetSize(90, 22)
         f.stopScanBtn:SetPoint("RIGHT", f.hint, "RIGHT", -85, 0)
         f.stopScanBtn:SetText(T("PG_SHOP_STOPSCAN", "STOP scan"))
+        StyleClassicTextButton(f.stopScanBtn)
         f.stopScanBtn:SetScript("OnClick", function()
             if S.StopScanAll then S:StopScanAll() end
         end)
@@ -3922,6 +3963,7 @@ function S:CreateWindow()
         for _, tb in ipairs({ f.listsTab, f.historyTab }) do
             if PanelTemplates_TabResize then PanelTemplates_TabResize(tb, 10, nil, 60) end
             SetTabHeightForced(tb, SHOP_FTAB_H)
+            CenterButtonText(tb, 11, { 1, 0.82, 0.20, 1 })
             PanelTemplates_DeselectTab(tb)
         end
 
@@ -4056,14 +4098,15 @@ function S:CreateWindow()
     f.header:SetPoint("TOPLEFT", 8, -8)
     f.header:SetPoint("TOPRIGHT", -8, -8)
     f.header:SetHeight(HEADER_H)
-    f.header:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    f.header:SetBackdropColor(1, 1, 1, 0.05)
+    f.header:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark" })
+    f.header:SetBackdropColor(0.22, 0.18, 0.12, 0.98)
 
     local function MakeHeader(text, point, relativeTo, relativePoint, x, w, justify)
         local fs = MakeText(f.header, 10, justify or "LEFT")
         fs:SetPoint(point, relativeTo, relativePoint, x, 0)
         fs:SetWidth(w)
         fs:SetText(text)
+        fs:SetTextColor(1, 0.82, 0.35, 1)
         return fs
     end
 
@@ -4099,7 +4142,7 @@ function S:CreateWindow()
             if S.RefreshWindow then S:RefreshWindow() end
         end)
         btn:SetScript("OnEnter", function() headerFs:SetTextColor(1, 0.95, 0.6, 1) end)
-        btn:SetScript("OnLeave", function() headerFs:SetTextColor(1, 1, 1, 1) end)
+        btn:SetScript("OnLeave", function() headerFs:SetTextColor(1, 0.82, 0.35, 1) end)
         return btn
     end
 
@@ -4156,6 +4199,19 @@ function S:CreateWindow()
 
     self.frame = f
     if PT.RestyleButtons then PT:RestyleButtons(f, 12) end
+    for _, button in ipairs({
+        f.newList, f.saveList, f.deleteList, f.importList, f.exportList,
+        f.clearHistory, f.priceScanButton, f.sellExclusionsBtn, f.stopScanBtn,
+    }) do
+        StyleClassicTextButton(button)
+    end
+    for _, tab in ipairs({ f.buyTab, f.sellTab, f.cancelTab, f.listsTab, f.historyTab }) do
+        CenterButtonText(tab, 11, { 1, 0.82, 0.20, 1 })
+    end
+    for _, button in ipairs({ f.refreshAction, f.bindAction, f.skipBindAction }) do
+        if button and button.label then button.label:SetFont(FONT, 9, "") end
+        if button and button.value then button.value:SetFont(FONT, 10, "") end
+    end
     return f
 end
 
@@ -4204,15 +4260,7 @@ function S:CreateBindCapture(target)
         f:SetPoint("CENTER")
         f:SetFrameStrata("DIALOG")
         f:SetFrameLevel(1000)
-        if f.SetBackdrop then
-            f:SetBackdrop({
-                bgFile   = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 1,
-            })
-            f:SetBackdropColor(0.05, 0.05, 0.07, 0.96)
-            f:SetBackdropBorderColor(0.694, 0.612, 0.851, 1)
-        end
+        if f.SetBackdrop then ApplyBlockFrame(f, 0.98, true) end
         f:EnableKeyboard(true)
         f:EnableMouse(true)
         f:Hide()
@@ -4306,7 +4354,7 @@ function S:ShowWindow()
     local tabLib = GetLibAHTab()
     local f = self:CreateWindow()
 
-    if AuctionHouseFrame and tabLib and HasShoppingSession() then
+    if AuctionHouseFrame and tabLib and ShouldShowAuctionTab() then
         self.isAuctionHouseOpen = true
 
         f:SetParent(AuctionHouseFrame)

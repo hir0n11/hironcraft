@@ -7018,12 +7018,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
                     S.isAuctionHouseOpen = true
                     S:EnsureAuctionTab()
                     UpdateAuctionTabVisibility()
-                    if HasShoppingSession() then
-                        S:ShowWindow()
-                        if tabLib:DoesIDExist(AH_TAB_ID) then
-                            tabLib:SetSelected(AH_TAB_ID)
-                        end
-                    end
+                    -- Shop is the landing page every time the Auction House
+                    -- opens. An empty list is still a useful starting point for
+                    -- search and manual list creation.
+                    if S.SetShopTab then S:SetShopTab("buy") end
+                    S:ShowWindow()
                 else
                     UpdateAuctionTabVisibility()
                 end
@@ -7038,13 +7037,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
             if ShouldShowAuctionTab() then
                 S:EnsureAuctionTab()
                 UpdateAuctionTabVisibility()
-                if HasShoppingSession() then
-                    S:ShowWindow()
-                    local tabLib = GetLibAHTab()
-                    if tabLib and tabLib:DoesIDExist(AH_TAB_ID) then
-                        tabLib:SetSelected(AH_TAB_ID)
-                    end
-                end
+                if S.SetShopTab then S:SetShopTab("buy") end
+                S:ShowWindow()
             else
                 UpdateAuctionTabVisibility()
             end

@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Classic Auction Shop interface (0.3.35)
+
+The HironCraft Auction House page now uses the same Blizzard-native visual
+language as the Crafting Orders workflow: textured dark-brown insets, warm
+borders, gold headers and standard panel buttons. Text buttons are explicitly
+centered, including the two-line buy/refresh/skip hotkey controls. The old
+purple outlines, colored action borders and oversized toy-shop artwork are no
+longer used. Buy, Sell and Cancel keep the same behavior and share the style.
+
+HironCraft Shop is now selected as the Auction House landing page on every
+open, even when the current shopping list is empty. The internal Buy page is
+selected first so search and manual list creation are immediately available.
+
 ## Quick Reply for new whisper orders (0.3.34)
 
 When an existing customer whispers a new crafting request, the scanner now

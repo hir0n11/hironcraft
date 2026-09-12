@@ -96,6 +96,7 @@ local function MakeDurationButton(parent, label, code)
         local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
         btn:SetSize(40, 22)
         btn:SetText(label)
+        if S.StyleClassicTextButton then S.StyleClassicTextButton(btn) end
         btn:SetScript("OnClick", function()
             if S.SetSellDuration then S:SetSellDuration(code) end
             if S.RefreshSellUI then S:RefreshSellUI() end
@@ -459,6 +460,7 @@ function S:EnsureSellPanel()
     form.maxBtn:SetSize(44, 22)
     form.maxBtn:SetPoint("LEFT", form.qtyBox, "RIGHT", 6, 0)
     form.maxBtn:SetText(T("PG_SELL_MAX", "Max"))
+    if S.StyleClassicTextButton then S.StyleClassicTextButton(form.maxBtn) end
     form.maxBtn:SetScript("OnClick", function()
         S.sell.quantity = S:GetSellPostLimit()
         S:RefreshSellUI()
@@ -518,6 +520,7 @@ function S:EnsureSellPanel()
             btn:SetSize(w, 24)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn:SetText(labelText)
+            if S.StyleClassicTextButton then S.StyleClassicTextButton(btn) end
             btn:SetScript("OnClick", function(self, button)
                 if button == "RightButton" then
                     if IsShiftKeyDown and IsShiftKeyDown() then
@@ -1149,6 +1152,7 @@ function S:EnsureSellExclusionsEditor()
     f.clearAll:SetSize(130, 24)
     f.clearAll:SetPoint("BOTTOMLEFT", 14, 14)
     f.clearAll:SetText(T("PG_SELL_EXCL_CLEAR", "Clear all"))
+    if S.StyleClassicTextButton then S.StyleClassicTextButton(f.clearAll) end
     f.clearAll:SetScript("OnClick", function() S:ClearSellExclusions() end)
 
     self.sellExclFrame = f
