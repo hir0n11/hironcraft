@@ -25,15 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Regular-recipe shopping list (0.3.46)
+## Regular-recipe shopping list (0.3.47)
 
 - Learned recipes on the standard profession crafting page have a quantity
-  field and **Add to shopping** button; this does not require Profession
-  Shopping List.
+  field and **Add to shopping** button below the native recipe-tracking control;
+  this does not require Profession Shopping List.
 - Repeated clicks and different recipes accumulate into one temporary
   **Profession recipes** list in HironCraft Shop. Player inventory, bank and
   reagent storage are reserved once across the complete plan, so only the
   combined missing amount is listed.
+- An unlearned recipe shows **Add recipe** in the same upper-right position.
+  It adds the recipe-learning item itself; unresolved source text is matched
+  by recipe name and restricted to auction items in the Recipe class.
+- HironCraft's recipe button and Profession Shopping List's **Track New Mogs**
+  button are kept inside the recipe panel so they cannot cover Blizzard's
+  Recipes, Specializations, Crafting Orders, or Chat Orders tabs on first open.
 - Current reagent-quality allocations and explicitly selected optional or
   finishing reagents are preserved. The best-quality checkbox controls an
   otherwise unallocated quality slot.

@@ -3,6 +3,8 @@ const fs = require("fs");
 const ui = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_UI.lua", "utf8");
 const sellUi = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_Selling_UI.lua", "utf8");
 const core = fs.readFileSync("ProfitHub/Shop/Core/ShoppingList_Core.lua", "utf8");
+const recipeShopping = fs.readFileSync("ProfitHub/Shop/Core/RecipeShopping.lua", "utf8");
+const recipeMenu = fs.readFileSync("Config/RecipeSchematicMenu.lua", "utf8");
 const locale = fs.readFileSync("ProfitHub/Shop/Locale.lua", "utf8");
 const tabLib = fs.readFileSync("ProfitHub/Core/Libs/LibAHTab/LibAHTab.lua", "utf8");
 
@@ -77,6 +79,28 @@ check(
   core.includes("function CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty)") &&
     core.includes("if #rows == 0 and not canExpand and not allowEmpty then"),
   "recipe shopping cannot replace its temporary list after all reagents become available",
+);
+check(
+  recipeShopping.includes('controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -34)') &&
+    !recipeShopping.includes('controls:SetPoint("TOPLEFT", form, "BOTTOMLEFT"'),
+  "regular-recipe shopping controls are not in the upper-right recipe area",
+);
+check(
+  recipeShopping.includes('GameTooltip:IsOwned(self)') &&
+    recipeShopping.includes('RS:UpdateTooltip(self)'),
+  "recipe shopping tooltip does not refresh while the button remains hovered",
+);
+check(
+  recipeShopping.includes('PG_RECIPE_ITEM_BUTTON') &&
+    recipeShopping.includes('RS:AddSelectedUnlearnedRecipe()') &&
+    core.includes('wantedClassID == tonumber(recipeClassID)'),
+  "unlearned recipes are not added through a recipe-class auction lookup",
+);
+check(
+  recipeMenu.includes("attachButton:SetPoint('BOTTOMLEFT', form, 'BOTTOMLEFT', 2, 4 + offset)") &&
+    recipeMenu.includes("child:SetPoint('BOTTOMLEFT', form, 'BOTTOMLEFT', 2, 30 + offset)") &&
+    !recipeMenu.includes("'TOPLEFT',\n        ProfessionsFrame.CraftingPage.SchematicForm,\n        'BOTTOMLEFT'"),
+  "custom profession buttons can still overlap Blizzard's bottom tabs",
 );
 
 console.log("Auction Shop UI tests passed (classic frame, centered controls, default landing tab).");

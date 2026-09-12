@@ -8,6 +8,7 @@ local itemCounts = {
     [101] = 3,
     [203] = 1,
     [301] = 0,
+    [901] = 0,
 }
 local itemNames = {
     [101] = "Thread",
@@ -15,6 +16,7 @@ local itemNames = {
     [202] = "Cloth R2",
     [203] = "Cloth R3",
     [301] = "Finisher",
+    [901] = "Plans: Test Recipe",
 }
 local qualities = { [201] = 1, [202] = 2, [203] = 3 }
 local captured = {}
@@ -24,10 +26,17 @@ C_Item = {
 }
 C_TradeSkillUI = {
     GetItemReagentQualityByItemInfo = function(itemID) return qualities[itemID] end,
+    GetRecipeSourceText = function(recipeID)
+        if recipeID == 2001 then
+            return "Source: |Hitem:901::::::::|h[Plans: Test Recipe]|h"
+        end
+        return "World drop"
+    end,
 }
 Enum = {
     CraftingReagentType = { Basic = 1, Finishing = 3 },
     TradeskillRecipeType = { Item = 1, Salvage = 2 },
+    ItemClass = { Recipe = 9 },
 }
 function GetItemInfo(itemID) return itemNames[itemID] end
 function wipe(tbl) for key in pairs(tbl) do tbl[key] = nil end end
@@ -173,5 +182,24 @@ local bad, reason = RS:AddRecipe(1004, 1, badTransaction)
 assert(not bad and reason == "unresolved_reagent" and not next(RS.plan.materials),
     "unresolved reagent partially changed the shopping plan")
 
-print("Recipe shopping tests passed (quantity, repeated recipes, shared inventory, qualities, optional reagents, clear).")
+assert(RS:AddUnlearnedRecipe({ recipeID = 2001, name = "Test Recipe", learned = false }))
+local recipeMap = MaterialMap(captured[#captured].materials)
+assert(recipeMap[901] and recipeMap[901].quantity == 1,
+    "linked unlearned recipe item was not added")
 
+local duplicateOk, duplicateReason = RS:AddUnlearnedRecipe({ recipeID = 2001, name = "Test Recipe", learned = false })
+assert(duplicateOk and duplicateReason == "already_added" and RS:GetPlannedRecipeItemCount() == 1,
+    "duplicate unlearned recipe was added twice")
+
+assert(RS:AddUnlearnedRecipe({ recipeID = 2002, name = "Fallback Recipe", learned = false }))
+local fallbackRows = captured[#captured].materials
+local fallback
+for _, row in ipairs(fallbackRows) do
+    if row.recipeID == 2002 then fallback = row end
+end
+assert(fallback and fallback.unresolvedName == "Fallback Recipe"
+    and fallback.itemClassID == Enum.ItemClass.Recipe,
+    "unlearned recipe without a source link did not retain a recipe-class auction lookup")
+assert(RS:GetPlannedRecipeItemCount() == 2, "planned recipe count was not updated")
+
+print("Recipe shopping tests passed (quantity, accumulation, inventory, qualities, clear, unlearned recipe items).")

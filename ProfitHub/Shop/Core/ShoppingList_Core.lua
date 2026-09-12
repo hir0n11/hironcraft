@@ -1806,6 +1806,7 @@ function BuildImportMergeKey(row)
     local name = NormalizeOptionText(row.importSearchName or row.unresolvedName or row.importName or row.label)
     if name ~= "" then
         return "n:" .. SearchLower(name) .. ":" .. tostring(tier)
+            .. ":c:" .. tostring(row.itemClassID or "")
     end
 
     return nil
@@ -1837,6 +1838,8 @@ function MergeRowIntoSessionRows(row)
                 existing.importSearchName = existing.importSearchName or row.importSearchName
                 existing.importExpandGrades = existing.importExpandGrades or row.importExpandGrades == true
                 existing.importResolveAttempted = existing.importResolveAttempted or row.importResolveAttempted == true
+                existing.itemClassID = existing.itemClassID or row.itemClassID
+                existing.itemSubClassID = existing.itemSubClassID or row.itemSubClassID
                 existing.auctionatorSearchString = existing.auctionatorSearchString or row.auctionatorSearchString
                 existing.auctionatorTier = existing.auctionatorTier or row.auctionatorTier
                 if row.auctionatorIsExact ~= nil then
@@ -1876,6 +1879,8 @@ function NormalizeAndMergeMaterials(materials)
             existing.importSearchName = existing.importSearchName or row.importSearchName
             existing.importExpandGrades = existing.importExpandGrades or row.importExpandGrades == true
             existing.importResolveAttempted = existing.importResolveAttempted or row.importResolveAttempted == true
+            existing.itemClassID = existing.itemClassID or row.itemClassID
+            existing.itemSubClassID = existing.itemSubClassID or row.itemSubClassID
             existing.auctionatorSearchString = existing.auctionatorSearchString or row.auctionatorSearchString
             existing.auctionatorTier = existing.auctionatorTier or row.auctionatorTier
             if row.auctionatorIsExact ~= nil then
@@ -1907,6 +1912,7 @@ function BuildImportResolveMaterialKey(material)
 
     if name ~= "" then
         return "n:" .. SearchLower(name) .. ":" .. tostring(tier)
+            .. ":c:" .. tostring(material.itemClassID or material.classID or "")
     end
 
     if material.itemID then
@@ -2014,7 +2020,7 @@ function AppendImportedMaterialsToTarget(targetListID, materials, sessionSerial)
     return #normalized
 end
 
-function ImportBrowseNameMatches(name, query)
+function ImportBrowseNameMatches(name, query, sourceMaterial)
     name = NormalizeSearchComparable(name)
     if name == "" then
         return false
@@ -2022,8 +2028,20 @@ function ImportBrowseNameMatches(name, query)
 
     for _, variant in ipairs(BuildKeyboardLayoutSearchVariants(query)) do
         local normalizedQuery = NormalizeSearchComparable(variant)
-        if normalizedQuery ~= "" and name == normalizedQuery then
-            return true
+        if normalizedQuery ~= "" then
+            if name == normalizedQuery then
+                return true
+            end
+
+            local recipeClassID = Enum and Enum.ItemClass and Enum.ItemClass.Recipe
+            local wantedClassID = sourceMaterial and tonumber(sourceMaterial.itemClassID or sourceMaterial.classID)
+            if recipeClassID ~= nil and wantedClassID == tonumber(recipeClassID)
+               and #name > #normalizedQuery
+               and name:sub(-#normalizedQuery) == normalizedQuery
+               and name:sub(-#normalizedQuery - 1, -#normalizedQuery - 1) == " "
+            then
+                return true
+            end
         end
     end
 
@@ -2037,11 +2055,23 @@ function BuildImportMaterialFromBrowseResult(result, sourceMaterial)
         return nil
     end
 
+    local staticInfo = ReadSearchItemStaticInfo(itemID)
+    local wantedClassID = sourceMaterial and tonumber(sourceMaterial.itemClassID or sourceMaterial.classID)
+    if wantedClassID then
+        if staticInfo.classID == nil then
+            RequestItemData(itemID)
+            return nil, true
+        end
+        if tonumber(staticInfo.classID) ~= wantedClassID then
+            return nil
+        end
+    end
+
     local query = NormalizeOptionText(sourceMaterial and (sourceMaterial.importSearchName or sourceMaterial.label or sourceMaterial.unresolvedName or sourceMaterial.importName) or "")
     local name = ReadBrowseResultName(itemKey, itemID)
 
     if name and name ~= "" then
-        if not ImportBrowseNameMatches(name, query) then
+        if not ImportBrowseNameMatches(name, query, sourceMaterial) then
             return nil
         end
     elseif query ~= "" then
@@ -2049,7 +2079,6 @@ function BuildImportMaterialFromBrowseResult(result, sourceMaterial)
         return nil, true
     end
 
-    local staticInfo = ReadSearchItemStaticInfo(itemID)
     local tier = NormalizeTierValue(staticInfo.professionQuality or staticInfo.craftedQuality or staticInfo.materialQuality)
     local wantedTier = NormalizeTierValue(sourceMaterial and (sourceMaterial.chosenTier or sourceMaterial.tier or sourceMaterial.qualityTier or sourceMaterial.professionQuality or sourceMaterial.craftedQuality or sourceMaterial.materialQuality))
 
@@ -2439,9 +2468,18 @@ if expectedName ~= "" and #results > 0 then
             if name and name ~= "" then
                 hasNamedResult = true
 
-                if ImportBrowseNameMatches(name, expectedName) then
-                    hasMatchingResult = true
-                    break
+                if ImportBrowseNameMatches(name, expectedName, entry.material) then
+                    local wantedClassID = tonumber(entry.material.itemClassID or entry.material.classID)
+                    if not wantedClassID then
+                        hasMatchingResult = true
+                        break
+                    end
+
+                    local staticInfo = ReadSearchItemStaticInfo(itemID)
+                    if staticInfo.classID == nil or tonumber(staticInfo.classID) == wantedClassID then
+                        hasMatchingResult = true
+                        break
+                    end
                 end
             end
         end
@@ -4783,6 +4821,8 @@ function S:ResolveUnresolvedSessionRowsByBrowse(afterDone)
                 auctionatorSearchString = row.auctionatorSearchString,
                 auctionatorTier = row.auctionatorTier,
                 auctionatorIsExact = row.auctionatorIsExact,
+                itemClassID = row.itemClassID,
+                itemSubClassID = row.itemSubClassID,
             })
 
             table.remove(rows, index)

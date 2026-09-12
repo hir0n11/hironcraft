@@ -11,6 +11,7 @@ local Unpack = unpack or table.unpack
 RS.plan = RS.plan or {
     materials = {},
     recipes = {},
+    recipeItems = {},
     totalCrafts = 0,
 }
 
@@ -253,6 +254,22 @@ function RS:BuildMissingMaterials()
         end
     end
 
+    for _, planned in pairs(self.plan.recipeItems or {}) do
+        local row = {}
+        for key, value in pairs(planned) do row[key] = value end
+
+        if row.itemID then
+            row.quantity = math.max(0,
+                math.floor((tonumber(row.quantity) or 1) - GetItemCountForShopping(row.itemID)))
+        else
+            row.quantity = math.max(1, math.floor(tonumber(row.quantity) or 1))
+        end
+
+        if row.quantity > 0 then
+            materials[#materials + 1] = row
+        end
+    end
+
     table.sort(materials, function(a, b)
         local an = tostring(a.label or a.itemID or "")
         local bn = tostring(b.label or b.itemID or "")
@@ -306,11 +323,63 @@ function RS:AddRecipe(recipeID, craftCount, transaction, form)
 end
 
 function RS:ClearPlan(refresh)
-    self.plan = { materials = {}, recipes = {}, totalCrafts = 0 }
+    self.plan = { materials = {}, recipes = {}, recipeItems = {}, totalCrafts = 0 }
     if refresh ~= false then
         return self:RefreshShoppingList()
     end
     return true
+end
+
+local function GetRecipeSourceItem(recipeInfo)
+    local recipeID = recipeInfo and tonumber(recipeInfo.recipeID)
+    local recipeName = recipeInfo and recipeInfo.name
+    if not recipeID or not recipeName or recipeName == "" then return nil end
+
+    local sourceText
+    if C_TradeSkillUI and type(C_TradeSkillUI.GetRecipeSourceText) == "function" then
+        local ok, value = pcall(C_TradeSkillUI.GetRecipeSourceText, recipeID)
+        sourceText = ok and value or nil
+    end
+
+    local itemID = type(sourceText) == "string" and tonumber(sourceText:match("|Hitem:(%d+)")) or nil
+    if itemID then
+        return {
+            itemID = itemID,
+            quantity = 1,
+            label = (type(GetItemInfo) == "function" and GetItemInfo(itemID)) or recipeName,
+            recipeID = recipeID,
+        }
+    end
+
+    return {
+        unresolvedName = recipeName,
+        importName = recipeName,
+        importSearchName = recipeName,
+        importExpandGrades = true,
+        itemClassID = Enum and Enum.ItemClass and Enum.ItemClass.Recipe,
+        quantity = 1,
+        label = recipeName,
+        recipeID = recipeID,
+    }
+end
+
+function RS:AddUnlearnedRecipe(recipeInfo)
+    local purchase = GetRecipeSourceItem(recipeInfo)
+    if not purchase then return false, "no_recipe_item" end
+
+    self.plan.recipeItems = self.plan.recipeItems or {}
+    local recipeID = tonumber(recipeInfo.recipeID)
+    if self.plan.recipeItems[recipeID] then
+        return true, "already_added"
+    end
+
+    self.plan.recipeItems[recipeID] = purchase
+    local refreshed, reason = self:RefreshShoppingList()
+    if not refreshed then
+        self.plan.recipeItems[recipeID] = nil
+        return false, reason
+    end
+    return true, "added"
 end
 
 local function Notify(message, isError)
@@ -363,12 +432,47 @@ function RS:AddSelectedRecipe()
     return ok, value
 end
 
+function RS:AddSelectedUnlearnedRecipe()
+    local recipeInfo = self:GetSelectedRecipe()
+    if not recipeInfo or recipeInfo.learned then
+        return false, "not_unlearned"
+    end
+
+    local ok, value = self:AddUnlearnedRecipe(recipeInfo)
+    if ok then
+        if value == "already_added" then
+            Notify(T("PG_RECIPE_ITEM_ALREADY_ADDED", "This recipe is already in the shopping list."))
+        else
+            Notify(T("PG_RECIPE_ITEM_ADDED", "Recipe added to the shopping list."))
+        end
+    else
+        Notify(T("PG_RECIPE_SHOP_ERROR_" .. string.upper(tostring(value or "unknown")),
+            "Could not add the recipe item."), true)
+    end
+    return ok, value
+end
+
+function RS:GetPlannedRecipeItemCount()
+    local count = 0
+    for _ in pairs(self.plan.recipeItems or {}) do count = count + 1 end
+    return count
+end
+
 function RS:UpdateTooltip(owner)
     if not GameTooltip then return end
+    local recipeInfo = self:GetSelectedRecipe()
+    local isUnlearned = recipeInfo and recipeInfo.learned ~= true
+
     GameTooltip:SetOwner(owner, "ANCHOR_TOP")
-    GameTooltip:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"), 1, 0.82, 0)
-    GameTooltip:AddLine(T("PG_RECIPE_SHOP_TOOLTIP", "Adds the missing reagents for this recipe and quantity to one accumulating shopping list."), 1, 1, 1, true)
-    GameTooltip:AddLine(string.format(T("PG_RECIPE_SHOP_TOTAL", "Planned crafts: %d"), tonumber(self.plan.totalCrafts) or 0), 0.65, 0.85, 1)
+    if isUnlearned then
+        GameTooltip:SetText(T("PG_RECIPE_ITEM_BUTTON", "Add recipe"), 1, 0.82, 0)
+        GameTooltip:AddLine(T("PG_RECIPE_ITEM_TOOLTIP", "Adds the item that teaches this recipe to the accumulating shopping list."), 1, 1, 1, true)
+        GameTooltip:AddLine(string.format(T("PG_RECIPE_ITEM_TOTAL", "Planned recipes: %d"), self:GetPlannedRecipeItemCount()), 0.65, 0.85, 1)
+    else
+        GameTooltip:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"), 1, 0.82, 0)
+        GameTooltip:AddLine(T("PG_RECIPE_SHOP_TOOLTIP", "Adds the missing reagents for this recipe and quantity to one accumulating shopping list."), 1, 1, 1, true)
+        GameTooltip:AddLine(string.format(T("PG_RECIPE_SHOP_TOTAL", "Planned crafts: %d"), tonumber(self.plan.totalCrafts) or 0), 0.65, 0.85, 1)
+    end
     GameTooltip:AddLine(T("PG_RECIPE_SHOP_CLEAR_HINT", "Right click: clear this recipe shopping list."), 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
 end
@@ -381,7 +485,7 @@ function RS:EnsureControls()
 
     local controls = CreateFrame("Frame", "HironCraftRecipeShoppingControls", page)
     controls:SetSize(142, 22)
-    controls:SetPoint("TOPLEFT", form, "BOTTOMLEFT", 144, -4)
+    controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -34)
     controls:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
 
     local quantity = CreateFrame("EditBox", nil, controls, "InputBoxTemplate")
@@ -407,12 +511,20 @@ function RS:EnsureControls()
     button:SetPoint("LEFT", quantity, "RIGHT", 4, 0)
     button:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"))
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    button:SetScript("OnClick", function(_, mouseButton)
+    button:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
             RS:ClearPlan()
             Notify(T("PG_RECIPE_SHOP_CLEARED", "Recipe shopping list cleared."))
         else
-            RS:AddSelectedRecipe()
+            local recipeInfo = RS:GetSelectedRecipe()
+            if recipeInfo and recipeInfo.learned ~= true then
+                RS:AddSelectedUnlearnedRecipe()
+            else
+                RS:AddSelectedRecipe()
+            end
+        end
+        if GameTooltip and (type(GameTooltip.IsOwned) ~= "function" or GameTooltip:IsOwned(self)) then
+            RS:UpdateTooltip(self)
         end
     end)
     button:SetScript("OnEnter", function(self) RS:UpdateTooltip(self) end)
@@ -422,23 +534,6 @@ function RS:EnsureControls()
     controls.button = button
     self.controls = controls
     return controls
-end
-
-function RS:UpdatePosition(offset)
-    local controls = self:EnsureControls()
-    local page = GetCraftingPage()
-    local form = page and page.SchematicForm
-    if not controls or not form then return end
-    controls:ClearAllPoints()
-    controls:SetPoint("TOPLEFT", form, "BOTTOMLEFT", 144, -4 + (tonumber(offset) or 0))
-end
-
-function RS:AttachScannerLabel(label)
-    local controls = self:EnsureControls()
-    if not controls or not label then return end
-    label:ClearAllPoints()
-    label:SetPoint("LEFT", controls, "RIGHT", 4, 0)
-    label:SetWidth(96)
 end
 
 function RS:OnRecipeSelected()
@@ -461,14 +556,28 @@ function RS:OnRecipeSelected()
     end
 
     local salvageType = Enum and Enum.TradeskillRecipeType and Enum.TradeskillRecipeType.Salvage or 2
-    local supported = schematic and schematic.recipeType ~= salvageType
-        and schematic.reagentSlotSchematics and #schematic.reagentSlotSchematics > 0
-        and not recipeInfo.isRecraft and not recipeInfo.isDummyRecipe and not recipeInfo.isGatheringRecipe
+    local regularRecipe = not recipeInfo.isRecraft and not recipeInfo.isDummyRecipe and not recipeInfo.isGatheringRecipe
+    local supported = regularRecipe and (recipeInfo.learned ~= true or (
+        schematic and schematic.recipeType ~= salvageType
+        and schematic.reagentSlotSchematics and #schematic.reagentSlotSchematics > 0))
 
     controls:SetShown(supported == true)
     if not supported then return end
 
-    controls.button:SetEnabled(recipeInfo.learned == true)
+    if recipeInfo.learned == true then
+        controls.quantity:Show()
+        controls.button:ClearAllPoints()
+        controls.button:SetSize(106, 22)
+        controls.button:SetPoint("LEFT", controls.quantity, "RIGHT", 4, 0)
+        controls.button:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"))
+    else
+        controls.quantity:Hide()
+        controls.button:ClearAllPoints()
+        controls.button:SetSize(142, 22)
+        controls.button:SetPoint("RIGHT", controls, "RIGHT", 0, 0)
+        controls.button:SetText(T("PG_RECIPE_ITEM_BUTTON", "Add recipe"))
+    end
+    controls.button:SetEnabled(true)
     if controls.recipeID ~= recipeInfo.recipeID then
         controls.recipeID = recipeInfo.recipeID
         controls.quantity:SetNumber(1)

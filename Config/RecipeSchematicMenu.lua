@@ -361,6 +361,55 @@ end
 HironCraftScan.Events:Register('TRADESKILL_OPENED', ScanAllRecipes)
 
 local attachButton = nil
+
+local function ReanchorOverlappingProfessionButtons()
+    local page = ProfessionsFrame and ProfessionsFrame.CraftingPage
+    local form = page and page.SchematicForm
+    if not page or not form then return end
+
+    local offset = math.max(0, tonumber(HironCraftScan.DB.settings.show_button_height) or 0)
+    if attachButton then
+        attachButton:ClearAllPoints()
+        attachButton:SetPoint('BOTTOMLEFT', form, 'BOTTOMLEFT', 2, 4 + offset)
+    end
+
+    -- Profession Shopping List creates "Track New Mogs" below SchematicForm at
+    -- a high frame strata. That rectangle covers Blizzard's profession tabs.
+    -- The addon does not expose the button through its public API, so identify
+    -- only its distinctive footer anchor and keep it inside the form as well.
+    if not C_AddOns or not C_AddOns.IsAddOnLoaded
+        or not C_AddOns.IsAddOnLoaded('ProfessionShoppingList')
+    then
+        return
+    end
+
+    local children = { page:GetChildren() }
+    for _, child in ipairs(children) do
+        if child ~= attachButton and child.IsObjectType and child:IsObjectType('Button')
+            and child.GetText and type(child:GetText()) == 'string' and child:GetText() ~= ''
+        then
+            for pointIndex = 1, child:GetNumPoints() do
+                local point, relativeTo, relativePoint, x, y = child:GetPoint(pointIndex)
+                if point == 'TOPLEFT' and relativeTo == form and relativePoint == 'BOTTOMLEFT'
+                    and math.abs(tonumber(x) or 0) <= 4 and (tonumber(y) or 0) < 0
+                then
+                    child:ClearAllPoints()
+                    child:SetPoint('BOTTOMLEFT', form, 'BOTTOMLEFT', 2, 30 + offset)
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function ScheduleProfessionButtonLayout()
+    ReanchorOverlappingProfessionButtons()
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, ReanchorOverlappingProfessionButtons)
+        C_Timer.After(0.2, ReanchorOverlappingProfessionButtons)
+    end
+end
+
 local function CreateMenuShownButton()
     local button = CreateFrame(
         'Button',
@@ -369,10 +418,7 @@ local function CreateMenuShownButton()
         'HironCraftScan_ScannerConfigButtonTemplate'
     )
     attachButton = button
-
-    if HironCraftProfit and HironCraftProfit.RecipeShopping then
-        HironCraftProfit.RecipeShopping:AttachScannerLabel(button.ScanningLabel)
-    end
+    ScheduleProfessionButtonLayout()
 
     HironCraftScan.Events:Register({
         'RECIPE_SELECTED',
@@ -484,17 +530,7 @@ function HironCraftScan_ScannerConfigButtonMixin:Setup(ctxt)
 end
 
 function HironCraftScan_ScannerConfigButtonMixin:UpdateHeight()
-    local offset = HironCraftScan.DB.settings.show_button_height or 0
-    self:SetPoint(
-        'TOPLEFT',
-        ProfessionsFrame.CraftingPage.SchematicForm,
-        'BOTTOMLEFT',
-        2,
-        -4 + offset
-    )
-    if HironCraftProfit and HironCraftProfit.RecipeShopping then
-        HironCraftProfit.RecipeShopping:UpdatePosition(offset)
-    end
+    ReanchorOverlappingProfessionButtons()
 end
 
 function HironCraftScan_ScannerConfigButtonMixin:UpdateRecipeLabel(recipeID, ctxt)
@@ -572,6 +608,8 @@ local function OnRecipeSelected()
         return
     end
 
+    ScheduleProfessionButtonLayout()
+
     if HironCraftProfit and HironCraftProfit.RecipeShopping then
         HironCraftProfit.RecipeShopping:OnRecipeSelected()
     end
@@ -589,4 +627,10 @@ end
 
 HironCraftScan.Utils.onLoad(function()
     hooksecurefunc(ProfessionsFrame.CraftingPage, 'SelectRecipe', OnRecipeSelected)
+    ProfessionsFrame:HookScript('OnShow', ScheduleProfessionButtonLayout)
+
+    local footerGuard = CreateFrame('Frame')
+    footerGuard:RegisterEvent('TRADE_SKILL_SHOW')
+    footerGuard:SetScript('OnEvent', ScheduleProfessionButtonLayout)
+    ScheduleProfessionButtonLayout()
 end)
