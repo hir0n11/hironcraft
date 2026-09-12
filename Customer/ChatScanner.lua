@@ -1576,6 +1576,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     local now = time()
 
     local customerStartedInteraction = overrides and overrides.customerStartedInteraction
+    local offerIncomingGreeting = customerStartedInteraction
+        and (firstInteraction or restartingTerminalRequest or not response.greeting_sent)
 
     response.crafterName = crafter
     response.crafterFullName = crafterInfo.crafter
@@ -1588,12 +1590,22 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.recipeID = recipeID
     response.time = (firstInteraction or restartingTerminalRequest) and (requestChatEntry.receivedAt or now) or response.time or now
     response.responseID = responseID
-    if overrides and overrides.battleNet then
+    if offerIncomingGreeting then
+        -- An incoming crafting request establishes contact, but it is not our
+        -- answer. Leave the generated greeting pending so Quick Replies can
+        -- offer an explicit click action for this exact new request.
+        response.greeting_sent = false
+    elseif overrides and overrides.battleNet then
         -- Receiving a request is not the same as sending our proposed reply.
         response.greeting_sent = (not restartingTerminalRequest and response.greeting_sent) or overrides.greeted or false
-        HironCraftScan.BattleNet.RememberCharacters(customer, response)
     else
         response.greeting_sent = overrides and overrides.greeted or customerStartedInteraction
+    end
+    -- Battle.net routing metadata is independent from the greeting state. A
+    -- newly offered Quick Reply still needs the verified game character so its
+    -- click can reach the correct Battle.net conversation.
+    if overrides and overrides.battleNet then
+        HironCraftScan.BattleNet.RememberCharacters(customer, response)
     end
     if HironCraftScan.QuickReplies then
         -- A proxied request must retain the originating conversation character.
@@ -1716,7 +1728,40 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
     end
     HironCraftScanComm:ShareCustomerOrder(message, customer, customerInfo.guid, entry,
         responses[1].requestToken, overrides and overrides.restartTerminalRequest, tokens)
+    return responses
+end
 
+local function OfferDeferredQuickReply(customer, message, customerInfo, overrides, matchedResponses)
+    if not overrides
+        or not overrides.deferQuickReplyUntilScan
+        or overrides.quickReplyOffered
+        or not HironCraftScan.QuickReplies
+        or type(customerInfo) ~= 'table'
+    then
+        return
+    end
+    overrides.quickReplyOffered = true
+
+    local responses = {}
+    if type(matchedResponses) == 'table' and matchedResponses.responseID then
+        responses[1] = matchedResponses
+    elseif type(matchedResponses) == 'table' then
+        for _, response in ipairs(matchedResponses) do
+            if type(response) == 'table' and response.responseID then
+                responses[#responses + 1] = response
+            end
+        end
+    end
+
+    if #responses > 0 then
+        if HironCraftScan.QuickReplies.ShowOrderGreeting then
+            HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
+        end
+    elseif HironCraftScan.QuickReplies.OnWhisper then
+        -- Ordinary follow-up questions that are not new crafting requests keep
+        -- using the configured keyword classifier.
+        HironCraftScan.QuickReplies:OnWhisper(customer, message, customerInfo)
+    end
 end
 
 local function BaseCustomerName(name)
@@ -1824,6 +1869,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     overrides.remoteRequest = overrides.remoteRequest == true or HironCraftScanComm.applying_remote_state == true
     overrides.chatEntry = HironCraftScan.Utils.StampChatHistory(overrides.chatEntry
         or MakeChatHistoryEntryDefault(customer, message, event))
+    local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
+    if incomingWhisper and not overrides.remoteRequest then
+        overrides.deferQuickReplyUntilScan = true
+    end
 
     local crafterInfo, itemID, recipeInfo, itemMatches, classPending
 
@@ -1856,9 +1905,6 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)
             end
 
-            if HironCraftScan.QuickReplies then
-                HironCraftScan.QuickReplies:OnWhisper(customer, message, customerInfo)
-            end
             HironCraftScanCraftingOrderPage:ShowGeneric()
             FlashClientIcon()
 
@@ -1873,6 +1919,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 customerGuid
             )
             if not crafterInfo and not classPending then
+                OfferDeferredQuickReply(customer, message, customerInfo, overrides)
                 return false
             end
             overrides.customerStartedInteraction = true
@@ -1909,6 +1956,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                     HironCraftScan.OnMessage(event, message, customer, guid, options)
                 end)
             end)
+        else
+            OfferDeferredQuickReply(customer, message, customerInfo, overrides)
         end
         return false
     end
@@ -1925,7 +1974,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 pending = pending - 1
                 if pending == 0 and HironCraftScan.DB.customers[customer] then
                     RunRequestCallback(overrides, function()
-                        HandleItemBatch(message, customer, itemMatches, overrides, event)
+                        local responses = HandleItemBatch(message, customer, itemMatches, overrides, event)
+                        OfferDeferredQuickReply(customer, message,
+                            HironCraftScan.DB.customers[customer], overrides, responses)
                     end)
                 end
             end)
@@ -1951,7 +2002,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             item:ContinueOnItemLoad(function()
                 RunRequestCallback(overrides, function()
                     if HironCraftScan.DB.customers[customer] then
-                        handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, event)
+                        local response = handleResponse(
+                            message, customer, crafterInfo, itemID, recipeInfo, item, overrides, event)
+                        OfferDeferredQuickReply(customer, message,
+                            HironCraftScan.DB.customers[customer], overrides, response)
                     end
                 end)
             end)
@@ -1960,6 +2014,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     end
 
     local response = handleResponse(message, customer, crafterInfo, itemID, recipeInfo, nil, overrides, event)
+    OfferDeferredQuickReply(customer, message,
+        HironCraftScan.DB.customers[customer], overrides, response)
     if overrides.manualMatch then return response end
 
     return false

@@ -14,6 +14,7 @@ local MAX_VISIBLE_TOASTS = 8
 local MAX_OPTIONS_PER_POPUP = 8
 local MAX_PRIORITY = 999
 local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
+local ORDER_GREETING_ACTION = 'order-greeting'
 
 -- Adding another built-in quick reply only requires another definition here.
 -- The SavedVariables defaults and the configuration UI are generated from
@@ -926,9 +927,15 @@ function QuickReplies:ResolvePopupResponse(option)
 end
 
 local function SameReplyContext(lhs, rhs)
-    if not lhs or not rhs or lhs.customer ~= rhs.customer or lhs.reply ~= rhs.reply then
+    if not lhs or not rhs or lhs.customer ~= rhs.customer then
         return false
     end
+    if lhs.action == ORDER_GREETING_ACTION or rhs.action == ORDER_GREETING_ACTION then
+        return lhs.action == rhs.action
+            and lhs.responseID == rhs.responseID
+            and lhs.requestToken == rhs.requestToken
+    end
+    if lhs.reply ~= rhs.reply then return false end
     if lhs.templateKey == REJECTED_ORDER_TEMPLATE_KEY or rhs.templateKey == REJECTED_ORDER_TEMPLATE_KEY then
         -- Rejection actions are tied to an exact order, not a general whisper.
         return lhs.templateKey == rhs.templateKey and lhs.responseID == rhs.responseID
@@ -949,6 +956,23 @@ end
 
 local function SendOption(toast, option)
     if toast.option ~= option or not toast:IsShown() then return end
+    if option.action == ORDER_GREETING_ACTION then
+        local response = CurrentResponse(option)
+        if not response or response.greeting_sent then
+            print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
+            DismissEquivalentToasts(option)
+            return
+        end
+        if HironCraftScan.SendOrderGreeting({
+            customerName = option.customer,
+            responseID = option.responseID,
+        }, true) == false then
+            return
+        end
+        DismissEquivalentToasts(option)
+        return
+    end
+
     local response, templateKey = QuickReplies:ResolvePopupResponse(option)
     local reply = response and QuickReplies:BuildReply(templateKey or option.templateKey, response) or nil
     if not reply then
@@ -1009,6 +1033,60 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
         self.Glow:Hide()
     end)
     toast:Show()
+end
+
+-- A craft request received in whisper is matched asynchronously. Offer its
+-- generated greeting only after the new row exists, so the click is bound to
+-- the new request token rather than an older completed order for that customer.
+function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
+    if not EnsureConfig().enabled or type(customerInfo) ~= 'table' then
+        return false
+    end
+
+    local selected
+    local contextLabels = {}
+    local seenLabels = {}
+    for _, response in ipairs(responses or {}) do
+        if type(response) == 'table'
+            and response.responseID ~= nil
+            and not response.greeting_sent
+            and IsListedOrder(customer, response.responseID)
+        then
+            selected = selected or response
+            local label = ResponseLabel(response)
+            if label and not seenLabels[label] then
+                seenLabels[label] = true
+                contextLabels[#contextLabels + 1] = label
+            end
+        end
+    end
+    if not selected then return false end
+
+    local reply = type(selected.message) == 'table'
+        and table.concat(selected.message, ' ') or ''
+    if reply == '' then
+        reply = L('Reply to new crafting request')
+    end
+    local option = {
+        action = ORDER_GREETING_ACTION,
+        customer = customer,
+        message = message,
+        response = selected,
+        responseID = selected.responseID,
+        requestToken = selected.requestToken,
+        requestTime = selected.time,
+        reply = reply,
+        label = reply,
+        templateLabel = L('New crafting request'),
+        contextLabel = contextLabels[1],
+        contextLabels = contextLabels,
+    }
+
+    DismissEquivalentToasts(option)
+    popupSerial = popupSerial + 1
+    SetupToast(GetToast(), option, customerInfo, popupSerial, 1)
+    LayoutToasts()
+    return true
 end
 
 local function PreferPopupOption(existing, candidate)

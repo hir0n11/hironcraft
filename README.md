@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Quick Reply for new whisper orders (0.3.34)
+
+When an existing customer whispers a new crafting request, the scanner now
+creates or reopens that exact order row before offering its generated greeting
+as a Quick Reply. The popup is tied to the row's new request token, so a
+completed older order cannot consume or redirect the reply. Multi-item and
+Battle.net requests retain their normal routing information. Nothing is sent
+automatically; the greeting still requires one explicit click.
+
 ## Multi-order reply context (0.3.33)
 
 The chat name context menu now offers **To who send** for customers with

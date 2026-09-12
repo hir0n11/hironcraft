@@ -35,11 +35,23 @@ local now=100
 function GetTime() return now end
 C_TradeSkillUI={GetTradeSkillTexture=function() return 42 end}
 HironCraftScanScannerMenu={PageButton={}}
-local sent, frames={}, {}
+local sent, frames, greetingClicks={}, {}, {}
 Scan.Utils.SendResponses=function(messages, customer, userInitiated)
     assert(userInitiated == true, 'quick reply bypassed the explicit-click sender')
     assert(#messages==1, 'one quick-reply click sent several messages')
     sent[#sent+1]={text=messages[1], customer=customer}
+    return true
+end
+Scan.SendOrderGreeting=function(order, userInitiated)
+    assert(userInitiated==true, 'new-order quick reply bypassed the explicit-click greeting guard')
+    local response=Scan.OrderToResponse(order)
+    if not response or response.greeting_sent then return false end
+    response.greeting_sent=true
+    greetingClicks[#greetingClicks+1]={
+        customerName=order.customerName,
+        responseID=order.responseID,
+        requestToken=response.requestToken,
+    }
     return true
 end
 local function surface()
@@ -179,6 +191,30 @@ assert(toast:IsShown() and #sent==6, 'failed send dismissed the only usable sugg
 Scan.Utils.SendResponses=sendResponses
 click(toast, 'RightButton')
 assert(#visible()==0 and #sent==6, 'dismissal sent the merged reply')
+
+-- A newly matched whisper request gets its generated greeting only after the
+-- new row exists. Repeated setup replaces the same toast, and an in-place
+-- request-token change makes the old click harmless.
+local returning, newOrder=addCustomer('ReturningBuyer')
+newOrder.greeting_sent=false
+newOrder.message={'Hi! I can craft [Bracers].'}
+returning.responses[102].greeting_sent=true
+assert(QuickReplies:ShowOrderGreeting('ReturningBuyer','can you also do wrist?',returning,{newOrder}))
+assert(#visible('ReturningBuyer')==1 and #greetingClicks==0)
+assert(QuickReplies:ShowOrderGreeting('ReturningBuyer','can you also do wrist?',returning,{newOrder}))
+assert(#visible('ReturningBuyer')==1, 'same new request stacked greeting quick replies')
+click(visible('ReturningBuyer')[1])
+assert(#greetingClicks==1 and greetingClicks[1].responseID==101
+    and greetingClicks[1].requestToken=='request-101', 'new-order quick reply targeted the wrong request')
+
+newOrder.greeting_sent=false
+newOrder.requestToken='request-before-reuse'
+assert(QuickReplies:ShowOrderGreeting('ReturningBuyer','another wrist?',returning,{newOrder}))
+local staleGreeting=visible('ReturningBuyer')[1]
+newOrder.requestToken='request-after-reuse'
+click(staleGreeting)
+assert(#greetingClicks==1 and #visible('ReturningBuyer')==0,
+    'stale new-order quick reply followed a reused row')
 
 -- The event-only rejection answer must stay attached to its specific order.
 for _, id in ipairs({101,102}) do

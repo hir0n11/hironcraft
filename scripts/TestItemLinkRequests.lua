@@ -399,6 +399,52 @@ now=1031;scan(b) -- no greeting for the later inquiry
 Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
 assert(response(101).customer_answered and not response(102).customer_answered, 'ungreeted search stole the active reply')
 
+-- A craft request whispered after an earlier completed job must create the new
+-- row first and only then offer its generated greeting. This reproduces the
+-- real wording that used to leave the row without a Quick Reply.
+local previousFulfillment=Scan.OrderFulfillment
+local previousShowGreeting=Scan.QuickReplies.ShowOrderGreeting
+local previousInclusions=Scan.DB.settings.inclusions
+local previousPermissive=Scan.DB.settings.permissive_matching
+local previousClassMatching=Scan.DB.settings.match_customer_class
+local previousKeywords=Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords
+reset()
+Scan.DB.settings.inclusions='lf,can'
+Scan.DB.settings.permissive_matching=true
+Scan.DB.settings.match_customer_class=false
+Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords='bs,blacksmith,wrist'
+Scan.UpdateHasMatchStyle()
+reloadConfig()
+scan('LF bs')
+local completedToken=response(164).requestToken
+Scan.OrderFulfillment={
+    Status={Fulfilled='fulfilled',Rejected='rejected',Failed='failed'},
+    GetStatus=function() return {status='fulfilled'} end,
+}
+local offered=0
+Scan.QuickReplies.ShowOrderGreeting=function(_,customer,message,customerInfo,responses)
+    offered=offered+1
+    assert(customer=='Buyer' and message=='can you also do wrist?')
+    assert(customerInfo==Scan.DB.customers.Buyer and #responses==1)
+    local current=response(164)
+    assert(responses[1]==current and current.requestToken~=completedToken,
+        'Quick Reply received the completed response instead of the new row')
+    assert(not current.greeting_sent and current.customer_answered,
+        'incoming new request consumed its pending greeting')
+    return true
+end
+now=1100
+Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist?','Buyer','Buyer-GUID')
+assert(offered==1 and countRows()==1, 'new whisper row did not trigger its Quick Reply')
+Scan.OrderFulfillment=previousFulfillment
+Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
+Scan.DB.settings.inclusions=previousInclusions
+Scan.DB.settings.permissive_matching=previousPermissive
+Scan.DB.settings.match_customer_class=previousClassMatching
+Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords=previousKeywords
+Scan.UpdateHasMatchStyle()
+reloadConfig()
+
 -- The manual menu is a real synchronous click-to-send path. It must use the
 -- chosen crafter even when the selected text matches a different profession.
 reset()
