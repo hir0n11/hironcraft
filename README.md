@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Sparks excluded from material lists (0.3.63)
+
+- Sparks are no longer reported as missing in the decline message and are not
+  shown in, or sent with, the order material list. A spark slot is recognized
+  by its interchangeable spark/fragment quantities or by the item name
+  ("Spark of ...", "Искра ..."); a supplied spark still fills its slot instead
+  of appearing as an unknown extra item. Lists saved or received from older
+  versions have their spark rows removed as well. The decline decision itself
+  is unchanged.
+
 ## Text cursor position in settings fields (0.3.62)
 
 - Multi-line settings fields (keywords, responses, greetings, aliases) now set

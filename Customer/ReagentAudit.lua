@@ -44,6 +44,24 @@ local function Quality(id)
         return quality and quality > 0 and quality or nil, available
     end
 end
+-- Sparks are not reported: the recipe cannot be crafted without one anyway,
+-- so listing them as "missing" or "supplied" only adds noise. A spark slot is
+-- recognized by its interchangeable spark/fragment quantities or by the item
+-- name (English and Russian clients, including fractured sparks).
+local function IsSparkName(name)
+    return type(name) == 'string' and (name:find('Spark of ', 1, true) ~= nil
+        or name:find('Искра', 1, true) ~= nil or name:find('искра', 1, true) ~= nil)
+end
+local function IsSparkRow(row)
+    if type(row) ~= 'table' then return false end
+    if IsSparkName(row.name) then return true end
+    for _, item in ipairs(type(row.supplied) == 'table' and row.supplied or {}) do
+        if type(item) == 'table' and IsSparkName(item.name) then return true end
+    end
+    return false
+end
+Audit.IsSparkName = IsSparkName
+
 local function IsCustomer(entry)
     local source = Read(entry, 'source')
     local types = Enum and Enum.CraftingOrderReagentSource or {Crafter=2, None=3}
@@ -81,7 +99,8 @@ function Audit.Sanitize(snapshot)
     end
     for i, row in ipairs(snapshot.rows) do
         if i > MAX_ROWS then result.complete=false; break end
-        if type(row) == 'table' then
+        -- Also drops sparks from snapshots saved or sent by older versions.
+        if type(row) == 'table' and not IsSparkRow(row) then
             local clean = {itemID=Number(row.itemID), name=Plain(row.name),
                 required=Number(row.required), known=row.known == true,
                 optional=row.optional == true, maxQuality=Number(row.maxQuality,10), supplied={}}
@@ -131,7 +150,11 @@ function Audit.Capture(order, details)
             name=choices[1] and choices[1].name or Plain(slot.slotInfo and slot.slotInfo.slotText),
             required=Number(slot.quantityRequired), known=type(order.reagents)=='table' and #choices>0,
             optional=optional, supplied={}}
-        prepared[#prepared+1]={row=row,choices=choices,ids=ids,slot=slot,index=index}
+        local spark=type(slot.variableQuantities)=='table' and #slot.variableQuantities>0
+        for _, choice in ipairs(choices) do spark=spark or IsSparkName(choice.name) end
+        -- A spark slot still claims the customer's spark (so it is not listed
+        -- as an unknown extra item) but is never added to the snapshot.
+        prepared[#prepared+1]={row=row,choices=choices,ids=ids,slot=slot,index=index,spark=spark}
     end
     for _, entry in ipairs(type(order.reagents)=='table' and order.reagents or {}) do
         local id=Number(Read(entry,'itemID'))
@@ -159,6 +182,8 @@ function Audit.Capture(order, details)
                 local row=candidates[1].row
                 row.supplied[#row.supplied+1]=supplied
                 if supplied.quantity==nil then row.known=false end
+            elseif IsSparkName(supplied.name) then
+                -- Not reported, see IsSparkName.
             else
                 -- An ambiguous item must not be counted twice, nor turn its
                 -- possible slots into false "missing" accusations.
@@ -204,7 +229,7 @@ function Audit.Capture(order, details)
                 end
             end
         end
-        if not row.optional or #row.supplied>0 then
+        if not candidate.spark and (not row.optional or #row.supplied>0) then
             if not row.known or (not row.optional and not row.required) then snapshot.complete=false end
             snapshot.rows[#snapshot.rows+1]=row
         end

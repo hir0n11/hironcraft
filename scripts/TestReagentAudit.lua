@@ -56,12 +56,30 @@ order.reagents={reagent(103,40,1),reagent(201,2,2)}
 local oldRank=ranks[102];ranks[102]=nil
 assert(not A.MaterialsOK(A.Capture(order)),'uncached maximum rank treated as known')
 ranks[102]=oldRank
-schematic={reagentSlotSchematics={slot({301,302},2,1)}}
+-- Sparks are never reported: neither missing, nor supplied, nor as an
+-- unknown extra item. Spark slots are recognized structurally (spark/fragment
+-- variable quantities) and by name, also in snapshots from older versions.
+schematic={reagentSlotSchematics={slot({301,302},2,1),slot({201},3,2)}}
 schematic.reagentSlotSchematics[1].variableQuantities={{reagent={itemID=301},quantity=2},{reagent={itemID=302},quantity=6}}
 order.reagents={reagent(302,4,1)}
-assert(select(2,A.Analyze(A.Capture(order).rows[1]))==2,'spark alternative quantity ignored')
-order.reagents={reagent(301,1,1),reagent(302,3,1)}
-assert(not A.Capture(order).complete and select(2,A.Analyze(A.Capture(order).rows[1]))==nil)
+local sparkless=A.Capture(order)
+assert(#sparkless.rows==1 and sparkless.rows[1].name=='Thread','spark slot entered the snapshot')
+assert(A.Issues(sparkless)=="Looks like you're missing 3 Thread.",'missing spark was reported')
+order.reagents={reagent(301,1,1),reagent(302,3,1),reagent(201,3,2)}
+local withSparks=A.Capture(order)
+assert(withSparks.complete and #withSparks.rows==1,'supplied sparks became unknown extra rows')
+names[501]='Spark of Radiance';names[502]='Sterling Alloy'
+schematic={reagentSlotSchematics={slot({501},4,1),slot({502},3,2)}}
+order.reagents={}
+local named=A.Capture(order)
+assert(#named.rows==1 and named.rows[1].name=='Sterling Alloy','named spark slot entered the snapshot')
+local legacy={version=1,orderID=9,capturedAt=time(),complete=true,rows={
+    {itemID=501,name='Spark of Radiance',required=4,known=true,supplied={}},
+    {itemID=601,name='Расколотая искра',required=2,known=true,supplied={}},
+    {itemID=502,name='Sterling Alloy',required=3,known=true,supplied={}}}}
+local cleaned=A.Sanitize(legacy)
+assert(#cleaned.rows==1 and cleaned.rows[1].name=='Sterling Alloy','stored spark rows survived sanitizing')
+assert(A.Issues(cleaned)=="Looks like you're missing 3 Sterling Alloy.")
 schematic={reagentSlotSchematics={slot({101,102,103},5,1),slot({101,102,103},5,2)}}
 order.reagents={{itemID=101,quantity=5}}
 local ambiguous=A.Capture(order)
@@ -111,7 +129,7 @@ A.ShowTooltip(owner,'Test',history,nil)
 assert(not owner.reagentTooltip.visible)
 
 -- Screenshot regression: late but populated snapshot showed green ?/N next
--- to explicit 1x/10x counts, duplicated names, and the wrong spark variant.
+-- to explicit 1x/10x counts and duplicated names. Its spark is not shown.
 local late={version=1,orderID=1238880255,capturedAt=time(),complete=false,rows={}}
 local sample={{'Tormented Tantalum',1},{'Mote of Wild Magic',10},
     {'Kaleidoscopic Prism',1,2},{'Dusk-Shrouded Stone',3,2},{'Flawless Amani Lapis',1,2},
@@ -120,9 +138,11 @@ for i,item in ipairs(sample) do
     late.rows[i]={itemID=i,name=i==6 and 'Spark of Radiance' or item[1],required=item[2],known=false,
         supplied={{itemID=i,name=item[1],quantity=item[2],quality=item[3],maxQuality=item[3]}}}
 end
+late=A.Sanitize(late)
+table.remove(sample)
 lines={};columns={};A.ShowTooltip(owner,'Late',history,late)
-assert(#lines==9,'six materials should use six rows, two header lines and one partial-data note')
-assert(#columns==6 and columns[6].text=='Spark of Tides','tooltip named an unprovided spark variant')
+assert(#lines==8,'five materials should use five rows, two header lines and one partial-data note')
+assert(#columns==5,'tooltip listed a spark')
 for i,column in ipairs(columns) do
     assert(column.value:find('≥'..sample[i][2]..'/'..sample[i][2],1,true),'explicit supplied count became ?')
     assert(column.r==0.7 and column.g==0.7 and column.b==0.7,'unknown coverage was colored as confirmed good')

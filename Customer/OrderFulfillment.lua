@@ -1700,6 +1700,17 @@ HironCraftScan.Utils.onLoad(function()
     PruneStorage()
     MigrateMaterialDelivery(EnsureStorage())
     MigrateMaterialDelivery(EnsureCompletionStorage())
+    -- Re-apply the current snapshot rules to stored lists (e.g. drop sparks
+    -- recorded by older versions). Done once at load, so tooltip identities
+    -- stay stable during the session.
+    for _, entries in ipairs({ EnsureStorage(), EnsureCompletionStorage() }) do
+        for _, entry in pairs(entries) do
+            if type(entry) == 'table' and entry.reagentAudit and HironCraftScan.ReagentAudit then
+                entry.reagentAudit = HironCraftScan.ReagentAudit.Sanitize(entry.reagentAudit)
+                    or entry.reagentAudit
+            end
+        end
+    end
     if HironCraftScan.ReagentAudit then HironCraftScan.ReagentAudit.PruneProgress() end
     for _, entry in pairs(EnsureStorage()) do
         RememberCraftingOrder(entry)
