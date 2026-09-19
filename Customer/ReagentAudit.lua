@@ -266,10 +266,17 @@ function Audit.CaptureProgress(order,beforeCraft)
         local fresh=Audit.Capture(order)
         if fresh and (not previous or fresh.complete or not previous.complete) then snapshot=fresh end
         if snapshot and not previous and order.isFulfillable==true then
-            -- First seen after consumption: display what the server still
-            -- exposes, but never interpret an empty slot as a customer shortage.
-            snapshot.complete=false
-            for _,row in ipairs(snapshot.rows) do row.known=false end
+            -- First seen after crafting (e.g. a quick recraft). Quantities that
+            -- cover the requirement are proven and shown exactly; only an
+            -- apparent shortage may be a consumption artifact, so never turn
+            -- it into an accusation.
+            for _,row in ipairs(snapshot.rows) do
+                local total,missing=Audit.Analyze(row)
+                if total==nil or (missing and missing>0) then
+                    row.known=false
+                    snapshot.complete=false
+                end
+            end
         end
     end
     if not snapshot then return nil end
@@ -461,7 +468,7 @@ function Audit.ShowTooltip(owner, name, history, snapshot)
                 local text=(#row.supplied>1 and (tostring(item.quantity or '?')..'×') or '')
                     ..(different and (Name(item)..' ') or '')..(item.quality and ('T'..item.quality) or '')
                 if item.quality and item.maxQuality and item.quality<item.maxQuality then
-                    text='|cffffaa33'..text..'→T'..item.maxQuality..'|r'
+                    text='|cffffaa33'..text..'->T'..item.maxQuality..'|r'
                 end
                 parts[#parts+1]=text
             end

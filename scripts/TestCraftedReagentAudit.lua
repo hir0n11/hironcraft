@@ -102,8 +102,8 @@ A.ShowTooltip({},'Test',{GetLeft=function() return 600 end,GetRight=function() r
 assert(lines[1]=='Order materials · T4/5')
 local tooltipText=table.concat(lines,'\n')
 assert(tooltipText:find('Alloy 40/40',1,true),'full quantity was displayed as missing')
-assert(tooltipText:find('20×T1→T3',1,true))
-assert(tooltipText:find('20×T2→T3',1,true))
+assert(tooltipText:find('20×T1->T3',1,true))
+assert(tooltipText:find('20×T2->T3',1,true))
 assert(#lines<=4,'one material expanded into a large tooltip')
 assert(A.GetForOrder(row)==A.GetForOrder(row),'unchanged completed snapshot rebuilt the hovered history')
 

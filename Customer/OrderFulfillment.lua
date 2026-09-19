@@ -565,9 +565,47 @@ local function CompletionNoticeMatchesOrder(notice, order)
         and CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid)
 end
 
+-- Completion notices grouped by customer base name. GetStatus runs for every
+-- visible status mark on each refresh, and a decline or completion triggers
+-- several refreshes; scanning the whole journal (hundreds of notices) per mark
+-- froze the UI. The index is only a pre-filter: every candidate is still
+-- checked by CompletionNoticeMatchesOrder. It is rebuilt when the journal
+-- changes here and at least every few seconds for changes made elsewhere.
+local NOTICE_INDEX_MAX_AGE = 5
+local noticeIndex, noticeIndexSource, noticeIndexBuiltAt = nil, nil, 0
+
+local function InvalidateNoticeIndex()
+    noticeIndex = nil
+end
+
+local function NoticesForOrder(order)
+    local notices = EnsureCompletionStorage()
+    if IsBattleNetOrder(order) then
+        -- Battle.net identities can match a different character name.
+        return notices
+    end
+    local now = GetTime and GetTime() or time()
+    if not noticeIndex or noticeIndexSource ~= notices
+        or now - noticeIndexBuiltAt > NOTICE_INDEX_MAX_AGE then
+        noticeIndex, noticeIndexSource, noticeIndexBuiltAt = {}, notices, now
+        for _, notice in pairs(notices) do
+            local name = type(notice) == 'table' and BaseName(notice.customerName)
+            if name then
+                local list = noticeIndex[name]
+                if not list then
+                    list = {}
+                    noticeIndex[name] = list
+                end
+                list[#list + 1] = notice
+            end
+        end
+    end
+    return noticeIndex[BaseName(order.customerName)] or {}
+end
+
 local function FindCompletionNotice(order)
     local newest = nil
-    for _, notice in pairs(EnsureCompletionStorage()) do
+    for _, notice in pairs(NoticesForOrder(order)) do
         if CompletionNoticeMatchesOrder(notice, order) then
             local preference = newest and PreferFulfillment(notice, newest)
             if not newest or preference == true
@@ -706,6 +744,7 @@ end
 local function PruneStorage()
     PruneEntries(EnsureStorage())
     PruneEntries(EnsureCompletionStorage())
+    InvalidateNoticeIndex()
 end
 
 -- Older builds tracked marks and material lists with one deliveryPending flag.
@@ -1211,6 +1250,7 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
         notice.reagentAudit=MergeReagentAudit(notice.reagentAudit,current.reagentAudit)
     end
     notices[key] = notice
+    InvalidateNoticeIndex()
     MaterializeMatchingStatuses(notice)
     NotifyCompletionUpdated(notice)
     return true

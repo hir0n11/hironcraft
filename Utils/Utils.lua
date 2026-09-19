@@ -741,14 +741,17 @@ local function UpgradeAccountWideOrderCompletionNotices(currentRealmDB)
         end
     end
 
-    -- Alias every realm to the authoritative journal for compatibility with
-    -- old call sites and to ensure ACK updates are saved consistently.
+    -- Drop the merged per-realm copies. They used to alias the account-wide
+    -- journal, but SavedVariables writes every alias as a separate copy, so
+    -- each realm ever visited stored the whole journal again (megabytes that
+    -- were parsed on every login). Only settings.order_completion_notices is
+    -- read at runtime.
     for _, realmDB in pairs(HironCraftScan_DB.realms or {}) do
         if type(realmDB) == 'table' then
-            realmDB.order_completion_notices = accountWide
+            realmDB.order_completion_notices = nil
         end
     end
-    currentRealmDB.order_completion_notices = accountWide
+    currentRealmDB.order_completion_notices = nil
 
     return accountWide
 end

@@ -80,6 +80,17 @@ local legacy={version=1,orderID=9,capturedAt=time(),complete=true,rows={
 local cleaned=A.Sanitize(legacy)
 assert(#cleaned.rows==1 and cleaned.rows[1].name=='Sterling Alloy','stored spark rows survived sanitizing')
 assert(A.Issues(cleaned)=="Looks like you're missing 3 Sterling Alloy.")
+-- First seen after crafting (a quick recraft): covered quantities are proven
+-- and shown exactly; only an apparent shortage stays unknown.
+schematic={reagentSlotSchematics={slot({101,102,103},3,1),slot({201},2,2),slot({401,402,403},1,3,true)}}
+local crafted={orderID=7100,spellID=123,isRecraft=true,isFulfillable=true,
+    reagents={reagent(102,3,1),reagent(201,1,2),reagent(402,1,3)}}
+local late=A.CaptureProgress(crafted)
+assert(late.rows[1].known and late.rows[3].known,'covered rows after crafting were marked partial')
+assert(not late.rows[2].known and not late.complete and select(2,A.Analyze(late.rows[2]))==nil,
+    'apparent shortage after crafting became an accusation')
+crafted.orderID=7101;crafted.reagents={reagent(102,3,1),reagent(201,2,2),reagent(402,1,3)}
+assert(A.CaptureProgress(crafted).complete,'fully covered recraft snapshot stayed partial')
 schematic={reagentSlotSchematics={slot({101,102,103},5,1),slot({101,102,103},5,2)}}
 order.reagents={{itemID=101,quantity=5}}
 local ambiguous=A.Capture(order)
@@ -150,7 +161,7 @@ for i,column in ipairs(columns) do
 end
 late.rows[3].supplied[1].quality=1
 lines={};columns={};A.ShowTooltip(owner,'Late',history,late)
-assert(columns[3].value:find('T1→T2',1,true) and columns[3].g==0.65,
+assert(columns[3].value:find('T1->T2',1,true) and columns[3].g==0.65,
     'partial snapshot hid known low-quality reagents')
 late.rows[2].supplied[1].quantity=nil
 assert(A.Analyze(late.rows[2])==nil,'missing numeric quantity was invented')

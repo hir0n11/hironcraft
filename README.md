@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Faster declines, exact late material lists (0.3.64)
+
+- Status marks look up completion notices through a per-customer index
+  instead of scanning the whole journal (hundreds of notices) for every
+  visible mark on every refresh. A decline or completion triggers several
+  such refreshes, which froze the UI.
+- The completion journal is no longer duplicated into every realm section of
+  SavedVariables. Those aliases were written as separate copies, one per
+  realm ever visited (about 7 MB parsed on every login); the copies are
+  removed on the next load.
+- A material list first captured after crafting (for example a quick recraft)
+  shows covered quantities exactly (3/3) instead of "≥"; only an apparent
+  shortage remains marked as uncertain.
+- The low-tier hint uses "T1->T2": the game font has no "→" glyph.
+
 ## Sparks excluded from material lists (0.3.63)
 
 - Sparks are no longer reported as missing in the decline message and are not
