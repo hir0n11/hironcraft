@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Hitch profiler (0.3.65)
+
+- `/hcprof [ms]` (default 150) reports every frame slower than the threshold
+  in chat, with the ProfitHub order and HironCraft functions that consumed its
+  time (inclusive, with call counts). `/hcprof off` stops it. Nothing is
+  wrapped until the first `/hcprof`; disabled wrappers only forward the call.
+- Recordings showed the game freezing for about 9 seconds while the Personal
+  orders list was processed, before the decline itself ran. The profiler
+  identifies which step is responsible.
+
 ## Faster declines, exact late material lists (0.3.64)
 
 - Status marks look up completion notices through a per-customer index

@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.3.64
+## Version: 0.3.65
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -172,3 +172,6 @@ Config\RecipeConfigPanel.xml
 Config\ProfessionConfigPanel.xml
 Config\GeneralConfigPanel.xml
 Config\SubstitutionTagPanel.xml
+
+# Diagnostics (inactive until /hcprof)
+Utils\Profiler.lua
