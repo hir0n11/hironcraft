@@ -10,11 +10,16 @@ local armorByClass = {
     MAGE=1, PRIEST=1, WARLOCK=1,
 }
 local professionByArmor = { [1]=197, [2]=165, [3]=165, [4]=164 }
+local craftingProfessions = {
+    [164]=true,[165]=true,[171]=true,[197]=true,
+    [202]=true,[333]=true,[755]=true,[773]=true,
+}
 local aliasDefinitions, aliasByKey = {}, {}
-local function AddAliases(key, words, fixedProfession)
+local function AddAliases(key, words, fixedProfession, alternativeProfessions)
     local definition=aliasByKey[key]
     if not definition then
-        definition={key=key, defaults='', parentProfID=fixedProfession}
+        definition={key=key, defaults='', parentProfID=fixedProfession,
+            parentProfIDs=alternativeProfessions}
         aliasDefinitions[#aliasDefinitions+1]=definition; aliasByKey[key]=definition
     end
     for word in words:gmatch('%S+') do
@@ -24,12 +29,14 @@ end
 local AddSlot=AddAliases
 AddSlot('INVTYPE_WRIST', 'wrist wrists bracer bracers cuff cuffs наручи наруч наручей запястье запястья')
 AddSlot('INVTYPE_HEAD', 'head helm helms helmet helmets hat hats шлем шлемы голова голову')
+AddSlot('INVTYPE_NECK', 'neck necks necklace necklaces neckpiece neckpieces amulet amulets pendant pendants нек ожерелье ожерелья амулет амулеты подвеска подвески кулон кулоны шея шею', 755)
 AddSlot('INVTYPE_SHOULDER', 'shoulder shoulders pauldron pauldrons плечи плечо наплечники наплечник')
 AddSlot('INVTYPE_CHEST', 'chest chestpiece chestpieces нагрудник нагрудники грудь')
 AddSlot('INVTYPE_HAND', 'hand hands glove gloves перчатки перчатку')
 AddSlot('INVTYPE_WAIST', 'waist belt belts пояс пояса ремень')
 AddSlot('INVTYPE_LEGS', 'leg legs leggings pants штаны поножи ноги')
 AddSlot('INVTYPE_FEET', 'feet boot boots shoe shoes сапоги ботинки обувь')
+AddSlot('INVTYPE_FINGER', 'ring rings finger ringfinger ринг ринги кольцо кольца колец перстень перстни перстня', 755)
 AddSlot('INVTYPE_WRIST', 'wristguard wristguards armguard armguards wristwrap wristwraps bindings manacles')
 AddSlot('INVTYPE_SHOULDER', 'shoulderpad shoulderpads spaulder spaulders mantle')
 AddSlot('INVTYPE_CHEST', 'chestguard chestplate breastplate vest robe robes tunic')
@@ -39,6 +46,9 @@ AddSlot('INVTYPE_LEGS', 'legguard legguards legplates trousers')
 AddSlot('INVTYPE_FEET', 'sabatons treads slippers greaves footwraps')
 AddSlot('INVTYPE_CLOAK', 'back cloak cloaks cape capes drape drapes плащ плащи плаща накидка накидки спина спину', 197)
 AddSlot('INVTYPE_SHIELD', 'shield shields buckler bucklers щит щиты щита щитов', 164)
+AddSlot('INVTYPE_HOLDABLE', 'offhand off-hand tome tomes codex codices focus foci оффхенд офф-хенд фолиант фолианты кодекс кодексы сфера сферы', nil, craftingProfessions)
+AddSlot('INVTYPE_TRINKET', 'trinket trinkets accessory accessories тринкет тринкеты брелок брелоки аксессуар аксессуары', nil,
+    craftingProfessions)
 
 -- Explicit professions/materials and non-armor requests must not be inferred
 -- from the speaker's class (alts, transmogs, enchants and profession tools).
@@ -50,9 +60,9 @@ plate cloth leather mail кузнец кузнеца кузня кузнечка
 портняжка портняжное кожевник кожевника кожевничество ювелир ювелира ювелирка
 инженер инженера начертатель алхимик чантер чант чары зачарование зачарователь
 латы латные латный ткань тканевые тканевый кожа кожаные кожаный кольчуга кольчужные
-cloak cape back bag bags neck necklace ring rings shield weapon sword dagger axe
+cloak cape back bag bags neck necklace ring rings trinket offhand shield weapon sword dagger axe
 staff tool tools profession transmog mog alt alts плащ сумка сумки кольцо шея щит
-оружие инструмент инструменты трансмог альт альта]=]):gmatch('%S+') do
+брелок аксессуар оружие инструмент инструменты трансмог альт альта]=]):gmatch('%S+') do
     explicitWords[word] = true
 end
 
@@ -78,13 +88,16 @@ ProfessionWords(773, 'inscription inscriber scribe начертатель')
 ProfessionWords(171, 'alchemy alchemist алхимик')
 local classCache = {}
 local slotLabels = {
-    INVTYPE_WRIST='Wrist', INVTYPE_HEAD='Head', INVTYPE_SHOULDER='Shoulders',
+    INVTYPE_WRIST='Wrist', INVTYPE_HEAD='Head', INVTYPE_NECK='Neck', INVTYPE_SHOULDER='Shoulders',
     INVTYPE_CHEST='Chest', INVTYPE_HAND='Gloves', INVTYPE_WAIST='Belt',
-    INVTYPE_LEGS='Legs', INVTYPE_FEET='Boots', INVTYPE_CLOAK='Cloak', INVTYPE_SHIELD='Shield',
+    INVTYPE_LEGS='Legs', INVTYPE_FEET='Boots', INVTYPE_FINGER='Ring',
+    INVTYPE_CLOAK='Cloak', INVTYPE_SHIELD='Shield', INVTYPE_HOLDABLE='Off-hand',
+    INVTYPE_TRINKET='Trinket',
 }
 local weapons = {}
-local function Weapon(key, profession, subclasses, words)
-    weapons[key] = {key=key, label=key, parentProfID=profession, subclasses=subclasses}
+local function Weapon(key, profession, subclasses, words, alternativeProfessions)
+    weapons[key] = {key=key, label=key, parentProfID=profession, subclasses=subclasses,
+        parentProfIDs=alternativeProfessions}
     AddAliases(key,words)
     for word in words:gmatch('%S+') do explicitWords[word]=nil end
 end
@@ -96,6 +109,10 @@ Weapon('Dagger', 164, {[15]=true}, 'dagger daggers кинжал кинжалы')
 Weapon('Polearm', 164, {[6]=true}, 'polearm polearms spear spears копье копьё')
 Weapon('Staff', 773, {[10]=true}, 'staff staves посох посохи')
 Weapon('Warglaive', 164, {[9]=true}, 'warglaive warglaives glaive glaives глефа глефы')
+Weapon('Bow', nil, {[2]=true}, 'bow bows лук луки', craftingProfessions)
+Weapon('Crossbow', nil, {[18]=true}, 'crossbow crossbows арбалет арбалеты', craftingProfessions)
+Weapon('Fist weapon', nil, {[13]=true}, 'fistweapon fistweapons fist-weapon fist-weapons knuckle knuckles кастет кастеты', craftingProfessions)
+Weapon('Wand', nil, {[19]=true}, 'wand wands жезл жезлы', craftingProfessions)
 
 local function NormalizeAliases(text)
     return (strlower or string.lower)(text):gsub('[%c%p]', ' '):gsub('%s+', ' ')
@@ -197,13 +214,19 @@ local function MatchAliases(message)
             local first,last=remaining:find(pattern,1,true)
             while first do
                 local insideAlias=false
+                local phraseStart,phraseEnd=first+1,last-1
+                local besideWeapon=false
                 for _,range in ipairs(weaponRanges) do
-                    if first+1<=range[2] and last-1>=range[1] then insideAlias=true;break end
+                    if phraseStart<=range[2] and phraseEnd>=range[1] then insideAlias=true end
+                    if math.abs(range[1]-phraseEnd)<=2 or math.abs(phraseStart-range[2])<=2 then
+                        besideWeapon=true
+                    end
                 end
                 -- Mask only the weapon modifier, not other mentions of hands:
                 -- "one hand sword and gloves" still requests two items. Keep
-                -- custom aliases such as "one hand blade" intact as well.
-                if not insideAlias then
+                -- custom aliases such as "one hand blade" intact as well. A
+                -- separated "sword and off hand" is its own equipment request.
+                if besideWeapon and not insideAlias then
                     remaining=remaining:sub(1,first)..string.rep(' ',last-first-1)..remaining:sub(last)
                 end
                 first,last=remaining:find(pattern,last,true)
@@ -257,6 +280,8 @@ function M.GetContext(message, guid, sharedClass)
         else
             slots[key]=true
             if aliasByKey[key].parentProfID then fixedProfession=aliasByKey[key].parentProfID
+            elseif aliasByKey[key].parentProfIDs then
+                -- The concrete monitored recipe selects among these professions.
             else needsArmor=true end
         end
     end
@@ -297,25 +322,51 @@ function M.GetRequests(context)
     if not context or context.unknownClass then return requests end
     if context.weapons then
         for key in pairs(context.weapons) do
+            local weapon=weapons[key]
             -- An explicit incompatible profession is not permission to route
             -- the request to another one (e.g. weapon enchants).
-            if not context.explicitProfession or weapons[key].parentProfID == context.parentProfID then
-                requests[#requests+1]=weapons[key]
+            if weapon.parentProfIDs then
+                for profession in pairs(weapon.parentProfIDs) do
+                    if not context.explicitProfession or profession==context.parentProfID then
+                        requests[#requests+1]={key=weapon.key,label=weapon.label,
+                            subclasses=weapon.subclasses,parentProfID=profession,dynamicProfession=true}
+                    end
+                end
+            elseif not context.explicitProfession or weapon.parentProfID == context.parentProfID then
+                requests[#requests+1]=weapon
             end
         end
     end
     local armorProfession = context.armorParentProfID or context.parentProfID
     for slot in pairs(context.slots or {}) do
-        local fixedProfession=aliasByKey[slot] and aliasByKey[slot].parentProfID
-        local profession=fixedProfession or armorProfession
-        if (profession==164 or profession==165 or profession==197)
-            and (not context.explicitProfession or not fixedProfession or fixedProfession==context.parentProfID) then
-            requests[#requests+1] = {key=slot, label=slotLabels[slot], slot=slot,
-                armor=not fixedProfession and context.armor or nil, parentProfID=profession}
+        local definition=aliasByKey[slot]
+        local fixedProfession=definition and definition.parentProfID
+        if definition and definition.parentProfIDs then
+            for profession in pairs(definition.parentProfIDs) do
+                if not context.explicitProfession or profession==context.parentProfID then
+                    requests[#requests+1] = {key=slot,label=slotLabels[slot],slot=slot,
+                        parentProfID=profession,dynamicProfession=true}
+                end
+            end
+        else
+            local profession=fixedProfession or armorProfession
+            local armorProfessionValid=profession==164 or profession==165 or profession==197
+            if profession and (fixedProfession or armorProfessionValid)
+                and (not context.explicitProfession or not fixedProfession or fixedProfession==context.parentProfID) then
+                requests[#requests+1] = {key=slot, label=slotLabels[slot], slot=slot,
+                    armor=not fixedProfession and context.armor or nil, parentProfID=profession}
+            end
         end
     end
-    table.sort(requests, function(a,b) return a.key < b.key end)
+    table.sort(requests, function(a,b)
+        if a.key==b.key then return (a.parentProfID or 0)<(b.parentProfID or 0) end
+        return a.key < b.key
+    end)
     return requests
+end
+
+function M.RequestSupportsProfession(request,parentProfID)
+    return type(request)=='table' and request.parentProfID==parentProfID
 end
 
 function M.MatchesItem(request, itemID)
@@ -333,20 +384,22 @@ function M.MatchesRecipe(context, recipeInfo)
     if context.unknownClass then return false end
     if context.explicitProfession and not context.armor then
         for slot in pairs(context.slots) do
-            if not (aliasByKey[slot] and aliasByKey[slot].parentProfID) then return false end
+            local definition=aliasByKey[slot]
+            if not definition or (definition.parentProfID~=context.parentProfID
+                and not (definition.parentProfIDs and definition.parentProfIDs[context.parentProfID])) then
+                return false
+            end
         end
     end
-    if context.explicitProfession and not next(context.slots) then return true end
+    if context.explicitProfession and not next(context.slots) and not context.weapons then return true end
     if type(recipeInfo) ~= 'table' then return false end
     local getInfo = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
     if type(getInfo) ~= 'function' then return false end
     local loaded, outputs = pcall(Scan.Utils.GetOutputItems, recipeInfo)
     if not loaded or type(outputs) ~= 'table' then return false end
     for _, itemID in ipairs(outputs) do
-        if context.weapons or context.slots.INVTYPE_CLOAK or context.slots.INVTYPE_SHIELD then
-            for _, request in ipairs(M.GetRequests(context)) do
-                if M.MatchesItem(request, itemID) then return true end
-            end
+        for _, request in ipairs(M.GetRequests(context)) do
+            if M.MatchesItem(request, itemID) then return true end
         end
         local ok, _, _, _, slot, _, itemClass, armor = pcall(getInfo, itemID)
         if ok and not IsSecret(slot) and not IsSecret(itemClass) and not IsSecret(armor) then

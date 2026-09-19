@@ -105,7 +105,7 @@ assert(not findRow('REJECTED_ORDER') and findRow('NAME').Keywords:IsShown())
 replies:Init(false)
 assert(replies.Description.height==34 and findRow('NAME').Response.width==298)
 local aliases=Scan.Config.LoadEquipmentAliasesConfigOptions(nil,false)
-assert(#aliases.Rows==18)
+assert(#aliases.Rows==26)
 local function aliasRow(key) for _,row in ipairs(aliases.Rows) do if row.key==key then return row end end end
 local wrist,hand=aliasRow('INVTYPE_WRIST'),aliasRow('INVTYPE_HAND')
 local original=Scan.ClassMatching.GetSynonyms('INVTYPE_HAND')

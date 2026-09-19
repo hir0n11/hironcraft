@@ -170,6 +170,7 @@ local function resetConfig()
         prof_keywords = {},
         items = {},
         recipes = {},
+        equipment = {},
     }
 end
 
@@ -390,6 +391,20 @@ function HironCraftScan.Scanner.LoadConfig()
                                         profID = profID,
                                         recipeID = recipeID,
                                     }
+                                end
+                                local getInfo=C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+                                if type(getInfo)=='function' then
+                                    local ok,_,_,_,slot,_,itemClass,subClass=pcall(getInfo,itemID)
+                                    if ok and type(slot)=='string' and slot~='' then
+                                        if slot=='INVTYPE_ROBE' then slot='INVTYPE_CHEST' end
+                                        config.equipment[crafter]=config.equipment[crafter] or {}
+                                        local byProfession=config.equipment[crafter]
+                                        byProfession[parentProfID]=byProfession[parentProfID] or {}
+                                        byProfession[parentProfID]['slot:'..slot]=true
+                                        if itemClass==2 and type(subClass)=='number' then
+                                            byProfession[parentProfID]['weapon:'..subClass]=true
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -754,6 +769,20 @@ local function UpdateAnalyticsProfIDs(parentProfID)
         end
     end
 end
+
+local function MonitorsEquipmentRequest(crafterInfo,request)
+    if not request or not request.dynamicProfession then return true end
+    local byCrafter=config.equipment[crafterInfo.crafter]
+    local byProfession=byCrafter and byCrafter[crafterInfo.parentProfID]
+    if not byProfession then return false end
+    if request.subclasses then
+        for subclass in pairs(request.subclasses) do
+            if byProfession['weapon:'..subclass] then return true end
+        end
+        return false
+    end
+    return request.slot and byProfession['slot:'..request.slot]==true or false
+end
 HironCraftScan.Events:Register('TRADESKILL_OPENED', function()
     local ppInfo = C_TradeSkillUI.GetBaseProfessionInfo()
     HironCraftScan.DoOnceForTag(ppInfo.professionID, UpdateAnalyticsProfIDs)
@@ -998,6 +1027,9 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     if armorContext and armorContext.unknownClass then return nil, nil, nil, nil, true end
     local equipmentRequests = HironCraftScan.ClassMatching
         and HironCraftScan.ClassMatching.GetRequests(armorContext) or nil
+    if armorContext and next(armorContext.slots or {})
+        and (not equipmentRequests or #equipmentRequests==0)
+        and not (overrides and overrides.equipmentRequest) then return nil end
     if overrides and overrides.equipmentRequest then
         local request = overrides.equipmentRequest
         armorContext = {parentProfID=request.parentProfID, armor=request.armor,
@@ -1042,10 +1074,14 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     for _, crafterInfo in ipairs(config.prof_keywords) do
         local equipmentProfession = false
         for _, request in ipairs(equipmentRequests or {}) do
-            if request.parentProfID == crafterInfo.parentProfID then equipmentProfession = true; break end
+            local supports=HironCraftScan.ClassMatching.RequestSupportsProfession(request,crafterInfo.parentProfID)
+            if supports and MonitorsEquipmentRequest(crafterInfo,request) then
+                equipmentProfession = true; break
+            end
         end
         if
-            (equipmentProfession or (armorContext and crafterInfo.parentProfID == armorContext.parentProfID)
+            (equipmentProfession or (armorContext and (not equipmentRequests or #equipmentRequests==0)
+                    and crafterInfo.parentProfID == armorContext.parentProfID)
                 or (not armorContext and HasMatch(message, crafterInfo.keywords)))
             and not HasMatch(message, crafterInfo.exclusions)
         then
@@ -1707,6 +1743,9 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
     -- Be as specific as possible about what we're responding to.
     local profID = crafterInfo.profID
+    local crafterConfig=HironCraftScan.DB.characters[crafterInfo.crafter]
+    local profConfig=crafterConfig and crafterConfig.professions[profID]
+    local crafterParentProfID=profConfig and profConfig.parentProfID
     local recipeID = recipeInfo and recipeInfo.recipeID
     local equipmentRequest = overrides and overrides.equipmentRequest
     local responseID = equipmentRequest and ('equipment:' .. profID .. ':' .. equipmentRequest.key)
@@ -1734,6 +1773,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
                         return nil -- do not downgrade a known item to a slot
                     end
                     if itemID and old.equipmentRequest
+                        and (not old.equipmentRequest.parentProfID
+                            or old.equipmentRequest.parentProfID==crafterParentProfID)
                         and HironCraftScan.ClassMatching.MatchesItem(old.equipmentRequest, itemID) then
                         remove[#remove+1] = {orderID=orderID, order=order, response=old}
                     end
@@ -1823,7 +1864,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     end
 
     local profInfo = C_TradeSkillUI.GetProfessionInfoBySkillLineID(profID)
-    local profConfig = HironCraftScan.DB.characters[crafterInfo.crafter].professions[profID]
+    profConfig = profConfig or HironCraftScan.DB.characters[crafterInfo.crafter].professions[profID]
 
     local crafter = HironCraftScan.NameAndRealmToName(crafterInfo.crafter)
     local greeting, alt_craft = BuildRawGreeting(crafterInfo.crafter, profID, itemID, itemLink, recipeID)

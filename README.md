@@ -25,6 +25,26 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Complete equipment aliases (0.3.58)
+
+- Equipment Names now includes Neck, Ring, Trinket and Held Off-hand, plus the
+  missing craftable weapon families Bow, Crossbow, Fist weapon and Wand. The
+  starter aliases include common English/Russian forms and player shorthand
+  such as `ring`/`ринг`, `neck`/`нек`, `trinket`/`тринкет` and `offhand`/`оффхенд`.
+- Ring and Neck route to Jewelcrafting. Ambiguous types (trinkets, held
+  off-hands and the added weapon families) are recipe-driven: a profession is
+  offered only when one of its currently monitored recipes produces that exact
+  inventory type/subclass. This follows expansion recipe changes without
+  claiming a craft from an unrelated enabled profession.
+- Messages can create several independent equipment rows, and a later item link
+  replaces only the matching type and profession. `sword and off-hand` remains
+  two requests, while adjacent `sword off-hand` stays a weapon-hand qualifier.
+  No reply is sent until its banner/Quick Reply is clicked.
+- Generic bags, shirts and profession tools/accessories remain outside this
+  combat-equipment vocabulary: their names do not identify one reliable target
+  profession or order. Exact monitored item links continue through normal item
+  matching.
+
 ## Completed-order material diagnosis reliability (0.3.57)
 
 - Added an end-to-end regression for the intended case: a T4/T3 result from an

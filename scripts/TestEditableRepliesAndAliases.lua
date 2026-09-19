@@ -35,7 +35,7 @@ print('Editable quick replies passed (built-in/custom CRUD, migration, reload, l
 
 assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',Scan)
 local M=Scan.ClassMatching
-assert(#M.GetSynonymDefinitions()==18)
+assert(#M.GetSynonymDefinitions()==26)
 local function requests(text,class)
     return M.GetRequests(M.GetContext(text,nil,class))
 end
@@ -51,6 +51,29 @@ for _,word in ipairs({'shield','shields','buckler','щит','щита'}) do
     local r=contains(requests('need '..word),'INVTYPE_SHIELD')
     assert(r and r.parentProfID==164 and not r.armor,'shield required armor class: '..word)
 end
+for _,case in ipairs({
+    {'need ring','INVTYPE_FINGER',755}, {'need necklace','INVTYPE_NECK',755},
+    {'нужен ринг','INVTYPE_FINGER',755}, {'нужен нек','INVTYPE_NECK',755},
+    {'нужен амулет','INVTYPE_NECK',755}, {'нужно кольцо','INVTYPE_FINGER',755},
+}) do
+    local r=contains(requests(case[1]),case[2])
+    assert(r and r.parentProfID==case[3] and not r.armor,'fixed equipment routed incorrectly: '..case[1])
+end
+local trinkets=requests('need trinket')
+assert(#trinkets==8 and contains(trinkets,'INVTYPE_TRINKET'),
+    'trinket did not expose its candidate crafting professions')
+for _,request in ipairs(trinkets) do assert(request.dynamicProfession) end
+local scribeTrinket=requests('need inscription trinket')
+assert(#scribeTrinket==1 and scribeTrinket[1].parentProfID==773)
+local offhands=requests('need offhand')
+assert(#offhands==8 and contains(offhands,'INVTYPE_HOLDABLE'))
+local scribeOffhand=requests('need inscription offhand')
+assert(#scribeOffhand==1 and scribeOffhand[1].parentProfID==773)
+for _,case in ipairs({{'bow','Bow'},{'crossbow','Crossbow'},{'fist weapon','Fist weapon'},{'wand','Wand'}}) do
+    local list=requests('need '..case[1])
+    assert(#list==8 and contains(list,case[2]),'dynamic weapon missing: '..case[1])
+    for _,request in ipairs(list) do assert(request.dynamicProfession and request.subclasses) end
+end
 for _,phrase in ipairs({'one hand','one handed','one-handed','1 hand','1h','two hand','two hands','2h',
     'two-handed','off hand','main hand'}) do
     local list=requests('sword '..phrase..' crafter','WARRIOR')
@@ -58,6 +81,10 @@ for _,phrase in ipairs({'one hand','one handed','one-handed','1 hand','1h','two 
     assert(#requests('need '..phrase..' sword and hands','WARRIOR')==2,'real gloves were removed: '..phrase)
 end
 assert(#requests('need hands and sword','WARRIOR')==2)
+local weaponAndOffhand=requests('need sword and off-hand','WARRIOR')
+assert(#weaponAndOffhand==9 and contains(weaponAndOffhand,'Sword')
+    and contains(weaponAndOffhand,'INVTYPE_HOLDABLE'),'separate off-hand request was masked as a sword modifier')
+assert(#requests('need sword off-hand crafter','WARRIOR')==1,'adjacent weapon modifier became an off-hand request')
 assert(#requests('need one hand','WARRIOR')==1,'weapon-only rule changed non-weapon matching')
 local swordAliases=M.GetSynonyms('Sword')
 assert(M.SetSynonyms('Sword','one hand blade'))
@@ -95,4 +122,4 @@ assert(contains(requests('need shield'),'INVTYPE_SHIELD').parentProfID==164)
 assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',Scan);M=Scan.ClassMatching
 Scan.DB.settings.match_customer_class=true
 assert(contains(requests('need reinforced hand cover','WARRIOR'),'INVTYPE_WRIST'),'reload lost aliases')
-print('Equipment aliases passed (18 starter types, weapon modifiers, shield, phrases, live edits, collisions, disable/reset, reload, class opt-out).')
+print('Equipment aliases passed (26 starter types, jewelry/off-hand/trinkets, complete craftable weapons, edits, reload, class opt-out).')

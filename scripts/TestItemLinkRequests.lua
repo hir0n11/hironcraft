@@ -779,10 +779,11 @@ assert(forClass('need wrist','WARRIOR',{forceCrafterInfo={crafter='Seller-Realm'
 assert(forClass('need cloak','WARRIOR').crafter=='Seller-Realm')
 assert(Scan.ClassMatching.GetContext('need wrist enchant','Class-WARRIOR').parentProfID==333)
 assert(Scan.ClassMatching.GetContext('need cloth wrist','Class-WARRIOR').armor==1)
-for _,text in ipairs({'need wrist for alt',
-    'need ring','need weapon','need tool','need bag','need necklace'}) do
+for _,text in ipairs({'need wrist for alt','need weapon','need tool','need bag'}) do
     assert(not Scan.ClassMatching.GetContext(text,'Class-WARRIOR'), 'class overrode explicit/non-armor request')
 end
+assert(Scan.ClassMatching.GetContext('need ring','Class-WARRIOR').parentProfID==755)
+assert(Scan.ClassMatching.GetContext('need necklace','Class-WARRIOR').parentProfID==755)
 assert(not Scan.ClassMatching.GetContext('need wristwatch','Class-WARRIOR'), 'substring matched as an armor slot')
 assert(not forClass('need wrist','UNKNOWN'), 'unknown class guessed an armor crafter')
 Scan.DB.settings.match_customer_class=false
@@ -960,6 +961,73 @@ assert(countRows()==2 and response(210) and not response(shieldID) and response(
 assert(#sent==0,'shield request sent automatically')
 Scan.DB.settings.inclusions=savedInclusions;reloadConfig()
 print('Sword/shield scanner tests passed (qualifiers, single greeting, real gloves, typed link replacement).')
+
+-- Jewelry/off-hand use fixed professions. Trinkets are intentionally dynamic:
+-- create rows only for professions with a monitored trinket output.
+Scan.DB.characters['Jewel-Realm']=character(755,'jc',{
+    [211]={scan_state=1,keywords=''},[212]={scan_state=1,keywords=''},
+})
+Scan.DB.characters['Scribe-Realm']=character(773,'inscription',{
+    [213]={scan_state=1,keywords=''},[214]={scan_state=1,keywords=''},
+})
+Scan.DB.characters['Alchemist-Realm']=character(171,'alchemy',{
+    [215]={scan_state=1,keywords=''},
+})
+for id,slot in pairs({[211]='INVTYPE_FINGER',[212]='INVTYPE_NECK',
+    [213]='INVTYPE_HOLDABLE',[214]='INVTYPE_TRINKET',[215]='INVTYPE_TRINKET'}) do
+    recipes[id]={recipeID=id,qualityItemIDs={id+1000}}
+    armorItems[id+1000]={slot=slot,class=4,subclass=0}
+end
+reloadConfig();reset()
+scan('need ring neck offhand trinket')
+local ringID,neckID,offhandID='equipment:755:INVTYPE_FINGER',
+    'equipment:755:INVTYPE_NECK','equipment:773:INVTYPE_HOLDABLE'
+local scribeTrinketID,alchemyTrinketID='equipment:773:INVTYPE_TRINKET','equipment:171:INVTYPE_TRINKET'
+assert(countRows()==5 and response(ringID) and response(neckID) and response(offhandID)
+    and response(scribeTrinketID) and response(alchemyTrinketID),
+    'jewelry/off-hand or monitored trinket rows were missing')
+assert(not response('equipment:202:INVTYPE_TRINKET') and not response('equipment:755:INVTYPE_TRINKET'),
+    'profession without a monitored trinket recipe claimed the request')
+assert(#sent==0,'new equipment categories sent without a click')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1214),'Buyer','Buyer-GUID')
+assert(countRows()==5 and response(214) and not response(scribeTrinketID)
+    and response(alchemyTrinketID),'scribe trinket link removed another profession placeholder')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1211),'Buyer','Buyer-GUID')
+assert(countRows()==5 and response(211) and not response(ringID) and response(neckID),
+    'ring link replaced Neck or failed to replace Ring')
+assert(#sent==0,'exact jewelry/trinket link sent automatically')
+reset();scan('need tailoring trinket')
+assert(countRows()==0,'unsupported explicit trinket profession produced a row')
+print('Jewelry/off-hand/trinket scanner tests passed (fixed routing, monitored dynamic professions, exact replacement).')
+
+-- Less common weapon families are also recipe-driven so an expansion can
+-- move them between professions without generating a false craft claim.
+Scan.DB.characters['Leather-Realm'].professions[165].recipes[216]={scan_state=1,keywords=''}
+Scan.DB.characters['Engineer-Realm'].professions[202].recipes[217]={scan_state=1,keywords=''}
+Scan.DB.characters['Smith-Realm'].professions[164].recipes[218]={scan_state=1,keywords=''}
+Scan.DB.characters['Enchanter-Realm']=character(333,'enchanting',{
+    [219]={scan_state=1,keywords=''},
+})
+for id,data in pairs({[216]={'INVTYPE_RANGEDRIGHT',2},[217]={'INVTYPE_RANGEDRIGHT',18},
+    [218]={'INVTYPE_WEAPON',13},[219]={'INVTYPE_RANGEDRIGHT',19}}) do
+    recipes[id]={recipeID=id,qualityItemIDs={id+1000}}
+    armorItems[id+1000]={slot=data[1],class=2,subclass=data[2]}
+end
+reloadConfig();reset()
+scan('need bow crossbow fist weapon wand')
+local bowID,crossbowID,fistID,wandID='equipment:165:Bow','equipment:202:Crossbow',
+    'equipment:164:Fist weapon','equipment:333:Wand'
+assert(countRows()==4 and response(bowID) and response(crossbowID)
+    and response(fistID) and response(wandID),'recipe-backed weapon categories routed incorrectly')
+assert(not response('equipment:164:Bow') and not response('equipment:202:Wand'),
+    'unmonitored profession claimed a dynamic weapon')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1216),'Buyer','Buyer-GUID')
+assert(countRows()==4 and response(216) and not response(bowID)
+    and response(crossbowID) and response(fistID) and response(wandID),
+    'bow link replaced another weapon category')
+assert(#sent==0,'dynamic weapon request sent automatically')
+print('Dynamic weapon scanner tests passed (bow, crossbow, fist weapon, wand, recipe-backed routing).')
+
 reset()
 recipes[301]={recipeID=301,qualityItemIDs={1501}}
 recipes[303]={recipeID=303,qualityItemIDs={1503}}
