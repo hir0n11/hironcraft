@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Completed-order materials and scanner fixes (0.3.56)
+
+- Completed equipment orders below T5 now show the customer reagent tooltip
+  beside chat history, including the actual crafted tier. The green completion
+  check remains; this does not offer a rejected-order reply. Recipes whose
+  maximum is T2/T3, T5 results, and unknown results do not trigger this tooltip.
+- Capture customer materials before crafting consumes them. Preserve snapshots
+  across reloads and linked-account status/journal updates; track the final pass
+  of a recraft separately. Missing post-craft data is unknown, not a shortage.
+  Actual quality comes from the fulfilled order's output hyperlink, not its
+  requested minimum or a crafting preview. Previously completed orders without
+  a snapshot cannot be reconstructed. Pending snapshots are capped at 500/30 days.
+- Weapon qualifiers (`one hand`, `two hand`, `1h`, `2h`, hyphenated forms)
+  no longer create an extra Gloves request. Separate requests such as
+  `hands and one hand sword` still produce two rows. Configured weapon phrases
+  remain intact, and exact links replace only the matching equipment request.
+- Added editable Shield synonyms (`shield`, `shields`, `buckler`, `bucklers`,
+  `щит`, `щиты`, `щита`, `щитов`). Shields route to Blacksmithing independently of
+  customer armor class and replace their placeholder when a shield is linked.
+- Patron/recipe shopping can populate its list before the first auction visit.
+  The shopping UI is created only after the auction UI is available and shown,
+  avoiding missing `AuctionHouseFrameDisplayModeTabTemplate` errors. The stored
+  list is retained for the next auction visit; closed auctions are not marked open.
+- Regression tests cover capture/craft/fulfillment, reloads, linked enrichment,
+  recraft passes, tooltip quality, scanner phrases and deferred auction opening.
+  All outgoing replies remain manual. Live rendering still needs an in-game check.
+
 ## Natural reagent replies (0.3.55)
 
 - `{reagent_issues}` now writes conversational sentences: `Looks like you're

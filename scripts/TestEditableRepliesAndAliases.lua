@@ -35,7 +35,7 @@ print('Editable quick replies passed (built-in/custom CRUD, migration, reload, l
 
 assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',Scan)
 local M=Scan.ClassMatching
-assert(#M.GetSynonymDefinitions()==17)
+assert(#M.GetSynonymDefinitions()==18)
 local function requests(text,class)
     return M.GetRequests(M.GetContext(text,nil,class))
 end
@@ -47,6 +47,24 @@ for _,word in ipairs({'back','cloak','capes','плащ'}) do
     local r=contains(requests('need '..word),'INVTYPE_CLOAK')
     assert(r and r.parentProfID==197 and not r.armor,'cloak required a customer class')
 end
+for _,word in ipairs({'shield','shields','buckler','щит','щита'}) do
+    local r=contains(requests('need '..word),'INVTYPE_SHIELD')
+    assert(r and r.parentProfID==164 and not r.armor,'shield required armor class: '..word)
+end
+for _,phrase in ipairs({'one hand','one handed','one-handed','1 hand','1h','two hand','two hands','2h',
+    'two-handed','off hand','main hand'}) do
+    local list=requests('sword '..phrase..' crafter','WARRIOR')
+    assert(#list==1 and list[1].key=='Sword','weapon modifier made gloves: '..phrase)
+    assert(#requests('need '..phrase..' sword and hands','WARRIOR')==2,'real gloves were removed: '..phrase)
+end
+assert(#requests('need hands and sword','WARRIOR')==2)
+assert(#requests('need one hand','WARRIOR')==1,'weapon-only rule changed non-weapon matching')
+local swordAliases=M.GetSynonyms('Sword')
+assert(M.SetSynonyms('Sword','one hand blade'))
+local customWeapon=requests('need one hand blade and hands','WARRIOR')
+assert(#customWeapon==2 and contains(customWeapon,'Sword') and contains(customWeapon,'INVTYPE_HAND'),
+    'weapon modifier destroyed a configured multi-word weapon alias')
+assert(M.SetSynonyms('Sword',swordAliases))
 local original=M.GetSynonyms('INVTYPE_HAND')
 assert(M.SetSynonyms('INVTYPE_HAND',original..', mitts, fancy hand protectors, MITTS'))
 assert(M.GetSynonyms('INVTYPE_HAND'):sub(-5)=='mitts' or M.GetSynonyms('INVTYPE_HAND'):find('mitts',1,true))
@@ -73,7 +91,8 @@ assert(not M.GetContext('need wrist',nil,'WARRIOR'))
 assert(contains(requests('looking for wrist cloth crafter please'),'INVTYPE_WRIST').parentProfID==197)
 assert(contains(requests('need back'),'INVTYPE_CLOAK'))
 assert(contains(requests('need gun'),'Gun').parentProfID==202)
+assert(contains(requests('need shield'),'INVTYPE_SHIELD').parentProfID==164)
 assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',Scan);M=Scan.ClassMatching
 Scan.DB.settings.match_customer_class=true
 assert(contains(requests('need reinforced hand cover','WARRIOR'),'INVTYPE_WRIST'),'reload lost aliases')
-print('Equipment aliases passed (17 starter types, phrases, live edits, collisions, disable/reset, reload, class opt-out).')
+print('Equipment aliases passed (18 starter types, weapon modifiers, shield, phrases, live edits, collisions, disable/reset, reload, class opt-out).')

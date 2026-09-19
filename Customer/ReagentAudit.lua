@@ -64,8 +64,14 @@ function Audit.Sanitize(snapshot)
     local result = {version=1, orderID=Number(snapshot.orderID, 1e16),
         recipeID=Number(snapshot.recipeID), capturedAt=Number(snapshot.capturedAt, 1e12),
         complete=snapshot.complete == true, isRecraft=snapshot.isRecraft == true,
+        craftStarted=snapshot.craftStarted == true,
+        craftAttempt=Number(snapshot.craftAttempt,10000),
+        craftedQuality=Number(snapshot.craftedQuality,5),
+        maxCraftedQuality=Number(snapshot.maxCraftedQuality,5),
         reason=Plain(snapshot.reason), rows={}}
     if not result.orderID or not result.capturedAt or type(snapshot.rows) ~= 'table' then return nil end
+    if result.craftedQuality==0 then result.craftedQuality=nil end
+    if result.maxCraftedQuality==0 then result.maxCraftedQuality=nil end
     if type(snapshot.quality)=='table' then
         local quality=snapshot.quality
         result.quality={currentQuality=Number(quality.currentQuality,10),
@@ -206,12 +212,102 @@ function Audit.Capture(order, details)
     return Audit.Sanitize(snapshot)
 end
 
+-- Keep the customer's pre-consumption list even if the claimed-order API is
+-- cleared before fulfillment, or the crafting character reloads mid-order.
+local function ProgressStorage()
+    if not Scan.DB or not Scan.DB.settings then return {} end
+    local settings=Scan.DB.settings
+    if type(settings.order_reagent_snapshots)~='table' then settings.order_reagent_snapshots={} end
+    return settings.order_reagent_snapshots
+end
+function Audit.PruneProgress()
+    local storage,entries=ProgressStorage(),{}
+    for key,snapshot in pairs(storage) do
+        local stamp=type(snapshot)=='table' and Number(snapshot.capturedAt,1e12)
+        if not stamp or time()-stamp>30*24*60*60 then storage[key]=nil
+        else entries[#entries+1]={key=key,time=stamp} end
+    end
+    table.sort(entries,function(a,b) return a.time>b.time end)
+    for index=501,#entries do storage[entries[index].key]=nil end
+end
+function Audit.CaptureProgress(order,beforeCraft)
+    local id=type(order)=='table' and Number(order.orderID,1e16)
+    if not id then return nil end
+    local storage=ProgressStorage()
+    local previous=Audit.Sanitize(storage[tostring(id)])
+    if previous and (previous.orderID~=id or (order.spellID and previous.recipeID~=order.spellID)) then previous=nil end
+    local snapshot=previous
+    if not previous or (not previous.craftStarted and (beforeCraft or not previous.complete)) then
+        local fresh=Audit.Capture(order)
+        if fresh and (not previous or fresh.complete or not previous.complete) then snapshot=fresh end
+        if snapshot and not previous and order.isFulfillable==true then
+            -- First seen after consumption: display what the server still
+            -- exposes, but never interpret an empty slot as a customer shortage.
+            snapshot.complete=false
+            for _,row in ipairs(snapshot.rows) do row.known=false end
+        end
+    end
+    if not snapshot then return nil end
+    local qualities=C_TradeSkillUI and C_TradeSkillUI.GetQualitiesForRecipe
+    if qualities and snapshot.recipeID then
+        local ok,ids=pcall(qualities,snapshot.recipeID)
+        if ok and type(ids)=='table' and #ids>0 and #ids<=5 then snapshot.maxCraftedQuality=#ids end
+    end
+    if beforeCraft then
+        snapshot.craftStarted=true
+        snapshot.craftAttempt=(previous and previous.craftAttempt or 0)+1
+        snapshot.craftedQuality=nil -- A previous pass through this recraft is not its new result.
+    elseif order.isFulfillable==true then
+        snapshot.craftStarted=true
+        local link=order.outputItemHyperlink
+        local getQuality=C_TradeSkillUI and C_TradeSkillUI.GetItemCraftedQualityByItemInfo
+        if getQuality and not (issecretvalue and issecretvalue(link)) and type(link)=='string' then
+            local ok,quality=pcall(getQuality,link)
+            quality=ok and Number(quality,5)
+            if quality and quality>0 then snapshot.craftedQuality=quality end
+        end
+    end
+    storage[tostring(id)]=snapshot
+    Audit.PruneProgress()
+    return snapshot
+end
+function Audit.IsBelowT5(snapshot)
+    return snapshot and snapshot.maxCraftedQuality==5
+        and snapshot.craftedQuality and snapshot.craftedQuality>0 and snapshot.craftedQuality<5
+end
+-- Same game order only. Older peers and transient API misses may omit metadata;
+-- they must not erase a captured list/result. Callers decide revision ordering.
+function Audit.Merge(candidate,current)
+    candidate=Audit.Sanitize(candidate);current=Audit.Sanitize(current)
+    if not candidate then return current end
+    if not current or candidate.orderID~=current.orderID then return candidate end
+    if (candidate.craftAttempt or 0)>(current.craftAttempt or 0) then return candidate end
+    if (candidate.craftAttempt or 0)<(current.craftAttempt or 0) then return current end
+    if not candidate.complete and current.complete then
+        candidate.rows=current.rows;candidate.complete=true
+        candidate.capturedAt=current.capturedAt
+    end
+    candidate.craftedQuality=candidate.craftedQuality or current.craftedQuality
+    candidate.maxCraftedQuality=candidate.maxCraftedQuality or current.maxCraftedQuality
+    candidate.craftStarted=candidate.craftStarted or current.craftStarted
+    return candidate
+end
+function Audit.HasMoreDetails(candidate,current)
+    if candidate and current and (candidate.craftAttempt or 0)<(current.craftAttempt or 0) then return false end
+    return candidate and (not current or (candidate.complete and not current.complete)
+        or ((candidate.craftAttempt or 0)>(current.craftAttempt or 0))
+        or (candidate.craftedQuality and not current.craftedQuality)
+        or (candidate.maxCraftedQuality and not current.maxCraftedQuality))
+end
+
 function Audit.GetForOrder(order)
     local fulfillment=Scan.OrderFulfillment
     local status=fulfillment and fulfillment:GetStatus(order)
-    if not status or status.status~=fulfillment.Status.Rejected then return nil end
+    if not status then return nil end
     local snapshot=status.reagentAudit
-    if snapshot and tostring(snapshot.orderID)==tostring(status.craftingOrderID) then return snapshot end
+    if snapshot and tostring(snapshot.orderID)==tostring(status.craftingOrderID)
+        and (status.status==fulfillment.Status.Rejected
+            or (status.status==fulfillment.Status.Fulfilled and Audit.IsBelowT5(snapshot))) then return snapshot end
 end
 function Audit.ForResponse(response)
     for _, order in pairs(Scan.DB.listed_orders or {}) do
@@ -308,8 +404,11 @@ function Audit.ShowTooltip(owner, name, history, snapshot)
         owner.reagentTooltip=tip
     end
     tip:SetOwner(history,'ANCHOR_NONE');tip:ClearLines();tip:SetMinimumWidth(300)
-    tip:AddLine(L('Customer reagents at decline'),1,0.82,0)
+    tip:AddLine(L(snapshot.craftedQuality and 'Customer reagents for completed order' or 'Customer reagents at decline'),1,0.82,0)
     tip:AddLine('#'..tostring(snapshot.orderID)..' - '..date('%d.%m %H:%M',snapshot.capturedAt),0.7,0.7,0.7)
+    if snapshot.craftedQuality and snapshot.maxCraftedQuality then
+        tip:AddLine(string.format(L('Crafted quality: T%d / T%d'),snapshot.craftedQuality,snapshot.maxCraftedQuality),1,0.65,0.1,true)
+    end
     local qualityProblem=Audit.QualityProblem(snapshot,true)
     if qualityProblem then tip:AddLine(qualityProblem,1,0.65,0.1,true) end
     local quality=snapshot.quality

@@ -780,7 +780,7 @@ assert(forClass('need cloak','WARRIOR').crafter=='Seller-Realm')
 assert(Scan.ClassMatching.GetContext('need wrist enchant','Class-WARRIOR').parentProfID==333)
 assert(Scan.ClassMatching.GetContext('need cloth wrist','Class-WARRIOR').armor==1)
 for _,text in ipairs({'need wrist for alt',
-    'need ring','need weapon','need tool','need bag','need necklace','need shield'}) do
+    'need ring','need weapon','need tool','need bag','need necklace'}) do
     assert(not Scan.ClassMatching.GetContext(text,'Class-WARRIOR'), 'class overrode explicit/non-armor request')
 end
 assert(not Scan.ClassMatching.GetContext('need wristwatch','Class-WARRIOR'), 'substring matched as an armor slot')
@@ -921,6 +921,45 @@ assert(countRows()==3 and not response(beltID) and not response(handID) and not 
     'repeated slot names downgraded linked items')
 assert(#sent==0,'link replacement automatically sent a greeting')
 print('Belt/hands/back scenario passed (three classes, three rows, independent link replacement, no auto send).')
+
+-- Public scanner -> typed row -> manual greeting -> exact item replacement.
+recipes[209]={recipeID=209,qualityItemIDs={1209}}
+recipes[210]={recipeID=210,qualityItemIDs={1210}}
+armorItems[1209]={slot='INVTYPE_WEAPON',class=2,subclass=7}
+armorItems[1210]={slot='INVTYPE_SHIELD',class=4,subclass=6}
+Scan.DB.characters['Smith-Realm'].professions[164].recipes[209]={scan_state=1,keywords=''}
+Scan.DB.characters['Smith-Realm'].professions[164].recipes[210]={scan_state=1,keywords=''}
+local savedInclusions=Scan.DB.settings.inclusions
+Scan.DB.settings.inclusions=savedInclusions..',crafter'
+reloadConfig()
+local swordID,shieldID='equipment:164:Sword','equipment:164:INVTYPE_SHIELD'
+for _,modifier in ipairs({'one hand','two hand','1h','2h','one-handed','two-handed'}) do
+    reset();classByGUID['Buyer-GUID']='WARRIOR'
+    scan('sword '..modifier..' crafter')
+    assert(countRows()==1 and response(swordID) and not response(handID),
+        'weapon qualifier created a glove/profession row: '..modifier)
+    flushTimers();assert(#sent==0,'weapon request sent without a click')
+    assert(Scan.SendOrderGreeting(order(swordID),true))
+    assert(#sent==1,'weapon greeting produced a second message')
+    Scan.OnMessage('CHAT_MSG_WHISPER',link(1209),'Buyer','Buyer-GUID')
+    assert(countRows()==1 and response(209) and not response(swordID),'sword link did not replace Sword')
+    assert(#sent==1,'sword replacement sent automatically')
+end
+reset();classByGUID['Buyer-GUID']='WARRIOR'
+scan('need hands and one hand sword')
+assert(countRows()==2 and response(handID) and response(swordID),'real gloves were suppressed')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1209),'Buyer','Buyer-GUID')
+assert(countRows()==2 and response(handID) and response(209) and not response(swordID))
+reset();classByGUID['Buyer-GUID']='MAGE'
+scan('need shield and hands')
+local clothHands='equipment:197:INVTYPE_HAND'
+assert(countRows()==2 and response(shieldID) and response(clothHands),'Shield inherited customer armor profession')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1210),'Buyer','Buyer-GUID')
+assert(countRows()==2 and response(210) and not response(shieldID) and response(clothHands),
+    'shield link replaced the wrong request')
+assert(#sent==0,'shield request sent automatically')
+Scan.DB.settings.inclusions=savedInclusions;reloadConfig()
+print('Sword/shield scanner tests passed (qualifiers, single greeting, real gloves, typed link replacement).')
 reset()
 recipes[301]={recipeID=301,qualityItemIDs={1501}}
 recipes[303]={recipeID=303,qualityItemIDs={1503}}

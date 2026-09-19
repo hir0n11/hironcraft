@@ -38,6 +38,7 @@ AddSlot('INVTYPE_WAIST', 'waistguard waistguards girdle girdles sash')
 AddSlot('INVTYPE_LEGS', 'legguard legguards legplates trousers')
 AddSlot('INVTYPE_FEET', 'sabatons treads slippers greaves footwraps')
 AddSlot('INVTYPE_CLOAK', 'back cloak cloaks cape capes drape drapes плащ плащи плаща накидка накидки спина спину', 197)
+AddSlot('INVTYPE_SHIELD', 'shield shields buckler bucklers щит щиты щита щитов', 164)
 
 -- Explicit professions/materials and non-armor requests must not be inferred
 -- from the speaker's class (alts, transmogs, enchants and profession tools).
@@ -79,7 +80,7 @@ local classCache = {}
 local slotLabels = {
     INVTYPE_WRIST='Wrist', INVTYPE_HEAD='Head', INVTYPE_SHOULDER='Shoulders',
     INVTYPE_CHEST='Chest', INVTYPE_HAND='Gloves', INVTYPE_WAIST='Belt',
-    INVTYPE_LEGS='Legs', INVTYPE_FEET='Boots', INVTYPE_CLOAK='Cloak',
+    INVTYPE_LEGS='Legs', INVTYPE_FEET='Boots', INVTYPE_CLOAK='Cloak', INVTYPE_SHIELD='Shield',
 }
 local weapons = {}
 local function Weapon(key, profession, subclasses, words)
@@ -154,6 +155,11 @@ function M.ResetSynonyms(key)
 end
 
 local aliasCache,aliasSignature={},nil
+local weaponHandPhrases={
+    'one handed','two handed','single handed','double handed','one hand','two hands','two hand',
+    '1 handed','2 handed','1 hand','2 hands','2 hand','main hand','off hand',
+    'onehanded','twohanded','onehand','twohand','1handed','2handed','1hand','2hand','1h','2h',
+}
 local function MatchAliases(message)
     local signature={}
     for _,definition in ipairs(aliasDefinitions) do signature[#signature+1]=M.GetSynonyms(definition.key) end
@@ -174,6 +180,36 @@ local function MatchAliases(message)
         end)
     end
     local remaining=' '..NormalizeAliases(message)..' '
+    local weaponRanges={}
+    for _,alias in ipairs(aliasCache) do
+        if weapons[alias.key] or alias.key=='INVTYPE_SHIELD' then
+            local pattern=' '..alias.text..' '
+            local first,last=remaining:find(pattern,1,true)
+            while first do
+                weaponRanges[#weaponRanges+1]={first+1,last-1}
+                first,last=remaining:find(pattern,last,true)
+            end
+        end
+    end
+    if #weaponRanges>0 then
+        for _,phrase in ipairs(weaponHandPhrases) do
+            local pattern=' '..phrase..' '
+            local first,last=remaining:find(pattern,1,true)
+            while first do
+                local insideAlias=false
+                for _,range in ipairs(weaponRanges) do
+                    if first+1<=range[2] and last-1>=range[1] then insideAlias=true;break end
+                end
+                -- Mask only the weapon modifier, not other mentions of hands:
+                -- "one hand sword and gloves" still requests two items. Keep
+                -- custom aliases such as "one hand blade" intact as well.
+                if not insideAlias then
+                    remaining=remaining:sub(1,first)..string.rep(' ',last-first-1)..remaining:sub(last)
+                end
+                first,last=remaining:find(pattern,last,true)
+            end
+        end
+    end
     local matches={}
     for _,alias in ipairs(aliasCache) do
         local pattern=' '..alias.text..' '
@@ -307,7 +343,7 @@ function M.MatchesRecipe(context, recipeInfo)
     local loaded, outputs = pcall(Scan.Utils.GetOutputItems, recipeInfo)
     if not loaded or type(outputs) ~= 'table' then return false end
     for _, itemID in ipairs(outputs) do
-        if context.weapons or context.slots.INVTYPE_CLOAK then
+        if context.weapons or context.slots.INVTYPE_CLOAK or context.slots.INVTYPE_SHIELD then
             for _, request in ipairs(M.GetRequests(context)) do
                 if M.MatchesItem(request, itemID) then return true end
             end

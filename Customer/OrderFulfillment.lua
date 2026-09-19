@@ -18,6 +18,20 @@ local function CleanReagentAudit(snapshot, orderID)
     local audit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.Sanitize(snapshot)
     if audit and orderID and tostring(audit.orderID) == tostring(orderID) then return audit end
 end
+local function KeepsReagentAudit(status)
+    return status==OrderFulfillment.Status.Rejected or status==OrderFulfillment.Status.Fulfilled
+        or status==OrderFulfillment.Status.Claimed or status==OrderFulfillment.Status.Crafted
+end
+local function MergeReagentAudit(candidate,current)
+    local audit=HironCraftScan.ReagentAudit
+    if audit and audit.Merge then return audit.Merge(candidate,current) end
+    return candidate or current
+end
+local function HasMoreReagentDetails(candidate,current)
+    local audit=HironCraftScan.ReagentAudit
+    if audit and audit.HasMoreDetails then return audit.HasMoreDetails(candidate,current) end
+    return candidate and not current
+end
 local craftingOrderToHironCraftScan = {}
 -- Fulfillment responses may omit orderID after GetClaimedOrder() has already
 -- been cleared, so retain the last snapshots captured by claim/craft events.
@@ -143,11 +157,18 @@ local function CurrentParentProfessionID()
     return tonumber(info.parentProfessionID or info.professionID or info.profession)
 end
 
-local function SnapshotOrderInfo(orderInfo, craftingOrderID)
+local function SnapshotOrderInfo(orderInfo, craftingOrderID, beforeCraft)
     if type(orderInfo) ~= 'table' or type(orderInfo.customerName) ~= 'string' then
         return nil
     end
 
+    if craftingOrderID and orderInfo.orderID and tostring(craftingOrderID)~=tostring(orderInfo.orderID) then
+        return nil -- A late response for A must not capture the currently claimed B.
+    end
+    local audit=CleanReagentAudit(orderInfo.reagentAudit,craftingOrderID or orderInfo.orderID)
+    if not audit and HironCraftScan.ReagentAudit then
+        audit=HironCraftScan.ReagentAudit.CaptureProgress(orderInfo,beforeCraft)
+    end
     local snapshot = {
         orderID = craftingOrderID or orderInfo.orderID,
         customerName = orderInfo.customerName,
@@ -156,7 +177,7 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID)
         itemID = tonumber(orderInfo.itemID) or ItemIDFromLink(orderInfo.outputItemHyperlink),
         parentProfessionID = tonumber(orderInfo.parentProfessionID) or CurrentParentProfessionID(),
         capturedAt = time(),
-        reagentAudit = CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID),
+        reagentAudit = audit,
     }
 
     if snapshot.orderID then
@@ -398,7 +419,7 @@ local function SanitizeEntry(entry)
         clean.result = entry.result:sub(1, 64)
     end
 
-    if clean.status == OrderFulfillment.Status.Rejected then
+    if KeepsReagentAudit(clean.status) then
         clean.reagentAudit = CleanReagentAudit(entry.reagentAudit, clean.craftingOrderID)
     end
     return clean
@@ -455,9 +476,7 @@ local function SanitizeCompletionNotice(notice)
         clean.requestTime = notice.requestTime
     end
 
-    if clean.status == OrderFulfillment.Status.Rejected then
-        clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
-    end
+    clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
     return clean
 end
 
@@ -976,8 +995,17 @@ function OrderFulfillment:SetStatus(order, status, options)
     local response = ResponseForOrder(order)
 
     local requestToken = response and response.requestToken
+    local reagentAudit=KeepsReagentAudit(status) and CleanReagentAudit(options.reagentAudit,craftingOrderID) or nil
+    local sameAuditOrder=current and current.status==status and current.automatic~=false
+        and craftingOrderID and current.craftingOrderID==craftingOrderID
+        and SameRequest({requestToken=requestToken,craftingOrderID=craftingOrderID},current)
+    local enriched=sameAuditOrder and (HasMoreReagentDetails(reagentAudit,current.reagentAudit)
+        or (reagentAudit and current.reagentAudit and reagentAudit.craftedQuality
+            and reagentAudit.craftAttempt==current.reagentAudit.craftAttempt
+            and reagentAudit.craftedQuality~=current.reagentAudit.craftedQuality))
     if
         not options.force
+        and not enriched
         and not MayTransition(current, status, craftingOrderID, requestToken, response and response.time)
     then
         return current, false
@@ -992,13 +1020,17 @@ function OrderFulfillment:SetStatus(order, status, options)
         updatedAt = tonumber(options.updatedAt) or time(),
         automatic = options.automatic ~= false,
         result = ResultForStorage(options.result),
-        reagentAudit = status == self.Status.Rejected and CleanReagentAudit(options.reagentAudit, craftingOrderID) or nil,
+        reagentAudit = reagentAudit,
         rev = (current and current.rev or 0) + 1,
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
     }
     if response then
         entry.requestToken = response.requestToken
         entry.requestTime = tonumber(response.time)
+    end
+    if current and KeepsReagentAudit(status) and craftingOrderID
+        and current.craftingOrderID==craftingOrderID and SameRequest(entry,current) then
+        entry.reagentAudit=MergeReagentAudit(entry.reagentAudit,current.reagentAudit)
     end
 
     if HironCraftScanComm and HironCraftScanComm.PrepareOrderStatusDelivery then
@@ -1038,8 +1070,8 @@ function OrderFulfillment:ApplyRemoteStatus(remoteEntry)
     local key = HironCraftScan.OrderToOrderID(entry)
     local current = statuses[key]
     if not EntryIsNewer(entry, current) then
-        if EntriesEquivalent(entry, current) and entry.reagentAudit and not current.reagentAudit then
-            current.reagentAudit = entry.reagentAudit
+        if EntriesEquivalent(entry, current) and HasMoreReagentDetails(entry.reagentAudit,current.reagentAudit) then
+            current.reagentAudit = MergeReagentAudit(entry.reagentAudit,current.reagentAudit)
             NotifyUpdated(current)
             return true, true, current
         end
@@ -1049,9 +1081,9 @@ function OrderFulfillment:ApplyRemoteStatus(remoteEntry)
         return false, EntriesEquivalent(entry, current), current
     end
 
-    if current and entry.status == self.Status.Rejected and current.status == entry.status
+    if current and KeepsReagentAudit(entry.status) and current.status == entry.status
         and entry.craftingOrderID == current.craftingOrderID and SameRequest(entry, current) then
-        entry.reagentAudit = entry.reagentAudit or current.reagentAudit
+        entry.reagentAudit = MergeReagentAudit(entry.reagentAudit,current.reagentAudit)
     end
     statuses[key] = entry
     RememberCraftingOrder(entry)
@@ -1125,10 +1157,10 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
                         reagentAudit = best.reagentAudit,
                         force = true, -- The merge above already validated this transition.
                     })
-                elseif candidate and not manualOverride and best.reagentAudit and stored
-                    and not stored.reagentAudit and stored.status == self.Status.Rejected
+                elseif candidate and not manualOverride and stored
+                    and HasMoreReagentDetails(best.reagentAudit,stored.reagentAudit) and stored.status == best.status
                     and stored.craftingOrderID == best.orderID and SameRequest(candidate, stored) then
-                    stored.reagentAudit = best.reagentAudit
+                    stored.reagentAudit = MergeReagentAudit(best.reagentAudit,stored.reagentAudit)
                     NotifyUpdated(stored)
                 end
             end
@@ -1137,8 +1169,8 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
 
     if current and (current.updatedAt or 0) >= notice.updatedAt then
         local enriched = current.updatedAt == notice.updatedAt and current.status == notice.status
-            and notice.reagentAudit and not current.reagentAudit
-        if enriched then current.reagentAudit = notice.reagentAudit end
+            and HasMoreReagentDetails(notice.reagentAudit,current.reagentAudit)
+        if enriched then current.reagentAudit = MergeReagentAudit(notice.reagentAudit,current.reagentAudit) end
         -- Replayed linked-account notices are also a cheap UI repair signal.
         -- The data is already current, but the ScrollBox row may have been
         -- rebound after the original notification was handled.
@@ -1147,6 +1179,9 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
         return enriched and true or false
     end
 
+    if current and current.status==notice.status then
+        notice.reagentAudit=MergeReagentAudit(notice.reagentAudit,current.reagentAudit)
+    end
     notices[key] = notice
     MaterializeMatchingStatuses(notice)
     NotifyCompletionUpdated(notice)
@@ -1183,7 +1218,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
         status = status or self.Status.Fulfilled,
         requestToken = orderInfo.requestToken,
         requestTime = tonumber(orderInfo.requestTime),
-        reagentAudit = status == self.Status.Rejected and CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID) or nil,
+        reagentAudit = CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID),
     }
 
     if not self:ApplyRemoteCompletion(notice) then
@@ -1438,7 +1473,7 @@ local function RegisterEvents()
                 if orderID then
                     local orderInfo = GetClaimedOrder()
                     if orderInfo then
-                        SnapshotOrderInfo(orderInfo, orderID)
+                        SnapshotOrderInfo(orderInfo, orderID, true)
                     end
                 end
             end)
@@ -1448,7 +1483,7 @@ local function RegisterEvents()
             hooksecurefunc(C_TradeSkillUI, 'RecraftRecipeForOrder', function(orderID)
                 local orderInfo = GetClaimedOrder()
                 if orderInfo then
-                    SnapshotOrderInfo(orderInfo, orderID)
+                    SnapshotOrderInfo(orderInfo, orderID, true)
                 end
             end)
         end
@@ -1601,6 +1636,7 @@ end
 
 HironCraftScan.Utils.onLoad(function()
     PruneStorage()
+    if HironCraftScan.ReagentAudit then HironCraftScan.ReagentAudit.PruneProgress() end
     for _, entry in pairs(EnsureStorage()) do
         RememberCraftingOrder(entry)
     end

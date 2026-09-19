@@ -2997,7 +2997,10 @@ function S:CreateWindow()
         return self.frame
     end
 
-    local parent = AuctionHouseFrame or UIParent
+    -- The native tab templates belong to Blizzard_AuctionHouseUI (load on
+    -- demand). Patron/recipe imports can run before it has ever been loaded.
+    if not AuctionHouseFrame then return nil end
+    local parent = AuctionHouseFrame
 
     local f = CreateFrame("Frame", "HironCraftProfitShoppingListTab", parent)
     f:SetAllPoints(parent)
@@ -4374,10 +4377,17 @@ function S:EnsureAuctionTab()
 end
 
 function S:ShowWindow()
+    -- Importing a shopping list outside the AH only updates the stored session.
+    -- Do not build a hidden auction UI, load Blizzard's addon, or mark the AH
+    -- open. AUCTION_HOUSE_SHOW will build/select the page with this same list.
+    if not AuctionHouseFrame or not AuctionHouseFrame:IsShown() then
+        if self.frame then self.frame:Hide() end
+        return
+    end
     local tabLib = GetLibAHTab()
-    local f = self:CreateWindow()
 
     if AuctionHouseFrame and tabLib and ShouldShowAuctionTab() then
+        local f = self:CreateWindow()
         self.isAuctionHouseOpen = true
 
         f:SetParent(AuctionHouseFrame)
@@ -4395,7 +4405,7 @@ function S:ShowWindow()
             tabLib:SetSelected(AH_TAB_ID)
         end
     else
-        f:Hide()
+        if self.frame then self.frame:Hide() end
     end
 end
 
