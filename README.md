@@ -25,6 +25,31 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Congestion-free status and material sync (0.3.61)
+
+- Checkmarks no longer queue behind material lists. Blizzard throttles addon
+  messages per prefix and AceComm sends each prefix/priority in order, so
+  material lists, profession snapshots, analytics and settings now use a
+  separate `HIRONCRAFT_BULK` prefix. Marks, ACKs and pings keep
+  `HIRONCRAFT_SCAN`, as do the public crafter-search messages.
+- Marks are sent without materials and acknowledged immediately. Claim, craft
+  and fulfil revisions made within 0.3 s are sent together; a mark still in the
+  local send queue is never queued again, and resends back off. A backlog is
+  sent ten marks at a time, the next part after each ACK.
+- Material lists (fulfilled and rejected only) have their own durable
+  "undelivered" flag and ACK. At most one batch per linked account is in
+  flight; the next batch or a retry follows an ACK or a timeout counted from
+  the moment the batch actually left the queue. A list still queued at logout
+  is sent by the next character. Rows materialized from a linked account's
+  notice no longer echo the list back.
+- Ping timeouts start when the ping is actually sent, and pinging every known
+  character is limited to once per 20 s. Previously a busy queue looked like a
+  character switch and triggered pings to every alt, which slowed it further.
+- Logging in sends only unconfirmed marks instead of the recent journal with
+  materials, and the login snapshot no longer contains material lists.
+- Both linked clients must run this version: older clients ignore the new
+  prefix and do not acknowledge material lists.
+
 ## Prompt live material delivery and compact tooltips (0.3.60)
 
 - Ordinary live outcomes (up to 12 reagent rows / 24 supplied variants) send

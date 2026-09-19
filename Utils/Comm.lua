@@ -36,8 +36,15 @@ local LibDeflate = LibStub('LibDeflate')
 
 local broadcastChannel = 'HironCraftScan'
 local HIRONCRAFT_SCAN_COMM_PREFIX = 'HIRONCRAFT_SCAN'
+-- Large, non-urgent payloads (material lists, profession snapshots, analytics,
+-- settings) use a second prefix. Blizzard throttles addon messages per prefix
+-- (a small burst, then about one message per second) and AceComm queues each
+-- prefix/priority as one FIFO pipe. On a shared prefix every material chunk
+-- delayed the following statuses, ACKs and pings.
+local HIRONCRAFT_BULK_COMM_PREFIX = 'HIRONCRAFT_BULK'
 function HironCraftScanComm:OnEnable()
     self:RegisterComm(HIRONCRAFT_SCAN_COMM_PREFIX)
+    self:RegisterComm(HIRONCRAFT_BULK_COMM_PREFIX)
 
     -- We want to make sure we've waited until after the other channels are
     -- initialized so we don't plan HironCraftScan at /1. I tried being clever and
@@ -65,6 +72,8 @@ HironCraftScanComm.Operations = {
     ShareOrderCompletionRepair = 'share_order_completion_repair',
     OrderCompletionAck = 'order_completion_ack',
     ShareOrderOutcome = 'share_order_outcome',
+    ShareOrderMaterials = 'share_order_materials',
+    OrderMaterialsAck = 'order_materials_ack',
     ShareAnalytics = 'share_analytics',
     Ping = 'ping',
     FindCrafter = 'fc',
@@ -102,14 +111,36 @@ local StartHeartbeat
 local SendOrderStatusAcks
 local SendOrderStatusRepairs
 local ReceiveOrderStatuses
+local ScheduleOrderStatusFlush
+local ScheduleMaterialPump
 local lastRecentOrderReplayAt = nil
 local FRESH_TARGET_SECONDS = 15
 local HEARTBEAT_SECONDS = 10
 local PING_ATTEMPT_TIMEOUT_SECONDS = 6
+local PING_FALLBACK_SECONDS = 2
+local PING_FALLBACK_MIN_INTERVAL_SECONDS = 20
+local PING_QUEUE_TIMEOUT_SECONDS = 30
 local RECENT_ORDER_REPLAY_THROTTLE_SECONDS = 2
 local RECENT_ORDER_NOTICE_LIMIT = 12
 local RECENT_ORDER_STATUS_LIMIT = 20
-local PENDING_ORDER_BATCH_LIMIT = 20
+local PENDING_ORDER_BATCH_LIMIT = 10
+-- Status delivery: coalesce claim/craft/fulfil revisions into one small packet
+-- and never re-queue an entry that is still waiting in the local send queue.
+local STATUS_FLUSH_DELAY_SECONDS = 0.3
+local STATUS_ACK_TIMEOUT_SECONDS = 2
+local STATUS_RESEND_SECONDS = 3
+local STATUS_QUEUE_STALE_SECONDS = 30
+-- Material delivery: one batch per linked account in flight at a time.
+-- A status and its completion notice carry the same list, so 4 entries are
+-- usually the two newest orders; deflate removes most of the duplication.
+local MATERIAL_BATCH_LIMIT = 4
+local MATERIAL_PUMP_DELAY_SECONDS = 1.5
+local MATERIAL_ACK_TIMEOUT_SECONDS = 10
+local MATERIAL_QUEUE_TIMEOUT_SECONDS = 90
+
+local function Now()
+    return GetTime and GetTime() or time()
+end
 
 local function NewestOrderEntries(entries, limit, predicate)
     local result = {}
@@ -126,6 +157,22 @@ local function NewestOrderEntries(entries, limit, predicate)
         table.remove(result)
     end
     return result
+end
+
+-- Copy of an order status/notice payload without material lists. Status
+-- packets keep deliveryPending so the receiver ACKs the mark immediately; the
+-- materials travel separately (see PumpOrderMaterials) with their own ACK.
+local function CompactOrderPayload(data)
+    if type(data) ~= 'table' then
+        return data
+    end
+    local compact = {}
+    for key, value in pairs(data) do
+        if key ~= 'reagentAudit' and key ~= 'materialsPending' and key ~= 'deliveryConfirmedAt' then
+            compact[key] = CompactOrderPayload(value)
+        end
+    end
+    return compact
 end
 
 local function HaveTarget()
@@ -199,17 +246,29 @@ function HironCraftScanComm:PrepareOrderStatusDelivery(entry)
     end
     if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(entry.customerName) then
         entry.deliveryPending = nil
+        entry.materialsPending = nil
         return false
     end
 
     local pending = {}
+    local materials = {}
+    -- Only final marks show a material tooltip; claimed/crafted lists stay local.
+    -- A row materialized from a linked account's completion notice does not
+    -- echo the list back: the notice's origin already delivers it to everyone.
+    local hasMaterials = type(entry.reagentAudit) == 'table'
+        and (entry.status == 'fulfilled' or entry.status == 'rejected')
+        and entry.result ~= 'completion_notice'
     for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts or {}) do
         if HironCraftScan.Utils.Contains(account.permissions, HironCraftScanComm.Permissions.Full) then
             pending[accountID] = true
+            if hasMaterials then
+                materials[accountID] = true
+            end
         end
     end
 
     entry.deliveryPending = next(pending) and pending or nil
+    entry.materialsPending = next(materials) and materials or nil
     entry.deliveryConfirmedAt = nil
     return entry.deliveryPending ~= nil
 end
@@ -348,14 +407,16 @@ local function ShareCharacterData_(state, target)
             HironCraftScan.OrderFulfillment:GetCompletionNotices(),
             RECENT_ORDER_NOTICE_LIMIT
         )
+        -- Materials are delivered by the material pump; the snapshot carries
+        -- only the marks so it stays a few chunks instead of dozens.
         for _, notice in ipairs(recentNotices) do
             if notice.status == HironCraftScan.OrderFulfillment.Status.Rejected then
-                table.insert(orderOutcomes, HironCraftScan.Utils.DeepCopy(notice))
+                table.insert(orderOutcomes, CompactOrderPayload(notice))
             else
-                table.insert(orderCompletions, HironCraftScan.Utils.DeepCopy(notice))
+                table.insert(orderCompletions, CompactOrderPayload(notice))
             end
         end
-        orderStatuses = HironCraftScan.Utils.DeepCopy(NewestOrderEntries(
+        orderStatuses = CompactOrderPayload(NewestOrderEntries(
             HironCraftScan.OrderFulfillment:GetStatuses(),
             RECENT_ORDER_STATUS_LIMIT
         ))
@@ -950,11 +1011,24 @@ local function ReceiveShareQuickReplies(sender, data, senderID)
     ReceiveShareQuickReplies_(data)
 end
 
-local function DiscoverOrderStatusTarget(accountID)
-    -- The ping response flushes every currently pending order update in one
-    -- bounded packet. Avoid attaching one callback per revision: during a busy
-    -- session those callbacks and their direct retries could outpace AceComm.
-    SendPing(accountID)
+-- Queue delivery of a locally changed status or completion notice. Nothing is
+-- sent directly: a short debounced flush sends every pending mark for the
+-- account in one small packet (claim -> craft -> fulfil revisions collapse into
+-- the newest one), and the material pump follows on the bulk prefix.
+local function ScheduleOrderDelivery(entry)
+    if type(entry) ~= 'table' then
+        return
+    end
+    for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts or {}) do
+        if HironCraftScan.Utils.Contains(account.permissions, HironCraftScanComm.Permissions.Full) then
+            if type(entry.deliveryPending) == 'table' and entry.deliveryPending[accountID] then
+                ScheduleOrderStatusFlush(accountID)
+            end
+            if type(entry.materialsPending) == 'table' and entry.materialsPending[accountID] then
+                ScheduleMaterialPump(accountID)
+            end
+        end
+    end
 end
 
 function HironCraftScanComm:ShareOrderStatus(entry)
@@ -966,43 +1040,7 @@ function HironCraftScanComm:ShareOrderStatus(entry)
         return
     end
 
-    -- Send immediately to a recently verified character, but do not wait for
-    -- the periodic heartbeat to notice that the account changed characters.
-    -- If the direct delivery does not get an ACK within one second, discover
-    -- the live character. Its ping response flushes the latest pending state
-    -- as a batch, superseding any obsolete intermediate revisions.
-    for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts or {}) do
-        if
-            type(entry.deliveryPending) == 'table'
-            and entry.deliveryPending[accountID]
-            and HironCraftScan.Utils.Contains(
-                account.permissions,
-                HironCraftScanComm.Permissions.Full
-            )
-        then
-            local deliveryAccountID = accountID
-            local target = FreshTargetForAccount(accountID)
-            if target then
-                HironCraftScanComm:Transmit(
-                    HironCraftScan.Utils.DeepCopy(entry),
-                    HironCraftScanComm.Operations.ShareOrderStatus,
-                    target
-                )
-                if C_Timer and C_Timer.After then
-                    C_Timer.After(1, function()
-                        if
-                            type(entry.deliveryPending) == 'table'
-                            and entry.deliveryPending[deliveryAccountID]
-                        then
-                            DiscoverOrderStatusTarget(deliveryAccountID)
-                        end
-                    end)
-                end
-            else
-                DiscoverOrderStatusTarget(accountID)
-            end
-        end
-    end
+    ScheduleOrderDelivery(entry)
 end
 
 local function StatusAck(entry)
@@ -1152,6 +1190,44 @@ local function ReceiveOrderStatusAck(sender, data, senderID)
             end
         end
     end
+
+    -- Send the next part of a backlog, if any (see SendPendingOrderStatuses).
+    ScheduleOrderStatusFlush(senderID)
+end
+
+-- Per entry table and account: where and when the mark was last queued. The
+-- old code re-queued every pending mark on each ping reply and after every
+-- unanswered second, so under the server throttle the same data piled up in
+-- the local queue faster than it could drain. Replaced entries are new tables,
+-- so a new revision is never suppressed by this bookkeeping.
+local statusSends = setmetatable({}, { __mode = 'k' })
+
+local function ShouldSendStatus(entry, accountID, target)
+    local send = statusSends[entry] and statusSends[entry][accountID]
+    if not send or send.target ~= target then
+        return true
+    end
+    if send.queued then
+        -- Still waiting in the local queue: a second copy cannot arrive sooner.
+        return Now() - send.queuedAt > STATUS_QUEUE_STALE_SECONDS
+    end
+    return Now() - send.sentAt >= math.min(60, STATUS_RESEND_SECONDS * send.attempts)
+end
+
+local function MarkStatusQueued(entry, accountID, target)
+    local byAccount = statusSends[entry] or {}
+    statusSends[entry] = byAccount
+    local previous = byAccount[accountID]
+    byAccount[accountID] = {
+        target = target,
+        queued = true,
+        queuedAt = Now(),
+        attempts = (previous and previous.target == target and previous.attempts or 0) + 1,
+    }
+end
+
+local function PendingForAccount(entry, accountID)
+    return type(entry.deliveryPending) == 'table' and entry.deliveryPending[accountID]
 end
 
 local function SendPendingOrderStatuses(accountID, target)
@@ -1161,90 +1237,109 @@ local function SendPendingOrderStatuses(accountID, target)
 
     local statuses = {}
     local notices = {}
-    local count = 0
+    local batch = {}
     local function Flush()
-        if count == 0 then
+        if #batch == 0 then
             return
         end
+        local sentEntries = batch
         HironCraftScanComm:Transmit(
             { statuses = statuses, recent = notices },
             HironCraftScanComm.Operations.ShareOrderCompletion,
-            target
+            target,
+            function()
+                local sentAt = Now()
+                for _, entry in ipairs(sentEntries) do
+                    local send = statusSends[entry] and statusSends[entry][accountID]
+                    if send and send.target == target then
+                        send.queued = false
+                        send.sentAt = sentAt
+                    end
+                end
+                -- Start the ACK timeout only once the packet has really left
+                -- the local queue. A missing ACK then means the character
+                -- changed, and a ping discovers the live one.
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(STATUS_ACK_TIMEOUT_SECONDS, function()
+                        for _, entry in ipairs(sentEntries) do
+                            if PendingForAccount(entry, accountID) then
+                                SendPing(accountID)
+                                return
+                            end
+                        end
+                    end)
+                end
+            end
         )
         statuses = {}
         notices = {}
-        count = 0
+        batch = {}
     end
 
-    local function PendingForAccount(entry)
-        return type(entry.deliveryPending) == 'table'
-            and entry.deliveryPending[accountID]
+    local function Pending(entry)
+        return PendingForAccount(entry, accountID) and ShouldSendStatus(entry, accountID, target)
     end
 
     -- Outcomes draw the final green/red mark and matter most to the operator,
-    -- so put newest notices at the front of the ALERT queue. Exact state rows
-    -- follow, also newest first, instead of relying on undefined pairs order.
+    -- so put newest notices first. Exact state rows follow, also newest first,
+    -- instead of relying on undefined pairs order. Transmit strips materials.
+    -- Only one small batch is queued per call: a long backlog (the linked
+    -- account was offline) would otherwise sit in front of every new mark.
+    -- Each ACK schedules the next flush, so the backlog drains self-clocked.
     for _, notice in ipairs(NewestOrderEntries(
         HironCraftScan.OrderFulfillment:GetCompletionNotices(),
         nil,
-        PendingForAccount
+        Pending
     )) do
-        table.insert(notices, HironCraftScan.Utils.DeepCopy(notice))
-        count = count + 1
-        if count >= PENDING_ORDER_BATCH_LIMIT then
-            Flush()
+        if #batch >= PENDING_ORDER_BATCH_LIMIT then
+            break
         end
+        MarkStatusQueued(notice, accountID, target)
+        table.insert(notices, notice)
+        table.insert(batch, notice)
     end
 
     for _, entry in ipairs(NewestOrderEntries(
         HironCraftScan.OrderFulfillment:GetStatuses(),
         nil,
-        PendingForAccount
+        Pending
     )) do
-        table.insert(statuses, HironCraftScan.Utils.DeepCopy(entry))
-        count = count + 1
-        if count >= PENDING_ORDER_BATCH_LIMIT then
-            Flush()
+        if #batch >= PENDING_ORDER_BATCH_LIMIT then
+            break
         end
+        MarkStatusQueued(entry, accountID, target)
+        table.insert(statuses, entry)
+        table.insert(batch, entry)
     end
     Flush()
+
+    ScheduleMaterialPump(accountID)
 end
 
-local function CreateRecentOrderJournal()
-    if not HironCraftScan.OrderFulfillment then
-        return nil
+local statusFlushes = {}
+
+ScheduleOrderStatusFlush = function(accountID)
+    if statusFlushes[accountID] then
+        return
     end
 
-    local recent = NewestOrderEntries(
-        HironCraftScan.OrderFulfillment:GetCompletionNotices(),
-        RECENT_ORDER_NOTICE_LIMIT
-    )
-    local statuses = NewestOrderEntries(
-        HironCraftScan.OrderFulfillment:GetStatuses(),
-        RECENT_ORDER_STATUS_LIMIT
-    )
-
-    return {
-        recent = HironCraftScan.Utils.DeepCopy(recent),
-        statuses = HironCraftScan.Utils.DeepCopy(statuses),
-    }
-end
-
-local function SendRecentOrderJournal(target)
-    local journal = CreateRecentOrderJournal()
-    if not journal or (#journal.recent == 0 and #journal.statuses == 0) then
-        return false
+    local function FlushNow()
+        statusFlushes[accountID] = nil
+        local target = FreshTargetForAccount(accountID)
+        if target then
+            SendPendingOrderStatuses(accountID, target)
+        else
+            -- The ping reply flushes every pending mark to the live character.
+            SendPing(accountID)
+        end
     end
 
-    -- Use the completion operation rather than the repair operation here. The
-    -- receiver accepts the same journal payload, while ALERT priority lets this
-    -- small login replay overtake the much larger BULK character snapshot.
-    HironCraftScanComm:Transmit(
-        journal,
-        HironCraftScanComm.Operations.ShareOrderCompletion,
-        target
-    )
-    return true
+    if not C_Timer or not C_Timer.After then
+        FlushNow()
+        return
+    end
+    statusFlushes[accountID] = true
+    C_Timer.After(STATUS_FLUSH_DELAY_SECONDS, FlushNow)
 end
 
 function HironCraftScanComm:ReplayRecentOrderHistory()
@@ -1268,19 +1363,17 @@ function HironCraftScanComm:ReplayRecentOrderHistory()
     for accountID, account in pairs(HironCraftScan.DB.realm.linked_accounts) do
         if HironCraftScan.Utils.Contains(account.permissions, HironCraftScanComm.Permissions.Full) then
             -- On a character switch the linked account usually stayed on the
-            -- same character. Send the tiny durable journal to that cached
-            -- target immediately instead of making the UI wait for discovery.
-            -- Discovery still runs in parallel and repairs a stale cached name.
+            -- same character. Send the marks that were not confirmed before
+            -- logout to that cached target immediately instead of making the
+            -- UI wait for discovery. Only undelivered marks are sent: replaying
+            -- the whole recent journal (with materials) on every relog was what
+            -- filled the queue during fast character switching. Discovery runs
+            -- in parallel; its reply flushes to a different live character.
             local cachedTarget = account.last_active_char
             if type(cachedTarget) == 'string' and cachedTarget ~= '' then
-                SendRecentOrderJournal(cachedTarget)
-                queued = true
+                SendPendingOrderStatuses(accountID, cachedTarget)
             end
-            SendPing(accountID, function(_, sender)
-                if sender ~= cachedTarget then
-                    SendRecentOrderJournal(sender)
-                end
-            end)
+            SendPing(accountID)
             queued = true
         end
     end
@@ -1298,7 +1391,7 @@ function HironCraftScanComm:ShareOrderCompletion(notice)
     -- Send only the current result. The durable pending flag and heartbeat ACK
     -- path retry it when needed; replaying the entire recent journal after every
     -- craft caused a steadily growing AceComm BULK queue during rush periods.
-    TransmitToFullLinkedAccounts(notice, HironCraftScanComm.Operations.ShareOrderCompletion)
+    ScheduleOrderDelivery(notice)
 end
 
 
@@ -1357,6 +1450,217 @@ local function ReceiveOrderCompletionAck(sender, data, senderID)
     for _, ack in ipairs(data.notices) do
         HironCraftScan.OrderFulfillment:AcknowledgeCompletion(ack, senderID)
     end
+
+    -- Send the next part of a backlog, if any (see SendPendingOrderStatuses).
+    ScheduleOrderStatusFlush(senderID)
+end
+
+-- Material lists ------------------------------------------------------------
+-- A material list is several times larger than the mark it belongs to. It is
+-- sent on the bulk prefix by a per-account pump that keeps at most one batch
+-- in flight: the next batch (or a retry) is queued only after an ACK or after
+-- a timeout that starts once the batch has actually left the local queue. The
+-- durable materialsPending flag survives relogs, so a list that was still in
+-- the queue at logout is sent by the next character.
+local materialPumps = {}
+local materialBatchSequence = math.random(1, 1000000)
+
+local function MaterialPump(accountID)
+    local pump = materialPumps[accountID]
+    if not pump then
+        pump = { misses = 0 }
+        materialPumps[accountID] = pump
+    end
+    return pump
+end
+
+local function MaterialsPendingFor(entry, accountID)
+    return type(entry) == 'table'
+        and type(entry.materialsPending) == 'table'
+        and entry.materialsPending[accountID] == true
+        and type(entry.reagentAudit) == 'table'
+end
+
+local function ClearMaterialsPending(entry, accountID)
+    if type(entry) ~= 'table' or type(entry.materialsPending) ~= 'table' then
+        return
+    end
+    entry.materialsPending[accountID] = nil
+    if not next(entry.materialsPending) then
+        entry.materialsPending = nil
+    end
+end
+
+local function MaterialPayloadEntry(entry)
+    -- Frozen copy: NORMAL priority serializes over several frames, while the
+    -- live entry may already move on to another crafting attempt.
+    local copy = HironCraftScan.Utils.DeepCopy(entry)
+    copy.deliveryPending = nil
+    copy.materialsPending = nil
+    copy.deliveryConfirmedAt = nil
+    return copy
+end
+
+local function PumpOrderMaterials(accountID)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    local pump = MaterialPump(accountID)
+    if pump.batchID or not fulfillment then
+        return
+    end
+    local target = FreshTargetForAccount(accountID)
+    if not target then
+        return -- The next ping reply resumes delivery.
+    end
+
+    local function Pending(entry)
+        return MaterialsPendingFor(entry, accountID)
+    end
+    local candidates = {}
+    for _, notice in ipairs(NewestOrderEntries(fulfillment:GetCompletionNotices(), nil, Pending)) do
+        table.insert(candidates, { kind = 'recent', entry = notice })
+    end
+    for _, entry in ipairs(NewestOrderEntries(fulfillment:GetStatuses(), nil, Pending)) do
+        table.insert(candidates, { kind = 'statuses', entry = entry })
+    end
+    if #candidates == 0 then
+        return
+    end
+    table.sort(candidates, function(lhs, rhs)
+        return (tonumber(lhs.entry.updatedAt) or 0) > (tonumber(rhs.entry.updatedAt) or 0)
+    end)
+
+    materialBatchSequence = materialBatchSequence + 1
+    local batchID = materialBatchSequence
+    local payload = { batch = batchID, statuses = {}, recent = {} }
+    for index = 1, math.min(#candidates, MATERIAL_BATCH_LIMIT) do
+        local candidate = candidates[index]
+        table.insert(payload[candidate.kind], MaterialPayloadEntry(candidate.entry))
+    end
+
+    pump.batchID = batchID
+    pump.sent = false
+    HironCraftScanComm:Transmit(payload, HironCraftScanComm.Operations.ShareOrderMaterials, target, function()
+        if pump.batchID ~= batchID then
+            return
+        end
+        pump.sent = true
+        if C_Timer and C_Timer.After then
+            local wait = math.min(60, MATERIAL_ACK_TIMEOUT_SECONDS * (pump.misses + 1))
+            C_Timer.After(wait, function()
+                if pump.batchID == batchID then
+                    pump.batchID = nil
+                    pump.misses = pump.misses + 1
+                    PumpOrderMaterials(accountID)
+                end
+            end)
+        end
+    end)
+    if C_Timer and C_Timer.After then
+        -- Safety net in case the send callback never fires.
+        C_Timer.After(MATERIAL_QUEUE_TIMEOUT_SECONDS, function()
+            if pump.batchID == batchID and not pump.sent then
+                pump.batchID = nil
+                PumpOrderMaterials(accountID)
+            end
+        end)
+    end
+end
+
+ScheduleMaterialPump = function(accountID, delay)
+    local pump = MaterialPump(accountID)
+    if pump.scheduled then
+        return
+    end
+    if not C_Timer or not C_Timer.After then
+        PumpOrderMaterials(accountID)
+        return
+    end
+    -- The short delay lets the small status packet go first and collapses the
+    -- several fulfilled revisions written within a second into one list.
+    pump.scheduled = true
+    C_Timer.After(delay or MATERIAL_PUMP_DELAY_SECONDS, function()
+        pump.scheduled = nil
+        PumpOrderMaterials(accountID)
+    end)
+end
+
+local function ReceiveShareOrderMaterials(sender, data, senderID)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if not fulfillment or type(data) ~= 'table' then
+        return
+    end
+
+    local acks = { batch = data.batch, statuses = {}, notices = {} }
+    if type(data.statuses) == 'table' then
+        fulfillment:ApplyRemoteStatuses(data.statuses)
+        for _, entry in pairs(data.statuses) do
+            local ack = StatusAck(entry)
+            if ack then
+                table.insert(acks.statuses, ack)
+            end
+        end
+    end
+    if type(data.recent) == 'table' then
+        fulfillment:ApplyRemoteCompletionNotices(data.recent)
+        for _, notice in pairs(data.recent) do
+            local ack = CompletionAck(notice)
+            if ack then
+                table.insert(acks.notices, ack)
+            end
+        end
+    end
+
+    -- ACK receipt, not acceptance: an older list superseded by a newer local
+    -- row must not be resent forever. Status conflicts are still repaired by
+    -- the compact status path.
+    HironCraftScanComm:Transmit(acks, HironCraftScanComm.Operations.OrderMaterialsAck, sender)
+end
+
+local function ReceiveOrderMaterialsAck(sender, data, senderID)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if not fulfillment or type(data) ~= 'table' then
+        return
+    end
+
+    local statuses = fulfillment:GetStatuses()
+    for _, ack in ipairs(type(data.statuses) == 'table' and data.statuses or {}) do
+        if
+            type(ack) == 'table'
+            and type(ack.customerName) == 'string'
+            and (type(ack.responseID) == 'number' or type(ack.responseID) == 'string')
+        then
+            local entry = statuses[HironCraftScan.OrderToOrderID(ack)]
+            if
+                entry
+                and entry.origin == ack.origin
+                and (tonumber(entry.rev) or 0) == (tonumber(ack.rev) or 0)
+                and (tonumber(entry.updatedAt) or 0) == (tonumber(ack.updatedAt) or 0)
+            then
+                ClearMaterialsPending(entry, senderID)
+            end
+        end
+    end
+
+    local notices = fulfillment:GetCompletionNotices()
+    for _, ack in ipairs(type(data.notices) == 'table' and data.notices or {}) do
+        local key = type(ack) == 'table' and type(ack.customerName) == 'string'
+            and fulfillment:CompletionNoticeKey(ack)
+        local notice = key and notices[key]
+        if
+            notice
+            and tostring(notice.origin or '') == tostring(ack.origin or '')
+            and (tonumber(notice.updatedAt) or 0) == (tonumber(ack.updatedAt) or 0)
+        then
+            ClearMaterialsPending(notice, senderID)
+        end
+    end
+
+    local pump = materialPumps[senderID]
+    if pump and pump.batchID and pump.batchID == data.batch then
+        pump.batchID = nil
+        pump.misses = 0
+        ScheduleMaterialPump(senderID, 0)
+    end
 end
 
 
@@ -1365,10 +1669,7 @@ function HironCraftScanComm:ShareOrderOutcome(notice)
         return
     end
 
-    TransmitToFullLinkedAccounts(
-        notice,
-        HironCraftScanComm.Operations.ShareOrderOutcome
-    )
+    ScheduleOrderDelivery(notice)
 end
 
 local function ReceiveShareOrderCompletion(sender, data, senderID)
@@ -1399,8 +1700,9 @@ local function ReceiveShareOrderCompletion(sender, data, senderID)
 end
 
 local todosByAccount = {}
+local lastPingFallbackAt = {}
 local heartbeatStarted = false
-local function PingTargets(targetAccountID, characters)
+local function PingTargets(targetAccountID, characters, onSent)
     if not characters or not next(characters) then
         return
     end
@@ -1408,7 +1710,8 @@ local function PingTargets(targetAccountID, characters)
     HironCraftScanComm:Transmit(
         { state = SharingState.InitialInquiry },
         HironCraftScanComm.Operations.Ping,
-        { [targetAccountID] = characters }
+        { [targetAccountID] = characters },
+        onSent
     )
 end
 
@@ -1466,17 +1769,34 @@ SendPing = function(targetAccountID, todo)
     -- A ping to an offline character has no response event. Release a pure
     -- heartbeat attempt so the next tick can try again; retain and retry real
     -- queued work until an account comes back online.
-    if C_Timer and C_Timer.After then
-        C_Timer.After(PING_ATTEMPT_TIMEOUT_SECONDS, function()
-            if todosByAccount[targetAccountID] ~= todos then
-                return
-            end
+    local function Expire()
+        if todosByAccount[targetAccountID] ~= todos then
+            return
+        end
 
-            todosByAccount[targetAccountID] = nil
-            for _, pendingTodo in ipairs(todos) do
-                SendPing(targetAccountID, pendingTodo)
-            end
-        end)
+        todosByAccount[targetAccountID] = nil
+        for _, pendingTodo in ipairs(todos) do
+            SendPing(targetAccountID, pendingTodo)
+        end
+    end
+
+    local hasTimers = C_Timer and C_Timer.After
+    -- All reply timeouts start when the ping has actually left the local
+    -- queue. Counting from the moment it was queued made a busy queue look
+    -- like an offline character, which queued a ping to every known alt and
+    -- congested the queue even further.
+    local function StartReplyTimers(fallback)
+        if not hasTimers then
+            return
+        end
+        C_Timer.After(PING_ATTEMPT_TIMEOUT_SECONDS, Expire)
+        if fallback then
+            C_Timer.After(PING_FALLBACK_SECONDS, fallback)
+        end
+    end
+    if hasTimers then
+        -- Safety net in case the send callback never fires.
+        C_Timer.After(PING_QUEUE_TIMEOUT_SECONDS, Expire)
     end
 
     -- Existing installations do not have last_active_char yet. The first
@@ -1484,26 +1804,36 @@ SendPing = function(targetAccountID, todo)
     -- one-shot migration candidate and still gets the normal fallback below.
     local preferred = account.last_active_char or (account.backup_chars and account.backup_chars[1])
     if preferred then
-        PingTargets(targetAccountID, { [preferred] = true })
-
         -- If the other account changed characters while we were offline, fall
         -- back to one small ping per remaining known character. Never send the
-        -- large synchronization snapshot to these candidates.
-        if C_Timer and C_Timer.After then
-            C_Timer.After(1, function()
-                if todosByAccount[targetAccountID] ~= todos then
-                    return
-                end
+        -- large synchronization snapshot to these candidates. The broadcast is
+        -- rate limited: every ping costs one message of the prefix budget, and
+        -- a relogging character announces itself to us anyway.
+        local function Fallback()
+            if todosByAccount[targetAccountID] ~= todos then
+                return
+            end
+            local now = Now()
+            local last = lastPingFallbackAt[targetAccountID]
+            if last and now - last < PING_FALLBACK_MIN_INTERVAL_SECONDS then
+                return
+            end
+            lastPingFallbackAt[targetAccountID] = now
 
-                local fallback = {}
-                AddAccountDiscoveryCandidates(targetAccountID, account, fallback, preferred)
-                PingTargets(targetAccountID, fallback)
-            end)
+            local fallback = {}
+            AddAccountDiscoveryCandidates(targetAccountID, account, fallback, preferred)
+            PingTargets(targetAccountID, fallback)
         end
+
+        PingTargets(targetAccountID, { [preferred] = true }, function()
+            StartReplyTimers(Fallback)
+        end)
     else
         local candidates = {}
         AddAccountDiscoveryCandidates(targetAccountID, account, candidates)
-        PingTargets(targetAccountID, candidates)
+        PingTargets(targetAccountID, candidates, function()
+            StartReplyTimers()
+        end)
     end
 end
 
@@ -2083,13 +2413,14 @@ local function ReceiveRequestCraft(sender, data)
     end
 end
 
-local function SendMessage(encoded, target, priority)
+local function SendMessage(encoded, target, priority, prefix, callback)
     HironCraftScanComm:SendCommMessage(
-        HIRONCRAFT_SCAN_COMM_PREFIX,
+        prefix or HIRONCRAFT_SCAN_COMM_PREFIX,
         encoded,
         'WHISPER',
         target,
-        priority
+        priority,
+        callback
     )
 end
 
@@ -2103,6 +2434,7 @@ local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareOrderCompletion] = true,
     [HironCraftScanComm.Operations.OrderCompletionAck] = true,
     [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
+    [HironCraftScanComm.Operations.OrderMaterialsAck] = true,
     [HironCraftScanComm.Operations.Ping] = true,
     [HironCraftScanComm.Operations.RequestCraft] = true,
 }
@@ -2121,6 +2453,18 @@ local function PriorityForOperation(operation)
         return 'BULK'
     end
     return 'NORMAL'
+end
+
+local function PrefixForOperation(operation)
+    -- Public operations must stay on the original prefix: other players'
+    -- clients (possibly older versions) only listen there.
+    if ALERT_OPERATIONS[operation]
+        or operation == HironCraftScanComm.Operations.FindCrafter
+        or operation == HironCraftScanComm.Operations.RequestCraft
+    then
+        return HIRONCRAFT_SCAN_COMM_PREFIX
+    end
+    return HIRONCRAFT_BULK_COMM_PREFIX
 end
 
 -- There is weirdly no way to test if a player is online. Originally, we tested
@@ -2222,14 +2566,16 @@ local function RegisterOfflineTargets(targets)
     end
 end
 
-local function TransmitSerialized(serialized, target, priority)
+-- onSent(target) is called once, when the last chunk for the first target has
+-- been handed to the server (i.e. it has left the local ChatThrottleLib queue).
+local function TransmitSerialized(serialized, target, priority, prefix, onSent)
     local compressed = LibDeflate:CompressDeflate(serialized)
     local encoded = LibDeflate:EncodeForWoWAddonChannel(compressed)
 
     if target == TARGET_BROADCAST then
         local channelNumber = GetChannelName(broadcastChannel)
         HironCraftScanComm:SendCommMessage(
-            HIRONCRAFT_SCAN_COMM_PREFIX,
+            prefix or HIRONCRAFT_SCAN_COMM_PREFIX,
             encoded,
             'CHANNEL',
             channelNumber,
@@ -2263,10 +2609,28 @@ local function TransmitSerialized(serialized, target, priority)
 
     RegisterOfflineTargets(targets)
 
+    local callback = nil
+    if onSent then
+        local notified = false
+        callback = function(sentTarget, sent, total)
+            if not notified and sent and total and sent >= total then
+                notified = true
+                onSent(sentTarget)
+            end
+        end
+    end
+
     for _, accountTargets in pairs(targets) do
         for target, _ in pairs(accountTargets) do
             HironCraftScan.Utils.printTable('Sending request to', target)
-            SendMessage(encoded, target, priority)
+            if callback then
+                local sentTarget = target
+                SendMessage(encoded, target, priority, prefix, function(_, sent, total)
+                    callback(sentTarget, sent, total)
+                end)
+            else
+                SendMessage(encoded, target, priority, prefix)
+            end
         end
     end
 
@@ -2278,51 +2642,18 @@ end
 
 local asyncPool = CreateFramePool('Frame', UIParent)
 
--- Material snapshots are much larger than the status they accompany. Keep
--- them out of the urgent queue, including login replays and conflict repairs.
--- The full packet retains pending-delivery metadata: only receipt of the
--- material details may acknowledge the durable update.
-local function CompactOrderPayload(data)
-    if type(data)~='table' then return data,false end
-    local compact,hasAudit={},false
-    for key,value in pairs(data) do
-        if key=='reagentAudit' then
-            hasAudit=true
-        elseif key~='deliveryPending' and key~='deliveryConfirmedAt' then
-            local child,found=CompactOrderPayload(value)
-            compact[key]=child
-            hasAudit=hasAudit or found
-        end
-    end
-    return compact,hasAudit
-end
-local MATERIAL_ORDER_OPERATIONS = {
-    [HironCraftScanComm.Operations.ShareOrderStatus]=true,
-    [HironCraftScanComm.Operations.OrderStatusRepair]=true,
-    [HironCraftScanComm.Operations.ShareOrderCompletion]=true,
-    [HironCraftScanComm.Operations.ShareOrderOutcome]=true,
+-- Order marks travel without material lists, which are several times larger.
+-- Materials are delivered separately by PumpOrderMaterials on the bulk prefix.
+local STATUS_ORDER_OPERATIONS = {
+    [HironCraftScanComm.Operations.ShareOrderStatus] = true,
+    [HironCraftScanComm.Operations.OrderStatusRepair] = true,
+    [HironCraftScanComm.Operations.ShareOrderCompletion] = true,
+    [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
 }
 
-local function SmallLiveMaterialUpdate(data)
-    if type(data)~='table' or (data.status~='fulfilled' and data.status~='rejected') then return false end
-    local audit=data.reagentAudit
-    if type(audit)~='table' or type(audit.rows)~='table' or #audit.rows>12 then return false end
-    local supplied=0
-    for _,row in ipairs(audit.rows) do
-        supplied=supplied+#(row.supplied or {})
-        if supplied>24 then return false end
-    end
-    return true
-end
-
-function HironCraftScanComm:Transmit(data, operation, target)
-    -- The pre-craft evidence remains durable locally. Sending that same large
-    -- list on claim, craft and completion filled the queue before the result.
-    if operation==self.Operations.ShareOrderStatus and type(data)=='table'
-        and (data.status=='claimed' or data.status=='crafted') and data.reagentAudit then
-        local progress={}
-        for key,value in pairs(data) do if key~='reagentAudit' then progress[key]=value end end
-        data=progress
+function HironCraftScanComm:Transmit(data, operation, target, onSent)
+    if STATUS_ORDER_OPERATIONS[operation] then
+        data = CompactOrderPayload(data)
     end
     local msg = {
         operation = operation,
@@ -2337,38 +2668,13 @@ function HironCraftScanComm:Transmit(data, operation, target)
     HironCraftScan.Utils.printTable('Sending msg', msg)
 
     local priority = PriorityForOperation(operation)
-    -- A typical individual outcome (including its materials) fits a few addon
-    -- chunks. Queue it now, with its ACK, instead of waiting behind NORMAL
-    -- traffic and triggering discovery/retries before the evidence arrives.
-    -- Large history batches retain the compact-first path below.
-    local liveMaterials=(operation==self.Operations.ShareOrderStatus
-        or operation==self.Operations.ShareOrderCompletion or operation==self.Operations.ShareOrderOutcome)
-        and SmallLiveMaterialUpdate(data)
-    if MATERIAL_ORDER_OPERATIONS[operation] and not liveMaterials then
-        local compact,hasAudit=CompactOrderPayload(data)
-        if hasAudit then
-            local compactOperation=operation
-            if operation==self.Operations.ShareOrderStatus then
-                -- The batch receiver ACKs only entries with deliveryPending.
-                -- This also works with older peers whose single-row receiver
-                -- unconditionally ACKs accepted status messages.
-                compact={statuses={compact}}
-                compactOperation=self.Operations.OrderStatusRepair
-            end
-            TransmitSerialized(LibSerialize:Serialize({operation=compactOperation,
-                version=msg.version,senderID=msg.senderID,data=compact}),target,'ALERT')
-            priority='NORMAL'
-            -- Freeze evidence before yielding; live order tables may advance
-            -- to another crafting attempt before async serialization runs.
-            msg.data=HironCraftScan.Utils.DeepCopy(data)
-        end
-    end
+    local prefix = PrefixForOperation(operation)
     if priority == 'ALERT' then
         -- Critical order updates are small. Serialize them immediately so the
         -- addon queues the whisper in the same frame as the fulfillment event;
         -- an instant logout can otherwise happen before SerializeAsync gets its
         -- first OnUpdate callback.
-        TransmitSerialized(LibSerialize:Serialize(msg), target, priority)
+        TransmitSerialized(LibSerialize:Serialize(msg), target, priority, prefix, onSent)
         return
     end
 
@@ -2380,7 +2686,7 @@ function HironCraftScanComm:Transmit(data, operation, target)
         if completed then
             processing:SetScript('OnUpdate', nil)
             asyncPool:Release(processing)
-            TransmitSerialized(serialized, target, priority)
+            TransmitSerialized(serialized, target, priority, prefix, onSent)
         end
     end)
 
@@ -2482,6 +2788,10 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveOrderCompletionAck(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderOutcome then
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderMaterials then
+            ReceiveShareOrderMaterials(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderMaterialsAck then
+            ReceiveOrderMaterialsAck(sender, msg.data, msg.senderID)
         elseif
             hasFull
             and msg.operation == HironCraftScanComm.Operations.ShareOrderCompletionRepair
@@ -2514,7 +2824,7 @@ function HironCraftScanComm:OnCommReceived(prefix, payload, distribution, sender
         sender = HironCraftScan.GetUnitName(sender, true)
     end
 
-    if prefix ~= HIRONCRAFT_SCAN_COMM_PREFIX then
+    if prefix ~= HIRONCRAFT_SCAN_COMM_PREFIX and prefix ~= HIRONCRAFT_BULK_COMM_PREFIX then
         return
     end
 

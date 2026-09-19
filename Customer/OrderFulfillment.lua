@@ -708,6 +708,28 @@ local function PruneStorage()
     PruneEntries(EnsureCompletionStorage())
 end
 
+-- Older builds tracked marks and material lists with one deliveryPending flag.
+-- Now the fast status ACK clears that flag, so give lists that were still
+-- undelivered their own materialsPending flag before it is cleared.
+local function MigrateMaterialDelivery(entries)
+    for _, entry in pairs(entries) do
+        if
+            type(entry) == 'table'
+            and type(entry.deliveryPending) == 'table'
+            and type(entry.reagentAudit) == 'table'
+            and entry.materialsPending == nil
+            and (entry.status == OrderFulfillment.Status.Fulfilled
+                or entry.status == OrderFulfillment.Status.Rejected)
+        then
+            local pending = {}
+            for accountID, value in pairs(entry.deliveryPending) do
+                pending[accountID] = value
+            end
+            entry.materialsPending = pending
+        end
+    end
+end
+
 function OrderFulfillment:GetStatuses()
     return EnsureStorage()
 end
@@ -1676,6 +1698,8 @@ end
 
 HironCraftScan.Utils.onLoad(function()
     PruneStorage()
+    MigrateMaterialDelivery(EnsureStorage())
+    MigrateMaterialDelivery(EnsureCompletionStorage())
     if HironCraftScan.ReagentAudit then HironCraftScan.ReagentAudit.PruneProgress() end
     for _, entry in pairs(EnsureStorage()) do
         RememberCraftingOrder(entry)

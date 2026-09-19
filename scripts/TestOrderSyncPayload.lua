@@ -1,13 +1,14 @@
--- Exercise the real communication module with serialization/transport mocked.
--- Large material details must never hold the final checkmark in the ALERT queue.
+-- Exercise the real communication module with transport and timers mocked.
+-- Marks travel alone on the urgent prefix and are ACKed at once; material
+-- lists follow on the bulk prefix, one batch in flight, with their own ACK.
 local function copy(value)
     if type(value)~='table' then return value end
     local result={};for k,v in pairs(value) do result[k]=copy(v) end;return result
 end
 local function noop() end
-local sent,frames={},{}
-local comm={SendCommMessage=function(_,prefix,data,channel,target,priority)
-    sent[#sent+1]={prefix=prefix,data=copy(data),target=target,priority=priority}
+local sent,frames,timers={},{},{}
+local comm={RegisterComm=noop,SendCommMessage=function(_,prefix,data,channel,target,priority,callback)
+    sent[#sent+1]={prefix=prefix,data=copy(data),target=target,priority=priority,callback=callback}
 end}
 local serialize={Serialize=function(_,data) return copy(data) end,
     SerializeAsync=function(_,data) return function() return true,copy(data) end end,
@@ -26,120 +27,174 @@ end
 function time() return 2000000000 end
 function GetTime() return 10 end
 function ChatFrame_AddMessageEventFilter() end
+function issecretvalue() return false end
+C_Timer={After=function(delay,callback) timers[#timers+1]={delay=delay,callback=callback} end}
+
 local Scan={CONST={TEXT={},CURRENT_VERSION=1},LOCAL={GetText=function(_,key) return key end},
-    DB={settings={my_uuid='source'},realm={linked_accounts={source={permissions={1}}}}},
-    Events={Register=noop},Utils={DeepCopy=copy,printTable=noop,onLoad=noop,
-        Contains=function(values,value) for _,v in pairs(values) do if v==value then return true end end end}}
+    DB={settings={},realm={},customers={},listed_orders={}},State={realmID=1},
+    Events={Register=noop,Emit=noop},OnLinkedAccountStateChange=noop,OrderToLiveResponse=noop,
+    Utils={DeepCopy=copy,printTable=noop,onLoad=noop,
+        Contains=function(values,value) for _,v in pairs(values) do if v==value then return true end end end,
+        saved=function(parent,key,value) if parent[key]==nil then parent[key]=value end;return parent[key] end},
+    GetPlayerName=function() return 'Crafter-Realm' end,
+    OrderToOrderID=function(order) return order.customerName..':'..order.responseID end,
+    OrderToResponse=function() return nil end}
 assert(loadfile('Utils/Comm.lua'))('HironCraft',Scan)
+assert(loadfile('Customer/ReagentAudit.lua'))('HironCraft',Scan)
+assert(loadfile('Customer/OrderFulfillment.lua'))('HironCraft',Scan)
 local op=comm.Operations
-local function flush()
+local fulfillment=Scan.OrderFulfillment
+
+-- Run every queued timer whose delay is at most maxDelay (one pass).
+local function runTimers(maxDelay)
+    local due,rest={},{}
+    for _,timer in ipairs(timers) do
+        if timer.delay<=maxDelay then due[#due+1]=timer else rest[#rest+1]=timer end
+    end
+    timers=rest
+    for _,timer in ipairs(due) do timer.callback() end
+end
+local function flushFrames()
     local pending=frames;frames={}
     for _,frame in ipairs(pending) do if frame.callback then frame.callback() end end
 end
-local entry={customerName='Buyer-Realm',responseID=123,craftingOrderID=42,status='fulfilled',
-    rev=7,origin='source',updatedAt=time(),deliveryPending={receiver=true},
-    reagentAudit={version=1,orderID=42,rows={{name='Alloy',supplied={{quantity=20,quality=1}}}}}}
-local function noMaterials(value)
-    if type(value)~='table' then return end
-    assert(not value.reagentAudit and not value.deliveryPending)
-    for _,child in pairs(value) do noMaterials(child) end
+local function actAs(me,peer)
+    Scan.DB.settings.my_uuid=me
+    Scan.DB.realm.linked_accounts={[peer]={permissions={1}}}
 end
+local function receive(packet,from)
+    sent={}
+    comm:OnCommReceived(packet.prefix,packet.data,'WHISPER',from);flushFrames()
+end
+local function find(operation)
+    local found
+    for _,packet in ipairs(sent) do
+        if packet.data.operation==operation then assert(not found,'duplicate '..operation);found=packet end
+    end
+    return found
+end
+local function only(operation)
+    assert(#sent==1,('expected one packet, got %d'):format(#sent))
+    return assert(find(operation),'expected '..operation)
+end
+local function markSent(packet) packet.callback(nil,1,1) end
+local function hasKey(value,key)
+    if type(value)~='table' then return false end
+    if value[key]~=nil then return true end
+    for _,child in pairs(value) do if hasKey(child,key) then return true end end
+    return false
+end
+
+local audit={version=1,orderID=42,capturedAt=time(),complete=true,
+    rows={{itemID=11,name='Alloy',required=20,known=true,supplied={{itemID=11,quantity=20,quality=1}}}}}
+local entry={customerName='Buyer-Realm',responseID=123,craftingOrderID=42,status='fulfilled',
+    rev=7,origin='source',updatedAt=time(),automatic=true,reagentAudit=audit}
+local key=Scan.OrderToOrderID(entry)
+
+-- Marks never carry material lists, but keep their ACK request.
+actAs('source','receiver')
 for _,operation in ipairs({op.ShareOrderStatus,op.ShareOrderCompletion,op.ShareOrderOutcome,op.OrderStatusRepair}) do
     sent={};frames={}
-    local payload=operation==op.OrderStatusRepair and {statuses={entry}} or entry
-    comm:Transmit(payload,operation,'Receiver-Realm')
-    assert(#sent==1 and sent[1].priority=='ALERT','status waited for async material serialization')
-    local full
-    if operation==op.OrderStatusRepair then
-        noMaterials(sent[1].data.data)
-        assert(sent[1].data.data.statuses[1].status=='fulfilled')
-        flush()
-        assert(#sent==2 and sent[2].priority=='NORMAL')
-        full=sent[2].data.data.statuses[1]
-    else
-        assert(#frames==0,'small live materials waited for the background queue')
-        full=sent[1].data.data
-        assert(full.status=='fulfilled' and full.rev==7 and full.craftingOrderID==42)
-    end
-    assert(full.reagentAudit.rows[1].supplied[1].quantity==20 and full.deliveryPending.receiver)
-    assert(entry.reagentAudit and entry.deliveryPending.receiver,'send mutated durable evidence')
+    local pending=copy(entry);pending.deliveryPending={receiver=true};pending.materialsPending={receiver=true}
+    comm:Transmit({statuses={pending}},operation,'Receiver-Realm')
+    assert(#sent==1 and #frames==0 and sent[1].priority=='ALERT' and sent[1].prefix=='HIRONCRAFT_SCAN',
+        'mark waited or left the urgent prefix')
+    local wire=sent[1].data.data.statuses[1]
+    assert(not hasKey(sent[1].data,'reagentAudit') and not wire.materialsPending,'material list travelled with the mark')
+    assert(wire.deliveryPending.receiver,'mark lost its ACK request')
+    assert(pending.reagentAudit and pending.materialsPending,'send mutated durable evidence')
 end
 
-for _,status in ipairs({'claimed','crafted'}) do
-    local progress=copy(entry);progress.status=status
-    sent={};frames={}
-    comm:Transmit(progress,op.ShareOrderStatus,'Receiver-Realm')
-    assert(#sent==1 and #frames==0 and sent[1].priority=='ALERT')
-    assert(not sent[1].data.data.reagentAudit and sent[1].data.data.deliveryPending.receiver,
-        'intermediate progress resent the material list or lost its ACK')
-    assert(progress.reagentAudit,'intermediate transmission erased the durable snapshot')
-end
-
--- Login batches and repeated orders keep ALL material lists out of ALERT.
+-- Bulky traffic has its own prefix; public operations keep the shared one.
 sent={};frames={}
-comm:Transmit({recent={entry,entry},statuses={entry}},op.ShareOrderCompletion,'Receiver-Realm')
-noMaterials(sent[1].data.data)
-entry.reagentAudit.rows[1].supplied[1].quantity=999
-flush()
-assert(sent[2].data.data.recent[1].reagentAudit.rows[1].supplied[1].quantity==20,
-    'later craft mutation changed a queued snapshot')
-entry.reagentAudit.rows[1].supplied[1].quantity=20
-
--- Ordinary status and ACK packets remain immediate single messages.
+comm:Transmit({characters={}},op.ShareCharacterData,'Receiver-Realm');flushFrames()
+assert(sent[1].prefix=='HIRONCRAFT_BULK' and sent[1].priority=='BULK')
 sent={};frames={}
-comm:Transmit({status='fulfilled'},op.ShareOrderStatus,'Receiver-Realm')
-comm:Transmit({statuses={}},op.OrderStatusAck,'Receiver-Realm')
-assert(#sent==2 and #frames==0 and sent[1].priority=='ALERT' and sent[2].priority=='ALERT')
+comm:Transmit({i=1},op.FindCrafter,'Receiver-Realm');flushFrames()
+assert(sent[1].prefix=='HIRONCRAFT_SCAN','public operation left the prefix other clients listen on')
 
--- Receive both stages through real Comm handlers and the real status merger.
-function issecretvalue() return false end
-Scan.State={realmID=1};Scan.OnLinkedAccountStateChange=noop;Scan.Events.Emit=noop
-Scan.Utils.saved=function(parent,key,value) if parent[key]==nil then parent[key]=value end;return parent[key] end
-Scan.GetPlayerName=function() return 'Receiver-Realm' end
-Scan.OrderToOrderID=function(order) return order.customerName..':'..order.responseID end
-Scan.OrderToResponse=function() return nil end
-Scan.OrderToLiveResponse=noop
-Scan.DB.customers={};Scan.DB.listed_orders={}
-assert(loadfile('Customer/ReagentAudit.lua'))('HironCraft',Scan)
-assert(loadfile('Customer/OrderFulfillment.lua'))('HironCraft',Scan)
-entry.reagentAudit.capturedAt=time();entry.reagentAudit.complete=true
-entry.reagentAudit.rows[1].supplied[1].itemID=11
--- Only oversized snapshots retain the two-stage transport.
-for i=2,13 do entry.reagentAudit.rows[i]=copy(entry.reagentAudit.rows[1]) end
-sent={};frames={}
-comm:Transmit(entry,op.ShareOrderStatus,'Receiver-Realm');flush()
-local compactPacket,fullPacket=sent[1],sent[2]
-Scan.DB.settings.my_uuid='receiver'
-local function receive(packet)
-    sent={};frames={}
-    comm:OnCommReceived(packet.prefix,packet.data,'WHISPER','Sender-Realm');flush()
-end
-receive(compactPacket)
-local stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
+-- Only final marks schedule a list, and never an echo of a remote notice.
+local prepared=copy(entry);comm:PrepareOrderStatusDelivery(prepared)
+assert(prepared.deliveryPending.receiver and prepared.materialsPending.receiver)
+local claimed=copy(entry);claimed.status='claimed';comm:PrepareOrderStatusDelivery(claimed)
+assert(claimed.deliveryPending.receiver and not claimed.materialsPending,'progress mark scheduled a material list')
+local echoed=copy(entry);echoed.result='completion_notice';comm:PrepareOrderStatusDelivery(echoed)
+assert(echoed.deliveryPending.receiver and not echoed.materialsPending,'materialized row echoed the list back')
+
+-- The receiver's current character answers a ping, so it is a fresh target.
+receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID='receiver',data={state=2}}},'Receiver-Realm')
+local senderStatuses=fulfillment:GetStatuses()
+local live=copy(entry);comm:PrepareOrderStatusDelivery(live);senderStatuses[key]=live
+sent={};timers={}
+comm:ShareOrderStatus(live)
+assert(#sent==0,'mark bypassed the coalescing flush')
+runTimers(0.3)
+local markPacket=only(op.ShareOrderCompletion)
+assert(markPacket.prefix=='HIRONCRAFT_SCAN' and markPacket.priority=='ALERT')
+assert(markPacket.data.data.statuses[1].deliveryPending.receiver and not hasKey(markPacket.data,'reagentAudit'))
+sent={};comm:ShareOrderStatus(live);runTimers(0.3)
+assert(#sent==0,'a mark still waiting in the local queue was queued again')
+
+markSent(markPacket)
+sent={};runTimers(1.5)
+live.reagentAudit.rows[1].supplied[1].quantity=999
+flushFrames()
+local materialPacket=only(op.ShareOrderMaterials)
+assert(materialPacket.prefix=='HIRONCRAFT_BULK' and materialPacket.priority=='NORMAL')
+local wireList=materialPacket.data.data
+assert(wireList.batch and wireList.statuses[1].reagentAudit.rows[1].supplied[1].quantity==20,
+    'queued list followed a later mutation')
+assert(not wireList.statuses[1].deliveryPending and not wireList.statuses[1].materialsPending)
+live.reagentAudit.rows[1].supplied[1].quantity=20
+sent={};comm:ShareOrderStatus(live);runTimers(1.5);flushFrames()
+assert(#sent==0,'a second material batch or mark was queued while the first was in flight')
+
+-- Receiver: the mark lands first and is ACKed on the urgent prefix.
+actAs('receiver','source');Scan.DB.realm.order_statuses={}
+receive(markPacket,'Sender-Realm')
+local stored=fulfillment:GetStatuses()[key]
 assert(stored and stored.status=='fulfilled' and not stored.reagentAudit)
-assert(#sent==0,'compact status acknowledged evidence before its delivery')
-receive(fullPacket)
-stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
+local statusAck=only(op.OrderStatusAck)
+assert(statusAck.prefix=='HIRONCRAFT_SCAN' and statusAck.priority=='ALERT','mark ACK waited for the material list')
+receive(materialPacket,'Sender-Realm')
+stored=fulfillment:GetStatuses()[key]
 assert(stored.status=='fulfilled' and stored.reagentAudit.rows[1].supplied[1].quantity==20)
-assert(#sent==1 and sent[1].data.operation==op.OrderStatusAck,'full evidence was not acknowledged')
-receive(compactPacket)
-assert(Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)].reagentAudit,
-    'reordered compact packet erased material details')
+local materialAck=only(op.OrderMaterialsAck)
+assert(materialAck.prefix=='HIRONCRAFT_SCAN' and materialAck.data.data.batch==wireList.batch)
+receive(markPacket,'Sender-Realm')
+assert(fulfillment:GetStatuses()[key].reagentAudit,'reordered mark erased material details')
 local newer=copy(entry);newer.craftingOrderID=43;newer.rev=8;newer.updatedAt=time()+1
 newer.status='claimed';newer.reagentAudit=nil
-assert(Scan.OrderFulfillment:ApplyRemoteStatus(newer))
-receive(fullPacket)
-stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
+assert(fulfillment:ApplyRemoteStatus(newer))
+receive(materialPacket,'Sender-Realm')
+stored=fulfillment:GetStatuses()[key]
 assert(stored.status=='claimed' and stored.craftingOrderID==43 and not stored.reagentAudit,
-    'late evidence completed or contaminated a newer order')
-local live=copy(entry);live.craftingOrderID=44;live.rev=9;live.updatedAt=time()+2
-live.reagentAudit.orderID=44;live.reagentAudit.rows={live.reagentAudit.rows[1]}
-Scan.DB.settings.my_uuid='source';sent={};frames={}
-comm:Transmit(live,op.ShareOrderStatus,'Receiver-Realm')
-assert(#sent==1 and #frames==0 and sent[1].priority=='ALERT')
-local livePacket=sent[1];Scan.DB.settings.my_uuid='receiver'
-receive(livePacket)
-stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
-assert(stored.status=='fulfilled' and stored.craftingOrderID==44 and stored.reagentAudit.orderID==44)
-assert(#sent==1 and sent[1].data.operation==op.OrderStatusAck)
-print('Order sync payload tests passed (immediate live evidence, lean progress, bounded history, ACKs, reordering, isolation).')
+    'late list completed or contaminated a newer order')
+only(op.OrderMaterialsAck)
+
+-- Sender: each ACK clears only its own delivery flag.
+actAs('source','receiver');Scan.DB.realm.order_statuses=senderStatuses
+receive(statusAck,'Receiver-Realm')
+assert(not live.deliveryPending and live.deliveryConfirmedAt,'mark ACK did not confirm delivery')
+assert(live.materialsPending and live.materialsPending.receiver,'mark ACK cleared the undelivered list')
+receive(materialAck,'Receiver-Realm')
+assert(not live.materialsPending,'material ACK did not clear the list')
+sent={}
+for _=1,3 do runTimers(60);flushFrames() end
+assert(#sent==0,'delivered data was sent again')
+
+-- A lost list is retried once its ACK timeout expires, not before.
+local second=copy(entry);second.responseID=124;second.craftingOrderID=50;second.reagentAudit.orderID=50
+comm:PrepareOrderStatusDelivery(second);senderStatuses[Scan.OrderToOrderID(second)]=second
+sent={};timers={}
+comm:ShareOrderStatus(second);runTimers(0.3)
+markSent(only(op.ShareOrderCompletion))
+sent={};runTimers(1.5);flushFrames()
+local lost=only(op.ShareOrderMaterials);markSent(lost)
+sent={};runTimers(9);flushFrames()
+assert(not find(op.ShareOrderMaterials),'material list retried before its ACK timeout')
+sent={};runTimers(10);flushFrames()
+local retry=find(op.ShareOrderMaterials)
+assert(retry and retry.data.data.batch~=lost.data.data.batch
+    and retry.data.data.statuses[1].craftingOrderID==50,'lost material list was not retried')
+print('Order sync payload tests passed (lean marks, bulk prefix, coalescing, single material batch, separate ACKs, reordering, isolation, retry).')
