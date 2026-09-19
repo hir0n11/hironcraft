@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Completed-order reply, material lists on fast declines (0.3.67)
+
+- New built-in quick reply COMPLETED ORDER, offered when an order is completed
+  and gets its green check ("Your order is done, thank you!"). Like every quick
+  reply it is editable and is only sent when you click the suggestion; its
+  checkbox in Quick Replies turns it off.
+- Clicking through the queue quickly could record a decline before its material
+  list was captured, so the reply said the details could not be found. The
+  list saved when the order was claimed is now used, retried for a few seconds
+  if it arrives late, and the decline reply waits for it.
+- Switching order tabs refreshes the list again. A tab that sends no request
+  (Public without favourites, an empty Guild tab) used to keep showing the
+  previous tab's orders.
+
 ## Stable order list, late Personal orders, manual declines (0.3.66)
 
 - The order list no longer blinks after a completed order. Every refresh used

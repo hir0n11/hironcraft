@@ -255,6 +255,13 @@ function Audit.PruneProgress()
     table.sort(entries,function(a,b) return a.time>b.time end)
     for index=501,#entries do storage[entries[index].key]=nil end
 end
+-- Read-only lookup of the snapshot stored when the order was claimed. Used to
+-- recover a material list for a decline that was recorded before the capture.
+function Audit.GetProgress(orderID)
+    local id=Number(orderID,1e16)
+    if not id then return nil end
+    return Audit.Sanitize(ProgressStorage()[tostring(id)])
+end
 function Audit.CaptureProgress(order,beforeCraft)
     local id=type(order)=='table' and Number(order.orderID,1e16)
     if not id then return nil end

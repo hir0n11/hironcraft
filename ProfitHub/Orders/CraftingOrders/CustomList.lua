@@ -1955,6 +1955,22 @@ local function AttachHooks()
 
     hooksecurefunc(ProfessionsCraftingOrderPageMixin, "ShowGeneric", HookAfter)
 
+    -- Switching to a tab that sends no request (Public without favourites,
+    -- an empty Guild tab) never reaches ShowGeneric or a data-provider change,
+    -- so the list kept showing the previous tab's orders. The order type is
+    -- already set here, and Refresh drops rows that belong to another tab.
+    if ProfessionsCraftingOrderPageMixin.SetCraftingOrderType then
+        hooksecurefunc(ProfessionsCraftingOrderPageMixin, "SetCraftingOrderType", function(pageFrame)
+            if not CO:IsEnabled() then return end
+            local container = pageFrame and pageFrame.ahuiCustomList
+            if container then
+                container._freshSearchPending = nil
+                container._allowEmptyOnce = true
+            end
+            QueueRefresh()
+        end)
+    end
+
     if ProfessionsFrame and ProfessionsFrame.OrdersPage and ProfessionsFrame.OrdersPage.HookScript
         and not ProfessionsFrame.OrdersPage.ahuiCustomListShowHooked then
         ProfessionsFrame.OrdersPage.ahuiCustomListShowHooked = true

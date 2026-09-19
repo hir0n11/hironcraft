@@ -19,7 +19,8 @@ function Scan.OrderToLiveResponse() end
 function time() return now end
 function issecretvalue() return false end
 function hooksecurefunc(_,name,callback) hooks[name]=callback end
-C_Timer={After=function() end}
+local timers={}
+C_Timer={After=function(_,callback) timers[#timers+1]=callback end}
 HironCraftScanScannerMenu={RegisterEventCallback=function(_,event,callback) events[event]=callback end}
 local listed={}
 C_CraftingOrders={GetClaimedOrder=function() return nil end,FulfillOrder=function() end,
@@ -58,4 +59,29 @@ hooks.RejectOrder(901,'',164)
 assert(not F:GetStatus(profit),'ProfitHub decline was recorded a second time by the hook')
 
 hooks.RejectOrder(999,'',164) -- unknown order: nothing to record, no error
-print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated).')
+
+-- Fast clicking declines before the list is captured: the list saved when the
+-- order was claimed is used, so the reply never says it was unavailable.
+local fast=chatRow(3,'Fast-Realm')
+Scan.ReagentAudit.CaptureProgress({orderID=902,spellID=123,
+    reagents={{itemID=11,quantity=4,slotIndex=1,source=1}}})
+F:RecordRejection({orderID=902,customerName='Fast-Realm',spellID=123,itemID=321},902,'insufficient_quality')
+local recovered=F:GetStatus(fast)
+assert(recovered and recovered.status=='rejected','fast decline was not recorded')
+assert(recovered.reagentAudit and recovered.reagentAudit.rows[1].supplied[1].quantity==4,
+    'fast decline lost the list captured when the order was claimed')
+
+-- The list can also arrive after the decline; the retries pick it up.
+local later=chatRow(4,'Later-Realm')
+timers={}
+F:RecordRejection({orderID=903,customerName='Later-Realm',spellID=123,itemID=321},903,'insufficient_quality')
+local initial=F:GetStatus(later).reagentAudit
+assert(not initial or initial.complete~=true,'a complete list appeared before it was captured')
+assert(#timers>0,'no retry was scheduled for the missing list')
+Scan.ReagentAudit.CaptureProgress({orderID=903,spellID=123,
+    reagents={{itemID=11,quantity=2,slotIndex=1,source=1}}})
+for _,callback in ipairs(timers) do callback() end
+local late=F:GetStatus(later)
+assert(late.reagentAudit and late.reagentAudit.rows[1].supplied[1].quantity==2,
+    'a list captured right after the decline never reached the status')
+print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated, late material lists recovered).')

@@ -68,7 +68,7 @@ local function edit(field,text)
     box:SetText(text);box.scripts.OnEditFocusLost(box)
 end
 local replies=Scan.Config.LoadQuickReplyConfigOptions(nil,false)
-assert(replies.definitionCount==5)
+assert(replies.definitionCount==6)
 local function findRow(key)
     for _,row in ipairs(replies.Rows) do if row:IsShown() and row.definition.key==key then return row end end
 end
@@ -87,10 +87,19 @@ assert(findRow('PRICE').Enabled.Title.text=='Commission')
 local template=Scan.QuickReplies:GetConfig().templates.PRICE
 assert(template.keywords=='cost, fee' and template.response=='500g' and template.priority==12 and template.enabled==false)
 click(findRow('PRICE').Delete)
-assert(replies.definitionCount==4 and not findRow('PRICE'))
+assert(replies.definitionCount==5 and not findRow('PRICE'))
+-- The completed-order reply is a normal built-in row: editable and switchable.
+local done=findRow('COMPLETED_ORDER')
+assert(done and done.Keywords and not done.Keywords:IsShown(),'completed-order reply asked for keywords')
+edit(done.Response,'Your order is ready!')
+done.Enabled.Act:SetChecked(false);click(done.Enabled.Act)
+local completed=Scan.QuickReplies:GetConfig().templates.COMPLETED_ORDER
+assert(completed.response=='Your order is ready!' and completed.enabled==false,
+    'completed-order reply could not be edited or switched off')
+done.Enabled.Act:SetChecked(true);click(done.Enabled.Act)
 -- Pooled rows must replace their delete/rename callbacks after reordering.
 click(findRow('ORDER').Delete)
-assert(replies.definitionCount==3 and not findRow('ORDER') and findRow('QUALITY'))
+assert(replies.definitionCount==4 and not findRow('ORDER') and findRow('QUALITY'))
 click(findRow('REJECTED_ORDER').Rename);dialog.OnAccept('Resend materials')
 edit(findRow('REJECTED_ORDER').Response,'Please resend: {reagent_issues}')
 assert(Scan.QuickReplies:GetConfig().templates.REJECTED_ORDER.response=='Please resend: {reagent_issues}')

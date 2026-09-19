@@ -14,6 +14,7 @@ local MAX_VISIBLE_TOASTS = 8
 local MAX_OPTIONS_PER_POPUP = 8
 local MAX_PRIORITY = 999
 local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
+local COMPLETED_ORDER_TEMPLATE_KEY = 'COMPLETED_ORDER'
 local ORDER_GREETING_ACTION = 'order-greeting'
 local REPLY_COOLDOWN = 6
 local LEGACY_REJECTION_TEXT = 'You need provide all mats and they all should be max tier (even missive and embelishment)'
@@ -51,6 +52,12 @@ local DEFAULT_TEMPLATES = {
         eventOnly = true,
         keywords = '',
         response = 'I checked your order. {reagent_issues}',
+    },
+    {
+        key = COMPLETED_ORDER_TEMPLATE_KEY,
+        eventOnly = true,
+        keywords = '',
+        response = 'Your order is done, thank you!',
     },
     {
         key = 'NAME',
@@ -713,16 +720,20 @@ function QuickReplies:IsConversationCharacter(response)
         and owner:gsub('%s+', ''):lower() == current:gsub('%s+', ''):lower()
 end
 
-function QuickReplies:BuildRejectedOrderOption(order, entry)
+-- Both order-status replies are built the same way; only the status they
+-- react to, their template and the toast headline differ.
+local STATUS_OPTIONS = {
+    rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected' },
+    fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed' },
+}
+
+function QuickReplies:BuildOrderStatusOption(order, entry)
     local config = EnsureConfig()
-    local rejectedStatus = HironCraftScan.OrderFulfillment
-        and HironCraftScan.OrderFulfillment.Status
-        and HironCraftScan.OrderFulfillment.Status.Rejected
+    local statusOption = type(entry) == 'table' and STATUS_OPTIONS[entry.status]
     if
         not config.enabled
         or type(order) ~= 'table'
-        or type(entry) ~= 'table'
-        or entry.status ~= rejectedStatus
+        or not statusOption
         or type(order.customerName) ~= 'string'
         or order.responseID == nil
         or not IsListedOrder(order.customerName, order.responseID)
@@ -741,25 +752,35 @@ function QuickReplies:BuildRejectedOrderOption(order, entry)
     end
     if not self:IsConversationCharacter(response) then return nil end
 
-    local reply = self:BuildReply(REJECTED_ORDER_TEMPLATE_KEY, response)
+    local reply = self:BuildReply(statusOption.template, response)
     if not reply then
         return nil
     end
 
     return {
         customer = order.customerName,
-        message = L('Crafting order status rejected'),
+        message = L(statusOption.message),
         response = response,
         responseID = order.responseID,
         requestToken = response.requestToken,
         requestTime = response.time,
-        templateKey = REJECTED_ORDER_TEMPLATE_KEY,
-        rejectionOrderID = entry.craftingOrderID,
-        templateLabel = self:GetTemplateLabel(REJECTED_ORDER_TEMPLATE_KEY),
+        templateKey = statusOption.template,
+        rejectionOrderID = entry.status == 'rejected' and entry.craftingOrderID or nil,
+        templateLabel = self:GetTemplateLabel(statusOption.template),
         reply = reply,
         label = reply,
         contextLabel = ResponseLabel(response),
     }, customerInfo
+end
+
+function QuickReplies:BuildRejectedOrderOption(order, entry)
+    local rejected = HironCraftScan.OrderFulfillment
+        and HironCraftScan.OrderFulfillment.Status
+        and HironCraftScan.OrderFulfillment.Status.Rejected
+    if type(entry) ~= 'table' or entry.status ~= rejected then
+        return nil
+    end
+    return self:BuildOrderStatusOption(order, entry)
 end
 
 local TOAST_WIDTH = 277
@@ -1390,11 +1411,13 @@ function QuickReplies:GetRejectedOrderSuggestionKeys(order, entry)
     -- Keep every stable identity as an alias. Reconciliation may initially
     -- omit craftingOrderID and populate it on a later ACK; revisions and
     -- updatedAt change on those updates and must not create another offer.
-    add('crafting-order', entry and entry.craftingOrderID)
-    add('request-token', entry and entry.requestToken)
-    add('order', order and HironCraftScan.OrderToOrderID(order))
+    local status = type(entry) == 'table' and tostring(entry.status) or ''
+    add('crafting-order', entry and entry.craftingOrderID and (status .. ':' .. entry.craftingOrderID))
+    add('request-token', entry and entry.requestToken and (status .. ':' .. entry.requestToken))
+    add('order', order and (status .. ':' .. tostring(HironCraftScan.OrderToOrderID(order))))
     if type(order) == 'table' then
         add('response', table.concat({
+            status,
             tostring(order.customerName or ''),
             tostring(order.responseID or ''),
         }, '\31'))
@@ -1402,8 +1425,40 @@ function QuickReplies:GetRejectedOrderSuggestionKeys(order, entry)
     return keys
 end
 
-function QuickReplies:OnOrderFulfillmentUpdated(order, entry)
-    local option, customerInfo = self:BuildRejectedOrderOption(order, entry)
+-- A decline can be recorded before its material list is captured, which is
+-- what fast clicking through the queue does. Offering the reply right then
+-- produced "I couldn't find the material details"; wait for the list first.
+local MATERIAL_WAIT_DELAYS = { 0.4, 1, 2, 3 }
+
+function QuickReplies:IsWaitingForMaterials(order, entry)
+    if type(entry) ~= 'table' or entry.status ~= 'rejected' or not HironCraftScan.ReagentAudit then
+        return false
+    end
+    local config = EnsureConfig()
+    local template = config.templates and config.templates[REJECTED_ORDER_TEMPLATE_KEY]
+    local response = type(template) == 'table' and template.response or ''
+    if type(response) ~= 'string' or not response:find('{reagent_issues}', 1, true) then
+        return false
+    end
+    -- A list built from the recipe alone carries no customer amounts yet.
+    local snapshot = HironCraftScan.ReagentAudit.GetForOrder(order)
+    return type(snapshot) ~= 'table' or snapshot.complete ~= true
+end
+
+function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
+    if self:IsWaitingForMaterials(order, entry) then
+        local delay = MATERIAL_WAIT_DELAYS[(attempt or 0) + 1]
+        if delay and C_Timer and C_Timer.After then
+            C_Timer.After(delay, function()
+                local fulfillment = HironCraftScan.OrderFulfillment
+                local current = fulfillment and fulfillment:GetStatus(order) or entry
+                QuickReplies:OnOrderFulfillmentUpdated(order, current, (attempt or 0) + 1)
+            end)
+            return
+        end
+    end
+
+    local option, customerInfo = self:BuildOrderStatusOption(order, entry)
     if not option then
         return
     end
@@ -1424,7 +1479,7 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry)
 
     for _, toast in ipairs(toastPool) do
         local old = toast.option
-        if type(old) == 'table' and old.templateKey == REJECTED_ORDER_TEMPLATE_KEY
+        if type(old) == 'table' and old.templateKey == option.templateKey
             and old.customer == option.customer and old.responseID == option.responseID then
             toast:Hide(); toast.option = nil
         end

@@ -1420,20 +1420,98 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
     return matched
 end
 
+-- Clicking through the queue quickly can record a decline before its material
+-- list was captured, which produced a reply saying the list was unavailable.
+-- The list captured when the order was claimed is durable, so recover it.
+-- The list built from the recipe alone (no supplied amounts) is incomplete and
+-- still worth replacing with the one captured when the order was claimed.
+local function NeedsBetterAudit(audit)
+    return type(audit) ~= 'table' or audit.complete ~= true
+end
+
+local function RejectionNeedsAudit(craftingOrderID)
+    local key = tostring(craftingOrderID)
+    local order = FindStoredOrder(craftingOrderID)
+    local entry = order and EnsureStorage()[HironCraftScan.OrderToOrderID(order)]
+    if
+        entry
+        and entry.status == OrderFulfillment.Status.Rejected
+        and tostring(entry.craftingOrderID) == key
+        and NeedsBetterAudit(entry.reagentAudit)
+    then
+        return true
+    end
+    for _, notice in pairs(EnsureCompletionStorage()) do
+        if
+            type(notice) == 'table'
+            and notice.status == OrderFulfillment.Status.Rejected
+            and tostring(notice.orderID) == key
+            and NeedsBetterAudit(notice.reagentAudit)
+        then
+            return true
+        end
+    end
+    return false
+end
+
+local function ScheduleRejectionAuditRetries(craftingOrderID, snapshot, reason)
+    if not craftingOrderID or not C_Timer or not C_Timer.After or not HironCraftScan.ReagentAudit then
+        return
+    end
+
+    for _, delay in ipairs({ 0.3, 1, 2, 4 }) do
+        C_Timer.After(delay, function()
+            if not RejectionNeedsAudit(craftingOrderID) then
+                return
+            end
+            local stored = craftingOrderSnapshots[craftingOrderID]
+            local audit = HironCraftScan.ReagentAudit.GetProgress
+                and HironCraftScan.ReagentAudit.GetProgress(craftingOrderID)
+                or (stored and stored.reagentAudit)
+            if NeedsBetterAudit(audit) then
+                return
+            end
+            local recovered = {}
+            for key, value in pairs(snapshot) do
+                recovered[key] = value
+            end
+            recovered.reagentAudit = audit
+            TrackOrderInfo(
+                OrderFulfillment.Status.Rejected,
+                craftingOrderID,
+                reason or 'missing_customer_reagents',
+                recovered
+            )
+        end)
+    end
+end
+
 function OrderFulfillment:RecordRejection(orderInfo, craftingOrderID, reason, reagentAudit)
     if type(orderInfo) ~= 'table' or type(orderInfo.customerName) ~= 'string' then
         return false
     end
 
-    local snapshot = SnapshotOrderInfo(orderInfo, craftingOrderID or orderInfo.orderID)
-        or orderInfo
-    snapshot.reagentAudit = CleanReagentAudit(reagentAudit or orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID)
-    return TrackOrderInfo(
+    local orderID = craftingOrderID or orderInfo.orderID
+    local snapshot = SnapshotOrderInfo(orderInfo, orderID) or orderInfo
+    snapshot.reagentAudit = CleanReagentAudit(reagentAudit or orderInfo.reagentAudit, orderID)
+    if NeedsBetterAudit(snapshot.reagentAudit) and HironCraftScan.ReagentAudit
+        and HironCraftScan.ReagentAudit.GetProgress then
+        -- Declining before the capture leaves only the recipe's slots. The
+        -- list saved when the order was claimed has the customer's amounts.
+        local progress = CleanReagentAudit(HironCraftScan.ReagentAudit.GetProgress(orderID), orderID)
+        if progress then
+            snapshot.reagentAudit = MergeReagentAudit(progress, snapshot.reagentAudit)
+        end
+    end
+
+    local matched = TrackOrderInfo(
         self.Status.Rejected,
-        craftingOrderID or orderInfo.orderID,
+        orderID,
         reason or 'missing_customer_reagents',
         snapshot
     )
+    ScheduleRejectionAuditRetries(orderID, snapshot, reason)
+    return matched
 end
 
 local function TrackClaimedOrder(status, craftingOrderID, result, allowLastSnapshot, force)

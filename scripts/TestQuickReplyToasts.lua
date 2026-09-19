@@ -361,6 +361,51 @@ now=now+6;click(visible('AuditBuyer')[1])
 assert(batches==2)
 print('Reagent reply tests passed (manual batches, cooldown, resend identity, completed order guard).')
 
+-- Completing an order offers its own reply, once, and only while enabled.
+dismissAll()
+local doneOrder={customerName='AuditBuyer',responseID=102}
+local doneStatus={status='fulfilled',craftingOrderID=81100}
+Scan.OrderFulfillment.GetStatus=function() return doneStatus end
+Scan.Utils.SendResponses=sendResponses
+local beforeDone=#sent
+QuickReplies:OnOrderFulfillmentUpdated(doneOrder,doneStatus)
+local doneCard=visible('AuditBuyer')[1]
+assert(doneCard and doneCard.option.templateKey=='COMPLETED_ORDER'
+    and doneCard.option.reply=='Your order is done, thank you!','completed order offered no reply')
+assert(#sent==beforeDone,'completed order auto-sent its reply')
+click(doneCard);assert(#sent==beforeDone+1,'completed-order reply was not sent on click')
+QuickReplies:OnOrderFulfillmentUpdated(doneOrder,doneStatus)
+assert(#visible('AuditBuyer')==0,'a status update repeated the completed-order offer')
+Scan.DB.settings.quick_replies.templates.COMPLETED_ORDER.enabled=false
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AuditBuyer',responseID=101},
+    {status='fulfilled',craftingOrderID=81101})
+assert(#visible('AuditBuyer')==0,'a disabled completed-order reply was still offered')
+Scan.DB.settings.quick_replies.templates.COMPLETED_ORDER.enabled=true
+
+-- A decline recorded before its material list waits for the list instead of
+-- replying that the details could not be found.
+dismissAll()
+local timers={}
+C_Timer={After=function(_,callback) timers[#timers+1]=callback end}
+local snapshot=nil
+Scan.ReagentAudit={GetForOrder=function() return snapshot end}
+local waitStatus={status='rejected',craftingOrderID=81200,requestToken=auditResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return waitStatus end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,waitStatus)
+assert(#visible('AuditBuyer')==0 and #timers==1,'decline offered a reply before its material list')
+snapshot={rows={},complete=true}
+timers[1]()
+assert(#visible('AuditBuyer')==1,'decline never offered its reply after the list arrived')
+-- A list that never arrives still offers the reply after the last attempt.
+dismissAll();timers={};snapshot=nil
+local lateStatus={status='rejected',craftingOrderID=81201,requestToken=auditResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return lateStatus end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,lateStatus)
+for index=1,8 do if timers[index] then timers[index]() end end
+assert(#visible('AuditBuyer')==1,'decline without a material list never offered any reply')
+C_Timer=nil
+print('Order status reply tests passed (completed reply with switch, decline waits for materials).')
+
 -- Deleting or renaming a template invalidates already visible callbacks as well
 -- as the keyboard action. Neither editing nor deletion may send anything.
 dismissAll()

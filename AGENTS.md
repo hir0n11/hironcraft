@@ -9,3 +9,8 @@
   history. If publication is blocked, explain the blocker.
 - This preference concerns source commits, not creating GitHub releases,
   publishing unrelated artifacts, or sending in-game messages.
+- Build every released version with scripts/Build.ps1 (default output: the
+  dist folder inside the addon folder), verify it with
+  scripts/TestReleaseArchive.ps1, and give the user the archive's full path.
+  Never place the archive in the addon's root: the build copies the root and
+  the archive would end up inside the next one.
