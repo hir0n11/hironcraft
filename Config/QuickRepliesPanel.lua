@@ -124,6 +124,11 @@ local function CreateRow(panel, index)
     row.Delete:SetSize(88, 22)
     row.Delete:SetPoint('TOPLEFT', 8, -42)
     row.Delete:SetText(L('Delete'))
+    row.Delete:SetNormalFontObject('GameFontNormalSmall')
+
+    row.Rename = CreateFrame('Button', nil, row, 'UIPanelButtonTemplate')
+    row.Rename:SetText(L('Quick reply rename button'))
+    row.Rename:SetNormalFontObject('GameFontNormalSmall')
 
     row.PriorityLabel = CreateLabel(row, 'GameFontNormalSmall', L('dialog.quick_reply.priority'))
     row.PriorityLabel:SetSize(64, 20)
@@ -151,6 +156,7 @@ end
 local function LayoutRow(row, isCollapsed)
     row.Enabled:ClearAllPoints()
     row.Delete:ClearAllPoints()
+    row.Rename:ClearAllPoints()
     row.PriorityLabel:ClearAllPoints()
     row.Priority:ClearAllPoints()
     row.Keywords:ClearAllPoints()
@@ -161,18 +167,21 @@ local function LayoutRow(row, isCollapsed)
 
     if isCollapsed then
         row:SetSize(COMPACT_CONTENT_WIDTH, COMPACT_ROW_HEIGHT)
-        row.Enabled:SetWidth(eventOnly and 260 or 190)
-
-        row.Delete:SetPoint('TOPRIGHT', -3, -2)
+        row.Enabled:SetWidth(290)
+        row.Enabled.Title:SetWidth(250)
+        row.Rename:SetSize(74, 20)
+        row.Delete:SetSize(74, 20)
+        row.Rename:SetPoint('TOPLEFT', 8, -29)
+        row.Delete:SetPoint('TOPLEFT', 86, -29)
 
         if eventOnly then
             row.PriorityLabel:Hide()
             row.Priority:Hide()
             row.Response:SetSize(COMPACT_CONTENT_WIDTH, 150)
-            row.Response:SetPoint('TOPLEFT', 0, -28)
+            row.Response:SetPoint('TOPLEFT', 0, -55)
         else
-            row.PriorityLabel:SetPoint('TOPLEFT', 5, -31)
-            row.Priority:SetPoint('TOPLEFT', 70, -29)
+            row.PriorityLabel:SetPoint('TOPLEFT', 174, -29)
+            row.Priority:SetPoint('TOPLEFT', 248, -29)
             row.PriorityLabel:Show()
             row.Priority:Show()
 
@@ -185,8 +194,11 @@ local function LayoutRow(row, isCollapsed)
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
         row.Enabled:SetWidth(eventOnly and 184 or 114)
-
-        row.Delete:SetPoint('TOPLEFT', 8, -76)
+        row.Enabled.Title:SetWidth(eventOnly and 145 or 75)
+        row.Rename:SetSize(eventOnly and 80 or 48, 22)
+        row.Delete:SetSize(eventOnly and 80 or 54, 22)
+        row.Rename:SetPoint('TOPLEFT', 8, -76)
+        row.Delete:SetPoint('TOPLEFT', eventOnly and 94 or 58, -76)
 
         if eventOnly then
             row.PriorityLabel:Hide()
@@ -216,6 +228,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:Layout(isCollapsed)
     local rowStep = isCollapsed and COMPACT_ROW_STEP or FULL_ROW_STEP
 
     self:SetWidth(panelWidth)
+    self.Description:SetHeight(isCollapsed and 76 or 34)
     self.Enabled:SetWidth(isCollapsed and 190 or 300)
     self.Content:SetWidth(contentWidth)
 
@@ -315,7 +328,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
         end
         HironCraftScan.SetupTextInput(self, row.Response, prefix .. 'response')
 
-        if definition.custom then
+        do
             row.Enabled.Title:SetText(definition.label)
             row.Keywords.Title:SetText(L('dialog.quick_reply.custom.keywords'))
             row.Response.Title:SetText(L('dialog.quick_reply.custom.response'))
@@ -326,14 +339,10 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
             )
             HironCraftScan.SetupInfoIcon(row.Keywords.Info, 'quick_reply.custom.keywords')
             HironCraftScan.SetupInfoIcon(row.Response.Info, 'quick_reply.custom.response')
-            row.Delete:SetScript('OnClick', function()
-                if HironCraftScan.QuickReplies:DeleteCustomTemplate(definition.key) then
-                    self:RefreshRows()
-                end
-            end)
+            row.Delete:SetScript('OnClick', function() HironCraftScan.QuickReplies:DeleteTemplate(definition.key) end)
+            row.Rename:SetScript('OnClick', function() self:ShowRenameDialog(definition.key) end)
             row.Delete:Show()
-        else
-            row.Delete:Hide()
+            row.Rename:Show()
         end
         row:Show()
     end
@@ -342,6 +351,21 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
         self.Rows[index]:Hide()
     end
     self:Layout(self.isCollapsed)
+end
+
+function HironCraftScanQuickReplyConfigPanelMixin:ShowRenameDialog(key)
+    local replies = HironCraftScan.QuickReplies
+    HironCraftScan.Dialog.Show({
+        key='rename_quick_reply', title=L('Rename Quick Reply'), submit=L('Save'), width=420,
+        OnAccept=function(label) replies:RenameTemplate(key, label) end,
+        elements={
+            {type=HironCraftScan.Dialog.Element.Text, text=L('Quick reply name description')},
+            {type=HironCraftScan.Dialog.Element.EditBox, initial_text=replies:GetTemplateLabel(key),
+                Validator=function(_,label)
+                    if not replies:IsLabelAvailable(label,key) then return {error=L('Quick reply duplicate name')} end
+                end},
+        },
+    })
 end
 
 function HironCraftScanQuickReplyConfigPanelMixin:ShowCreateDialog(initialKeywords)
@@ -425,7 +449,8 @@ function HironCraftScanQuickReplyConfigPanelMixin:GetConfigValue(keyword)
 
     local templateKey, field = ParseTemplateKeyword(keyword)
     local template = templateKey and config.templates[templateKey]
-    return template and template[field] or ''
+    if template and template[field] ~= nil then return template[field] end
+    return ''
 end
 
 function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, value)

@@ -8,7 +8,7 @@ local Scan = {
         CUSTOM_3={custom=true, enabled=true, label='Greeting', keywords='yo,hello', response='hey hey'},
     }}}, customers={}, listed_orders={}},
     Utils={}, Frames={flipTextureHorizontally=noop}, State={}, CONST={LEFT=0},
-    Events={Register=noop}, LOCAL={GetText=function(_, text) return text end},
+    Events={Register=noop,Emit=noop}, LOCAL={GetText=function(_, text) return text end},
     Config={SubstituteTags=function(text) return text end},
     OrderFulfillment={Status={Rejected='rejected'}},
 }
@@ -360,3 +360,29 @@ assert(batches==1,'multi-message audit bypassed cooldown')
 now=now+6;click(visible('AuditBuyer')[1])
 assert(batches==2)
 print('Reagent reply tests passed (manual batches, cooldown, resend identity, completed order guard).')
+
+-- Deleting or renaming a template invalidates already visible callbacks as well
+-- as the keyboard action. Neither editing nor deletion may send anything.
+dismissAll()
+Scan.Utils.SendResponses=sendResponses
+local beforeEdits=#sent
+whisper('CooldownBuyer','price')
+assert(#visible()==2)
+local oldPrice=visible()[1]
+local oldPriceClick=oldPrice.scripts.OnClick
+assert(QuickReplies:DeleteTemplate('PRICE'))
+assert(#visible()==0 and not QuickReplies:SendTopReply(true))
+oldPriceClick(oldPrice,'LeftButton')
+whisper('CooldownBuyer','price')
+assert(#visible()==0 and #sent==beforeEdits,'deleted default sent or proposed an answer')
+whisper('CooldownBuyer','sent')
+local oldCustom=visible()[1]
+local oldCustomClick=oldCustom.scripts.OnClick
+assert(QuickReplies:RenameTemplate('CUSTOM_2','On my way'))
+assert(#visible()==0)
+oldCustomClick(oldCustom,'LeftButton')
+whisper('CooldownBuyer','sent')
+assert(#visible()==1 and visible()[1].option.templateLabel=='On my way')
+assert(QuickReplies:DeleteTemplate('CUSTOM_2'))
+assert(#visible()==0 and not QuickReplies:SendTopReply(true) and #sent==beforeEdits)
+print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send).')

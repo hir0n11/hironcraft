@@ -1669,7 +1669,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
         if visualAlert then
             HironCraftScan.State.activeOrder = order
             FlashClientIcon()
-            if not customerStartedInteraction then
+            if not customerStartedInteraction and not (overrides and overrides.suppressGreetingBanner) then
                 HironCraftScanScannerMenu:TriggerAlert(
                     string.format('%s\n%s (%s)',
                         HironCraftScan.ColorizePlayerName(customer, customerInfo.guid),
@@ -1966,7 +1966,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
             FlashClientIcon()
 
-            if not customerStartedInteraction then
+            if not customerStartedInteraction and not (overrides and overrides.suppressGreetingBanner) then
                 HironCraftScanScannerMenu:TriggerAlert(
                     string.format(
                         '%s\n%s (%s)',
@@ -2072,7 +2072,12 @@ local function OfferDeferredQuickReply(customer, message, customerInfo, override
 
     if #responses > 0 then
         if HironCraftScan.QuickReplies.ShowOrderGreeting then
-            HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
+            local shown = HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
+            if shown and overrides.manualMatch and HironCraftScanScannerMenu then
+                for _, response in ipairs(responses) do
+                    HironCraftScanScannerMenu:ClearAlert({customerName=customer,responseID=response.responseID})
+                end
+            end
         end
     elseif HironCraftScan.QuickReplies.OnWhisper then
         -- Ordinary follow-up questions that are not new crafting requests keep
@@ -2193,7 +2198,11 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         overrides.genericFollowup = true
     end
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
-    if (incomingWhisper or overrides.manualMatch) and not overrides.remoteRequest then
+    local quickReplies = HironCraftScan.QuickReplies
+    local manualQuickReply = overrides.manualMatch and quickReplies and quickReplies.ShowOrderGreeting
+        and (not quickReplies.GetConfig or quickReplies:GetConfig().enabled)
+    if manualQuickReply and not overrides.remoteRequest then overrides.suppressGreetingBanner = true end
+    if (incomingWhisper or manualQuickReply) and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
 

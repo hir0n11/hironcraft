@@ -649,8 +649,16 @@ local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} e
     CreateButton=function(_,label,click) buttons[#buttons+1]={label=label,click=click};return {SetTooltip=noop} end}
 local chatReads=0
 local manualOffers={}
+local manualBanners=0
+local oldManualColor=Scan.ColorizePlayerName
+Scan.ColorizePlayerName=function(name) return name end
+local oldManualTrigger,oldManualConfig=HironCraftScanScannerMenu.TriggerAlert,Scan.QuickReplies.GetConfig
+HironCraftScanScannerMenu.TriggerAlert=function() manualBanners=manualBanners+1 end
+Scan.DB.characters['Seller-Realm'].parent_professions[164].visual_alert_enabled=true
+Scan.DB.characters['Tailor-Realm'].parent_professions[197].visual_alert_enabled=true
 Scan.QuickReplies.ShowOrderGreeting=function(_,customer,_,_,responses)
     manualOffers[#manualOffers+1]={customer=customer,response=responses[1]}
+    return true
 end
 C_ChatInfo={GetChatLineText=function(id) assert(id==44);chatReads=chatReads+1;return 'LF '..a end,
     GetChatLineSenderGUID=function() return 'Manual-GUID' end}
@@ -658,6 +666,7 @@ menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ManualBuyer-Realm',lineID='44'})
 assert(#sent==0 and countRows()==0, 'opening the manual menu took an action')
 buttons[2].click()
 assert(#sent==0 and #manualOffers==1 and manualOffers[1].customer=='ManualBuyer-Realm' and chatReads==1)
+assert(manualBanners==0,'manual match displayed both a quick reply and greeting banner')
 local manualResponse=Scan.DB.customers['ManualBuyer-Realm'].responses[197]
 assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.itemID and not manualResponse.greeting_sent)
 assert(Scan.SendOrderGreeting({customerName='ManualBuyer-Realm',responseID=197},true))
@@ -667,6 +676,15 @@ buttons[1].click()
 assert(#sent==1 and #manualOffers==2 and manualOffers[2].customer=='Expired-Realm' and chatReads==1,
     'expired line blocked the profession suggestion or sent it immediately')
 flushTimers();assert(#sent==1, 'manual matching scheduled more messages')
+assert(manualBanners==0,'deferred manual match reopened a second banner')
+Scan.QuickReplies.GetConfig=function() return {enabled=false} end
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='NoQuick-Realm'})
+buttons[1].click()
+assert(manualBanners==1 and #manualOffers==2 and #sent==1,'disabled quick replies did not fall back to one banner')
+Scan.DB.characters['Seller-Realm'].parent_professions[164].visual_alert_enabled=nil
+Scan.DB.characters['Tailor-Realm'].parent_professions[197].visual_alert_enabled=nil
+HironCraftScanScannerMenu.TriggerAlert,Scan.QuickReplies.GetConfig=oldManualTrigger,oldManualConfig
+Scan.ColorizePlayerName=oldManualColor
 Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.GetSortedCrafters, Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName, Scan.Utils.ProfessionNameByID=
     getSorted, colorCrafter, colorProfession, professionName
@@ -799,6 +817,26 @@ Scan.DB.customers.ClassBuyer={guid='Class-WARRIOR'}
 assert(Scan.Scanner.GetCrafterForMessage('ClassBuyer','need wrist').crafter=='Smith-Realm',
     'stored GUID was not used when the current event omitted it')
 
+local originalInclusions=Scan.DB.settings.inclusions
+Scan.DB.settings.inclusions=originalInclusions..',looking for'
+reloadConfig()
+for _,inferClass in ipairs({true,false}) do
+    reset();Scan.DB.settings.match_customer_class=inferClass
+    Scan.OnMessage('CHAT_MSG_CHANNEL','looking for wrist cloth crafter please','Buyer','Uncached-Cloth-GUID')
+    local clothWrist=response('equipment:197:INVTYPE_WRIST')
+    assert(countRows()==1 and clothWrist and clothWrist.equipmentRequest.armor==1
+        and clothWrist.crafterFullName=='Seller-Realm' and not response(197),
+        'explicit cloth wrist became a generic Tailoring row')
+    assert(Scan.SendOrderGreeting(order('equipment:197:INVTYPE_WRIST'),true))
+    assert(countRows()==1 and response('equipment:197:INVTYPE_WRIST')==clothWrist,
+        'greeting click changed the explicit Wrist row')
+    Scan.OnMessage('CHAT_MSG_WHISPER',link(1202),'Buyer','Uncached-Cloth-GUID')
+    assert(countRows()==1 and response(202) and not response('equipment:197:INVTYPE_WRIST'))
+end
+Scan.DB.settings.match_customer_class=true
+Scan.DB.settings.inclusions=originalInclusions;reloadConfig()
+print('Explicit cloth wrist scenario passed (no class data, class inference disabled, manual send, link replacement).')
+
 reset()
 Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','LateClass','Late-GUID')
 assert(countRows()==0 and #sent==0 and #timers==1, 'unknown class guessed or sent a response')
@@ -847,6 +885,43 @@ assert(response(wristID).requestToken==sharedTokens[wristID]
     'linked batch collapsed two different request tokens')
 reset()
 Scan.DB.characters['Engineer-Realm']=character(202,'engineering',{})
+
+-- Exact user scenario: three typed rows, then independent link replacements.
+for id,slot in pairs({[207]='INVTYPE_WAIST',[208]='INVTYPE_HAND'}) do
+    recipes[id]={recipeID=id,qualityItemIDs={id+1000}}
+    armorItems[id+1000]={slot=slot,armor=4}
+    Scan.DB.characters['Smith-Realm'].professions[164].recipes[id]={scan_state=1,keywords=''}
+end
+reloadConfig()
+local multiText='Hey, i need also belt, hands and back can you craft?'
+for class,profession in pairs({WARRIOR=164,HUNTER=165,MAGE=197}) do
+    reset();classByGUID['Buyer-GUID']=class
+    Scan.DB.customers.Buyer={guid='Buyer-GUID',responses={},chat_history={}}
+    Scan.OnMessage('CHAT_MSG_WHISPER',multiText,'Buyer','Buyer-GUID')
+    assert(countRows()==3 and response('equipment:'..profession..':INVTYPE_WAIST')
+        and response('equipment:'..profession..':INVTYPE_HAND') and response('equipment:197:INVTYPE_CLOAK'),
+        'belt/hands/back did not produce three correctly routed rows for '..class)
+    assert(#sent==0,'multi-slot whisper sent without a click')
+end
+reset();classByGUID['Buyer-GUID']='WARRIOR'
+Scan.OnMessage('CHAT_MSG_WHISPER',multiText,'Buyer','Buyer-GUID')
+local beltID,handID,backID='equipment:164:INVTYPE_WAIST','equipment:164:INVTYPE_HAND','equipment:197:INVTYPE_CLOAK'
+local handToken,backToken=response(handID).requestToken,response(backID).requestToken
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1207),'Buyer','Buyer-GUID')
+assert(countRows()==3 and not response(beltID) and response(207)
+    and response(handID).requestToken==handToken and response(backID).requestToken==backToken,
+    'belt link changed hands/back or added a fourth row')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1208),'Buyer','Buyer-GUID')
+assert(countRows()==3 and response(207) and response(208) and not response(handID) and response(backID))
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1206),'Buyer','Buyer-GUID')
+assert(countRows()==3 and response(207) and response(208) and response(206) and not response(backID),
+    'cloak link used warrior armor class or failed to replace Back')
+Scan.OnMessage('CHAT_MSG_WHISPER',multiText,'Buyer','Buyer-GUID')
+assert(countRows()==3 and not response(beltID) and not response(handID) and not response(backID),
+    'repeated slot names downgraded linked items')
+assert(#sent==0,'link replacement automatically sent a greeting')
+print('Belt/hands/back scenario passed (three classes, three rows, independent link replacement, no auto send).')
+reset()
 recipes[301]={recipeID=301,qualityItemIDs={1501}}
 recipes[303]={recipeID=303,qualityItemIDs={1503}}
 armorItems[1501]={slot='INVTYPE_WEAPON',class=2,subclass=0}

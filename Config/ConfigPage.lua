@@ -854,6 +854,14 @@ function HironCraftScanConfigMenuMixin:InitMenu()
         },
     })
 
+    node:Insert({
+        order = 2.25,
+        configInfo = {
+            label = L('Equipment Names'),
+            LoadOptions = HironCraftScan.Config.LoadEquipmentAliasesConfigOptions,
+        },
+    })
+
     -- Keep this between the fixed config entries and the profession sections.
     -- Current-expansion professions use order 3, and equal orders invoke the
     -- header comparator, which padding nodes intentionally do not implement.

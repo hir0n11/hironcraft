@@ -101,7 +101,7 @@ local function EnsureConfig()
     if config.typo_tolerance == nil then
         config.typo_tolerance = true
     end
-    config.schema_version = 6
+    config.schema_version = 7
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -133,17 +133,18 @@ function QuickReplies:GetDefinitions()
     local config = EnsureConfig()
     local definitions = {}
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
-        table.insert(definitions, {
+        local template = config.templates[definition.key]
+        if not template.deleted then table.insert(definitions, {
             key = definition.key,
-            label = definition.key,
+            label = template.label or L('dialog.quick_reply.' .. definition.key .. '.enabled'),
             custom = false,
             eventOnly = definition.eventOnly == true,
-        })
+        }) end
     end
 
     local custom = {}
     for key, template in pairs(config.templates) do
-        if not builtinKeys[key] and type(template) == 'table' and template.custom then
+        if not builtinKeys[key] and type(template) == 'table' and template.custom and not template.deleted then
             table.insert(custom, {
                 key = key,
                 label = template.label or key,
@@ -163,22 +164,20 @@ end
 function QuickReplies:GetTemplateLabel(key)
     for _, definition in ipairs(self:GetDefinitions()) do
         if definition.key == key then
-            if definition.custom then
-                return definition.label
-            end
-            return L('dialog.quick_reply.' .. key .. '.enabled')
+            return definition.label
         end
     end
     return key
 end
 
-function QuickReplies:IsLabelAvailable(label)
-    label = Trim(label):lower()
+function QuickReplies:IsLabelAvailable(label, exceptKey)
+    if type(label) ~= 'string' or #label > 128 or label:find('[%c|]') then return false end
+    label = (strlower or string.lower)(Trim(label))
     if label == '' then
         return false
     end
     for _, definition in ipairs(self:GetDefinitions()) do
-        if definition.label:lower() == label then
+        if definition.key ~= exceptKey and (strlower or string.lower)(definition.label) == label then
             return false
         end
     end
@@ -200,7 +199,7 @@ function QuickReplies:AddKeyword(key, keyword)
 
     local config = EnsureConfig()
     local template = config.templates[key]
-    if type(template) ~= 'table' or key == REJECTED_ORDER_TEMPLATE_KEY then
+    if type(template) ~= 'table' or template.deleted or key == REJECTED_ORDER_TEMPLATE_KEY then
         return false, 'invalid_quick_reply'
     end
 
@@ -245,15 +244,34 @@ function QuickReplies:CreateCustomTemplate(label, keywords, response)
     return key
 end
 
-function QuickReplies:DeleteCustomTemplate(key)
+function QuickReplies:RenameTemplate(key, label)
+    local template = EnsureConfig().templates[key]
+    if type(template) ~= 'table' or template.deleted or not self:IsLabelAvailable(label, key) then return false end
+    template.label = Trim(label)
+    self:NotifyConfigChanged()
+    if self.InvalidateTemplateToasts then self:InvalidateTemplateToasts(key) end
+    HironCraftScan.Events:Emit('QUICK_REPLIES_UPDATED')
+    return true
+end
+
+function QuickReplies:DeleteTemplate(key)
     local config = EnsureConfig()
     local template = config.templates[key]
-    if not template or not template.custom or builtinKeys[key] then
+    if type(template) ~= 'table' or template.deleted then
         return false
     end
-    config.templates[key] = nil
+    -- Retain a tombstone, including on linked accounts. Defaults must not
+    -- silently recreate a deliberately removed built-in after reload.
+    config.templates[key] = {deleted=true, enabled=false, keywords='', response='', custom=template.custom}
     self:NotifyConfigChanged()
+    if self.InvalidateTemplateToasts then self:InvalidateTemplateToasts(key) end
+    HironCraftScan.Events:Emit('QUICK_REPLIES_UPDATED')
     return true
+end
+
+function QuickReplies:DeleteCustomTemplate(key)
+    if builtinKeys[key] then return false end
+    return self:DeleteTemplate(key)
 end
 
 function QuickReplies:ApplyRemoteConfig(remoteConfig)
@@ -542,7 +560,7 @@ end
 function QuickReplies:BuildReply(templateKey, response)
     local config = EnsureConfig()
     local template = config.templates[templateKey]
-    if not template or not template.enabled or template.response == '' then
+    if not template or template.deleted or not template.enabled or template.response == '' then
         return nil
     end
 
@@ -727,7 +745,7 @@ function QuickReplies:BuildRejectedOrderOption(order, entry)
         requestTime = response.time,
         templateKey = REJECTED_ORDER_TEMPLATE_KEY,
         rejectionOrderID = entry.craftingOrderID,
-        templateLabel = L('Crafting order status rejected'),
+        templateLabel = self:GetTemplateLabel(REJECTED_ORDER_TEMPLATE_KEY),
         reply = reply,
         label = reply,
         contextLabel = ResponseLabel(response),
@@ -813,6 +831,21 @@ local function DismissToast(toast)
     toast.option = nil
     toast:Hide()
     LayoutToasts()
+end
+
+function QuickReplies:InvalidateTemplateToasts(key)
+    local changed=false
+    for _, toast in ipairs(toastPool) do
+        local option = toast.option
+        if toast:IsShown() and type(option) == 'table' then
+            local affected = option.templateKey == key
+            for _, source in ipairs(option.sources or {}) do
+                affected = affected or source.templateKey == key
+            end
+            if affected then toast.option=nil; toast:Hide(); changed=true end
+        end
+    end
+    if changed then LayoutToasts() end
 end
 
 function QuickReplies:DismissOrderGreeting(customer, responseID, requestToken)

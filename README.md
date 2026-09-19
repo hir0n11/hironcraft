@@ -25,6 +25,32 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Editable replies and equipment names (0.3.54)
+
+- Config > Quick Replies now offers **Name** and **Delete** for every answer,
+  including built-ins and the rejected-order reply. Renaming preserves triggers,
+  text, priority and enabled state. Deletions survive reloads and linked-account
+  config synchronization. Visible cards for a renamed/deleted answer are dismissed;
+  stale clicks cannot send them. Disabled checkboxes remain disabled on refresh.
+- Config > Equipment Names contains editable English/Russian starter synonyms for
+  nine armor slots (including Back/Cloak) and eight weapon types. Add words or
+  phrases separated by commas/newlines. Changes save on leaving the field and
+  apply to new messages; an empty row disables that category. Exact duplicates
+  across categories are rejected. Defaults can be restored separately per row.
+- `Hey, i need also belt, hands and back can you craft?` creates three separate
+  typed requests when the customer class and monitored crafters are available.
+  Armor routes by class, cloaks to Tailoring. A compatible monitored item link
+  replaces only its own placeholder, retaining the other requests.
+- Explicit `looking for wrist cloth crafter please` produces a cloth Wrist
+  request even with no class information or class inference disabled. Clicking
+  the proposed greeting keeps the typed row; a later bracer link replaces it.
+- Manual profession matching through the nickname menu offers one Quick Reply,
+  not an additional greeting banner. When Quick Replies are disabled, the normal
+  enabled banner alert remains available. Nothing sends until a manual click/bind.
+- Automated regression tests cover the exact reported phrases, unknown classes,
+  link replacement, real settings callbacks, compact/full layouts, persistent
+  edits and stale reply actions. Game rendering still needs an in-game check.
+
 ## Declined-order reagent snapshots (0.3.53)
 
 - Before an addon-driven decline/release, save the customer's server-provided
