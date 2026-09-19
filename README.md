@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Text cursor position in settings fields (0.3.62)
+
+- Multi-line settings fields (keywords, responses, greetings, aliases) now set
+  their 12 pt font before their text. Changing the font after the text left
+  the caret laid out for the template's smaller font, so it was drawn away
+  from the actual insertion point. When a field's width changes while it is
+  not being edited, its text is re-applied to refresh the caret layout.
+
 ## Congestion-free status and material sync (0.3.61)
 
 - Checkmarks no longer queue behind material lists. Blizzard throttles addon

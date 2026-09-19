@@ -84,9 +84,15 @@ function HironCraftScan.SetupTextInput(panel, field, keyword)
     local function UpdateMultilineGeometry()
         local width = field.Expression:GetWidth()
         if width and width > 20 then
+            local changed = math.abs((editBox:GetWidth() or 0) - (width - 20)) > 0.5
             editBox:SetWidth(width - 20)
             if editBox.Instructions then
                 editBox.Instructions:SetWidth(width - 20)
+            end
+            -- Re-wrapping existing text does not always refresh the caret
+            -- layout. Re-apply the text while the user is not editing it.
+            if changed and not editBox:HasFocus() then
+                editBox:SetText(editBox:GetText())
             end
         end
     end
@@ -105,6 +111,15 @@ function HironCraftScan.SetupTextInput(panel, field, keyword)
     if field.Title then
         field.Title:SetText(L('dialog.' .. keyword))
     end
+
+    -- Set the font before the text. A multi-line EditBox keeps the caret
+    -- layout of the font its text was set with, so changing the font
+    -- afterwards drew the caret away from the actual insertion point.
+    local fontFile, _, fontFlags = HironCraftScanConfigPage.TitleContainer.TitleText:GetFont()
+    local FONT_SIZE = 12
+    field.Expression.EditBox:SetFont(fontFile, FONT_SIZE, fontFlags)
+    field.Expression.EditBox.Instructions:SetFont(fontFile, FONT_SIZE, fontFlags)
+
     local value = GetDisplayValue(panel, keyword)
     field.Expression.EditBox:SetText(value)
 
@@ -112,10 +127,6 @@ function HironCraftScan.SetupTextInput(panel, field, keyword)
     if type(panel.Validate) == 'function' then
         panel:Validate(keyword, panel:GetConfigValue(keyword), field.Expression.ValidationIcon)
     end
-
-    local fontFile, _, fontFlags = HironCraftScanConfigPage.TitleContainer.TitleText:GetFont()
-    local FONT_SIZE = 12
-    field.Expression.EditBox.Instructions:SetFont(fontFile, FONT_SIZE, fontFlags)
 
     local instructions = nil
     if type(panel.GetInstructions) == 'function' then
@@ -137,7 +148,6 @@ function HironCraftScan.SetupTextInput(panel, field, keyword)
         field.Expression.EditBox.Instructions:SetText(instructions)
     end
 
-    field.Expression.EditBox:SetFont(fontFile, FONT_SIZE, fontFlags)
     field.Expression.EditBox:SetScript('OnTextChanged', InputScrollFrame_OnTextChanged)
     field.Expression.EditBox:SetScript('OnEscapePressed', InputScrollFrame_OnEscapePressed)
     field.Expression.EditBox:SetScript('OnEditFocusGained', function(self)

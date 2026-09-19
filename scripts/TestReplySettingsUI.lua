@@ -24,6 +24,7 @@ function methods:IsShown() return self.shown end
 function methods:CreateFontString() return surface(self) end
 methods.CreateTexture=methods.CreateFontString
 function methods:GetFont() return 'font',12,'' end
+function methods:HasFocus() return self.focused==true end
 for _,method in ipairs({'SetJustifyH','SetJustifyV','SetAllPoints','SetColorTexture','SetNormalFontObject',
     'SetAutoFocus','SetNumeric','SetMaxLetters','SetMultiLine','SetFont','SetAlpha','SetScrollChild','FitToText',
     'ClearFocus'}) do methods[method]=noop end
