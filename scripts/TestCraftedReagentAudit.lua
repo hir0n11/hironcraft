@@ -99,12 +99,13 @@ function CreateFrame()
         {__index=function() return function() end end})
 end
 A.ShowTooltip({},'Test',{GetLeft=function() return 600 end,GetRight=function() return 850 end},snapshot)
-assert(lines[1]=='Customer reagents for completed order')
-assert(table.concat(lines,'\n'):find('Crafted quality: T4 / T5',1,true))
+assert(lines[1]=='Order materials · T4/5')
 local tooltipText=table.concat(lines,'\n')
-assert(tooltipText:find('Alloy 40 / 40',1,true),'full quantity was displayed as missing')
-assert(tooltipText:find('Replace: 20x Alloy T1 -> T3',1,true))
-assert(tooltipText:find('Replace: 20x Alloy T2 -> T3',1,true))
+assert(tooltipText:find('Alloy 40/40',1,true),'full quantity was displayed as missing')
+assert(tooltipText:find('20×T1→T3',1,true))
+assert(tooltipText:find('20×T2→T3',1,true))
+assert(#lines<=4,'one material expanded into a large tooltip')
+assert(A.GetForOrder(row)==A.GetForOrder(row),'unchanged completed snapshot rebuilt the hovered history')
 
 -- SavedVariables survive reload both mid-order and after fulfillment.
 loadModules();A,F=Scan.ReagentAudit,Scan.OrderFulfillment
@@ -124,10 +125,10 @@ local lowCap=start(7004);hooks.CraftRecipe(123,1,nil,nil,7004);complete(7004,2)
 assert(A.GetForOrder(lowCap).maxCraftedQuality==3)
 maxQuality=5
 local unknown=start(7005);hooks.CraftRecipe(123,1,nil,nil,7005);complete(7005,nil)
-assert(A.GetForOrder(unknown).completed and not A.GetForOrder(unknown).craftedQuality)
+assert(A.GetForOrder(unknown).orderID==7005 and not A.GetForOrder(unknown).craftedQuality)
 lines={}
 A.ShowTooltip({},'Unknown',{GetLeft=function() return 600 end,GetRight=function() return 850 end},A.GetForOrder(unknown))
-assert(lines[1]=='Customer reagents for completed order','uncached quality mislabeled completion as decline')
+assert(lines[1]=='Order materials','uncached quality mislabeled completion as decline')
 local allGood=start(7010)
 claimed.reagents={{itemID=13,quantity=40,slotIndex=1,source=1}}
 hooks.CraftRecipe(123,1,nil,nil,7010);complete(7010,5)
@@ -138,7 +139,7 @@ A.ShowTooltip({},'Good',{GetLeft=function() return 600 end,GetRight=function() r
 assert(not table.concat(lines,'\n'):find('Replace:',1,true) and not table.concat(lines,'\n'):find('Missing:',1,true))
 maxQuality=0
 local unranked=start(7011);hooks.CraftRecipe(123,1,nil,nil,7011);complete(7011,nil)
-assert(A.GetForOrder(unranked).completed and not A.GetForOrder(unranked).maxCraftedQuality)
+assert(A.GetForOrder(unranked).orderID==7011 and not A.GetForOrder(unranked).maxCraftedQuality)
 maxQuality=5
 local unknownSnapshot=A.Sanitize(F:GetStatus(unknown).reagentAudit)
 unknownSnapshot.craftedQuality=4
@@ -149,7 +150,7 @@ assert(A.GetForOrder(unknown).craftedQuality==4,'late actual-quality enrichment 
 -- enrich the already fulfilled row and journal once the exact output resolves.
 local delayed=start(7009);hooks.CraftRecipe(123,1,nil,nil,7009)
 complete(7009,nil)
-assert(A.GetForOrder(delayed).completed and not A.GetForOrder(delayed).craftedQuality)
+assert(A.GetForOrder(delayed).orderID==7009 and not A.GetForOrder(delayed).craftedQuality)
 qualities['output:7009']=3
 local pending=timers;timers={}
 for _,callback in ipairs(pending) do callback() end

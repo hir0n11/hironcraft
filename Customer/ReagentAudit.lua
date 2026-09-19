@@ -304,13 +304,9 @@ function Audit.GetForOrder(order)
     if snapshot and tostring(snapshot.orderID)==tostring(status.craftingOrderID)
         and (status.status==fulfillment.Status.Rejected
             or status.status==fulfillment.Status.Fulfilled) then
-        -- Presentation follows the order outcome, even when output quality is
-        -- unavailable (or this recipe has no quality ranks).
-        if status.status==fulfillment.Status.Rejected then return snapshot end
-        local display={}
-        for key,value in pairs(snapshot) do display[key]=value end
-        display.completed=true
-        return display
+        -- Keep identity stable: the hovered history redraws when this snapshot
+        -- changes. A fresh wrapper on every poll caused four redraws/second.
+        return snapshot
     end
 end
 function Audit.ForResponse(response)
@@ -322,15 +318,18 @@ local function Name(item)
     return item.name or ItemName(item.itemID) or ('item:'..tostring(item.itemID or '?'))
 end
 function Audit.Analyze(row)
-    local total,known=0,row.known
+    local total,quantitiesKnown=0,true
     local replacements={}
     for _, item in ipairs(row.supplied or {}) do
-        if item.quantity==nil then known=false else total=total+item.quantity end
+        if item.quantity==nil then quantitiesKnown=false else total=total+item.quantity end
         if item.quantity and item.quantity>0 and item.quality and item.maxQuality
             and item.quality<item.maxQuality then replacements[#replacements+1]=item end
     end
-    local missing=known and not row.optional and row.required and math.max(0,row.required-total) or nil
-    return known and total or nil,missing,replacements
+    local missing=row.known and quantitiesKnown and not row.optional and row.required and math.max(0,row.required-total) or nil
+    -- A late/partial snapshot still proves the quantities it actually contains.
+    -- It does not prove that omitted materials were absent before consumption.
+    local observed=quantitiesKnown and (row.known or #(row.supplied or {})>0)
+    return observed and total or nil,missing,replacements
 end
 function Audit.MaterialsOK(snapshot)
     if not snapshot or not snapshot.complete or #snapshot.rows==0 then return false end
@@ -407,42 +406,58 @@ function Audit.ShowTooltip(owner, name, history, snapshot)
         tip:SetClampedToScreen(true)
         owner.reagentTooltip=tip
     end
-    tip:SetOwner(history,'ANCHOR_NONE');tip:ClearLines();tip:SetMinimumWidth(300)
-    tip:AddLine(L((snapshot.completed or snapshot.craftedQuality) and 'Customer reagents for completed order' or 'Customer reagents at decline'),1,0.82,0)
-    tip:AddLine('#'..tostring(snapshot.orderID)..' - '..date('%d.%m %H:%M',snapshot.capturedAt),0.7,0.7,0.7)
+    tip:SetOwner(history,'ANCHOR_NONE');tip:ClearLines();tip:SetMinimumWidth(260)
+    local heading=L('Order materials')
     if snapshot.craftedQuality and snapshot.maxCraftedQuality then
-        tip:AddLine(string.format(L('Crafted quality: T%d / T%d'),snapshot.craftedQuality,snapshot.maxCraftedQuality),1,0.65,0.1,true)
+        heading=heading..' · T'..snapshot.craftedQuality..'/'..snapshot.maxCraftedQuality
     end
+    tip:AddLine(heading,1,0.82,0)
+    tip:AddLine('#'..tostring(snapshot.orderID)..' · '..date('%d.%m %H:%M',snapshot.capturedAt),0.6,0.6,0.6)
     local qualityProblem=Audit.QualityProblem(snapshot,true)
     if qualityProblem then tip:AddLine(qualityProblem,1,0.65,0.1,true) end
     local quality=snapshot.quality
     if quality and quality.skill and quality.nextQualitySkill then
         tip:AddLine(string.format(L('Skill: %d; next quality threshold: %d'),quality.skill,quality.nextQualitySkill),1,1,1,true)
     end
-    if quality and quality.maxAllowed then
-        tip:AddLine(string.format(L('Configured finishing-reagent skill limit: +%d'),quality.maxAllowed),0.7,0.7,0.7,true)
-    end
-    local lines=0
+    local lines,partial=0,false
     for _, row in ipairs(snapshot.rows) do
-        if lines>=14 then tip:AddLine(L('More materials are saved in this order snapshot.'),0.7,0.7,0.7,true);break end
+        if lines>=20 then tip:AddLine(L('More materials are saved in this order snapshot.'),0.7,0.7,0.7,true);break end
         local total,missing,replacements=Audit.Analyze(row)
-        local bad=missing and missing>0 or #replacements>0
-        tip:AddDoubleLine(Name(row),tostring(total or '?')..(not row.optional and (' / '..tostring(row.required or '?')) or ''),
-            1,1,1,bad and 1 or 0.4,bad and 0.35 or 1,0.3)
+        local shortage=missing and missing>0
+        local uncertain=not row.known or total==nil or (not row.optional and not row.required)
+        partial=partial or uncertain
+        local label=#row.supplied==1 and Name(row.supplied[1]) or Name(row)
+        local amount=(not row.known and total and '≥' or '')..tostring(total or '?')
+        if not row.optional then amount=amount..'/'..tostring(row.required or '?') end
         local parts={}
         for _, item in ipairs(row.supplied) do
-            parts[#parts+1]=tostring(item.quantity or '?')..'x '..Name(item)
-                ..(item.quality and (' T'..item.quality) or '')
+            local different=#row.supplied>1 and Name(item)~=label
+            if item.quality or different then
+                local text=(#row.supplied>1 and (tostring(item.quantity or '?')..'×') or '')
+                    ..(different and (Name(item)..' ') or '')..(item.quality and ('T'..item.quality) or '')
+                if item.quality and item.maxQuality and item.quality<item.maxQuality then
+                    text='|cffffaa33'..text..'→T'..item.maxQuality..'|r'
+                end
+                parts[#parts+1]=text
+            end
         end
-        if #parts>0 then tip:AddLine(table.concat(parts,', '),0.75,0.75,0.75,true) end
-        if missing and missing>0 then tip:AddLine(string.format(L('Missing: %dx %s'),missing,Name(row)),1,0.3,0.3,true) end
-        for _, item in ipairs(replacements) do
-            tip:AddLine(string.format(L('Replace: %dx %s T%d -> T%d'),item.quantity,Name(item),item.quality,item.maxQuality),1,0.65,0.1,true)
+        local tierText=table.concat(parts,' + ')
+        -- Keep ordinary rows to a single line; wrap only long mixed variants.
+        if #tierText>75 then
+            tip:AddDoubleLine(label,amount,1,1,1,0.7,0.7,0.7)
+            tip:AddLine(tierText,0.75,0.75,0.75,true)
+        else
+            if tierText~='' then amount=amount..' · '..tierText end
+            local r,g,b=0.4,1,0.3
+            if shortage then r,g,b=1,0.3,0.3
+            elseif #replacements>0 then r,g,b=1,0.65,0.1
+            elseif uncertain then r,g,b=0.7,0.7,0.7 end
+            tip:AddDoubleLine(label,amount,1,1,1,r,g,b)
         end
+        if shortage then tip:AddLine(string.format(L('Missing: %d'),missing),1,0.3,0.3) end
         lines=lines+1
     end
-    if not snapshot.complete then tip:AddLine(L('Some reagent data was unavailable; please recheck the remaining materials.'),1,0.65,0.1,true) end
-    tip:AddLine(L('Highest-tier materials alone do not guarantee maximum craft quality.'),0.7,0.7,0.7,true)
+    if partial or not snapshot.complete then tip:AddLine(L('Partial snapshot; ≥ means at least this many.'),0.7,0.7,0.7,true) end
     tip:Show();tip:ClearAllPoints()
     local width=tip:GetWidth()
     if (history:GetLeft() or 0)>=width+8 then

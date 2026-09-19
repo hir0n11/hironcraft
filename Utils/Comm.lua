@@ -2303,7 +2303,27 @@ local MATERIAL_ORDER_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareOrderOutcome]=true,
 }
 
+local function SmallLiveMaterialUpdate(data)
+    if type(data)~='table' or (data.status~='fulfilled' and data.status~='rejected') then return false end
+    local audit=data.reagentAudit
+    if type(audit)~='table' or type(audit.rows)~='table' or #audit.rows>12 then return false end
+    local supplied=0
+    for _,row in ipairs(audit.rows) do
+        supplied=supplied+#(row.supplied or {})
+        if supplied>24 then return false end
+    end
+    return true
+end
+
 function HironCraftScanComm:Transmit(data, operation, target)
+    -- The pre-craft evidence remains durable locally. Sending that same large
+    -- list on claim, craft and completion filled the queue before the result.
+    if operation==self.Operations.ShareOrderStatus and type(data)=='table'
+        and (data.status=='claimed' or data.status=='crafted') and data.reagentAudit then
+        local progress={}
+        for key,value in pairs(data) do if key~='reagentAudit' then progress[key]=value end end
+        data=progress
+    end
     local msg = {
         operation = operation,
         version = HironCraftScan.CONST.CURRENT_VERSION,
@@ -2317,7 +2337,14 @@ function HironCraftScanComm:Transmit(data, operation, target)
     HironCraftScan.Utils.printTable('Sending msg', msg)
 
     local priority = PriorityForOperation(operation)
-    if MATERIAL_ORDER_OPERATIONS[operation] then
+    -- A typical individual outcome (including its materials) fits a few addon
+    -- chunks. Queue it now, with its ACK, instead of waiting behind NORMAL
+    -- traffic and triggering discovery/retries before the evidence arrives.
+    -- Large history batches retain the compact-first path below.
+    local liveMaterials=(operation==self.Operations.ShareOrderStatus
+        or operation==self.Operations.ShareOrderCompletion or operation==self.Operations.ShareOrderOutcome)
+        and SmallLiveMaterialUpdate(data)
+    if MATERIAL_ORDER_OPERATIONS[operation] and not liveMaterials then
         local compact,hasAudit=CompactOrderPayload(data)
         if hasAudit then
             local compactOperation=operation

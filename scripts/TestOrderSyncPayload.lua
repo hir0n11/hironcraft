@@ -49,16 +49,30 @@ for _,operation in ipairs({op.ShareOrderStatus,op.ShareOrderCompletion,op.ShareO
     local payload=operation==op.OrderStatusRepair and {statuses={entry}} or entry
     comm:Transmit(payload,operation,'Receiver-Realm')
     assert(#sent==1 and sent[1].priority=='ALERT','status waited for async material serialization')
-    noMaterials(sent[1].data.data)
-    local compact=operation==op.ShareOrderStatus and sent[1].data.data.statuses[1]
-        or (operation==op.OrderStatusRepair and sent[1].data.data.statuses[1] or sent[1].data.data)
-    assert(compact.status=='fulfilled' and compact.rev==7 and compact.craftingOrderID==42)
-    if operation==op.ShareOrderStatus then assert(sent[1].data.operation==op.OrderStatusRepair) end
-    flush()
-    assert(#sent==2 and sent[2].priority=='NORMAL' and sent[2].data.operation==operation)
-    local full=operation==op.OrderStatusRepair and sent[2].data.data.statuses[1] or sent[2].data.data
+    local full
+    if operation==op.OrderStatusRepair then
+        noMaterials(sent[1].data.data)
+        assert(sent[1].data.data.statuses[1].status=='fulfilled')
+        flush()
+        assert(#sent==2 and sent[2].priority=='NORMAL')
+        full=sent[2].data.data.statuses[1]
+    else
+        assert(#frames==0,'small live materials waited for the background queue')
+        full=sent[1].data.data
+        assert(full.status=='fulfilled' and full.rev==7 and full.craftingOrderID==42)
+    end
     assert(full.reagentAudit.rows[1].supplied[1].quantity==20 and full.deliveryPending.receiver)
     assert(entry.reagentAudit and entry.deliveryPending.receiver,'send mutated durable evidence')
+end
+
+for _,status in ipairs({'claimed','crafted'}) do
+    local progress=copy(entry);progress.status=status
+    sent={};frames={}
+    comm:Transmit(progress,op.ShareOrderStatus,'Receiver-Realm')
+    assert(#sent==1 and #frames==0 and sent[1].priority=='ALERT')
+    assert(not sent[1].data.data.reagentAudit and sent[1].data.data.deliveryPending.receiver,
+        'intermediate progress resent the material list or lost its ACK')
+    assert(progress.reagentAudit,'intermediate transmission erased the durable snapshot')
 end
 
 -- Login batches and repeated orders keep ALL material lists out of ALERT.
@@ -90,6 +104,8 @@ assert(loadfile('Customer/ReagentAudit.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/OrderFulfillment.lua'))('HironCraft',Scan)
 entry.reagentAudit.capturedAt=time();entry.reagentAudit.complete=true
 entry.reagentAudit.rows[1].supplied[1].itemID=11
+-- Only oversized snapshots retain the two-stage transport.
+for i=2,13 do entry.reagentAudit.rows[i]=copy(entry.reagentAudit.rows[1]) end
 sent={};frames={}
 comm:Transmit(entry,op.ShareOrderStatus,'Receiver-Realm');flush()
 local compactPacket,fullPacket=sent[1],sent[2]
@@ -116,4 +132,14 @@ receive(fullPacket)
 stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
 assert(stored.status=='claimed' and stored.craftingOrderID==43 and not stored.reagentAudit,
     'late evidence completed or contaminated a newer order')
-print('Order sync payload tests passed (immediate status, deferred evidence, replay batches, ACKs, reordering, newer-order isolation).')
+local live=copy(entry);live.craftingOrderID=44;live.rev=9;live.updatedAt=time()+2
+live.reagentAudit.orderID=44;live.reagentAudit.rows={live.reagentAudit.rows[1]}
+Scan.DB.settings.my_uuid='source';sent={};frames={}
+comm:Transmit(live,op.ShareOrderStatus,'Receiver-Realm')
+assert(#sent==1 and #frames==0 and sent[1].priority=='ALERT')
+local livePacket=sent[1];Scan.DB.settings.my_uuid='receiver'
+receive(livePacket)
+stored=Scan.OrderFulfillment:GetStatuses()[Scan.OrderToOrderID(entry)]
+assert(stored.status=='fulfilled' and stored.craftingOrderID==44 and stored.reagentAudit.orderID==44)
+assert(#sent==1 and sent[1].data.operation==op.OrderStatusAck)
+print('Order sync payload tests passed (immediate live evidence, lean progress, bounded history, ACKs, reordering, isolation).')

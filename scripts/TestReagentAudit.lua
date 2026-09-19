@@ -86,16 +86,19 @@ assert(A.ForResponse(response)==audit)
 status.craftingOrderID=7002
 assert(not A.ForResponse(response),'audit leaked to resent game order')
 status.craftingOrderID=7001;status.status='fulfilled'
-assert(A.ForResponse(response).completed and A.ForResponse(response).orderID==7001,
+assert(A.ForResponse(response)==audit and A.ForResponse(response).orderID==7001,
     'completed order lost its material list')
 
-local owner,lines={},{}
+local owner,lines,columns={},{},{}
 UIParent={GetWidth=function() return 1200 end}
 local left,right=600,850
 local history={GetLeft=function() return left end,GetRight=function() return right end}
 function CreateFrame()
     return setmetatable({GetWidth=function() return 300 end,
-        AddLine=function(_,text) lines[#lines+1]=text end,AddDoubleLine=function(_,text) lines[#lines+1]=text end,
+        AddLine=function(_,text) lines[#lines+1]=text end,
+        AddDoubleLine=function(_,text,value,_,_,_,r,g,b)
+            lines[#lines+1]=text..' '..value;columns[#columns+1]={text=text,value=value,r=r,g=g,b=b}
+        end,
         SetPoint=function(self,point,_,relative) self.anchor=relative end,
         Show=function(self) self.visible=true end,Hide=function(self) self.visible=false end},
         {__index=function() return function() end end})
@@ -106,6 +109,31 @@ left,right=100,350;A.ShowTooltip(owner,'Test',history,audit)
 assert(owner.reagentTooltip.anchor=='TOPRIGHT')
 A.ShowTooltip(owner,'Test',history,nil)
 assert(not owner.reagentTooltip.visible)
+
+-- Screenshot regression: late but populated snapshot showed green ?/N next
+-- to explicit 1x/10x counts, duplicated names, and the wrong spark variant.
+local late={version=1,orderID=1238880255,capturedAt=time(),complete=false,rows={}}
+local sample={{'Tormented Tantalum',1},{'Mote of Wild Magic',10},
+    {'Kaleidoscopic Prism',1,2},{'Dusk-Shrouded Stone',3,2},{'Flawless Amani Lapis',1,2},
+    {'Spark of Tides',2}}
+for i,item in ipairs(sample) do
+    late.rows[i]={itemID=i,name=i==6 and 'Spark of Radiance' or item[1],required=item[2],known=false,
+        supplied={{itemID=i,name=item[1],quantity=item[2],quality=item[3],maxQuality=item[3]}}}
+end
+lines={};columns={};A.ShowTooltip(owner,'Late',history,late)
+assert(#lines==9,'six materials should use six rows, two header lines and one partial-data note')
+assert(#columns==6 and columns[6].text=='Spark of Tides','tooltip named an unprovided spark variant')
+for i,column in ipairs(columns) do
+    assert(column.value:find('≥'..sample[i][2]..'/'..sample[i][2],1,true),'explicit supplied count became ?')
+    assert(column.r==0.7 and column.g==0.7 and column.b==0.7,'unknown coverage was colored as confirmed good')
+    assert(select(2,A.Analyze(late.rows[i]))==nil,'late evidence invented a shortage')
+end
+late.rows[3].supplied[1].quality=1
+lines={};columns={};A.ShowTooltip(owner,'Late',history,late)
+assert(columns[3].value:find('T1→T2',1,true) and columns[3].g==0.65,
+    'partial snapshot hid known low-quality reagents')
+late.rows[2].supplied[1].quantity=nil
+assert(A.Analyze(late.rows[2])==nil,'missing numeric quantity was invented')
 print('Reagent audit tests passed (customer-only capture, ranks, missing/unknown data, recraft, identity, tooltip).')
 
 -- Custom pastes can explicitly select a declined item among several requests.

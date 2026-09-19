@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Prompt live material delivery and compact tooltips (0.3.60)
+
+- Ordinary live outcomes (up to 12 reagent rows / 24 supplied variants) send
+  their material snapshot immediately with the status at ALERT priority. They
+  no longer wait for NORMAL traffic or a subsequent frame before serialization.
+  Claim/craft progress sends only the status, keeping pre-consumption evidence
+  durable locally and avoiding repeated material transfers before completion.
+  Large outcomes and history batches retain the compact-first delivery path.
+- The material tooltip uses one line per ordinary reagent: actual supplied
+  name, supplied/required quantity, and quality. Low tiers show an amber
+  T1→T2/T3; proven shortages remain red. Long mixed variants may wrap.
+- Partial/late snapshots display observed quantities as ≥N, in neutral color,
+  rather than green question marks. Unknown coverage never becomes a proven
+  shortage. The selected spark's name replaces the schematic's first variant.
+- Hovering a completed order no longer rebuilds both tooltips four times per
+  second: unchanged reagent snapshots preserve their identity.
+
 ## Completed-order materials and responsive status sync (0.3.59)
 
 - Customer reagent snapshots appear for every fulfilled order, including T5,
