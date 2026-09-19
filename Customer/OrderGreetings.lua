@@ -18,7 +18,7 @@ function Scan.BuildOrderDestinationMessage(response)
         return nil
     end
     local subject = Scan.Utils.GetReplyItemLink(response.itemID, response.itemLink)
-        or response.professionName
+        or response.equipmentLabel or response.professionName
     local crafter = Scan.NameAndRealmToName(response.crafterFullName)
     if type(subject) ~= 'string' or subject == '' or not crafter then return nil end
     return subject .. ' Send to ' .. crafter .. '.'
@@ -60,7 +60,13 @@ function Scan.SendOrderGreeting(order, userInitiated)
     end
     if #pending == 0 or #messages == 0 then return false end
 
+    local reply = table.concat(messages, '\n')
+    if Scan.QuickReplies and Scan.QuickReplies.IsReplyOnCooldown
+        and Scan.QuickReplies:IsReplyOnCooldown(order.customerName, reply) then return false end
     if Scan.Utils.SendResponses(messages, order.customerName, true) == false then return false end
+    if Scan.QuickReplies and Scan.QuickReplies.RememberSentReply then
+        Scan.QuickReplies:RememberSentReply(order.customerName, reply)
+    end
     Scan.RequestTracking.GreetingSent(Scan.OrderToCustomerInfo(order), pending)
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end

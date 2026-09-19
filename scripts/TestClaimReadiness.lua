@@ -82,14 +82,15 @@ for _, concentrationState in ipairs({ true, "unknown" }) do
     CO.currentQueueOrderID = unsafe.orderID
     CO._orderSelectionBucket = { choices = { ["6999"] = { checked = true } } }
     CO.OrderRequiresConcentrationForQueue = function()
-        return concentrationState == "unknown" and nil or concentrationState
+        if concentrationState == "unknown" then return nil end
+        return concentrationState
     end
     assert(CO:ClaimOrder(unsafe, page) == false)
     assert(claimCalls == 0, "unsafe concentration order reached ClaimOrder API")
-    assert(CO.selectedOrders["6999"] == nil and CO.currentQueueOrderID == nil,
-        "unsafe concentration order remained selected")
-    assert(CO._orderSelectionBucket.choices["6999"] == nil,
-        "unsafe concentration selection was restored from memory")
+    assert(CO.selectedOrders["6999"] == true and CO.currentQueueOrderID == unsafe.orderID,
+        "concentration revalidation silently unchecked the order")
+    assert(CO._orderSelectionBucket.choices["6999"].checked == true,
+        "concentration revalidation erased the saved selection")
 end
 
 CO.OrderRequiresConcentrationForQueue = function() return false end

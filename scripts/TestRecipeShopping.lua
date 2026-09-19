@@ -107,7 +107,7 @@ local first = captured[#captured]
 local firstMap = MaterialMap(first.materials)
 assert(first.name == "Recipe test list" and first.sourceKind == RS.SOURCE_KIND and first.allowEmpty == true)
 assert(firstMap[101].quantity == 5, "owned base reagent was not subtracted once")
-assert(firstMap[203].quantity == 3 and firstMap[203].tier == 3, "selected reagent quality was not preserved")
+assert(firstMap[201].quantity == 4 and firstMap[201].tier == 1 and not firstMap[203], "default T1 did not override allocated T3")
 assert(firstMap[301].quantity == 2, "selected finishing reagent was not included")
 
 local schematicTwo = {
@@ -133,7 +133,7 @@ assert(secondMap[101].quantity == 7,
 
 assert(RS:AddRecipe(1001, 1, transactionOne))
 local repeatedMap = MaterialMap(captured[#captured].materials)
-assert(repeatedMap[101].quantity == 11 and repeatedMap[203].quantity == 5,
+assert(repeatedMap[101].quantity == 11 and repeatedMap[201].quantity == 6,
     "repeated recipe click did not increase the same plan")
 assert(RS.plan.recipes[1001] == 3 and RS.plan.recipes[1002] == 1 and RS.plan.totalCrafts == 4,
     "planned craft quantities were not accumulated")
@@ -165,8 +165,8 @@ local bestQualityTransaction = {
 
 assert(RS:AddRecipe(1003, 1, bestQualityTransaction, bestQualityForm))
 local bestMap = MaterialMap(captured[#captured].materials)
-assert(bestMap[203] and bestMap[203].quantity == 1 and not bestMap[201],
-    "best-quality checkbox did not select the highest reagent tier")
+assert(bestMap[201] and bestMap[201].quantity == 2 and not bestMap[203],
+    "native best-quality checkbox overrode shopping tier")
 
 RS:ClearPlan(false)
 local badTransaction = {
@@ -241,10 +241,10 @@ assert(RS:AddRecipe(3001,1,ClothTransaction(40)))
 exact=MaterialMap(captured[#captured].materials)
 assert(#RS.plan.entries==2 and exact[201].quantity==20 and exact[202].quantity==25,
     'different quality selections merged or consumed other-tier inventory')
-assert(RS:SetUseInventory(false))
+RS:GetSettings().useInventory=false -- legacy setting cannot disable stock accounting
+assert(RS:RefreshShoppingList())
 exact=MaterialMap(captured[#captured].materials)
-assert(exact[201].quantity==40 and exact[202].quantity==40,'stock toggle did not use full quantities')
-assert(RS:SetUseInventory(true))
+assert(exact[201].quantity==20 and exact[202].quantity==25,'stock accounting was disabled by legacy settings')
 assert(RS:SetEntryQuantity(firstID,0))
 assert(not MaterialMap(captured[#captured].materials)[201] and RS.plan.entries[1].quality==2,
     'removing T1 recipe affected the T2 entry')
@@ -277,6 +277,29 @@ assert(not qualityOK and qualityReason=='quality_unavailable' and #RS.plan.entri
     'unavailable T3 silently substituted another quality')
 RS:SetQuality(0)
 itemCounts[201], itemCounts[202] = nil, nil
+
+-- Sparks have multiple alternatives, but no quality and no auctionability.
+local originalItemInfo=GetItemInfo
+GetItemInfo=function(id)
+    if id==800 or id==801 then
+        return 'Spark',nil,4,nil,nil,nil,nil,nil,nil,nil,nil,7,0,1
+    end
+    return originalItemInfo(id)
+end
+local sparkTransaction={GetRecipeSchematic=function() return {recipeType=1,reagentSlotSchematics={
+    {slotIndex=1,reagentType=1,quantityRequired=2,reagents={{itemID=800},{itemID=801}}},
+    {slotIndex=2,reagentType=1,quantityRequired=4,reagents={{itemID=201},{itemID=202}}},
+}} end,IsSlotRequired=function() return true end}
+assert(RS:AddRecipe(4001,1,sparkTransaction),'spark alternatives blocked recipe addition')
+local sparkMap=MaterialMap(captured[#captured].materials)
+assert(not sparkMap[800] and not sparkMap[801] and sparkMap[201].quantity==4,
+    'bound sparks entered the shopping list or replaced real reagents')
+itemCounts[201]=3
+assert(RS:RefreshShoppingList())
+assert(MaterialMap(captured[#captured].materials)[201].quantity==1,'new stock did not reduce purchase quantities')
+itemCounts[201]=nil
+RS:ClearPlan(false)
+GetItemInfo=originalItemInfo
 
 -- UI regression: multiple clicks with one OnEnter and no timer/mouse movement.
 -- Both the persistent label and the existing tooltip must change synchronously.

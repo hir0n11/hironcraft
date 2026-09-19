@@ -14,6 +14,10 @@ OrderFulfillment.Status = {
 
 local MAX_STATUS_AGE = 30 * 24 * 60 * 60
 local MAX_STATUS_COUNT = 500
+local function CleanReagentAudit(snapshot, orderID)
+    local audit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.Sanitize(snapshot)
+    if audit and orderID and tostring(audit.orderID) == tostring(orderID) then return audit end
+end
 local craftingOrderToHironCraftScan = {}
 -- Fulfillment responses may omit orderID after GetClaimedOrder() has already
 -- been cleared, so retain the last snapshots captured by claim/craft events.
@@ -152,6 +156,7 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID)
         itemID = tonumber(orderInfo.itemID) or ItemIDFromLink(orderInfo.outputItemHyperlink),
         parentProfessionID = tonumber(orderInfo.parentProfessionID) or CurrentParentProfessionID(),
         capturedAt = time(),
+        reagentAudit = CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID),
     }
 
     if snapshot.orderID then
@@ -293,7 +298,11 @@ local function EntryIsNewer(candidate, current)
             -- beat a newer clear and caused peers to reject the clear itself.
             local candidateProgress = STATUS_PROGRESS[candidate.status] or 0
             local currentProgress = STATUS_PROGRESS[current.status] or 0
-            if candidateProgress ~= currentProgress then
+            local differentGameOrder = candidate.craftingOrderID and current.craftingOrderID
+                and tostring(candidate.craftingOrderID) ~= tostring(current.craftingOrderID)
+            -- A resent order can reuse the chat request. Its earlier decline
+            -- must not outrank a newer claim just because it is terminal.
+            if not differentGameOrder and candidateProgress ~= currentProgress then
                 return candidateProgress > currentProgress
             end
         end
@@ -389,6 +398,9 @@ local function SanitizeEntry(entry)
         clean.result = entry.result:sub(1, 64)
     end
 
+    if clean.status == OrderFulfillment.Status.Rejected then
+        clean.reagentAudit = CleanReagentAudit(entry.reagentAudit, clean.craftingOrderID)
+    end
     return clean
 end
 
@@ -443,6 +455,9 @@ local function SanitizeCompletionNotice(notice)
         clean.requestTime = notice.requestTime
     end
 
+    if clean.status == OrderFulfillment.Status.Rejected then
+        clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
+    end
     return clean
 end
 
@@ -517,6 +532,8 @@ local function CompletionNoticeMatchesOrder(notice, order)
     end
 
     local responseParentProfessionID = tonumber(response.parentProfID)
+    if response.equipmentRequest and (not HironCraftScan.ClassMatching
+        or not HironCraftScan.ClassMatching.MatchesItem(response.equipmentRequest, notice.itemID)) then return false end
     return (not notice.parentProfessionID
         or not responseParentProfessionID
         or notice.parentProfessionID == responseParentProfessionID)
@@ -766,6 +783,8 @@ function OrderFulfillment:GetStatus(order)
     if notice then
         return {
             status = notice.status or self.Status.Fulfilled,
+            craftingOrderID = notice.orderID,
+            reagentAudit = notice.reagentAudit,
             crafterFullName = notice.crafterFullName,
             updatedAt = notice.updatedAt,
             automatic = true,
@@ -829,6 +848,10 @@ function OrderFulfillment:FindMatchingOrder(orderInfo)
                 local itemMismatch = claimedItemID
                     and responseItemID
                     and claimedItemID ~= responseItemID
+                if response.equipmentRequest then
+                    itemMismatch = not HironCraftScan.ClassMatching
+                        or not HironCraftScan.ClassMatching.MatchesItem(response.equipmentRequest, claimedItemID)
+                end
 
                 if not recipeMismatch and not itemMismatch then
                     local score = 1
@@ -893,6 +916,9 @@ function OrderFulfillment:FindGenericOrders(orderInfo)
                 and not response.recipeID
                 and not response.itemID
                 and professionMatches
+                and (not response.equipmentRequest or (HironCraftScan.ClassMatching
+                    and HironCraftScan.ClassMatching.MatchesItem(response.equipmentRequest,
+                        tonumber(orderInfo.itemID) or ItemIDFromLink(orderInfo.outputItemHyperlink))))
             then
                 table.insert(matches, order)
             end
@@ -966,6 +992,7 @@ function OrderFulfillment:SetStatus(order, status, options)
         updatedAt = tonumber(options.updatedAt) or time(),
         automatic = options.automatic ~= false,
         result = ResultForStorage(options.result),
+        reagentAudit = status == self.Status.Rejected and CleanReagentAudit(options.reagentAudit, craftingOrderID) or nil,
         rev = (current and current.rev or 0) + 1,
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
     }
@@ -1011,12 +1038,21 @@ function OrderFulfillment:ApplyRemoteStatus(remoteEntry)
     local key = HironCraftScan.OrderToOrderID(entry)
     local current = statuses[key]
     if not EntryIsNewer(entry, current) then
+        if EntriesEquivalent(entry, current) and entry.reagentAudit and not current.reagentAudit then
+            current.reagentAudit = entry.reagentAudit
+            NotifyUpdated(current)
+            return true, true, current
+        end
         -- Only an exact idempotent replay is safe to acknowledge silently. A
         -- different rejected revision needs an immediate repair response; ACKing
         -- it here used to stop the sender's retries while leaving this row stale.
         return false, EntriesEquivalent(entry, current), current
     end
 
+    if current and entry.status == self.Status.Rejected and current.status == entry.status
+        and entry.craftingOrderID == current.craftingOrderID and SameRequest(entry, current) then
+        entry.reagentAudit = entry.reagentAudit or current.reagentAudit
+    end
     statuses[key] = entry
     RememberCraftingOrder(entry)
     NotifyUpdated(entry)
@@ -1086,20 +1122,29 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
                         updatedAt = best.updatedAt,
                         automatic = true,
                         result = 'completion_notice',
+                        reagentAudit = best.reagentAudit,
                         force = true, -- The merge above already validated this transition.
                     })
+                elseif candidate and not manualOverride and best.reagentAudit and stored
+                    and not stored.reagentAudit and stored.status == self.Status.Rejected
+                    and stored.craftingOrderID == best.orderID and SameRequest(candidate, stored) then
+                    stored.reagentAudit = best.reagentAudit
+                    NotifyUpdated(stored)
                 end
             end
         end
     end
 
     if current and (current.updatedAt or 0) >= notice.updatedAt then
+        local enriched = current.updatedAt == notice.updatedAt and current.status == notice.status
+            and notice.reagentAudit and not current.reagentAudit
+        if enriched then current.reagentAudit = notice.reagentAudit end
         -- Replayed linked-account notices are also a cheap UI repair signal.
         -- The data is already current, but the ScrollBox row may have been
         -- rebound after the original notification was handled.
         MaterializeMatchingStatuses(current)
         ScheduleStatusRefreshes()
-        return false
+        return enriched and true or false
     end
 
     notices[key] = notice
@@ -1138,6 +1183,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
         status = status or self.Status.Fulfilled,
         requestToken = orderInfo.requestToken,
         requestTime = tonumber(orderInfo.requestTime),
+        reagentAudit = status == self.Status.Rejected and CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID) or nil,
     }
 
     if not self:ApplyRemoteCompletion(notice) then
@@ -1215,6 +1261,7 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
             automatic = true,
             result = result,
             force = force == true,
+            reagentAudit = orderInfo and orderInfo.reagentAudit,
         })
     end
 
@@ -1239,6 +1286,7 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
                 automatic = true,
                 result = result,
                 force = force == true,
+                reagentAudit = orderInfo.reagentAudit,
             })
         end
 
@@ -1249,13 +1297,14 @@ local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, generi
     return matched
 end
 
-function OrderFulfillment:RecordRejection(orderInfo, craftingOrderID, reason)
+function OrderFulfillment:RecordRejection(orderInfo, craftingOrderID, reason, reagentAudit)
     if type(orderInfo) ~= 'table' or type(orderInfo.customerName) ~= 'string' then
         return false
     end
 
     local snapshot = SnapshotOrderInfo(orderInfo, craftingOrderID or orderInfo.orderID)
         or orderInfo
+    snapshot.reagentAudit = CleanReagentAudit(reagentAudit or orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID)
     return TrackOrderInfo(
         self.Status.Rejected,
         craftingOrderID or orderInfo.orderID,
@@ -1569,10 +1618,11 @@ end)
 -- bridge lets its safe reject action feed the CraftScan status journal without
 -- coupling either module to the other's private Lua environment.
 _G.HironCraft = _G.HironCraft or {}
-_G.HironCraft.RecordRejectedCraftingOrder = function(orderInfo, reason)
+_G.HironCraft.RecordRejectedCraftingOrder = function(orderInfo, reason, reagentAudit)
     return OrderFulfillment:RecordRejection(
         orderInfo,
         orderInfo and orderInfo.orderID,
-        reason
+        reason,
+        reagentAudit
     )
 end

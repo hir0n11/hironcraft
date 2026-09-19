@@ -92,6 +92,9 @@ CO.selectedReagents['3:1']={itemID=1234}
 CO.useConcentration['3']=true
 local previousReagent=CO.selectedReagents['3:1']
 -- Temporary empty load and reopening cannot destroy persisted choices.
+CO.IsOrderActionInProgress=function() return true end
+CO:RestoreOrderSelection(page,{});selected('2,3,6')
+CO.IsOrderActionInProgress=function() return false end
 CO:RestoreOrderSelection(page,{});selected('')
 page.shown=false;page.shown=true
 auto();selected('2,3,6')

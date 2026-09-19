@@ -273,11 +273,13 @@ function CO:HasPreparedFinishingReagent(order, reagentTbl)
     return false
 end
 
-function CO:MarkOrderReadyForQualityRejection(order)
+function CO:MarkOrderReadyForQualityRejection(order, details)
     local key = OrderKey(order and order.orderID)
     if not key then return end
     self.qualityRejectOrderIDs = self.qualityRejectOrderIDs or {}
     self.qualityRejectOrderIDs[key] = (GetTime and GetTime() or 0) + QUALITY_REJECT_WINDOW_SECONDS
+    self.qualityRejectDetails = self.qualityRejectDetails or {}
+    self.qualityRejectDetails[key] = details
 end
 
 function CO:IsOrderReadyForQualityRejection(order)
@@ -286,6 +288,7 @@ function CO:IsOrderReadyForQualityRejection(order)
     if not expiresAt then return false end
     if expiresAt <= (GetTime and GetTime() or 0) then
         self.qualityRejectOrderIDs[key] = nil
+        if self.qualityRejectDetails then self.qualityRejectDetails[key] = nil end
         return false
     end
     return true
@@ -296,6 +299,7 @@ function CO:ClearOrderQualityRejection(order)
     if key and self.qualityRejectOrderIDs then
         self.qualityRejectOrderIDs[key] = nil
     end
+    if key and self.qualityRejectDetails then self.qualityRejectDetails[key] = nil end
 end
 
 function CO:PrepareAutoFinishingReagent(engine, order, useConcentration, pageFrame)
@@ -438,10 +442,15 @@ function CO:PrepareAutoFinishingReagent(engine, order, useConcentration, pageFra
     end
 
     RefreshOrderEngine(engine, form)
-    self:MarkOrderReadyForQualityRejection(order)
-    return "reject", {
+    local rejectionDetails = {
         currentQuality = tonumber(baseQuality.quality) or 0,
         requestedQuality = requestedQuality,
         maxAllowed = maxAllowed,
+        skill = tonumber(baseQuality.skill),
+        nextQualitySkill = tonumber(baseQuality.operationInfo and
+            (baseQuality.operationInfo.upperSkillThreshold or baseQuality.operationInfo.upperSkillTreshold)),
+        concentration = useConcentration == true,
     }
+    self:MarkOrderReadyForQualityRejection(order, rejectionDetails)
+    return "reject", rejectionDetails
 end

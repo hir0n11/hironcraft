@@ -15,6 +15,26 @@ local MAX_OPTIONS_PER_POPUP = 8
 local MAX_PRIORITY = 999
 local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 local ORDER_GREETING_ACTION = 'order-greeting'
+local REPLY_COOLDOWN = 6
+local LEGACY_REJECTION_TEXT = 'You need provide all mats and they all should be max tier (even missive and embelishment)'
+local sentReplies = {}
+
+local function ReplyKey(customer, reply)
+    local info = HironCraftScan.DB.customers[customer]
+    return tostring(info and info.guid or customer):lower() .. '\31' .. reply
+end
+
+function QuickReplies:IsReplyOnCooldown(customer, reply)
+    local now = GetTime()
+    for key, sentAt in pairs(sentReplies) do
+        if now - sentAt >= REPLY_COOLDOWN then sentReplies[key] = nil end
+    end
+    return sentReplies[ReplyKey(customer, reply)] ~= nil
+end
+
+function QuickReplies:RememberSentReply(customer, reply)
+    sentReplies[ReplyKey(customer, reply)] = GetTime()
+end
 
 -- Adding another built-in quick reply only requires another definition here.
 -- The SavedVariables defaults and the configuration UI are generated from
@@ -24,7 +44,7 @@ local DEFAULT_TEMPLATES = {
         key = REJECTED_ORDER_TEMPLATE_KEY,
         eventOnly = true,
         keywords = '',
-        response = 'You need provide all mats and they all should be max tier (even missive and embelishment)',
+        response = '{reagent_issues}',
     },
     {
         key = 'NAME',
@@ -81,7 +101,7 @@ local function EnsureConfig()
     if config.typo_tolerance == nil then
         config.typo_tolerance = true
     end
-    config.schema_version = 5
+    config.schema_version = 6
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -92,7 +112,8 @@ local function EnsureConfig()
         if template.keywords == nil then
             template.keywords = definition.keywords
         end
-        if template.response == nil then
+        if template.response == nil or (definition.key == REJECTED_ORDER_TEMPLATE_KEY
+            and template.response == LEGACY_REJECTION_TEXT) then
             template.response = definition.response
         end
     end
@@ -538,7 +559,8 @@ function QuickReplies:BuildReply(templateKey, response)
 
     -- An unavailable commission (or any unknown context token) must never leak
     -- as a literal placeholder or turn into a misleading answer.
-    if reply == '' or reply:find('%b{}') or #reply > MAX_CHAT_BYTES then
+    local hasAuditTag = raw:find('{reagent_issues}', 1, true)
+    if reply == '' or reply:find('%b{}') or #reply > (hasAuditTag and 4096 or MAX_CHAT_BYTES) then
         return nil
     end
     return reply
@@ -588,7 +610,7 @@ local function ResponseLabel(response)
     end
     local crafter = response.crafterName
         or HironCraftScan.NameAndRealmToName(response.crafterFullName)
-    local subject = response.professionName
+    local subject = response.equipmentLabel or response.professionName
     if response.itemID then
         subject = select(1, GetItemInfo(response.itemID)) or subject
     end
@@ -704,6 +726,7 @@ function QuickReplies:BuildRejectedOrderOption(order, entry)
         requestToken = response.requestToken,
         requestTime = response.time,
         templateKey = REJECTED_ORDER_TEMPLATE_KEY,
+        rejectionOrderID = entry.craftingOrderID,
         templateLabel = L('Crafting order status rejected'),
         reply = reply,
         label = reply,
@@ -941,6 +964,14 @@ function QuickReplies:ResolvePopupResponse(option)
     end
     local response = CurrentResponse(option)
     if option.templateKey == REJECTED_ORDER_TEMPLATE_KEY then
+        local fulfillment = HironCraftScan.OrderFulfillment
+        if fulfillment and fulfillment.GetStatus then
+            local status = fulfillment:GetStatus({customerName=option.customer,responseID=option.responseID})
+            if not status or status.status ~= fulfillment.Status.Rejected
+                or (option.rejectionOrderID and tostring(option.rejectionOrderID) ~= tostring(status.craftingOrderID)) then
+                return nil
+            end
+        end
         return self:IsConversationCharacter(response) and response or nil
     end
     return response or FindEquivalentResponse(option)
@@ -975,7 +1006,7 @@ local function DismissEquivalentToasts(option)
 end
 
 local function SendOption(toast, option)
-    if toast.option ~= option or not toast:IsShown() then return end
+    if toast.option ~= option or not toast:IsVisible() then return end
     if option.action == ORDER_GREETING_ACTION then
         local response = CurrentResponse(option)
         if not response or response.greeting_sent then
@@ -1008,11 +1039,26 @@ local function SendOption(toast, option)
         return
     end
 
-    -- Exactly one entry is intentionally passed. SendResponses uses the same
-    -- whisper path as greetings, and CHAT_MSG_WHISPER_INFORM records it in the
-    -- customer's existing chat_history.
-    if HironCraftScan.Utils.SendResponses({ reply }, option.customer, true) == false then return end
+    -- Long reagent audits are split only on this explicit click; the complete
+    -- reply shares one cooldown. Each whisper is recorded in chat history.
+    if QuickReplies:IsReplyOnCooldown(option.customer, reply) then return end
+    local messages = #reply > MAX_CHAT_BYTES and HironCraftScan.Utils.SplitResponse(reply) or { reply }
+    if HironCraftScan.Utils.SendResponses(messages, option.customer, true) == false then return end
+    QuickReplies:RememberSentReply(option.customer, reply)
     DismissEquivalentToasts(option)
+end
+
+function QuickReplies:SendTopReply(userInitiated)
+    if userInitiated ~= true then return false end
+    local toast = VisibleToasts()[1]
+    if not toast or not toast:IsVisible() then return false end
+    SendOption(toast, toast.option)
+    return true
+end
+
+-- Key bindings and mouse clicks share the same context checks and cooldown.
+function HironCraftScanSendQuickReply()
+    QuickReplies:SendTopReply(true)
 end
 
 local function SetupToast(toast, option, customerInfo, serial, optionIndex)
@@ -1249,6 +1295,8 @@ end
 
 local lastShown = {}
 function QuickReplies:OnWhisper(customer, message, customerInfo)
+    if HironCraftScan.Scanner and HironCraftScan.Scanner.IsCrafterAdvertisement
+        and HironCraftScan.Scanner.IsCrafterAdvertisement(message) then return end
     local config = EnsureConfig()
     if not config.enabled then
         return
@@ -1318,10 +1366,26 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry)
     end
 
     local rejectionKeys = self:GetRejectedOrderSuggestionKeys(order, entry)
+    local gameOrderID = entry.craftingOrderID and tostring(entry.craftingOrderID)
     for _, key in ipairs(rejectionKeys) do
-        if shownRejections[key] then return end
+        local previous = shownRejections[key]
+        if previous and (not gameOrderID or previous == true or previous == gameOrderID) then
+            -- Upgrade legacy aliases once the game order ID becomes known.
+            if gameOrderID then
+                for _, alias in ipairs(rejectionKeys) do shownRejections[alias] = gameOrderID end
+            end
+            return
+        end
     end
-    for _, key in ipairs(rejectionKeys) do shownRejections[key] = true end
+    for _, key in ipairs(rejectionKeys) do shownRejections[key] = gameOrderID or true end
+
+    for _, toast in ipairs(toastPool) do
+        local old = toast.option
+        if type(old) == 'table' and old.templateKey == REJECTED_ORDER_TEMPLATE_KEY
+            and old.customer == option.customer and old.responseID == option.responseID then
+            toast:Hide(); toast.option = nil
+        end
+    end
 
     popupSerial = popupSerial + 1
     SetupToast(GetToast(), option, customerInfo, popupSerial, 1)

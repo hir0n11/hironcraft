@@ -25,25 +25,88 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Editable recipe shopping plan (0.3.50)
+## Declined-order reagent snapshots (0.3.53)
+
+- Before an addon-driven decline/release, save the customer's server-provided
+  reagents, quantities and ranks. Never include the crafter's inventory or
+  temporary transaction allocations. Snapshots survive reloads and travel with
+  rejection statuses/journal notices between fully linked accounts.
+- Hover a rejected CraftScan row for a separate reagent tooltip to the left of
+  chat history (right/below fallback near screen edges). It shows supplied vs.
+  required quantities, shortages, and lower-tier materials. Missing API data
+  stays unknown. Old declines cannot be reconstructed retroactively.
+- Use `{reagent_issues}` in Quick Reply or Custom Explanations. The unchanged
+  legacy rejection reply is migrated to this tag; edited pastes are preserved.
+  The tag expands to concrete missing/replacement quantities in English using
+  captured item names. Select an active/declined item in the customer menu when
+  the customer has several requests. Long replies split at chat limits only
+  after a manual click/bind and share the six-second cooldown.
+- If all supplied materials are complete and highest tier, a captured quality
+  rejection reports the game's computed vs. requested quality, not a request to
+  replace good materials. Recrafts are marked as a *possible* calculation issue,
+  not proof of a Blizzard bug. The tooltip includes captured skill/next-tier
+  threshold and configured finishing-reagent limit when available. Skill,
+  specializations, concentration and settings can also limit output quality.
+- Snapshots and reply actions stay tied to the exact Blizzard order ID. Delayed
+  rejection messages cannot replace the status of a more recent resent order.
+- Regression coverage includes mixed ranks, alternative spark quantities,
+  ambiguous/unavailable reagent data, pre-release capture, linked-account
+  persistence, manual reply batches, and live tooltip lifecycle. Actual game UI
+  and server payloads still require an in-game check after `/reload`.
+
+## Reply safety (0.3.52)
+
+- Banner bindings act only on a currently visible banner and its displayed
+  request. New whispers cannot silently replace its recipient. Hidden,
+  expired, dismissed or reused requests cannot be sent via an old banner.
+- The Quick Reply binding also refuses cards whose parent interface is hidden.
+- Obvious crafter service offers (including `Send order to ...`, `I can craft`
+  and the reported unsolicited sales messages) no longer create requests or
+  quick-reply suggestions. Item links alone and customer questions still work;
+  explicit manual profession matching remains available.
+
+## Conversation and patron queue fixes (0.3.51)
+
+- The same outgoing quick-reply text to the same customer has a six-second
+  cooldown. Other replies and customers are independent; failed sends can retry.
+- Bind **Send top Quick Reply** under HironCraftScan in WoW's key bindings.
+  It uses the same validation and cooldown as clicking the uppermost card.
+- Right-click manual profession matching creates a proposed reply without
+  sending. Click its card/order banner to send it.
+- New whisper requests use `item Send to crafter.`, including first contact.
+- Slot requests (Wrist, Belt, etc.) and weapon requests (Axe, Sword, Gun, etc.)
+  have separate placeholder rows. Armor follows the customer's class or explicit
+  armor/profession. Compatible monitored item links replace their placeholder;
+  unrelated types remain separate. Requests never automatically send chat.
+- Patron selection survives transient concentration-cache misses and partial
+  order-list refreshes during a craft. Unsafe claims remain blocked, but no
+  longer silently uncheck the order or erase its saved selection.
+
+## Editable recipe shopping plan (updated in 0.3.51)
 
 - Adding a recipe opens a small, movable side window (360 wide, at most five
   visible rows). It never takes keyboard focus. Close it with X/Escape and
   reopen it with **List** or by right-clicking **Add to shopping**.
 - Each row has minus/plus, an editable quantity (Enter or focus loss to apply)
-  and X to remove it. Quantity zero removes that row. **Clear** requires a
-  second click. Removing or reducing one recipe rebuilds only the accumulated
+  and X to remove it. Quantity zero removes that row. **Clear** works with one
+  click. Removing or reducing one recipe rebuilds only the accumulated
   recipe list, preserving the other recipes and their reagent selections.
-- The quality selector applies to new additions: **As in recipe**, **T1**,
-  **T2**, **T3**. Explicit quality overrides required quality-reagent slots,
+- The side-window quality selector applies to new additions: **T1** or **T2**.
+  Explicit quality overrides required quality-reagent slots,
   while selected optional/finishing reagents remain as selected. An unavailable
   tier produces an error instead of silently buying another tier.
 - Identical recipe/reagent selections merge. Different quality or optional
   reagent selections retain separate rows and immutable per-craft snapshots.
-- **Use owned reagents** deducts stock once from the combined requirement for
+- Owned reagents are always deducted once from the combined requirement for
   each exact item ID/quality. For 40 T1 required, 20 T1 owned and 15 T2 owned,
   the list buys 20 T1. Other quality stock does not reduce that amount.
-  **Recalculate** refreshes missing amounts after inventory changes.
+  Stock is also checked on auction opening and before purchase; a larger old
+  commodity quote is cancelled if stock changed before confirmation.
+- Bound reagents such as sparks are excluded, including slots with several
+  interchangeable sparks. They cannot block selection of T1/T2 materials.
+- Each addition refreshes the side-window rows, count and tooltip immediately.
+  The main duplicate quality button, stock checkbox and Recalculate are removed.
+  Creating a plan outside the AH no longer constructs the full auction window.
 - Recipe plans and settings survive reload/login. Shopping's temporary-list
   cleanup no longer deletes user-managed recipe lists.
 - Unlearned recipe items also appear in the editor and can be removed
@@ -86,8 +149,8 @@ The original CraftScan and ProfitHUB folders are not required after migration an
 - Current reagent-quality allocations and explicitly selected optional or
   finishing reagents are preserved. The best-quality checkbox controls an
   otherwise unallocated quality slot.
-- In 0.3.50, right-clicking opens the editor; full clearing moved into its
-  explicit two-click **Clear** button.
+- Right-clicking opens the editor; full clearing uses its **Clear** button
+  (one click since 0.3.51).
 
 ## Specific item request guard (0.3.45)
 

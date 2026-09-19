@@ -22,6 +22,7 @@ local allowedContext = {
     profession = true,
     profession_link = true,
     commission = true,
+    reagent_issues = true,
 }
 
 local function UnknownContextPlaceholders(value)

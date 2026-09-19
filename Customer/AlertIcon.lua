@@ -143,6 +143,16 @@ local function UpdateAlertDuration()
 end
 
 function HironCraftScanScannerMenuMixin:TriggerAlert(text, order)
+    -- Stop the old animation before binding the new target: OnHide releases
+    -- its request. A later whisper must not retarget this displayed banner.
+    self.PageButton.MinimapAlertAnim:Stop()
+    local response = HironCraftScan.OrderToResponse(order)
+    if not response then return end
+    HironCraftScan.State.activeOrder = order
+    self.AlertBGButton.order = order
+    self.AlertBGButton.response = response
+    self.AlertBGButton.requestToken = response.requestToken
+    self.AlertBGButton.requestTime = response.time
     UpdateBannerDirection();
     UpdateAlertDuration();
     self.PageButton:UpdateIcon();
@@ -153,7 +163,12 @@ end
 function HironCraftScanScannerMenuMixin:ClearAlert(order)
     if order == HironCraftScan.State.activeOrder then
         HironCraftScan.State.activeOrder = nil;
+    end
+    local displayed = self.AlertBGButton.order
+    if order and displayed and order.customerName == displayed.customerName
+        and order.responseID == displayed.responseID then
         self:ClearPulses()
+        self.AlertBGButton:OnHide()
         self.AlertBGButton.HighlightTexture:Hide()
     end
 end
@@ -168,18 +183,40 @@ end
 
 HironCraftScanBannerMixin = {}
 
-function HironCraftScanBannerMixin:OnClick(button)
-    if HironCraftScan.State.activeOrder then
-        HironCraftScan.GreetCustomer(button, HironCraftScan.State.activeOrder)
-        self:GetParent():ClearAlert(HironCraftScan.State.activeOrder)
+function HironCraftScanBannerMixin:GetOrder()
+    -- Bindings invoke OnClick directly, even while the button/parent is hidden.
+    if not self:IsVisible() or not self.order then return nil end
+    local response = HironCraftScan.OrderToResponse(self.order)
+    if response ~= self.response or not response
+        or response.requestToken ~= self.requestToken
+        or (not self.requestToken and response.time ~= self.requestTime)
+        or not HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(self.order)] then
+        return nil
     end
+    return self.order
+end
+
+function HironCraftScanBannerMixin:OnClick(button)
+    local order = self:GetOrder()
+    if not order then return end
+    HironCraftScan.GreetCustomer(button, order)
+    self:GetParent():ClearAlert(order)
 end
 
 local bannerTooltip = HironCraftScan.Utils.ChatHistoryTooltip:new();
+function HironCraftScanBannerMixin:OnHide()
+    if self.order and HironCraftScan.State.activeOrder == self.order then
+        HironCraftScan.State.activeOrder = nil
+    end
+    self.order, self.response, self.requestToken, self.requestTime = nil, nil, nil, nil
+    bannerTooltip:Hide()
+end
+
 function HironCraftScanBannerMixin:OnEnter()
-    if HironCraftScan.State.activeOrder then
-        bannerTooltip:Show("HironCraftScanChatHistoryBannerTooltip", self, HironCraftScan.State.activeOrder,
-            string.format(L("Customer Request"), HironCraftScan.NameAndRealmToName(HironCraftScan.State.activeOrder.customerName)),
+    local order = self:GetOrder()
+    if order then
+        bannerTooltip:Show("HironCraftScanChatHistoryBannerTooltip", self, order,
+            string.format(L("Customer Request"), HironCraftScan.NameAndRealmToName(order.customerName)),
             true);
         self.HighlightTexture:Show()
     end

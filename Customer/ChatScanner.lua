@@ -837,6 +837,48 @@ local function GetMonitoredItemMatches(message)
     return matches
 end
 
+local function IsCrafterAdvertisement(message)
+    if type(message) ~= 'string' then return false end
+    -- Match the author's words, never item/profession names inside links.
+    local text = (strlower or string.lower)(message)
+        :gsub('|h[^|]+|h.-|h', ' '):gsub('|a.-|a', ' '):gsub('|t.-|t', ' ')
+        :gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|cn[%w_]+:', ''):gsub('|r', '')
+    local question = text:find('?', 1, true)
+    text = text:gsub('[%p%c]', ' '):gsub('%s+', ' '):match('^%s*(.-)%s*$')
+    -- Greetings often precede an unsolicited sales pitch. Strip whole words
+    -- only; do not mistake "can YOU craft", LF, or a bare link for an offer.
+    local changed = true
+    while changed do
+        local count
+        text, count = text:gsub('^hi%s+', '')
+        if count == 0 then text, count = text:gsub('^hello%s+', '') end
+        if count == 0 then text, count = text:gsub('^hey%s+', '') end
+        if count == 0 then text, count = text:gsub('^mate%s+', '') end
+        if count == 0 then text, count = text:gsub('^привет%s+', '') end
+        changed = count > 0
+    end
+    local destination = text:match('^send%s+to%s+(%a+)')
+        or text:match('^send%s+orders?%s+to%s+(%a+)')
+    if destination == 'who' or destination == 'whom' or destination == 'which'
+        or destination == 'what' or destination == 'where' then return false end
+    if not question and (text:find('^send%s+to%s+%S')
+        or text:find('^send%s+orders?%s+to%s+%S')) then return true end
+    local offers = {
+        '^i%s+can%s+craft%f[%A]', '^i%s+can%s+recraft%f[%A]',
+        '^i%s+craft%f[%A]', '^i%s+recraft%f[%A]',
+        '^wts%f[%A]', '^crafting%s+services%f[%A]',
+        '^могу скрафтить', '^могу перекрафтить', '^крафчу', '^изготовлю',
+        '^отправляй заказ', '^отправляйте заказ', '^заказы на ',
+    }
+    for _, pattern in ipairs(offers) do
+        if text:find(pattern) then return true end
+    end
+    -- "Can craft [item]?" can be a terse customer question.
+    return not question and (text:find('^can%s+craft%f[%A]') ~= nil
+        or text:find('^can%s+recraft%f[%A]') ~= nil)
+end
+HironCraftScan.Scanner.IsCrafterAdvertisement = IsCrafterAdvertisement
+
 local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     local originalMessage = message
     message = string.lower(message)
@@ -856,6 +898,7 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
 
     if not overrides or (not overrides.forceCrafterInfo and not overrides.itemInfo) then
+        if IsCrafterAdvertisement(originalMessage) then return nil end
         if HasMatch(message, config.exclusions) then
             return nil
         end
@@ -953,6 +996,15 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass)
     end
     if armorContext and armorContext.unknownClass then return nil, nil, nil, nil, true end
+    local equipmentRequests = HironCraftScan.ClassMatching
+        and HironCraftScan.ClassMatching.GetRequests(armorContext) or nil
+    if overrides and overrides.equipmentRequest then
+        local request = overrides.equipmentRequest
+        armorContext = {parentProfID=request.parentProfID, armor=request.armor,
+            slots=request.slot and {[request.slot]=true} or {},
+            weapons=request.subclasses and {[request.key]=true} or nil}
+        equipmentRequests = {request}
+    end
     local bestMatch = nil
 
     local function FindBestCrafter(crafterInfo)
@@ -969,7 +1021,8 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
                 if pConfig.parentProfID == crafterInfo.parentProfID then
                     local recipeInfo = GetRequestID(message, crafterInfo, pConfig, armorContext)
                     if recipeInfo then
-                        return { crafter = crafterInfo.crafter, profID = pID }, nil, recipeInfo
+                        return { crafter = crafterInfo.crafter, profID = pID,
+                            equipmentRequests=equipmentRequests }, nil, recipeInfo
                     end
 
                     if pID > maxProfID then
@@ -980,14 +1033,19 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
 
             local profID = maxProfID
             if profID > 0 and not bestMatch then
-                bestMatch = { crafter = crafterInfo.crafter, profID = profID }
+                bestMatch = { crafter = crafterInfo.crafter, profID = profID,
+                    equipmentRequests=equipmentRequests }
             end -- Keep looking for other crafters with keywords that match something specific.
         end
     end
 
     for _, crafterInfo in ipairs(config.prof_keywords) do
+        local equipmentProfession = false
+        for _, request in ipairs(equipmentRequests or {}) do
+            if request.parentProfID == crafterInfo.parentProfID then equipmentProfession = true; break end
+        end
         if
-            ((armorContext and crafterInfo.parentProfID == armorContext.parentProfID)
+            (equipmentProfession or (armorContext and crafterInfo.parentProfID == armorContext.parentProfID)
                 or (not armorContext and HasMatch(message, crafterInfo.keywords)))
             and not HasMatch(message, crafterInfo.exclusions)
         then
@@ -1031,6 +1089,7 @@ local function HasDelimitedPhrase(message, phrases)
 end
 
 local function IsGenericRequest(message)
+    if IsCrafterAdvertisement(message) then return false end
     if type(message) ~= 'string' then return false end
     -- A linked item is already a specific request, even when none of the
     -- enabled characters knows its recipe. Do not turn a failed item match
@@ -1420,9 +1479,13 @@ function HironCraftScan.BuildResponseContext(response)
         nil,
         response.recipeID
     )
+    if response.equipmentLabel then context.item = response.equipmentLabel end
     context.crafter = response.crafterName or context.crafter
     context.profession = response.professionName or context.profession
     context.profession_link = context.profession_link or context.profession
+    if HironCraftScan.ReagentAudit then
+        context.reagent_issues = HironCraftScan.ReagentAudit.Issues(HironCraftScan.ReagentAudit.ForResponse(response))
+    end
     return context
 end
 
@@ -1645,12 +1708,54 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     -- Be as specific as possible about what we're responding to.
     local profID = crafterInfo.profID
     local recipeID = recipeInfo and recipeInfo.recipeID
-    local responseID = recipeID or profID
+    local equipmentRequest = overrides and overrides.equipmentRequest
+    local responseID = equipmentRequest and ('equipment:' .. profID .. ':' .. equipmentRequest.key)
+        or recipeID or profID
 
     local needsResultCallbackOnly = overrides and overrides.resultCallback
 
     if not needsResultCallbackOnly then
         RemoveGeneralRequest(customer, customerInfo)
+    end
+
+    -- Replace only a compatible pending slot/type, never another requested
+    -- item. Retain the conversation itself and invalidate its old toast.
+    if HironCraftScan.ClassMatching and not needsResultCallbackOnly then
+        local remove = {}
+        for orderID, order in pairs(HironCraftScan.DB.listed_orders) do
+            if order.customerName == customer then
+                local old = customerInfo.responses and customerInfo.responses[order.responseID]
+                local fulfillment = HironCraftScan.OrderFulfillment
+                local state = fulfillment and fulfillment.GetStatus and fulfillment:GetStatus(order)
+                local terminal = state and (state.status == 'fulfilled' or state.status == 'rejected' or state.status == 'failed')
+                if old and not terminal then
+                    if equipmentRequest and old.itemID
+                        and HironCraftScan.ClassMatching.MatchesItem(equipmentRequest, old.itemID) then
+                        return nil -- do not downgrade a known item to a slot
+                    end
+                    if itemID and old.equipmentRequest
+                        and HironCraftScan.ClassMatching.MatchesItem(old.equipmentRequest, itemID) then
+                        remove[#remove+1] = {orderID=orderID, order=order, response=old}
+                    end
+                end
+            end
+        end
+        for _, old in ipairs(remove) do
+            HironCraftScan.DB.listed_orders[old.orderID] = nil
+            for id, value in pairs(customerInfo.responses) do
+                if value == old.response then customerInfo.responses[id] = nil end
+            end
+            if HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.DismissOrderGreeting then
+                HironCraftScan.QuickReplies:DismissOrderGreeting(customer, old.order.responseID, old.response.requestToken)
+            end
+            if HironCraftScanScannerMenu.ClearAlert then HironCraftScanScannerMenu:ClearAlert(old.order) end
+            local active = HironCraftScan.State.activeOrder
+            if active and active.customerName == customer and active.responseID == old.order.responseID then
+                HironCraftScan.State.activeOrder = nil
+            end
+            local live = HironCraftScan.LIVE and HironCraftScan.LIVE.customers[customer]
+            if live and live.responses then live.responses[old.order.responseID] = nil end
+        end
     end
 
     local responses = saved(customerInfo, 'responses', {})
@@ -1776,7 +1881,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     -- responded to 'lf bs <item>', they didn't take the offer, then they
     -- requested 'lf bs'. We don't want to message that person again after
     -- they rejected us offering the exact item they wanted.
-    if not responses[profID] then
+    if not equipmentRequest and not responses[profID] then
         responses[profID] = response
         local children = saved(response, 'less_granular', {})
         table.insert(children, profID)
@@ -1797,10 +1902,11 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
     response.itemID = itemID
     response.itemLink = itemLink
     response.recipeID = recipeID
+    response.equipmentRequest = equipmentRequest
+    response.equipmentLabel = equipmentRequest and equipmentRequest.label
     response.time = (firstInteraction or restartingTerminalRequest) and (requestChatEntry.receivedAt or now) or response.time or now
     response.responseID = responseID
-    response.destination_only_greeting = customerStartedInteraction == true
-        and overrides and overrides.existingCustomerRequest == true or nil
+    response.destination_only_greeting = customerStartedInteraction == true or nil
     if offerIncomingGreeting then
         -- An incoming crafting request establishes contact, but it is not our
         -- answer. Leave the generated greeting pending so Quick Replies can
@@ -1865,7 +1971,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
                     string.format(
                         '%s\n%s (%s)',
                         HironCraftScan.ColorizePlayerName(customer, customerInfo.guid),
-                        itemLink
+                        itemLink or response.equipmentLabel
                             or HironCraftScan.Utils.ColorizeProfessionName(
                                 profInfo.parentProfessionID,
                                 profInfo.parentProfessionName
@@ -2087,7 +2193,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         overrides.genericFollowup = true
     end
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
-    if incomingWhisper and not overrides.remoteRequest then
+    if (incomingWhisper or overrides.manualMatch) and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
 
@@ -2105,6 +2211,18 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, entry, false)
             end
+        end
+        return false
+    end
+
+    if not overrides.forceCrafterInfo and not overrides.itemInfo
+        and IsCrafterAdvertisement(message) then
+        -- Retain existing local history, but do not create/reopen a request,
+        -- switch the active order, or classify this sales pitch as a question.
+        if incomingWhisper and customerInfo then
+            HironCraftScan.Utils.AppendUniqueChatHistory(
+                saved(customerInfo, 'chat_history', {}), overrides.chatEntry)
+            HironCraftScanCraftingOrderPage:ShowGeneric()
         end
         return false
     end
@@ -2188,6 +2306,35 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 
     local customerInfo = saved(HironCraftScan.DB.customers, customer, {})
     customerInfo.guid = customerGuid or customerInfo.guid
+
+    if crafterInfo.equipmentRequests and #crafterInfo.equipmentRequests > 0 then
+        local responses, tokens = {}, {}
+        for _, request in ipairs(crafterInfo.equipmentRequests) do
+            local options = {}
+            for key, value in pairs(overrides) do options[key] = value end
+            options.equipmentRequest = request
+            options.deferItemBatch = true
+            options.suppressBatchAlert = #responses > 0
+            local crafter = GetCrafterForMessage(customer, message, options, customerGuid)
+            if crafter then
+                local id = 'equipment:' .. crafter.profID .. ':' .. request.key
+                if type(overrides.requestTokens) == 'table' then options.requestToken = overrides.requestTokens[id] end
+                local response = handleResponse(message, customer, crafter, nil, nil, nil, options, event)
+                if response then
+                    responses[#responses+1] = response
+                    tokens[response.responseID] = response.requestToken
+                end
+            end
+        end
+        if #responses > 0 then
+            HironCraftScan.GroupOrderGreetings(responses)
+            HironCraftScanCraftingOrderPage:ShowGeneric()
+            HironCraftScanComm:ShareCustomerOrder(message, customer, customerInfo.guid, overrides.chatEntry,
+                responses[1].requestToken, overrides.restartTerminalRequest, tokens)
+        end
+        OfferDeferredQuickReply(customer, message, customerInfo, overrides, responses)
+        return false
+    end
 
     if itemMatches and #itemMatches > 1 then
         -- Load every base-item link before creating/sending the group. This is

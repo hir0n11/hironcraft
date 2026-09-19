@@ -73,7 +73,7 @@ checkManualCalls('SendResponses', [
     'Customer/QuickReplies.lua', 'Utils/Comm.lua',
 ]);
 checkManualCalls('SendOrderGreeting', [
-    'Customer/OrderPage.lua', 'Customer/CustomExplanations.lua', 'Customer/QuickReplies.lua',
+    'Customer/OrderPage.lua', 'Customer/QuickReplies.lua',
 ]);
 checkManualCalls('RequestCraft', ['Customer/CustomerPage.lua']);
 

@@ -56,6 +56,7 @@ function CraftScan.BuildResponseContext(response)
         profession_link = response.professionName,
         item = response.itemName,
         commission = "",
+        reagent_issues = 'Recorded material issues',
     }
 end
 function CraftScan.NameAndRealmToName(name) return name and name:match("^[^-]+") end
@@ -73,6 +74,7 @@ function GetItemInfo(itemID)
     return itemID == 200 and "Second Item" or "Spellbreaker's Bracers"
 end
 
+assert(loadfile('Utils/FStrings.lua'))('HironCraft', CraftScan)
 assert(loadfile("Customer/QuickReplies.lua"))("HironCraft", CraftScan)
 local QuickReplies = CraftScan.QuickReplies
 
@@ -181,8 +183,8 @@ currentCharacter = "Farrierr-Realm"
 assert(QuickReplies:ResolvePopupResponse(rejectedOption) == nil, "stale rejection popup sent from another character")
 currentCharacter = "Seller-Realm"
 assert(
-    rejectedOption.reply == "You need provide all mats and they all should be max tier (even missive and embelishment)",
-    "rejected-order reply text changed"
+    rejectedOption.reply == 'Recorded material issues',
+    'default rejection reply did not use the reagent audit'
 )
 QuickReplies:GetConfig().templates.REJECTED_ORDER.response = "Edited rejected-order reply"
 rejectedOption = QuickReplies:BuildRejectedOrderOption(
@@ -280,6 +282,7 @@ CraftScan.Utils.ChatHistoryTooltip = { new = function() return {} end }
 HironCraftScanScannerMenu = { ClearAlert = function() end }
 HironCraftScanCraftingOrderPage = { ShowGeneric = function() end }
 CraftScan.Utils.SendResponses = function() end
+GetTime = function() return 100 end
 ChatFrame_SendTell = function() end
 CraftScan.Utils.OpenCustomerChat = function(customer) ChatFrame_SendTell(customer); return true end
 assert(loadfile('Customer/OrderPage.lua'))('HironCraft', CraftScan)

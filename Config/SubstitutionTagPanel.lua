@@ -48,6 +48,7 @@ local contextSensitiveTags = {
     crafter = true,
     commission = true,
     general_greeting = true,
+    reagent_issues = true,
 }
 
 function HironCraftScan.Config.GetSuggestions(text, includeContext)

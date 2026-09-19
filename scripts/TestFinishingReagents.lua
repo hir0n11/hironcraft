@@ -253,7 +253,10 @@ result,candidate=CO:PrepareAutoFinishingReagent(engine,order,false)
 assert(result=='applied' and candidate.itemID==246447, 'resource bonus outranked required skill')
 Reset(399, 10)
 CO:SetPreferredFinishingItemID(247726)
-assert(CO:PrepareAutoFinishingReagent(engine,order,false)=='reject')
+local rejectedResult,rejectedDetails=CO:PrepareAutoFinishingReagent(engine,order,false)
+assert(rejectedResult=='reject')
+assert(rejectedDetails.currentQuality and rejectedDetails.requestedQuality
+    and CO.qualityRejectDetails[tostring(order.orderID)]==rejectedDetails,'quality decline lost its diagnostic context')
 assert(not activeAllocations[1], 'bonus reagent was used when skill requirement was impossible')
 
 Reset(408, 5)

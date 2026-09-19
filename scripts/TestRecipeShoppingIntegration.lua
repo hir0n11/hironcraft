@@ -45,11 +45,17 @@ dofile('ProfitHub/Shop/Core/ShoppingList_Core.lua')
 dofile('ProfitHub/Shop/Core/RecipeShopping.lua')
 local S, RS = HironCraftProfit.ShoppingList, HironCraftProfit.RecipeShopping
 S.isAuctionHouseOpen=false
+local shopShows=0
+S.ShowWindow=function(self)
+    assert(self.isAuctionHouseOpen, 'recipe addition tried to construct the auction UI before opening AH')
+    shopShows=shopShows+1
+end
 assert(RS:AddUnlearnedRecipe({recipeID=2002,name='Test Recipe',learned=false}))
 assert(#S.session.rows==1 and S.session.rows[1].unresolvedName=='Test Recipe','recipe never reached the shop')
 local listID=S.activeSavedListID
 local db=HironCraftProfit_DB.shoppingList
 assert(#db.savedLists==1 and #db.savedLists[1].rows==1,'recipe not saved before opening AH')
+assert(shopShows==0)
 S.isAuctionHouseOpen=true
 assert(S:ResolveUnresolvedSessionRowsByBrowse(), 'recipe lookup did not start')
 assert(#S.session.rows==1 and #db.savedLists[1].rows==1,
@@ -97,3 +103,35 @@ RS.plan={entries={},recipeItems={}}
 local entries=RS:GetPlanEntries()
 assert(#entries==1 and entries[1].kind=='recipe_item','recipe editor lost the saved learning-item request')
 print('Recipe shopping integration tests passed.')
+
+-- An owned reagent can arrive after plan creation, or between a quote and
+-- confirmation. Never confirm the old larger quantity or resurrect mail buys.
+local stock, starts, confirms, cancels = 0, {}, {}, 0
+C_Item.GetItemCount=function() return stock end
+C_AuctionHouse.StartCommoditiesPurchase=function(id,quantity) starts[#starts+1]=quantity end
+C_AuctionHouse.ConfirmCommoditiesPurchase=function(id,quantity) confirms[#confirms+1]=quantity end
+C_AuctionHouse.CancelCommoditiesPurchase=function() cancels=cancels+1 end
+RS.plan={entries={},recipeItems={},materials={[901]={itemID=901,quantity=40}}}
+RS.planLoaded=true
+local row={itemID=901,chosenItemID=901,quantity=40,remainingQuantity=40,isCommodity=true,
+    totalQuantity=100,minPrice=1,index=1}
+S.session={active=true,sourceKind='profession_recipes',rows={row},itemData={}}
+S.activeSavedListID=nil
+stock=20
+S:BeginCommodityPurchase(row)
+assert(starts[1]==20 and row.remainingQuantity==20,'stale stock caused an oversized quote')
+row.purchaseStage='confirm';row.pendingQuantity=20
+stock=25
+S:ConfirmCommodityPurchase(row)
+assert(#confirms==0 and cancels==1 and row.remainingQuantity==15 and not row.purchaseStage,
+    'new stock did not invalidate the larger quote')
+S:BeginCommodityPurchase(row)
+assert(starts[2]==15)
+row.purchaseStage='confirm';row.pendingQuantity=15
+S:ConfirmCommodityPurchase(row)
+assert(confirms[1]==15,'updated quote could not be confirmed by a new click')
+row.remainingQuantity=0;row.purchaseStage=nil;stock=0
+assert(not RS:ClampShoppingRowToStock(row) and row.remainingQuantity==0,'mail purchase was added back to shopping')
+S.session.sourceKind='other_list';row.remainingQuantity=40;stock=40
+assert(not RS:ClampShoppingRowToStock(row) and row.remainingQuantity==40,'recipe stock modified an unrelated list')
+print('Recipe shopping purchase stock checks passed.')

@@ -11,6 +11,9 @@
   <Binding name="HIRONCRAFT_SCAN_CHAT_CURRENT_CUSTOMER" category="HironCraftScan">
     HironCraftScanScannerMenu.AlertBGButton:OnClick("MiddleButton");
   </Binding>
+  <Binding name="HIRONCRAFT_SCAN_QUICK_REPLY" category="HironCraftScan">
+    HironCraftScanSendQuickReply();
+  </Binding>
   <Binding name="HIRONCRAFT_SCAN_DISMISS_CURRENT_CUSTOMER" category="HironCraftScan">
     HironCraftScanScannerMenu.AlertBGButton:OnClick("RightButton");
   </Binding>

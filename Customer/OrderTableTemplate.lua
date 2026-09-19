@@ -200,7 +200,8 @@ function HironCraftScanCrafterTableCellItemNameMixin:Populate(rowData, dataIndex
 
     if not response.itemID then
         self.Icon:SetTexture(C_TradeSkillUI.GetTradeSkillTexture(response.professionID))
-        self.Text:SetText(HironCraftScan.Utils.ColorizeProfessionName(response.parentProfID, response.professionName))
+        self.Text:SetText(HironCraftScan.Utils.ColorizeProfessionName(response.parentProfID,
+            response.equipmentLabel or response.professionName))
         return
     end
 

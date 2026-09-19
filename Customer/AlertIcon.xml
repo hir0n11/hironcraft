@@ -208,6 +208,7 @@
                     <Anchor point="LEFT" relativeTo="$parentButton" relativePoint="CENTER"/>
                 </Anchors>
                 <Scripts>
+                    <OnHide method="OnHide"/>
                     <OnClick method="OnClick"/>
                     <OnEnter method="OnEnter"/>
                     <OnLeave method="OnLeave"/>

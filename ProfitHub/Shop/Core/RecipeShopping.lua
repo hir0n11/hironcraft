@@ -27,8 +27,8 @@ function RS:GetSettings()
     HironCraftProfit_DB = HironCraftProfit_DB or {}
     HironCraftProfit_DB.recipeShopping = HironCraftProfit_DB.recipeShopping or {}
     local settings = HironCraftProfit_DB.recipeShopping
-    settings.quality = math.max(0, math.min(3, math.floor(tonumber(settings.quality) or 0)))
-    if settings.useInventory == nil then settings.useInventory = true end
+    settings.quality = tonumber(settings.quality) == 2 and 2 or 1
+    settings.useInventory = true
     return settings
 end
 
@@ -38,18 +38,8 @@ function RS:GetQualityLabel(quality)
 end
 
 function RS:SetQuality(quality)
-    self:GetSettings().quality = math.max(0, math.min(3, math.floor(tonumber(quality) or 0)))
+    self:GetSettings().quality = tonumber(quality) == 2 and 2 or 1
     self:UpdatePlanDisplay()
-end
-
-function RS:SetUseInventory(enabled)
-    local settings = self:GetSettings()
-    local previous = settings.useInventory
-    settings.useInventory = enabled == true
-    local ok, reason = self:RefreshShoppingList()
-    if not ok then settings.useInventory = previous end
-    self:UpdatePlanDisplay()
-    return ok, reason
 end
 
 local function SafeCall(method, owner, ...)
@@ -149,6 +139,19 @@ local function AddMaterial(target, itemID, quantity, candidateCount)
     return true
 end
 
+-- Sparks, crests and other bound reagents cannot be bought on the AH. Do not
+-- confuse several interchangeable sparks with the quality tiers of a material.
+local function IsPurchasableReagent(itemID)
+    local info = C_Item and C_Item.GetItemInfo or GetItemInfo
+    if type(info) ~= "function" then return nil end
+    local ok, name, _, _, _, _, _, _, _, _, _, _, _, _, bindType = pcall(info, itemID)
+    if not ok or not name then
+        if C_Item and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+        return nil
+    end
+    return bindType == nil or bindType == 0 or bindType == 2 or bindType == 3
+end
+
 local function AddAllocation(parts, allocation)
     if type(allocation) ~= "table" then return end
     local reagent = SafeCall(allocation.GetReagent, allocation) or allocation.reagent or allocation.item
@@ -215,6 +218,8 @@ end
 
 local function GetExactQualityCandidate(slot, quality)
     local candidates = slot.reagents or {}
+    -- Bound alternatives were excluded by the caller. Multiple buyable
+    -- candidates with no loaded quality data must not silently pick T2/T3.
     local tiered = #candidates > 1
     for _, candidate in ipairs(candidates) do
         local itemID = GetReagentItemID(candidate)
@@ -258,7 +263,21 @@ function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form, qual
         local candidates = slot.reagents or {}
         local parts = GetAllocatedParts(transaction, slotIndex, dataSlotIndex)
 
-        if required and requiredQuantity > 0 then
+        if required and requiredQuantity > 0 and #candidates == 0 then
+            return nil, "unresolved_reagent"
+        end
+
+        local purchasable, unknown = false, false
+        for _, candidate in ipairs(candidates) do
+            local id = GetReagentItemID(candidate)
+            local allowed = id and IsPurchasableReagent(id)
+            if not id and type(candidate) == "table" and candidate.currencyID then allowed = false end
+            if allowed then purchasable = true elseif allowed == nil then unknown = true end
+        end
+        -- An unallocated optional slot does not need item data at all.
+        local needed = (required and requiredQuantity > 0) or #parts > 0
+        if needed and unknown then return nil, "unresolved_reagent" end
+        if purchasable and required and requiredQuantity > 0 then
             if quality > 0 then
                 local itemID, tiered = GetExactQualityCandidate(slot, quality)
                 if tiered then
@@ -270,23 +289,27 @@ function RS:CollectRecipeMaterials(recipeID, craftCount, transaction, form, qual
             for _, part in ipairs(parts) do
                 if remaining <= 0 then break end
                 local used = math.min(remaining, part.quantity)
-                AddMaterial(materials, part.itemID, used * craftCount, #candidates)
+                if IsPurchasableReagent(part.itemID) then
+                    AddMaterial(materials, part.itemID, used * craftCount, #candidates)
+                end
                 remaining = remaining - used
             end
 
             if remaining > 0 then
                 local itemID = GetPreferredCandidate(slot, parts, form)
-                if itemID then
+                if itemID and IsPurchasableReagent(itemID) then
                     AddMaterial(materials, itemID, remaining * craftCount, #candidates)
                 else
                     unresolved = unresolved + 1
                 end
             end
-        elseif #parts > 0 then
+        elseif purchasable and #parts > 0 then
             -- Optional and finishing reagents enter the plan only when the
             -- player explicitly selected them in the current transaction.
             for _, part in ipairs(parts) do
-                AddMaterial(materials, part.itemID, part.quantity * craftCount, #candidates)
+                if IsPurchasableReagent(part.itemID) then
+                    AddMaterial(materials, part.itemID, part.quantity * craftCount, #candidates)
+                end
             end
         end
     end
@@ -298,11 +321,11 @@ end
 
 function RS:BuildMissingMaterials()
     local materials = {}
-    local useInventory = self:GetSettings().useInventory
+    self:GetSettings()
     for itemID, planned in pairs(self.plan.materials or {}) do
         -- Each quality has its own itemID. Reserve its stock once across the
         -- entire plan, never by item name or by summing other quality tiers.
-        local owned = useInventory and GetItemCountForShopping(itemID) or 0
+        local owned = GetItemCountForShopping(itemID)
         local missing = math.max(0, math.floor((tonumber(planned.quantity) or 0) - owned))
         if missing > 0 then
             local row = {}
@@ -318,7 +341,7 @@ function RS:BuildMissingMaterials()
 
         if row.itemID then
             row.quantity = math.max(0,
-                math.floor((tonumber(row.quantity) or 1) - (useInventory and GetItemCountForShopping(row.itemID) or 0)))
+                math.floor((tonumber(row.quantity) or 1) - GetItemCountForShopping(row.itemID)))
         else
             row.quantity = math.max(1, math.floor(tonumber(row.quantity) or 1))
         end
@@ -351,6 +374,22 @@ function RS:RefreshShoppingList()
         SOURCE_KIND,
         allowEmpty)
     return ok, reason, #materials
+end
+
+function RS:ClampShoppingRowToStock(row)
+    local shop = PT.ShoppingList
+    if not row or not shop or not shop.session or shop.session.sourceKind ~= SOURCE_KIND then return false end
+    self:EnsurePlanLoaded()
+    local itemID = tonumber(row.chosenItemID or row.itemID)
+    local material = itemID and self.plan.materials[itemID]
+    if not material then return false end
+    local missing = math.max(0, math.floor(material.quantity - GetItemCountForShopping(itemID)))
+    if IsPurchasableReagent(itemID) == false then missing = 0 end
+    local remaining = tonumber(row.remainingQuantity) or tonumber(row.quantity) or 0
+    -- Never increase a live shopping row: bought reagents may still be in mail.
+    if missing >= remaining then return false end
+    row.quantity, row.remainingQuantity = missing, missing
+    return true
 end
 
 local function CopyTable(source)
@@ -431,7 +470,14 @@ function RS:ApplyPlan(plan, refresh)
     RebuildPlan(plan)
     self.plan = plan
     local ok, reason, missingTypes = true, nil, 0
-    if refresh ~= false then ok, reason, missingTypes = self:RefreshShoppingList() end
+    if refresh ~= false then
+        local called
+        called, ok, reason, missingTypes = pcall(self.RefreshShoppingList, self)
+        if not called then
+            if geterrorhandler then geterrorhandler()(ok) end
+            ok, reason = false, "shopping_unavailable"
+        end
+    end
     if not ok then self.plan = previous else
         HironCraftProfit_DB = HironCraftProfit_DB or {}
         HironCraftProfit_DB.recipeShoppingPlan = plan
@@ -701,7 +747,7 @@ function RS:EnsureControls()
     if not page or not form or type(CreateFrame) ~= "function" then return nil end
 
     local controls = CreateFrame("Frame", "HironCraftRecipeShoppingControls", page)
-    controls:SetSize(248, 22)
+    controls:SetSize(186, 22)
     controls:SetPoint("TOPRIGHT", form, "TOPRIGHT", -8, -44)
     controls:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
 
@@ -765,16 +811,10 @@ function RS:EnsureControls()
     counter:SetTextColor(0.65, 0.85, 1)
     local list = CreateFrame("Button", nil, controls, "UIPanelButtonTemplate")
     list:SetSize(56, 18)
-    list:SetPoint("TOPRIGHT", controls, "BOTTOMRIGHT", 0, -4)
+    list:SetPoint("TOPRIGHT", controls, "BOTTOMRIGHT", 0, -24)
     list:SetText(T("PG_RECIPE_PLAN_OPEN", "List"))
     list:SetPushedTextOffset(0, 0)
     list:SetScript("OnClick", function() if RS.ShowPlanWindow then RS:ShowPlanWindow() end end)
-    local quality = CreateFrame("Button", nil, controls, "UIPanelButtonTemplate")
-    quality:SetSize(100, 22)
-    quality:SetPoint("TOPRIGHT", controls, "TOPRIGHT", 0, 0)
-    quality:SetPushedTextOffset(0, 0)
-    quality:SetScript("OnClick", function(self) if RS.ShowQualityMenu then RS:ShowQualityMenu(self) end end)
-    controls.quality = quality
     controls.list = list
     controls.counter = counter
     controls.quantity = quantity
@@ -812,14 +852,12 @@ function RS:OnRecipeSelected()
     if not supported then return end
 
     if recipeInfo.learned == true then
-        controls.quality:Show()
         controls.quantity:Show()
         controls.button:ClearAllPoints()
-        controls.button:SetSize(106, 22)
+        controls.button:SetSize(150, 22)
         controls.button:SetPoint("LEFT", controls.quantity, "RIGHT", 4, 0)
         controls.button:SetText(T("PG_RECIPE_SHOP_BUTTON", "Add to shopping"))
     else
-        controls.quality:Hide()
         controls.quantity:Hide()
         controls.button:ClearAllPoints()
         controls.button:SetSize(142, 22)

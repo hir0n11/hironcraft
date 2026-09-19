@@ -378,6 +378,30 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     end
 
     local claimed = self:GetClaimedOrder()
+    local auditKey = OrderKey(order.orderID)
+    self.rejectionReagentSnapshots = self.rejectionReagentSnapshots or {}
+    local auditNow = GetTime and GetTime() or 0
+    for id, cached in pairs(self.rejectionReagentSnapshots) do
+        if auditNow - cached.time > 300 then self.rejectionReagentSnapshots[id] = nil end
+    end
+    local capture = _G.HironCraft and _G.HironCraft.CaptureCraftingOrderReagents
+    if type(capture) == "function" then
+        -- Capture before Release/Reject: Blizzard may clear order.reagents
+        -- synchronously. Retain the authoritative pre-release snapshot if the
+        -- next row refresh has only a partial listing of the same game order.
+        local source = claimed and SameOrderID(claimed.orderID, order.orderID) and claimed or order
+        local ok, audit = pcall(capture, source, {
+            reason=rejectionReason,
+            quality=self.qualityRejectDetails and self.qualityRejectDetails[auditKey],
+        })
+        local previous = self.rejectionReagentSnapshots[auditKey]
+        local fromClaim = claimed and SameOrderID(claimed.orderID, order.orderID)
+        if ok and audit and (not previous or fromClaim or (not previous.fromClaim and audit.complete)) then
+            self.rejectionReagentSnapshots[auditKey] = {snapshot=audit, time=auditNow, fromClaim=fromClaim}
+        end
+    end
+    local reagentAudit = self.rejectionReagentSnapshots[auditKey]
+    reagentAudit = reagentAudit and reagentAudit.snapshot
     if claimed and SameOrderID(claimed.orderID, order.orderID) then
         if qualityRejection then
             self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT_QUALITY", "Releasing order before declining it for insufficient quality..."))
@@ -422,7 +446,8 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
         local recorded, err = pcall(
             recordRejected,
             order,
-            rejectionReason
+            rejectionReason,
+            reagentAudit
         )
         if not recorded then
             self:DActionPrint("CraftScan rejection status failed:", err)
@@ -432,8 +457,9 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     if self.ClearOrderQualityRejection then
         self:ClearOrderQualityRejection(order)
     end
+    self.rejectionReagentSnapshots[auditKey] = nil
     if qualityRejection then
-        self:SetStatus(T("COA_STATUS_REJECTED_QUALITY", "Order declined: the requested quality required a stronger finishing reagent."))
+        self:SetStatus(T("COA_STATUS_REJECTED_QUALITY", "Order declined: the requested quality is unavailable with the current skill and settings."))
     else
         self:SetStatus(T("COA_STATUS_REJECTED_MISSING_REAGENTS", "Order declined: customer reagents were missing."))
     end
@@ -530,17 +556,12 @@ function CO:ClaimOrder(order, pageFrame)
     then
         local needsConcentration = self:OrderRequiresConcentrationForQueue(order, pageFrame)
         if needsConcentration ~= false then
-            self.selectedOrders[key] = nil
-            if self.useConcentration then self.useConcentration[key] = nil end
-            if self._orderSelectionBucket and self._orderSelectionBucket.choices then
-                self._orderSelectionBucket.choices[key] = nil
-            end
-            if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
-                self.currentQueueOrderID = nil
-            end
+            -- A cache miss is not a user deselection. Keep this order and its
+            -- saved choice intact while refusing an unsafe claim. The next
+            -- hardware press can retry after data loads / concentration changes.
             self:SetStatus(needsConcentration == true
-                and T("COA_STATUS_QUEUE_CONCENTRATION_REMOVED", "Order removed from queue: it requires concentration.")
-                or T("COA_STATUS_QUEUE_CONCENTRATION_UNKNOWN", "Order removed from queue: concentration data is not loaded."))
+                and T("COA_STATUS_QUEUE_CONCENTRATION_WAIT", "Order kept selected: enable concentration or uncheck it.")
+                or T("COA_STATUS_QUEUE_CONCENTRATION_LOADING", "Order kept selected: concentration data is still loading. Try again."))
             self:RefreshVisibleRowsSoon()
             if self.UpdateControlPanel then self:UpdateControlPanel() end
             return false

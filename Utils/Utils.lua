@@ -1018,6 +1018,8 @@ local function doOnce()
         string.format('%s - %s', L(LID.CONFIG_TOGGLE_BINDING_NAME), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_GREET_CURRENT_CUSTOMER =
         string.format('%s - %s', L(LID.GREET_BUTTON_BINDING_NAME), L(LID.HIRONCRAFT_SCAN))
+    BINDING_NAME_HIRONCRAFT_SCAN_QUICK_REPLY =
+        string.format('%s - %s', L('Send top Quick Reply'), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_CHAT_CURRENT_CUSTOMER =
         string.format('%s - %s', L(LID.CHAT_BUTTON_BINDING_NAME), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_DISMISS_CURRENT_CUSTOMER =
@@ -1292,6 +1294,7 @@ function HironCraftScan.Utils.ChatHistoryTooltip:new()
 end
 
 function HironCraftScan.Utils.ChatHistoryTooltip:Hide()
+    if self.reagentTooltip then self.reagentTooltip:Hide() end
     if self.tooltip then
         self.tooltip:Hide()
     end
@@ -1302,12 +1305,16 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
         self.tooltip = CreateFrame('GameTooltip', name, UIParent, 'GameTooltipTemplate')
         self.tooltip.TextLeft2:SetFontObject(ChatFrame1:GetFontObject())
         self.tooltip.TextRight1:SetFontObject(self.tooltip.TextRight2:GetFontObject())
+        self.tooltip:SetScript('OnHide', function()
+            if self.reagentTooltip then self.reagentTooltip:Hide() end
+        end)
     end
 
     local tooltip = self.tooltip
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
     local response = HironCraftScan.OrderToResponse(order)
-    if not response or not customerInfo then tooltip:Hide(); return end
+    if not response or not customerInfo then self:Hide(); return end
+    local reagentAudit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.GetForOrder(order)
     local historyCount = #(customerInfo.chat_history or {})
     local greetingSent, requestToken = response.greeting_sent, response.requestToken
     local elapsed = 0
@@ -1315,12 +1322,13 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
         elapsed = elapsed + delta
         if elapsed < 0.25 then return end
         elapsed = 0
-        if anchor.order and anchor.order ~= order then tooltip:Hide(); return end
+        if anchor.order and anchor.order ~= order then self:Hide(); return end
         local current = HironCraftScan.OrderToResponse(order)
         local info = HironCraftScan.OrderToCustomerInfo(order)
-        if not current or not info then tooltip:Hide(); return end
+        if not current or not info then self:Hide(); return end
+        local currentAudit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.GetForOrder(order)
         if #(info.chat_history or {}) ~= historyCount or current.greeting_sent ~= greetingSent
-            or current.requestToken ~= requestToken then
+            or current.requestToken ~= requestToken or currentAudit ~= reagentAudit then
             self:Show(name, anchor, order, header, includeBinds)
         end
     end)
@@ -1383,6 +1391,9 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     tooltip:SetMinimumWidth(math.min(GetMaxTextLeftWidth(name), ChatFrame1:GetWidth()))
 
     tooltip:Show()
+    if HironCraftScan.ReagentAudit then
+        HironCraftScan.ReagentAudit.ShowTooltip(self, name, tooltip, reagentAudit)
+    end
 end
 
 function HironCraftScan.Utils.SizeTooltipLikeChat(name, tooltip)

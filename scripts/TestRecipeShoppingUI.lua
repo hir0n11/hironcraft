@@ -116,27 +116,25 @@ MenuUtil={CreateContextMenu=function(_,generator)
         choices[#choices+1]={label=label,selected=selected,choose=choose}
     end})
 end}
-RS.controls.quality:Run('OnClick')
-assert(#choices==4 and choices[1].selected(),'quality menu default mismatch')
-choices[3].choose()
-assert(RS:GetSettings().quality==2 and RS.plan.entries[1].quality==0,
+assert(not RS.controls.quality and not frame.inventory and not frame.refresh, 'removed controls still exist')
+frame.quality:Run('OnClick')
+assert(#choices==2 and choices[1].selected(),'quality menu default mismatch')
+choices[2].choose()
+assert(RS:GetSettings().quality==2 and RS.plan.entries[1].quality==1,
     'quality setting rewrote existing snapshot')
 RS.controls.button:Run('OnClick','LeftButton')
 assert(#RS.plan.entries==2 and RS.plan.entries[2].quality==2)
-frame.inventory:SetChecked(false); frame.inventory:Run('OnClick')
 local quantities={}; for _,m in ipairs(lastMaterials) do quantities[m.itemID]=m.quantity end
-assert(quantities[101]==40 and quantities[102]==10,'inventory checkbox did not recalculate shopping')
+assert(quantities[101]==37 and quantities[102]==10,'exact-tier inventory was not subtracted')
 row.remove:Run('OnClick')
 assert(#RS.plan.entries==1 and RS.plan.entries[1].quality==2 and #frame.rowPool==1,
     'row delete lost other recipes or leaked its widget')
 
 for recipe=2,8 do recipeInfo={recipeID=recipe,learned=true,name='Recipe '..recipe}; RS:AddRecipe(recipe,1,transaction,form) end
-assert(frame.height==300 and frame.content.height==8*34,'long plan expanded instead of scrolling')
+assert(frame.height==276 and frame.content.height==8*34,'long plan expanded instead of scrolling')
 frame.scroll:SetVerticalScroll(102)
 RS:RefreshPlanWindow()
 assert(frame.scroll:GetVerticalScroll()==102,'refresh jumped to the start of the list')
-frame.clear:Run('OnClick')
-assert(#RS.plan.entries==8,'one click on clear removed everything without confirmation')
 frame.clear:Run('OnClick')
 assert(#RS.plan.entries==0 and #lastMaterials==0 and frame.empty:IsShown() and frame.scroll.scroll==0)
 

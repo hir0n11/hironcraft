@@ -136,6 +136,129 @@ end
 local a,b,c=link(1001),link(1002),link(1003)
 reloadConfig()
 
+-- Unsolicited service replies must not become new requests or quick replies.
+do
+    local isAd=Scan.Scanner.IsCrafterAdvertisement
+    local offers={
+        'Send to, Scalescd, can craft '..a..'. Can log now. Kind tips please.',
+        'Hi Mate, Send Order To : Unzalor - Commission Around 3k-15k '..a..' Max Quality - instant Craft',
+        'Hi! I can craft/recraft '..a..' to max. You choose price.',
+        'Can craft '..a..' for you', 'WTS '..a,
+        'привет! могу скрафтить '..a, 'отправляйте заказ на Мастер '..a,
+    }
+    local previousWhisper,previousGreeting=Scan.QuickReplies.OnWhisper,Scan.QuickReplies.ShowOrderGreeting
+    local offered=0
+    Scan.QuickReplies.OnWhisper=function() offered=offered+1 end
+    Scan.QuickReplies.ShowOrderGreeting=Scan.QuickReplies.OnWhisper
+    for _, message in ipairs(offers) do
+        reset()
+        assert(isAd(message) and not match(message), 'crafter offer accepted: '..message)
+        for _, event in ipairs({'CHAT_MSG_CHANNEL','CHAT_MSG_WHISPER','CHAT_MSG_BN_WHISPER'}) do
+            Scan.OnMessage(event,message,'Advertiser','Other-GUID')
+        end
+        flushTimers()
+        assert(countRows()==0 and #sent==0 and offered==0, 'advertisement created a row/reply')
+    end
+    for _, message in ipairs({
+        a, 'LF '..a, 'Need '..a, 'Can you craft '..a..'?', 'Hi, can u craft '..a..'?',
+        'Can craft '..a..'?', 'Who can craft '..a..'?', 'I need someone who can craft '..a,
+        'Send to who?', 'send to who', 'send order to which character',
+        'Send order to Seller?', 'Where do I send '..a..'?',
+        'Can you craft '..link(1001):gsub('Item 1001','I can craft')..'?',
+    }) do
+        assert(not isAd(message), 'customer question filtered: '..message)
+        if message:find('|Hitem:',1,true) then
+            assert(match(message), 'valid linked request stopped matching: '..message)
+        end
+    end
+    reset()
+    scan('LF '..a)
+    local previousRows,previousHistory=countRows(),#Scan.DB.customers.Buyer.chat_history
+    offered=0
+    Scan.OnMessage('CHAT_MSG_WHISPER',offers[1],'Buyer','Buyer-GUID')
+    assert(countRows()==previousRows and #Scan.DB.customers.Buyer.chat_history==previousHistory+1
+        and #sent==0 and offered==0, 'existing customer advertisement offered an answer or lost history')
+    local manual=Scan.OnMessage(nil,offers[1],'ManualBuyer',nil,
+        {manualMatch=true,forceCrafterInfo={crafter='Seller-Realm',parentProfID=164}})
+    assert(type(manual)=='table' and #sent==0, 'explicit manual matching was blocked/sent chat')
+    Scan.QuickReplies.OnWhisper,Scan.QuickReplies.ShowOrderGreeting=previousWhisper,previousGreeting
+end
+
+-- Real scanner + banner + greeting integration. Binding code calls OnClick
+-- directly; the frame can be hidden or refer to an older request by then.
+do
+    loadSource('Customer/AlertIcon.lua')
+    local savedMenu=HironCraftScanScannerMenu
+    local savedSetting,savedPlayerColor,savedCrafterColor=
+        Scan.Utils.GetSetting,Scan.ColorizePlayerName,Scan.ColorizeCrafterName
+    Scan.Utils.GetSetting=function(key) return key=='banner_timeout' and 60 or 0 end
+    Scan.ColorizePlayerName=function(name) return name end
+    Scan.ColorizeCrafterName=function(name) return name end
+    local menu=setmetatable({pulseLocks={},shown=true},{__index=HironCraftScanScannerMenuMixin})
+    local banner=setmetatable({shown=false,HighlightTexture={Hide=noop},SetPoint=noop,ClearAllPoints=noop},
+        {__index=HironCraftScanBannerMixin})
+    function banner:IsVisible() return self.shown and menu.shown end
+    function banner:GetParent() return menu end
+    function banner:Hide() self.shown=false; self:OnHide() end
+    local anim={AlertTextFade={SetStartDelay=noop},AlertBGFade={SetStartDelay=noop},
+        AlertBGShrink={SetStartDelay=noop}}
+    function anim:Stop() banner:Hide() end
+    function anim:Play() banner.shown=true end
+    local display={SetText=noop,ClearAllPoints=noop,SetPoint=noop,SetJustifyH=noop}
+    menu.PageButton={UpdateIcon=noop,AlertText=display,AlertBG=display,
+        MinimapAlertAnim=anim,MinimapLoopPulseAnim={Stop=noop}}
+    menu.AlertBGButton=banner
+    HironCraftScanScannerMenu=menu
+    local parent=Scan.DB.characters['Seller-Realm'].parent_professions[164]
+    parent.visual_alert_enabled=true
+    local function fresh()
+        banner:Hide(); reset(); Scan.State.activeOrder=nil; menu.shown=true
+    end
+    local function key(button) banner:OnClick(button or 'LeftButton') end
+    fresh()
+    Scan.OnMessage('CHAT_MSG_WHISPER',a,'WhisperBuyer','Whisper-GUID')
+    assert(countRows()==1 and not banner:IsVisible())
+    key();key('MiddleButton');key('RightButton')
+    assert(#sent==0 and opened==0 and countRows()==1,'hidden banner key acted on a whisper request')
+
+    fresh()
+    scan('LF '..a)
+    assert(banner:GetOrder().customerName=='Buyer')
+    Scan.OnMessage('CHAT_MSG_WHISPER',a,'WhisperBuyer','Whisper-GUID')
+    assert(Scan.State.activeOrder.customerName=='WhisperBuyer')
+    key()
+    assert(#sent==1 and sent[1].customer=='Buyer', 'whisper retargeted an already displayed banner')
+    assert(not banner:GetOrder(), 'sent banner kept an actionable request')
+    key()
+    assert(#sent==1,'repeated hidden-banner key sent another greeting')
+
+    for _, invalidate in ipairs({
+        function() banner:Hide() end,
+        function() menu.shown=false end,
+        function() response(101).requestToken='new-request' end,
+        function() Scan.DB.listed_orders['Buyer-101']=nil end,
+        function() Scan.DB.customers.Buyer.responses[101]={requestToken=response(101).requestToken} end,
+        function()
+            response(101).requestToken=nil
+            menu:TriggerAlert('legacy',order(101))
+            response(101).time=response(101).time+1
+        end,
+    }) do
+        fresh();scan('LF '..a);invalidate();key()
+        assert(#sent==0,'hidden/deleted/reused request was sent by an old banner')
+    end
+    fresh();scan('LF '..a);key('MiddleButton')
+    assert(#sent==0 and opened==1,'visible banner could not open chat without sending')
+    fresh();scan('LF '..a);key('RightButton')
+    assert(#sent==0 and countRows()==0,'visible banner could not dismiss its order')
+    fresh()
+    parent.visual_alert_enabled=nil
+    HironCraftScanScannerMenu=savedMenu
+    Scan.Utils.GetSetting,Scan.ColorizePlayerName,Scan.ColorizeCrafterName=
+        savedSetting,savedPlayerColor,savedCrafterColor
+end
+print('Reply safety tests passed (crafter ads, hidden banners, whisper retargeting, stale requests).')
+
 -- A broad request creates one click-only placeholder row. A later profession
 -- or item clarification replaces it even when the customer does not repeat LF.
 reset()
@@ -505,7 +628,7 @@ Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords=previousKeyw
 Scan.UpdateHasMatchStyle()
 reloadConfig()
 
--- The manual menu is a real synchronous click-to-send path. It must use the
+-- The manual menu proposes a greeting without sending. It must use the
 -- chosen crafter even when the selected text matches a different profession.
 reset()
 Scan.DB.settings.explanations={}
@@ -525,18 +648,26 @@ local buttons={}
 local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end,
     CreateButton=function(_,label,click) buttons[#buttons+1]={label=label,click=click};return {SetTooltip=noop} end}
 local chatReads=0
+local manualOffers={}
+Scan.QuickReplies.ShowOrderGreeting=function(_,customer,_,_,responses)
+    manualOffers[#manualOffers+1]={customer=customer,response=responses[1]}
+end
 C_ChatInfo={GetChatLineText=function(id) assert(id==44);chatReads=chatReads+1;return 'LF '..a end,
     GetChatLineSenderGUID=function() return 'Manual-GUID' end}
 menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ManualBuyer-Realm',lineID='44'})
 assert(#sent==0 and countRows()==0, 'opening the manual menu took an action')
 buttons[2].click()
-assert(#sent==1 and sent[1].customer=='ManualBuyer-Realm' and chatReads==1)
+assert(#sent==0 and #manualOffers==1 and manualOffers[1].customer=='ManualBuyer-Realm' and chatReads==1)
 local manualResponse=Scan.DB.customers['ManualBuyer-Realm'].responses[197]
-assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.itemID and manualResponse.greeting_sent)
+assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.itemID and not manualResponse.greeting_sent)
+assert(Scan.SendOrderGreeting({customerName='ManualBuyer-Realm',responseID=197},true))
+assert(#sent==1 and manualResponse.greeting_sent)
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Expired-Realm'})
 buttons[1].click()
-assert(#sent==2 and sent[2].customer=='Expired-Realm' and chatReads==1, 'expired line blocked the clicked profession greeting')
-flushTimers();assert(#sent==2, 'manual matching scheduled more messages')
+assert(#sent==1 and #manualOffers==2 and manualOffers[2].customer=='Expired-Realm' and chatReads==1,
+    'expired line blocked the profession suggestion or sent it immediately')
+flushTimers();assert(#sent==1, 'manual matching scheduled more messages')
+Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.GetSortedCrafters, Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName, Scan.Utils.ProfessionNameByID=
     getSorted, colorCrafter, colorProfession, professionName
 print('Request lifecycle tests passed (30-second reoffer, independent inquiries, latest greeted reply, full history, synchronous manual matching).')
@@ -570,7 +701,7 @@ C_Item={
     GetItemQualityByID=function() return 4 end,
     GetItemInfoInstant=function(id)
         local info=armorItems[id]
-        if info then return id,'Armor','Armor',info.slot,0,4,info.armor end
+        if info then return id,'Item','Item',info.slot,0,info.class or 4,info.subclass or info.armor end
     end,
 }
 local classByGUID={}
@@ -672,7 +803,7 @@ reset()
 Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','LateClass','Late-GUID')
 assert(countRows()==0 and #sent==0 and #timers==1, 'unknown class guessed or sent a response')
 classByGUID['Late-GUID']='WARRIOR';flushTimers()
-assert(countRows()==1 and Scan.DB.customers.LateClass.responses[201].crafterFullName=='Smith-Realm')
+assert(countRows()==1 and Scan.DB.customers.LateClass.responses['equipment:164:INVTYPE_WRIST'].crafterFullName=='Smith-Realm')
 assert(#sent==0, 'class-cache retry sent player chat')
 reset();Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','NeverClass','Never-GUID')
 for i=1,4 do flushTimers() end
@@ -681,17 +812,76 @@ assert(countRows()==0 and #timers==0 and #sent==0, 'unknown class retries did no
 reset()
 classByGUID['Buyer-GUID']='WARRIOR'
 scan('need wrist')
-assert(countRows()==1 and response(201).crafterFullName=='Smith-Realm' and #sent==0)
+local wristID='equipment:164:INVTYPE_WRIST'
+assert(countRows()==1 and response(wristID).crafterFullName=='Smith-Realm' and #sent==0)
+assert(response(wristID).equipmentLabel=='Wrist' and not response(wristID).itemID,
+    'slot request guessed an exact item before the customer linked it')
 flushTimers()
 assert(#sent==0, 'class routing introduced auto replies')
-Scan.GreetCustomer('LeftButton',order(201))
-assert(#sent==1 and response(201).greeting_sent, 'class-routed greeting did not send on click')
+Scan.GreetCustomer('LeftButton',order(wristID))
+assert(#sent==1 and response(wristID).greeting_sent, 'class-routed greeting did not send on click')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1205),'Buyer','Buyer-GUID') -- head, not wrist
+assert(response(wristID) and response(205) and countRows()==2, 'unrelated head item replaced wrists')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1201),'Buyer','Buyer-GUID')
+assert(not response(wristID) and response(201) and response(205) and countRows()==2,
+    'linked wrists did not replace just the compatible placeholder')
+assert(response(201).destination_only_greeting and not response(201).greeting_sent)
+assert(Scan.SendOrderGreeting(order(201),true))
+assert(sent[#sent].message==link(1201)..' Send to Smith.', 'replacement item repeated the full greeting')
+scan('need wrist')
+assert(not response(wristID) and countRows()==2, 'known item was downgraded to a generic slot')
+reset(); classByGUID['Buyer-GUID']='WARRIOR'
+scan('need wrist and belt')
+assert(countRows()==2 and response(wristID) and response('equipment:164:INVTYPE_WAIST'),
+    'different armor slots were merged')
+local sharedTokens=shared[#shared][7]
+assert(sharedTokens[wristID]==response(wristID).requestToken
+    and sharedTokens['equipment:164:INVTYPE_WAIST']==response('equipment:164:INVTYPE_WAIST').requestToken,
+    'equipment batch did not share individual request identities')
+reset();HironCraftScanComm.applying_remote_state=true
+Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist and belt','Buyer','Buyer-GUID',{
+    requestToken='legacy-first',requestTokens=sharedTokens,customerClass='WARRIOR'})
+HironCraftScanComm.applying_remote_state=false
+assert(response(wristID).requestToken==sharedTokens[wristID]
+    and response('equipment:164:INVTYPE_WAIST').requestToken==sharedTokens['equipment:164:INVTYPE_WAIST'],
+    'linked batch collapsed two different request tokens')
+reset()
+Scan.DB.characters['Engineer-Realm']=character(202,'engineering',{})
+recipes[301]={recipeID=301,qualityItemIDs={1501}}
+recipes[303]={recipeID=303,qualityItemIDs={1503}}
+armorItems[1501]={slot='INVTYPE_WEAPON',class=2,subclass=0}
+armorItems[1503]={slot='INVTYPE_RANGEDRIGHT',class=2,subclass=3}
+Scan.DB.characters['Smith-Realm'].professions[164].recipes[301]={scan_state=1,keywords='axe'}
+Scan.DB.characters['Engineer-Realm'].professions[202].recipes[303]={scan_state=1,keywords='gun'}
+reloadConfig()
+scan('need axe and sword and gun')
+assert(countRows()==3 and response('equipment:164:Axe') and response('equipment:164:Sword')
+    and response('equipment:202:Gun').crafterFullName=='Engineer-Realm','weapon placeholders routed incorrectly')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1503),'Buyer','Buyer-GUID')
+assert(countRows()==3 and response(303) and not response('equipment:202:Gun')
+    and response('equipment:164:Axe') and response('equipment:164:Sword'), 'gun link replaced another weapon')
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1501),'Buyer','Buyer-GUID')
+assert(countRows()==3 and response(301) and not response('equipment:164:Axe')
+    and response('equipment:164:Sword'), 'axe link did not replace the Axe placeholder')
+assert(Scan.ClassMatching.MatchesItem({subclasses={[3]=true}},999)==false)
+reset();classByGUID['Buyer-GUID']='WARRIOR'
+scan('need wrist and gun')
+assert(countRows()==2 and response(wristID) and response('equipment:202:Gun'),
+    'mixed armor and weapon request dropped one type')
 reset()
 classByGUID['Buyer-GUID']='HUNTER'
 scan('LF lw')
 Scan.OnMessage('CHAT_MSG_WHISPER','need wrist','Buyer','Buyer-GUID')
-assert(response(204) and not response(203), 'existing whisper conversation lost the sender class')
+assert(response('equipment:165:INVTYPE_WRIST').equipmentRequest.armor==3 and not response(203),
+    'existing whisper conversation lost the sender class')
 print('Customer-class matching tests passed (13 classes, armor slots, links, exclusions, opt-out, unknown data, whispers, manual sends).')
+
+reset()
+Scan.OnMessage('CHAT_MSG_WHISPER',link(1201),'Buyer','Buyer-GUID')
+assert(response(201).destination_only_greeting and not response(201).greeting_sent,
+    'first customer-initiated whisper was offered a full greeting')
+assert(Scan.SendOrderGreeting(order(201),true))
+assert(sent[1].message==link(1201)..' Send to Smith.', 'first whisper greeting still contained Hi')
 
 -- Battle.net event -> matcher -> rows -> manual greeting -> same transport.
 loadSource('Customer/BattleNet.lua')

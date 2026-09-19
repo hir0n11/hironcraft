@@ -258,7 +258,7 @@ local function getOrderName(response)
         local item = Item:CreateFromItemID(response.itemID);
         return item:GetItemName()
     else
-        return response.professionName;
+        return response.equipmentLabel or response.professionName;
     end
 end
 

@@ -429,3 +429,72 @@ assert(not CraftScan.OrderFulfillment:ApplyRemoteStatus(bnMarked), 'remote statu
 assert(not CraftScan.OrderFulfillment:ApplyRemoteCompletion({customerName=bnOrders[1].customerName}),
     'remote journal injected a BNet identity')
 print("Order status merge tests passed.")
+
+assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',CraftScan)
+C_Item={GetItemInfoInstant=function(id)
+    return id,nil,nil,id==1 and 'INVTYPE_WRIST' or 'INVTYPE_WAIST',nil,4,4
+end}
+local slots={wrist={key='INVTYPE_WRIST',slot='INVTYPE_WRIST',armor=4},
+    belt={key='INVTYPE_WAIST',slot='INVTYPE_WAIST',armor=4}}
+local buyer='SlotBuyer-Realm'
+CraftScan.DB.customers[buyer]={responses={}}
+for key,request in pairs(slots) do
+    local slotOrder={customerName=buyer,responseID=key}
+    CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(slotOrder)]=slotOrder
+    CraftScan.DB.customers[buyer].responses[key]={equipmentRequest=request,
+        crafterFullName='Crafter-Realm',parentProfID=164,requestToken=key,time=now}
+end
+local claim={customerName=buyer,itemID=1,parentProfessionID=164}
+assert(CraftScan.OrderFulfillment:FindMatchingOrder(claim).responseID=='wrist',
+    'slot order fulfillment matched the wrong generic row')
+local generic=CraftScan.OrderFulfillment:FindGenericOrders(claim)
+assert(#generic==1 and generic[1].responseID=='wrist','wrist completion also selected Belt')
+claim.itemID=nil
+assert(not CraftScan.OrderFulfillment:FindMatchingOrder(claim)
+    and #CraftScan.OrderFulfillment:FindGenericOrders(claim)==0,'unknown item marked a typed order complete')
+print('Equipment placeholder fulfillment matching tests passed.')
+
+assert(loadfile('Customer/ReagentAudit.lua'))('HironCraft',CraftScan)
+local auditOrder={customerName='AuditBuyer-Realm',responseID=77123}
+local auditKey=CraftScan.OrderToOrderID(auditOrder)
+CraftScan.DB.customers[auditOrder.customerName]={responses={[77123]={recipeID=77123,itemID=8123,
+    crafterFullName='Crafter-Realm',requestToken='audit-request',time=now}}}
+CraftScan.DB.listed_orders[auditKey]=auditOrder
+local audit={version=1,orderID=88001,recipeID=77123,capturedAt=now,complete=true,rows={
+    {itemID=12,name='Alloy',required=40,known=true,supplied={{itemID=12,quantity=20,quality=1,maxQuality=3}}},
+}}
+local auditEntry=CraftScan.OrderFulfillment:SetStatus(auditOrder,'rejected',{craftingOrderID=88001})
+local notice={customerName=auditOrder.customerName,orderID=88001,spellID=77123,itemID=8123,
+    crafterFullName='Crafter-Realm',updatedAt=now,status='rejected',requestToken='audit-request',requestTime=now}
+assert(CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice))
+assert(not CraftScan.ReagentAudit.GetForOrder(auditOrder))
+notice.reagentAudit=audit
+assert(CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice),'same-time journal metadata was discarded')
+local savedAudit=CraftScan.ReagentAudit.GetForOrder(auditOrder)
+assert(savedAudit and savedAudit.orderID==88001,'linked rejection failed to enrich an existing status')
+audit.rows[1].supplied[1].quantity=1000
+assert(savedAudit.rows[1].supplied[1].quantity==20,'linked payload remained mutable')
+assert(not CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice),'audit replay counted as fresh decline')
+local savedSettings,savedRealm=CraftScan.DB.settings,CraftScan.DB.realm
+assert(loadfile('Customer/OrderFulfillment.lua'))('HironCraft',CraftScan)
+assert(CraftScan.DB.settings==savedSettings and CraftScan.DB.realm==savedRealm)
+assert(CraftScan.ReagentAudit.GetForOrder(auditOrder).rows[1].supplied[1].quantity==20,'reload lost snapshot')
+now=now+1
+CraftScan.OrderFulfillment:SetStatus(auditOrder,'claimed',{craftingOrderID=88002})
+assert(not CraftScan.ReagentAudit.GetForOrder(auditOrder),'old audit attached to replacement order')
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice)
+assert(not CraftScan.ReagentAudit.GetForOrder(auditOrder),'delayed old notice revived an audit')
+local newAudit=CraftScan.ReagentAudit.Sanitize(audit);newAudit.orderID=88002;newAudit.capturedAt=now
+assert(CraftScan.OrderFulfillment:RecordRejection({customerName=auditOrder.customerName,
+    spellID=77123,itemID=8123,orderID=88002},88002,'missing_customer_reagents',newAudit))
+assert(CraftScan.ReagentAudit.GetForOrder(auditOrder).orderID==88002)
+local remote=copyEntry(CraftScan.OrderFulfillment:GetStatus(auditOrder))
+CraftScan.DB.realm.order_statuses[auditKey].reagentAudit=nil
+assert(CraftScan.OrderFulfillment:ApplyRemoteStatus(remote),'exact replay did not enrich status metadata')
+remote=copyEntry(CraftScan.OrderFulfillment:GetStatus(auditOrder));remote.rev=remote.rev+1;remote.reagentAudit=nil
+assert(CraftScan.OrderFulfillment:ApplyRemoteStatus(remote))
+assert(CraftScan.ReagentAudit.GetForOrder(auditOrder),'peer without audit erased a recorded snapshot')
+local wrong=copyEntry(remote);wrong.rev=wrong.rev+1;wrong.craftingOrderID=88003;wrong.reagentAudit=newAudit
+CraftScan.OrderFulfillment:ApplyRemoteStatus(wrong)
+assert(not CraftScan.OrderFulfillment:GetStatuses()[auditKey].reagentAudit,'mismatched game ID accepted')
+print('Reagent audit persistence tests passed (journal enrichment, reload, resend, legacy peer, payload isolation).')

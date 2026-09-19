@@ -67,6 +67,24 @@ ProfessionWords(202, 'engineer engineering engi инженер инженера'
 ProfessionWords(773, 'inscription inscriber scribe начертатель')
 ProfessionWords(171, 'alchemy alchemist алхимик')
 local classCache = {}
+local slotLabels = {
+    INVTYPE_WRIST='Wrist', INVTYPE_HEAD='Head', INVTYPE_SHOULDER='Shoulders',
+    INVTYPE_CHEST='Chest', INVTYPE_HAND='Gloves', INVTYPE_WAIST='Belt',
+    INVTYPE_LEGS='Legs', INVTYPE_FEET='Boots',
+}
+local weaponWords, weapons = {}, {}
+local function Weapon(key, profession, subclasses, words)
+    weapons[key] = {key=key, label=key, parentProfID=profession, subclasses=subclasses}
+    for word in words:gmatch('%S+') do weaponWords[word]=key; explicitWords[word]=nil end
+end
+Weapon('Axe', 164, {[0]=true,[1]=true}, 'axe axes топор топоры')
+Weapon('Sword', 164, {[7]=true,[8]=true}, 'sword swords меч мечи')
+Weapon('Gun', 202, {[3]=true}, 'gun guns rifle rifles ружье ружьё винтовка')
+Weapon('Mace', 164, {[4]=true,[5]=true}, 'mace maces молот булава')
+Weapon('Dagger', 164, {[15]=true}, 'dagger daggers кинжал кинжалы')
+Weapon('Polearm', 164, {[6]=true}, 'polearm polearms spear spears копье копьё')
+Weapon('Staff', 773, {[10]=true}, 'staff staves посох посохи')
+Weapon('Warglaive', 164, {[9]=true}, 'warglaive warglaives glaive glaives глефа глефы')
 
 local function IsSecret(value)
     return issecretvalue and issecretvalue(value)
@@ -94,21 +112,68 @@ function M.GetContext(message, guid, sharedClass)
     -- Links are authoritative, including an unmonitored item/recipe link.
     if message:find('|hitem:', 1, true) or message:find('|henchant:', 1, true)
         or message:find('|hrecipe:', 1, true) then return nil end
-    local slots, armor, profession, bypass = {}, nil, nil, false
+    local slots, armor, profession, bypass, requestedWeapons = {}, nil, nil, false, {}
     for word in message:gmatch('[^%s%p]+') do
         if explicitArmor[word] then armor = explicitArmor[word] end
         if explicitProfessions[word] then profession = explicitProfessions[word] end
         if explicitWords[word] then bypass = true end
         if slotWords[word] then slots[slotWords[word]] = true end
+        if weaponWords[word] then requestedWeapons[weaponWords[word]] = true end
     end
-    if profession then return {parentProfID=profession, explicitProfession=true, slots=slots} end
+    if profession then
+        return {parentProfID=profession, explicitProfession=true, slots=slots,
+            weapons=next(requestedWeapons) and requestedWeapons or nil}
+    end
     if bypass then return nil end
+    if next(requestedWeapons) then
+        -- Mixed professions are split into independent request contexts below.
+        local keys = {}; for key in pairs(requestedWeapons) do keys[#keys+1]=key end
+        table.sort(keys)
+        local class = M.ResolveClass(guid, sharedClass)
+        if next(slots) and not armor and not class then return {unknownClass=true,slots=slots} end
+        armor = armor or (class and armorByClass[class])
+        return {parentProfID=weapons[keys[1]].parentProfID, slots=slots, weapons=requestedWeapons,
+            class=class, armor=armor, armorParentProfID=armor and professionByArmor[armor]}
+    end
     if armor then return {armor=armor, parentProfID=professionByArmor[armor], slots=slots} end
     if not next(slots) then return nil end
     local class = M.ResolveClass(guid, sharedClass)
     if not class then return {unknownClass=true, slots=slots} end
     armor = armorByClass[class]
     return { class=class, armor=armor, parentProfID=professionByArmor[armor], slots=slots }
+end
+
+function M.GetRequests(context)
+    local requests = {}
+    if not context or context.unknownClass then return requests end
+    if context.weapons then
+        for key in pairs(context.weapons) do
+            -- An explicit incompatible profession is not permission to route
+            -- the request to another one (e.g. weapon enchants).
+            if not context.explicitProfession or weapons[key].parentProfID == context.parentProfID then
+                requests[#requests+1]=weapons[key]
+            end
+        end
+    end
+    local armorProfession = context.armorParentProfID or context.parentProfID
+    if armorProfession == 164 or armorProfession == 165 or armorProfession == 197 then
+        for slot in pairs(context.slots or {}) do
+            requests[#requests+1] = {key=slot, label=slotLabels[slot], slot=slot,
+                armor=context.armor, parentProfID=armorProfession}
+        end
+    end
+    table.sort(requests, function(a,b) return a.key < b.key end)
+    return requests
+end
+
+function M.MatchesItem(request, itemID)
+    local getInfo = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+    if not request or not itemID or type(getInfo) ~= 'function' then return false end
+    local ok, _, _, _, slot, _, itemClass, subClass = pcall(getInfo, itemID)
+    if not ok or IsSecret(slot) or IsSecret(itemClass) or IsSecret(subClass) then return false end
+    if request.subclasses then return itemClass == 2 and request.subclasses[subClass] == true end
+    if slot == 'INVTYPE_ROBE' then slot = 'INVTYPE_CHEST' end
+    return itemClass == 4 and slot == request.slot and (not request.armor or subClass == request.armor)
 end
 
 function M.MatchesRecipe(context, recipeInfo)
@@ -121,6 +186,11 @@ function M.MatchesRecipe(context, recipeInfo)
     local loaded, outputs = pcall(Scan.Utils.GetOutputItems, recipeInfo)
     if not loaded or type(outputs) ~= 'table' then return false end
     for _, itemID in ipairs(outputs) do
+        if context.weapons then
+            for _, request in ipairs(M.GetRequests(context)) do
+                if M.MatchesItem(request, itemID) then return true end
+            end
+        end
         local ok, _, _, _, slot, _, itemClass, armor = pcall(getInfo, itemID)
         if ok and not IsSecret(slot) and not IsSecret(itemClass) and not IsSecret(armor) then
             if slot == 'INVTYPE_ROBE' then slot = 'INVTYPE_CHEST' end

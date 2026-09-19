@@ -28,7 +28,7 @@ function Scan.OrderToResponse(order)
 end
 function Scan.BuildResponseContext(response)
     return {crafter=response.crafterName, item=response.itemName, commission=response.commission,
-        profession=response.professionName}
+        profession=response.professionName, reagent_issues=response.reagentIssues or 'Recorded material issues'}
 end
 function Scan.BuildOrderDestinationMessage(response)
     return response.itemName .. ' Send to ' .. response.crafterName .. '.'
@@ -59,11 +59,13 @@ Scan.SendOrderGreeting=function(order, userInitiated)
     }
     return true
 end
+local parentVisible=true
 local function surface()
     local value={scripts={}, shown=false}
     function value:Show() self.shown=true end
     function value:Hide() self.shown=false end
     function value:IsShown() return self.shown end
+    function value:IsVisible() return self.shown and parentVisible end
     function value:SetScript(event, callback) self.scripts[event]=callback end
     function value:SetText(text) self.text=text end
     function value:CreateTexture() return surface() end
@@ -86,7 +88,7 @@ local function response(id, crafter)
 end
 local function addCustomer(name)
     local first, second=response(101), response(102)
-    local customer={guid='test-guid', responses={[101]=first, [102]=second, [2918]=first}}
+    local customer={guid='test-guid-'..name, responses={[101]=first, [102]=second, [2918]=first}}
     Scan.DB.customers[name]=customer
     for _, id in ipairs({101,102}) do
         Scan.DB.listed_orders[name..'-'..id]={customerName=name, responseID=id}
@@ -263,3 +265,98 @@ click(visible(bnetCustomer)[1])
 assert(#sent==beforeBNet+1 and sent[#sent].customer==bnetCustomer and sent[#sent].text=='omw',
     'BN quick reply lost its account-scoped transport identity')
 print('Quick-reply toast tests passed (one answer per customer/text, clicks, stale sources, distinct contexts, Battle.net).')
+
+dismissAll()
+addCustomer('CooldownBuyer');addCustomer('OtherCooldownBuyer')
+QuickReplies:GetConfig().templates.CUSTOM_1.response='hey hey'
+QuickReplies:GetConfig().templates.CUSTOM_3.response='hey hey'
+local baseline=#sent
+local function propose(name,message)
+    QuickReplies:OnWhisper(name,message,Scan.DB.customers[name])
+end
+propose('CooldownBuyer','sent'); HironCraftScanSendQuickReply()
+assert(#sent==baseline+1 and #visible()==0,'keyboard did not click the top quick reply')
+propose('CooldownBuyer','sending orders'); now=now+5.99
+HironCraftScanSendQuickReply()
+assert(#sent==baseline+1 and #visible('CooldownBuyer')==1,'same reply bypassed six-second cooldown')
+propose('OtherCooldownBuyer','sent'); HironCraftScanSendQuickReply()
+assert(#sent==baseline+2 and sent[#sent].customer=='OtherCooldownBuyer','cooldown leaked to another customer')
+propose('CooldownBuyer','yo'); HironCraftScanSendQuickReply()
+assert(#sent==baseline+3 and sent[#sent].text=='hey hey','cooldown blocked another reply')
+now=now+0.01
+HironCraftScanSendQuickReply()
+assert(#sent==baseline+4 and sent[#sent].text=='omw','reply did not unlock after six seconds')
+assert(not QuickReplies:SendTopReply(false),'unguarded keyboard entry point')
+local send=Scan.Utils.SendResponses
+Scan.Utils.SendResponses=function() return false end
+now=now+10;propose('CooldownBuyer','sent');HironCraftScanSendQuickReply()
+Scan.Utils.SendResponses=send
+HironCraftScanSendQuickReply()
+assert(#sent==baseline+5,'failed send consumed the cooldown')
+assert(not QuickReplies:SendTopReply(true),'empty stack consumed keyboard action')
+print('Quick reply cooldown and keyboard tests passed (6s, independent recipients/text, failure retry).')
+
+now=now+10
+propose('CooldownBuyer','sent')
+local hidden=visible()[1]
+local beforeHidden=#sent
+parentVisible=false
+assert(not QuickReplies:SendTopReply(true), 'hidden parent left its quick reply hotkey active')
+click(hidden)
+assert(#sent==beforeHidden, 'invisible quick reply sent chat')
+parentVisible=true
+HironCraftScanSendQuickReply()
+assert(#sent==beforeHidden+1, 'visible quick reply stopped working')
+-- Also guard direct whisper classification callers, not just the scanner.
+Scan.Scanner={IsCrafterAdvertisement=function(message) return message=='hello ad' end}
+now=now+10
+propose('CooldownBuyer','hello ad')
+assert(#visible()==0 and #sent==beforeHidden+1,'advertisement made a conversational reply card')
+print('Quick reply visibility and advertisement guards passed.')
+
+-- A new Blizzard order ID can be declined again; ACKs are not fresh declines.
+dismissAll()
+local auditCustomer,auditResponse=addCustomer('AuditBuyer')
+auditResponse.conversationCharacter='Seller-Realm'
+local auditOrder={customerName='AuditBuyer',responseID=101}
+local auditStatus={status='rejected',craftingOrderID=81001,requestToken=auditResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return auditStatus end
+local beforeAudit=#sent
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,auditStatus)
+assert(#visible('AuditBuyer')==1 and #sent==beforeAudit,'decline auto-sent its audit')
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,auditStatus)
+assert(#visible('AuditBuyer')==1,'ACK repeated the decline suggestion')
+local staleOption=visible('AuditBuyer')[1].option
+auditStatus.craftingOrderID=81002
+assert(not QuickReplies:ResolvePopupResponse(staleOption),'old decline reply followed the resent order')
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,auditStatus)
+assert(#visible('AuditBuyer')==1 and visible('AuditBuyer')[1].option.rejectionOrderID==81002)
+auditStatus.status='fulfilled'
+click(visible('AuditBuyer')[1])
+assert(#sent==beforeAudit,'completed order sent a stale decline reply')
+auditStatus.status='rejected';auditStatus.craftingOrderID=81003
+auditResponse.reagentIssues=string.rep('Missing: 20x Alloy; ',25)
+local splits,batches=0,0
+Scan.Utils.SplitResponse=function(text)
+    splits=splits+1
+    local result={}
+    while #text>0 do result[#result+1]=text:sub(1,255);text=text:sub(256) end
+    return result
+end
+Scan.Utils.SendResponses=function(messages,customer,manual)
+    assert(manual==true and customer=='AuditBuyer' and #messages>1)
+    for _,message in ipairs(messages) do assert(#message<=255) end
+    batches=batches+1
+    return true
+end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,auditStatus)
+assert(#visible('AuditBuyer')==1 and splits==0 and batches==0,'long audit auto-split/sent')
+click(visible('AuditBuyer')[1])
+assert(splits==1 and batches==1)
+auditStatus.craftingOrderID=81004
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,auditStatus)
+click(visible('AuditBuyer')[1])
+assert(batches==1,'multi-message audit bypassed cooldown')
+now=now+6;click(visible('AuditBuyer')[1])
+assert(batches==2)
+print('Reagent reply tests passed (manual batches, cooldown, resend identity, completed order guard).')

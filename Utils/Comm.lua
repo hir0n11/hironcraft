@@ -865,7 +865,8 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
     -- way. This is more work on this side, but it minimizes both the sent data and
     -- the differences between a received message and a naturally detected message.
     HironCraftScan.OnMessage(
-        'CHAT_MSG_CHANNEL',
+        data.lastChatFrameMessage and data.lastChatFrameMessage.chatType == 'WHISPER'
+            and 'CHAT_MSG_WHISPER' or 'CHAT_MSG_CHANNEL',
         data.message,
         data.customer,
         data.customerGuid,

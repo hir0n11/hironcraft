@@ -86,8 +86,11 @@ function CO:RestoreOrderSelection(pageFrame, orders)
             end
         end
     end
+    local inFlight = self.IsOrderActionInProgress and self:IsOrderActionInProgress()
     for key in pairs(self.selectedOrders) do
-        if not present[key] then self.selectedOrders[key] = nil end
+        -- Claim/craft refreshes can briefly expose an empty/partial API list.
+        -- Completion handlers remove the actual finished order explicitly.
+        if not present[key] and not inFlight then self.selectedOrders[key] = nil end
     end
     if self.currentQueueOrderID and not self:IsOrderSelected(self.currentQueueOrderID) then
         self.currentQueueOrderID = nil

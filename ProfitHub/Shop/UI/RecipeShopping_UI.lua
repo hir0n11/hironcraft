@@ -31,7 +31,7 @@ function RS:ShowQualityMenu(owner)
     if MenuUtil and MenuUtil.CreateContextMenu then
         MenuUtil.CreateContextMenu(owner, function(_, root)
             root:CreateTitle(T("PG_RECIPE_PLAN_QUALITY", "New reagents"))
-            for value = 0, 3 do
+            for value = 1, 2 do
                 local quality = value
                 root:CreateRadio(RS:GetQualityLabel(quality),
                     function() return RS:GetSettings().quality == quality end,
@@ -39,7 +39,7 @@ function RS:ShowQualityMenu(owner)
             end
         end)
     else
-        self:SetQuality((self:GetSettings().quality + 1) % 4)
+        self:SetQuality(self:GetSettings().quality == 1 and 2 or 1)
     end
 end
 
@@ -152,58 +152,23 @@ function RS:EnsurePlanWindow()
     Label(frame, T("PG_RECIPE_PLAN_QUALITY", "New reagents"), 162, "TOPLEFT", frame, "TOPLEFT", 12, -38)
     frame.quality = Button(frame, "", 150, "TOPRIGHT", frame, "TOPRIGHT", -12, -32,
         function(self) RS:ShowQualityMenu(self) end)
-    local inventory = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
-    inventory:SetSize(22, 22)
-    inventory:SetPoint("TOPLEFT", frame, "TOPLEFT", 9, -59)
-    inventory:SetScript("OnClick", function(self)
-        local ok, reason = RS:SetUseInventory(self:GetChecked())
-        if not ok then RS:NotifyPlanError(reason) end
-    end)
-    inventory:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText(T("PG_RECIPE_PLAN_STOCK_HINT", "Subtract owned reagents of the exact same quality once across all recipes. Bags and accessible bank stock are included."), 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    inventory:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    Label(frame, T("PG_RECIPE_PLAN_INVENTORY", "Use owned reagents (same quality)"), 308,
-        "LEFT", inventory, "RIGHT", 3, 0)
-    frame.inventory = inventory
     frame.scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -88)
+    frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -64)
     frame.scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 42)
     frame.content = CreateFrame("Frame", nil, frame.scroll)
     frame.content:SetSize(316, ROW_HEIGHT)
     frame.scroll:SetScrollChild(frame.content)
     frame.empty = Label(frame, T("PG_RECIPE_PLAN_EMPTY", "Add a recipe with Add to shopping."), 300,
-        "TOPLEFT", frame, "TOPLEFT", 18, -94)
+        "TOPLEFT", frame, "TOPLEFT", 18, -70)
     frame.empty:SetJustifyH("CENTER")
     frame.rows = {}
     frame.rowPool = {}
-    frame.refresh = Button(frame, T("PG_RECIPE_PLAN_REFRESH", "Recalculate"), 96,
-        "BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 10, function()
-            local ok, reason = RS:RefreshShoppingList()
-            if not ok then RS:NotifyPlanError(reason) end
-            RS:RefreshPlanWindow()
-        end)
-    frame.total = Label(frame, "", 138, "BOTTOMLEFT", frame, "BOTTOMLEFT", 112, 10)
-    frame.total:SetJustifyH("CENTER")
-    local function ResetClear()
-        frame.clearArmed = false
-        frame.clear:SetText(T("PG_RECIPE_PLAN_CLEAR", "Clear"))
-    end
+    frame.total = Label(frame, "", 210, "BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 15)
     frame.clear = Button(frame, T("PG_RECIPE_PLAN_CLEAR", "Clear"), 82,
-        "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 10, function(self)
-            if not frame.clearArmed then
-                frame.clearArmed = true
-                self:SetText(T("PG_RECIPE_PLAN_CONFIRM", "Confirm?"))
-                return
-            end
+        "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 10, function()
             local ok, reason = RS:ClearPlan()
             if not ok then RS:NotifyPlanError(reason) end
-            ResetClear()
         end)
-    frame.clear:SetScript("OnLeave", ResetClear)
-    frame:SetScript("OnHide", ResetClear)
     self.planFrame = frame
     UISpecialFrames = UISpecialFrames or {}
     table.insert(UISpecialFrames, "HironCraftRecipeShoppingPlan")
@@ -215,13 +180,12 @@ function RS:RefreshPlanWindow()
     if not frame then return end
     local entries = self:GetPlanEntries()
     local visible = math.max(1, math.min(MAX_ROWS, #entries))
-    frame:SetHeight(130 + visible * ROW_HEIGHT)
+    frame:SetHeight(106 + visible * ROW_HEIGHT)
     frame.content:SetHeight(math.max(1, #entries) * ROW_HEIGHT)
     frame.scroll:SetVerticalScroll(math.min(frame.scroll:GetVerticalScroll(), math.max(0, (#entries - visible) * ROW_HEIGHT)))
     frame.empty:SetShown(#entries == 0)
     frame.quality:SetText(self:GetQualityLabel(self:GetSettings().quality))
-    frame.inventory:SetChecked(self:GetSettings().useInventory)
-    frame.total:SetText(string.format(T("PG_RECIPE_PLAN_TOTAL", "Rows: %d\nCrafts: %d"), #entries, self.plan.totalCrafts or 0))
+    frame.total:SetText(string.format(T("PG_RECIPE_PLAN_TOTAL", "Rows: %d"), #entries))
     local active = {}
     for index, entry in ipairs(entries) do
         local row = frame.rows[entry.id]

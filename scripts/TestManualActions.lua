@@ -142,8 +142,15 @@ CO.SetStatus=function(_,text) CO.lastStatus=text end
 CO.SetActiveRowButton=noop
 CO.HasSelectedOrders=function() return next(CO.selectedOrders)~=nil end
 local row={orderID=7001,order=order,pageFrame=page}
+local auditRecordCount=0
+HironCraft={CaptureCraftingOrderReagents=function(source,details)
+    return {complete=true,orderID=source.orderID,provided=source.provided or 0,reason=details.reason}
+end,RecordRejectedCraftingOrder=function(source,reason,audit)
+    assert(audit.provided==17 and audit.reason==reason,'pre-release snapshot lost or changed')
+    auditRecordCount=auditRecordCount+1
+end}
 for _,reason in ipairs({'missing_customer_reagents','insufficient_quality'}) do
-    claimed={orderID=7001,orderState='claimed'}
+    claimed={orderID=7001,orderState='claimed',provided=17}
     quality=reason=='insufficient_quality'; missing=not quality
     CO.selectedOrders['7001']=true
     CO.rejectedOrderIDs={}
@@ -163,6 +170,7 @@ for _,reason in ipairs({'missing_customer_reagents','insufficient_quality'}) do
     assert(rejected==previous+1, 'manual decline did not execute exactly once')
 end
 assert(released==2 and rejected==2)
+assert(auditRecordCount==2,'decline failed to record a reagent snapshot')
 
 -- Even a manually requested craft must not send from a later item-cache event.
 local comm, whispers, packets, cacheCallbacks, cached = {}, 0, 0, {}, false

@@ -11,6 +11,7 @@ local allowedContext = {
     profession = true,
     profession_link = true,
     commission = true,
+    reagent_issues = true,
 }
 
 local function UnknownPlaceholders(text)
@@ -62,7 +63,7 @@ end
 -- Unlike automatic quick replies, this list intentionally spans every active
 -- inquiry from the customer. That is what lets the user answer "where do I
 -- send both items?" after two different profession requests.
-function CustomExplanations:GetPendingResponses(target)
+function CustomExplanations:GetPendingResponses(target, includeRejected)
     local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
     local listedOrders = HironCraftScan.DB.listed_orders
     if type(customerInfo) ~= 'table'
@@ -83,7 +84,8 @@ function CustomExplanations:GetPendingResponses(target)
             if response.crafterFullName
                 and response.professionID
                 and listedOrders[orderID]
-                and not IsTerminalOrder(order)
+                and (not IsTerminalOrder(order) or (includeRejected
+                    and HironCraftScan.OrderFulfillment:GetStatus(order).status == HironCraftScan.OrderFulfillment.Status.Rejected))
             then
                 candidates[#candidates + 1] = {
                     order = order,
@@ -149,7 +151,7 @@ local function ResponseSubject(response, context)
         if type(link) == 'string' and link ~= '' then return link end
     end
     return context.profession
-        or response.professionName
+        or response.equipmentLabel or response.professionName
         or HironCraftScan.Utils.ProfessionNameByID(response.parentProfID or response.professionID)
 end
 
@@ -216,7 +218,18 @@ function CustomExplanations:Render(text, target)
         return nil
     end
 
-    local pending = self:GetPendingResponses(target)
+    local wantsAudit = raw:find('{reagent_issues}', 1, true)
+    local pending = self:GetPendingResponses(target, wantsAudit)
+    if wantsAudit and HironCraftScan.OrderFulfillment then
+        local rejected = {}
+        for _, candidate in ipairs(pending) do
+            local entry = HironCraftScan.OrderFulfillment:GetStatus(candidate.order)
+            if entry and entry.status == HironCraftScan.OrderFulfillment.Status.Rejected then
+                rejected[#rejected+1] = candidate
+            end
+        end
+        pending = rejected
+    end
     local selected = self:GetSelectedResponse(target, pending)
     local candidates = {}
     if selected then
@@ -472,7 +485,6 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             }
                         });
                         if type(response) == 'table' then
-                            HironCraftScan.SendOrderGreeting({customerName=customer, responseID=response.responseID}, true)
                             HironCraftScanCraftingOrderPage:ShowGeneric()
                         end
                     end);
@@ -498,10 +510,12 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         local pending = CustomExplanations:GetPendingResponses(target)
+        local contexts = CustomExplanations:GetPendingResponses(target, true)
         -- A single unfinished order is useful here too: the customer may ask
         -- for the destination character without having requested two items.
-        if #pending >= 1 then
+        if #contexts >= 1 then
             subMenu:CreateDivider()
+            if #pending >= 1 then
             local assignments = subMenu:CreateButton(prefix .. L('To who send'), function()
                 CustomExplanations:SendAssignments(target)
             end)
@@ -509,26 +523,27 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 GameTooltip_AddNormalLine(tooltip,
                     HironCraftScan.MakeTextWhite(L('Send every unfinished item or profession with its crafter.')))
             end)
+            end
 
-            if #pending > 1 then
+            if #contexts > 1 then
                 local activeOrder = subMenu:CreateButton(prefix .. L('Active order'))
                 activeOrder:SetTooltip(function(tooltip, elementDescription)
                     GameTooltip_AddNormalLine(tooltip,
-                        HironCraftScan.MakeTextWhite(L('Choose which unfinished order supplies custom message tags.')))
+                        HironCraftScan.MakeTextWhite(L('Choose the order for message tags, including declined orders for {reagent_issues}.')))
                 end)
                 activeOrder:CreateRadio(L('Automatic (latest relevant order)'),
                     function()
-                        return CustomExplanations:GetSelectedResponse(target, pending) == nil
+                        return CustomExplanations:GetSelectedResponse(target, contexts) == nil
                     end,
                     function()
                         CustomExplanations:SetSelectedResponse(target, nil)
                     end)
-                for _, candidate in ipairs(pending) do
+                for _, candidate in ipairs(contexts) do
                     local label = Assignment(candidate)
                     if label then
                         activeOrder:CreateRadio(label,
                             function(value)
-                                return CustomExplanations:GetSelectedResponse(target, pending) == value.response
+                                return CustomExplanations:GetSelectedResponse(target, contexts) == value.response
                             end,
                             function(value)
                                 CustomExplanations:SetSelectedResponse(target, value)

@@ -5053,7 +5053,7 @@ function CreateTemporaryImportedList(listName, materials, sourceKind, allowEmpty
 
     if S.SetShopTab then S:SetShopTab("buy") end
 
-    if S.ShowWindow then
+    if S.isAuctionHouseOpen and S.ShowWindow then
         S:ShowWindow()
     end
 
@@ -6318,7 +6318,26 @@ function S:SearchItemID(itemID, silent)
     ResolveAllRows()
 end
 
+function S:CheckRecipeShoppingStock(row)
+    if not (PT.RecipeShopping and PT.RecipeShopping.ClampShoppingRowToStock
+        and PT.RecipeShopping:ClampShoppingRowToStock(row)) then return true end
+    local hadQuote = row.purchaseStage == "confirm" or row.purchaseStage == "await_price"
+    if hadQuote then
+        if C_AuctionHouse and C_AuctionHouse.CancelCommoditiesPurchase then
+            pcall(C_AuctionHouse.CancelCommoditiesPurchase)
+        end
+        if self.pendingCommodityRow == row then self.pendingCommodityRow = nil end
+        row.purchaseStage, row.pendingQuantity = nil, nil
+        row.pendingUnitPrice, row.pendingTotalPrice = nil, nil
+    end
+    if GetRemainingQuantity(row) <= 0 then MarkRowPurchased(row) end
+    SyncActiveSavedList()
+    RefreshShoppingWindow()
+    return not hadQuote and GetRemainingQuantity(row) > 0
+end
+
 function S:BeginCommodityPurchase(row)
+    if not self:CheckRecipeShoppingStock(row) then return end
     if not row or not row.chosenItemID or GetRemainingQuantity(row) <= 0 then return end
     if not self.isAuctionHouseOpen then
         row.status = T("PG_SHOP_STATUS_OPEN_AH", "Open AH")
@@ -6366,6 +6385,7 @@ function S:BeginCommodityPurchase(row)
 end
 
 function S:ConfirmCommodityPurchase(row)
+    if not self:CheckRecipeShoppingStock(row) then return end
     if not row or row.purchaseStage ~= "confirm" or not row.pendingQuantity or row.pendingQuantity <= 0 then
         return
     end
@@ -6385,6 +6405,7 @@ function S:ConfirmCommodityPurchase(row)
 end
 
 function S:BuyItemAuction(row)
+    if not self:CheckRecipeShoppingStock(row) then return end
     if not row or GetRemainingQuantity(row) <= 0 then return end
     if not row.bestAuctionID or not row.bestBuyoutAmount then
         row.status = T("PG_SHOP_STATUS_NO_BUYOUT", "No buyout")
@@ -7126,6 +7147,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "AUCTION_HOUSE_SHOW" then
         S.isAuctionHouseOpen = true
         S:RestoreRecipeShoppingListOnOpen()
+        for _, row in ipairs(S.session and S.session.rows or {}) do
+            S:CheckRecipeShoppingStock(row)
+        end
         C_Timer.After(0, function()
             if ShouldShowAuctionTab() then
                 S:EnsureAuctionTab()

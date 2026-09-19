@@ -49,3 +49,22 @@ local legacy=Scan.Utils.GetUniqueChatHistory({
 })
 assert(#legacy==2, 'reused legacy formatting ID erased a different reply')
 print('Chat history tooltip tests passed (live updates, repeated events, recycled rows, dismissal, legacy identity collisions).')
+
+local currentAudit={orderID=77}
+Scan.ReagentAudit={GetForOrder=function() return currentAudit end,
+    ShowTooltip=function(owner,_,_,snapshot)
+        owner.reagentTooltip=owner.reagentTooltip or {Hide=function(self) self.visible=false end}
+        owner.reagentTooltip.visible=snapshot~=nil
+        owner.reagentTooltip.snapshot=snapshot
+    end}
+response={greeting_sent=true,requestToken='new'}
+history:Show('TestHistoryTooltip',anchor,order,'History')
+assert(history.reagentTooltip.visible)
+currentAudit={orderID=78};tip.scripts.OnUpdate(tip,0.25)
+assert(history.reagentTooltip.snapshot.orderID==78,'hover kept old rejection snapshot')
+currentAudit=nil;tip.scripts.OnUpdate(tip,0.25)
+assert(not history.reagentTooltip.visible,'completed order kept material tooltip')
+currentAudit={orderID=79};history:Show('TestHistoryTooltip',anchor,order,'History')
+tip.scripts.OnHide(tip)
+assert(not history.reagentTooltip.visible,'hidden chat history left material tooltip behind')
+print('Reagent side tooltip lifecycle tests passed.')
