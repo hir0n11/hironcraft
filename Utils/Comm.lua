@@ -2278,6 +2278,31 @@ end
 
 local asyncPool = CreateFramePool('Frame', UIParent)
 
+-- Material snapshots are much larger than the status they accompany. Keep
+-- them out of the urgent queue, including login replays and conflict repairs.
+-- The full packet retains pending-delivery metadata: only receipt of the
+-- material details may acknowledge the durable update.
+local function CompactOrderPayload(data)
+    if type(data)~='table' then return data,false end
+    local compact,hasAudit={},false
+    for key,value in pairs(data) do
+        if key=='reagentAudit' then
+            hasAudit=true
+        elseif key~='deliveryPending' and key~='deliveryConfirmedAt' then
+            local child,found=CompactOrderPayload(value)
+            compact[key]=child
+            hasAudit=hasAudit or found
+        end
+    end
+    return compact,hasAudit
+end
+local MATERIAL_ORDER_OPERATIONS = {
+    [HironCraftScanComm.Operations.ShareOrderStatus]=true,
+    [HironCraftScanComm.Operations.OrderStatusRepair]=true,
+    [HironCraftScanComm.Operations.ShareOrderCompletion]=true,
+    [HironCraftScanComm.Operations.ShareOrderOutcome]=true,
+}
+
 function HironCraftScanComm:Transmit(data, operation, target)
     local msg = {
         operation = operation,
@@ -2292,6 +2317,25 @@ function HironCraftScanComm:Transmit(data, operation, target)
     HironCraftScan.Utils.printTable('Sending msg', msg)
 
     local priority = PriorityForOperation(operation)
+    if MATERIAL_ORDER_OPERATIONS[operation] then
+        local compact,hasAudit=CompactOrderPayload(data)
+        if hasAudit then
+            local compactOperation=operation
+            if operation==self.Operations.ShareOrderStatus then
+                -- The batch receiver ACKs only entries with deliveryPending.
+                -- This also works with older peers whose single-row receiver
+                -- unconditionally ACKs accepted status messages.
+                compact={statuses={compact}}
+                compactOperation=self.Operations.OrderStatusRepair
+            end
+            TransmitSerialized(LibSerialize:Serialize({operation=compactOperation,
+                version=msg.version,senderID=msg.senderID,data=compact}),target,'ALERT')
+            priority='NORMAL'
+            -- Freeze evidence before yielding; live order tables may advance
+            -- to another crafting attempt before async serialization runs.
+            msg.data=HironCraftScan.Utils.DeepCopy(data)
+        end
+    end
     if priority == 'ALERT' then
         -- Critical order updates are small. Serialize them immediately so the
         -- addon queues the whisper in the same frame as the fulfillment event;

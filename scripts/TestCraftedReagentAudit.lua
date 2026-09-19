@@ -114,15 +114,32 @@ claimed.reagents={};loadModules();A,F=Scan.ReagentAudit,Scan.OrderFulfillment
 complete(7002,3)
 assert(A.GetForOrder(reloadRow).craftedQuality==3 and A.GetForOrder(reloadRow).rows[1].supplied[1].quantity==20)
 
--- T5, max-T3 recipes and missing actual quality never create false warnings.
+-- Every fulfilled order exposes its actual customer inputs, regardless of rank.
 local perfect=start(7003);hooks.CraftRecipe(123,1,nil,nil,7003);complete(7003,5)
-assert(F:GetStatus(perfect).status=='fulfilled' and not A.GetForOrder(perfect))
+assert(F:GetStatus(perfect).status=='fulfilled' and A.GetForOrder(perfect).craftedQuality==5)
+assert(#select(3,A.Analyze(A.GetForOrder(perfect).rows[1]))==2,
+    'T5 output hid the two lower-tier customer materials')
 maxQuality=3
 local lowCap=start(7004);hooks.CraftRecipe(123,1,nil,nil,7004);complete(7004,2)
-assert(not A.GetForOrder(lowCap),'a max-T3 recipe was presented as a failed T5')
+assert(A.GetForOrder(lowCap).maxCraftedQuality==3)
 maxQuality=5
 local unknown=start(7005);hooks.CraftRecipe(123,1,nil,nil,7005);complete(7005,nil)
-assert(not A.GetForOrder(unknown),'requested T5/minQuality was mistaken for a real craft result')
+assert(A.GetForOrder(unknown).completed and not A.GetForOrder(unknown).craftedQuality)
+lines={}
+A.ShowTooltip({},'Unknown',{GetLeft=function() return 600 end,GetRight=function() return 850 end},A.GetForOrder(unknown))
+assert(lines[1]=='Customer reagents for completed order','uncached quality mislabeled completion as decline')
+local allGood=start(7010)
+claimed.reagents={{itemID=13,quantity=40,slotIndex=1,source=1}}
+hooks.CraftRecipe(123,1,nil,nil,7010);complete(7010,5)
+local goodAudit=assert(A.GetForOrder(allGood))
+assert(A.MaterialsOK(goodAudit) and #select(3,A.Analyze(goodAudit.rows[1]))==0)
+lines={}
+A.ShowTooltip({},'Good',{GetLeft=function() return 600 end,GetRight=function() return 850 end},goodAudit)
+assert(not table.concat(lines,'\n'):find('Replace:',1,true) and not table.concat(lines,'\n'):find('Missing:',1,true))
+maxQuality=0
+local unranked=start(7011);hooks.CraftRecipe(123,1,nil,nil,7011);complete(7011,nil)
+assert(A.GetForOrder(unranked).completed and not A.GetForOrder(unranked).maxCraftedQuality)
+maxQuality=5
 local unknownSnapshot=A.Sanitize(F:GetStatus(unknown).reagentAudit)
 unknownSnapshot.craftedQuality=4
 F:SetStatus(unknown,'fulfilled',{craftingOrderID=7005,reagentAudit=unknownSnapshot})
@@ -132,7 +149,7 @@ assert(A.GetForOrder(unknown).craftedQuality==4,'late actual-quality enrichment 
 -- enrich the already fulfilled row and journal once the exact output resolves.
 local delayed=start(7009);hooks.CraftRecipe(123,1,nil,nil,7009)
 complete(7009,nil)
-assert(not A.GetForOrder(delayed))
+assert(A.GetForOrder(delayed).completed and not A.GetForOrder(delayed).craftedQuality)
 qualities['output:7009']=3
 local pending=timers;timers={}
 for _,callback in ipairs(pending) do callback() end
@@ -173,7 +190,7 @@ claimed.isFulfillable=true;claimed.outputItemHyperlink='pass-one';qualities['pas
 claimed.reagents={};event('CRAFTINGORDERS_CRAFT_ORDER_RESPONSE',0,7006)
 hooks.RecraftRecipeForOrder(7006)
 complete(7006,5)
-assert(not A.GetForOrder(recraft),'previous recraft pass T4 survived a final T5')
+assert(A.GetForOrder(recraft).craftedQuality==5,'previous recraft pass T4 survived a final T5')
 assert(F:GetStatus(recraft).reagentAudit.craftAttempt==2)
 local before=A.Sanitize(snapshot);local after=A.Sanitize(snapshot)
 before.craftAttempt=1;after.craftAttempt=2;after.craftedQuality=nil

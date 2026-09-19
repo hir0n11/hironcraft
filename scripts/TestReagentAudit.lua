@@ -79,14 +79,15 @@ clean=A.Sanitize(clean)
 assert(not clean.rows[1].name:find('[{}|]') and clean.rows[1].supplied[1].quantity==nil)
 assert(not A.Sanitize({version=1,orderID=7001,rows={}}),'undated payload accepted')
 local status={status='rejected',craftingOrderID=7001,reagentAudit=audit}
-Scan.OrderFulfillment={Status={Rejected='rejected'},GetStatus=function() return status end}
+Scan.OrderFulfillment={Status={Rejected='rejected',Fulfilled='fulfilled'},GetStatus=function() return status end}
 local response={};Scan.OrderToResponse=function() return response end
 Scan.DB.listed_orders.a={}
 assert(A.ForResponse(response)==audit)
 status.craftingOrderID=7002
 assert(not A.ForResponse(response),'audit leaked to resent game order')
 status.craftingOrderID=7001;status.status='fulfilled'
-assert(not A.ForResponse(response),'fulfilled row retains rejection tooltip')
+assert(A.ForResponse(response).completed and A.ForResponse(response).orderID==7001,
+    'completed order lost its material list')
 
 local owner,lines={},{}
 UIParent={GetWidth=function() return 1200 end}

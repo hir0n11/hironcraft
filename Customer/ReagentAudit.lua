@@ -271,10 +271,6 @@ function Audit.CaptureProgress(order,beforeCraft)
     Audit.PruneProgress()
     return snapshot
 end
-function Audit.IsBelowT5(snapshot)
-    return snapshot and snapshot.maxCraftedQuality==5
-        and snapshot.craftedQuality and snapshot.craftedQuality>0 and snapshot.craftedQuality<5
-end
 -- Same game order only. Older peers and transient API misses may omit metadata;
 -- they must not erase a captured list/result. Callers decide revision ordering.
 function Audit.Merge(candidate,current)
@@ -307,7 +303,15 @@ function Audit.GetForOrder(order)
     local snapshot=status.reagentAudit
     if snapshot and tostring(snapshot.orderID)==tostring(status.craftingOrderID)
         and (status.status==fulfillment.Status.Rejected
-            or (status.status==fulfillment.Status.Fulfilled and Audit.IsBelowT5(snapshot))) then return snapshot end
+            or status.status==fulfillment.Status.Fulfilled) then
+        -- Presentation follows the order outcome, even when output quality is
+        -- unavailable (or this recipe has no quality ranks).
+        if status.status==fulfillment.Status.Rejected then return snapshot end
+        local display={}
+        for key,value in pairs(snapshot) do display[key]=value end
+        display.completed=true
+        return display
+    end
 end
 function Audit.ForResponse(response)
     for _, order in pairs(Scan.DB.listed_orders or {}) do
@@ -404,7 +408,7 @@ function Audit.ShowTooltip(owner, name, history, snapshot)
         owner.reagentTooltip=tip
     end
     tip:SetOwner(history,'ANCHOR_NONE');tip:ClearLines();tip:SetMinimumWidth(300)
-    tip:AddLine(L(snapshot.craftedQuality and 'Customer reagents for completed order' or 'Customer reagents at decline'),1,0.82,0)
+    tip:AddLine(L((snapshot.completed or snapshot.craftedQuality) and 'Customer reagents for completed order' or 'Customer reagents at decline'),1,0.82,0)
     tip:AddLine('#'..tostring(snapshot.orderID)..' - '..date('%d.%m %H:%M',snapshot.capturedAt),0.7,0.7,0.7)
     if snapshot.craftedQuality and snapshot.maxCraftedQuality then
         tip:AddLine(string.format(L('Crafted quality: T%d / T%d'),snapshot.craftedQuality,snapshot.maxCraftedQuality),1,0.65,0.1,true)

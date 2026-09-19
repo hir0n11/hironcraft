@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Completed-order materials and responsive status sync (0.3.59)
+
+- Customer reagent snapshots appear for every fulfilled order, including T5,
+  recipes capped at another rank, unranked crafts and uncached output quality.
+  Missing quantities and lower-tier customer reagents keep their existing
+  highlighting. The completed-order heading no longer depends on cached quality.
+- Linked status updates, outcomes, recent-history replays and status repairs
+  queue a compact status immediately at ALERT priority. Material evidence follows
+  at NORMAL priority, so large reagent lists do not occupy the urgent status
+  queue. Both packets use existing operations and preserve order/revision identity.
+- The compact packet cannot acknowledge delivery of material evidence. The full
+  packet retains delivery metadata for existing ACK/retry handling; reordered
+  packets enrich the same result without erasing evidence or changing a newer order.
+
 ## Complete equipment aliases (0.3.58)
 
 - Equipment Names now includes Neck, Ring, Trinket and Held Off-hand, plus the
