@@ -190,4 +190,14 @@ assert(#requests==1 and shopping==1,'closed page started another queue/shopping 
 page.shown=true;CO._autoRanForOpen=false;mixin.ShowGeneric(page);drain(.7)
 requests[2].callback(0);page.shown=false;drain(1)
 assert(shopping==1,'closed page created a shopping list after selection')
+
+-- One-button mode: a Personal order arriving while the list is open is
+-- selected like the ones present at opening; a manual uncheck still wins.
+page.shown=true
+CO.IsOneButtonPersonalEnabled=function() return true end
+switch(3,1,'Player-A','midnight',{{orderID=8,spellID=108,orderType=3},{orderID=9,spellID=109,orderType=3}})
+selected('9')
+switch(4,1,'Player-A','midnight');assert(not CO:IsOrderSelected(10),'auto-selection leaked outside Personal')
+CO.IsOneButtonPersonalEnabled=function() return false end
+switch(3,1,'Player-A','midnight',{{orderID=11,spellID=111,orderType=3}});selected('')
 print('Order selection memory tests passed (shopping/reopen, manual exclusions, characters/professions/tabs/expansions, reload, knowledge union, stale callbacks).')

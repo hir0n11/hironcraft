@@ -205,6 +205,26 @@ local function GetClaimedOrder()
     return nil
 end
 
+-- The order as the crafter sees it: the claimed order or a row of the list.
+local function FindCrafterOrder(orderID)
+    local key = tostring(orderID)
+    local claimed = GetClaimedOrder()
+    if type(claimed) == 'table' and tostring(claimed.orderID) == key then
+        return claimed
+    end
+    if C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
+        local ok, orders = pcall(C_CraftingOrders.GetCrafterOrders)
+        if ok and type(orders) == 'table' then
+            for _, order in ipairs(orders) do
+                if type(order) == 'table' and tostring(order.orderID) == key then
+                    return order
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function IsSuccessfulResult(result)
     if result == nil then
         return true
@@ -1566,6 +1586,31 @@ local function RegisterEvents()
                     SnapshotOrderInfo(orderInfo, orderID)
                 end
                 TrackFulfillmentIntent(orderID)
+            end)
+        end
+
+        -- A decline made with Blizzard's own button (or any other addon) used
+        -- to leave the chat row without its cross. ProfitHub records its own
+        -- declines with their reason, marked in rejectedOrderIDs just before
+        -- the call, so only record the others here.
+        if C_CraftingOrders and type(C_CraftingOrders.RejectOrder) == 'function' then
+            hooksecurefunc(C_CraftingOrders, 'RejectOrder', function(orderID)
+                if not orderID or IsSecret(orderID) then
+                    return
+                end
+                local profit = _G.HironCraftProfitCraftingOrders
+                local marked = profit and type(profit.rejectedOrderIDs) == 'table'
+                    and (profit.rejectedOrderIDs[tostring(orderID)] or profit.rejectedOrderIDs[orderID])
+                if marked then
+                    return
+                end
+                local orderInfo = FindCrafterOrder(orderID)
+                if not orderInfo then
+                    return
+                end
+                local audit = HironCraftScan.ReagentAudit
+                    and HironCraftScan.ReagentAudit.Capture(orderInfo, { reason = 'manual_decline' })
+                OrderFulfillment:RecordRejection(orderInfo, orderID, 'manual_decline', audit)
             end)
         end
 

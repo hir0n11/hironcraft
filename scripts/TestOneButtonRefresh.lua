@@ -125,4 +125,18 @@ assert(#timers == 2, "safe terminal refresh was not rescheduled")
 timers[2]()
 assert(refreshedPage == page, "terminal refresh did not target the open Personal page")
 
+-- A refresh after an order keeps the rows on screen (no blink) but inert.
+local hidden, mouse = false, true
+local action = { orderID = 1002, EnableMouse = function(_, value) mouse = value end }
+local row = { action = action, Hide = function() hidden = true end }
+CO.visibleRowButtons = { [action] = true }
+CO.rowButtonsByOrderID = { ["1002"] = action }
+page.ahuiCustomList = { rows = { row }, _lastGoodOrders = { orders[2] } }
+CO:PrepareFreshOrderSearch(page)
+assert(not hidden, "a refresh hid the current rows until the response arrived")
+assert(mouse == false and row._staleDuringSearch, "a stale row stayed clickable during the refresh")
+assert(CO.visibleRowButtons[action] == nil and CO.rowButtonsByOrderID["1002"] == nil,
+    "the hotkey could still act on a stale row")
+assert(page.ahuiCustomList._freshSearchPending and page.ahuiCustomList._freshSearchStartedAt == 100)
+
 print("One-button refresh tests passed.")

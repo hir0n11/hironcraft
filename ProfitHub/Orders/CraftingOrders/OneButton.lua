@@ -108,9 +108,14 @@ function CO:PrepareFreshOrderSearch(pageFrame)
     container._allowEmptyOnce = true
     container._orderType = pageFrame.orderType
     container._freshSearchPending = true
+    container._freshSearchStartedAt = Now()
     container._actionOrders = nil
     container._actionHoldUntil = nil
 
+    -- Keep the current rows on screen until the response replaces them:
+    -- hiding them here made the whole list blink after every completed order.
+    -- They only become inert, so neither the hotkey nor a click can act on a
+    -- row that the fresh response may no longer contain.
     for _, row in ipairs(container.rows or {}) do
         local action = row and row.action
         if action then
@@ -119,8 +124,9 @@ function CO:PrepareFreshOrderSearch(pageFrame)
             if key and self.rowButtonsByOrderID and self.rowButtonsByOrderID[key] == action then
                 self.rowButtonsByOrderID[key] = nil
             end
+            if action.EnableMouse then action:EnableMouse(false) end
         end
-        if row and row.Hide then row:Hide() end
+        if row then row._staleDuringSearch = true end
     end
 end
 

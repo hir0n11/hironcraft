@@ -70,6 +70,13 @@ function CO:RestoreOrderSelection(pageFrame, orders)
     local bucket = self:EnsureOrderSelectionContext(pageFrame)
     if not bucket or type(orders) ~= 'table' then return end
     local present = {}
+    -- A Personal order that arrives while the list is already open used to
+    -- stay unchecked (the automatic selection ran only when opening), so the
+    -- queue skipped it. Select such new orders the same way; an explicit
+    -- uncheck is remembered as checked=false and still wins.
+    local personalType = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
+    local autoSelectNew = personalType ~= nil and pageFrame and pageFrame.orderType == personalType
+        and self.IsOneButtonPersonalEnabled and self:IsOneButtonPersonalEnabled()
     for _, order in ipairs(orders) do
         local key = OrderKey(order.orderID)
         if key and (not order.orderType or order.orderType == pageFrame.orderType)
@@ -79,6 +86,11 @@ function CO:RestoreOrderSelection(pageFrame, orders)
             if choice and choice.spellID and order.spellID and choice.spellID ~= order.spellID then
                 bucket.choices[key], choice = nil, nil
                 self.selectedOrders[key] = nil
+            end
+            if not choice and autoSelectNew then
+                self:RememberOrderSelection(order.orderID, true, order)
+                choice = bucket.choices[key]
+                self.currentQueueOrderID = self.currentQueueOrderID or order.orderID
             end
             if choice then
                 choice.updatedAt = Now()

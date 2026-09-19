@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable order list, late Personal orders, manual declines (0.3.66)
+
+- The order list no longer blinks after a completed order. Every refresh used
+  to hide all rows until the server answered; the rows now stay on screen
+  (inert: no hotkey or click) and are replaced when the response arrives. A
+  tab/profession change or a request without an answer (3 s) still clears it.
+- In one-button Personal mode, a Personal order that arrives while the list is
+  already open is selected like the ones present at opening; an order you
+  unchecked yourself stays unchecked.
+- A decline made with Blizzard's own button now also marks the chat row with
+  the rejected cross and keeps its material list. ProfitHub's own declines are
+  still recorded once, with their reason.
+
 ## Hitch profiler (0.3.65)
 
 - `/hcprof [ms]` (default 150) reports every frame slower than the threshold

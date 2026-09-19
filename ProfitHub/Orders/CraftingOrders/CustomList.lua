@@ -29,6 +29,8 @@ local REFRESH_QUIET_WINDOW = 0.14
 local REFRESH_MAX_WAIT = 0.40
 local EMPTY_SNAPSHOT_RETRY = 0.30
 local ACTION_SETTLE_HOLD = 0.40
+-- Longest time the previous rows stay on screen while a refresh is pending.
+local FRESH_SEARCH_HOLD = 3
 
 local QueueRefresh
 
@@ -543,7 +545,9 @@ function CL:CreateRow(parent, index)
 
     row:SetScript("OnEnter", function(self)
         self.hover:SetColorTexture(1, 0.82, 0.2, 0.10)
-        if self.action and CO.SetActiveRowButton then CO:SetActiveRowButton(self.action) end
+        if self.action and CO.SetActiveRowButton and not self._staleDuringSearch then
+            CO:SetActiveRowButton(self.action)
+        end
         CL:ShowOrderProblemTooltip(self)
     end)
     row:SetScript("OnLeave", function(self)
@@ -1621,6 +1625,23 @@ function CL:Refresh(pageFrame)
 
     self:HideBlizzardList(pageFrame)
 
+    -- A refresh of the same list is in flight: keep the rows already shown
+    -- (made inert by PrepareFreshOrderSearch) instead of blanking the table
+    -- until the response arrives. A tab or profession change, or a request
+    -- that never answers, still falls through to the normal empty state.
+    if container._freshSearchPending and container.rows and #container.rows > 0
+        and ListScopeKey(pageFrame) == container._listScope
+        and (GetTime and GetTime() or 0) - (container._freshSearchStartedAt or 0) < FRESH_SEARCH_HOLD then
+        if not container._freshHoldRetryQueued and C_Timer and C_Timer.After then
+            container._freshHoldRetryQueued = true
+            C_Timer.After(FRESH_SEARCH_HOLD, function()
+                container._freshHoldRetryQueued = nil
+                QueueRefresh()
+            end)
+        end
+        return
+    end
+
     local currentType = pageFrame.orderType
     local rowHeight = self:RowHeight()
     local previousRowHeight = container._lastRowHeight or rowHeight
@@ -1847,6 +1868,10 @@ function CL:Refresh(pageFrame)
         row._index = i
         if row._order and row._order.orderID ~= order.orderID then HideRowTooltip(row) end
         if row._order and row._order.orderID ~= order.orderID then UnregisterRow(row) end
+        if row._staleDuringSearch then
+            row._staleDuringSearch = nil
+            if row.action and row.action.EnableMouse then row.action:EnableMouse(true) end
+        end
         if row._listY ~= y then
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", container.content, "TOPLEFT", 0, -y)
