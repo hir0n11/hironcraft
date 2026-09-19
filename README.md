@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Completed-order material diagnosis reliability (0.3.57)
+
+- Added an end-to-end regression for the intended case: a T4/T3 result from an
+  unlocked order whose customer supplied the full quantity as mixed lower-tier
+  reagents. `40 / 40` remains complete while every confirmed lower tier is
+  listed separately, for example `20x T1 -> T3` and `20x T2 -> T3`. Crafter-
+  supplied reagents remain excluded from this evidence.
+- If the crafted item's actual rank is not cached at the first result event,
+  retry it after 0.2, 1 and 3 seconds using the exact order/output identity.
+  Late data enriches the existing green completed row and its linked-account
+  journal; it never changes the result back to an in-progress state.
+- The tooltip reports observed material quantities/tiers and the actual output
+  tier. It does not claim that materials are the sole cause of a lower result,
+  because skill and recipe state can also matter.
+
 ## Completed-order materials and scanner fixes (0.3.56)
 
 - Completed equipment orders below T5 now show the customer reagent tooltip

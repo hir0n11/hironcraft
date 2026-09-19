@@ -179,6 +179,12 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID, beforeCraft)
         capturedAt = time(),
         reagentAudit = audit,
     }
+    local outputLink = orderInfo.outputItemHyperlink
+    if type(outputLink) == 'string' and not (issecretvalue and issecretvalue(outputLink)) then
+        -- Local-only retry context. It is deliberately absent from status and
+        -- journal payloads, which contain only sanitized reagent snapshots.
+        snapshot.outputItemHyperlink = outputLink
+    end
 
     if snapshot.orderID then
         craftingOrderSnapshots[snapshot.orderID] = snapshot
@@ -1379,6 +1385,39 @@ local function TrackWithRetry(status, craftingOrderID, result, allowLastSnapshot
     end
 end
 
+local function RetryCraftedQuality(craftingOrderID)
+    local snapshot = craftingOrderID and craftingOrderSnapshots[craftingOrderID]
+    if not snapshot or not snapshot.reagentAudit or snapshot.reagentAudit.craftedQuality
+        or not snapshot.outputItemHyperlink or not HironCraftScan.ReagentAudit then return end
+
+    local audit = HironCraftScan.ReagentAudit.CaptureProgress({
+        orderID = snapshot.orderID,
+        spellID = snapshot.spellID,
+        customerName = snapshot.customerName,
+        isFulfillable = true,
+        outputItemHyperlink = snapshot.outputItemHyperlink,
+    })
+    if not audit or not audit.craftedQuality then return end
+    snapshot.reagentAudit = audit
+
+    local order = FindStoredOrder(craftingOrderID)
+    local current = order and OrderFulfillment:GetStatus(order)
+    if current and current.craftingOrderID == craftingOrderID
+        and (current.status == OrderFulfillment.Status.Crafted
+            or current.status == OrderFulfillment.Status.Fulfilled) then
+        -- Enrich the same status and, for fulfilled orders, its journal notice.
+        -- Never turn a completed row back into "crafted".
+        TrackOrderInfo(current.status, craftingOrderID, current.result, snapshot, false, false)
+    end
+end
+
+local function ScheduleCraftedQualityRetries(craftingOrderID)
+    if not craftingOrderID or not C_Timer or not C_Timer.After then return end
+    for _, delay in ipairs({ 0.2, 1, 3 }) do
+        C_Timer.After(delay, function() RetryCraftedQuality(craftingOrderID) end)
+    end
+end
+
 local function TrackFulfillmentIntent(craftingOrderID)
     pendingFulfillOrderID = craftingOrderID or pendingFulfillOrderID
 
@@ -1521,6 +1560,7 @@ local function RegisterEvents()
         function(_, result, orderID)
             if IsSuccessfulResult(result) then
                 TrackWithRetry(OrderFulfillment.Status.Crafted, orderID, nil, true)
+                ScheduleCraftedQualityRetries(orderID)
             end
         end
     )
