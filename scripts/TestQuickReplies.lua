@@ -183,7 +183,7 @@ currentCharacter = "Farrierr-Realm"
 assert(QuickReplies:ResolvePopupResponse(rejectedOption) == nil, "stale rejection popup sent from another character")
 currentCharacter = "Seller-Realm"
 assert(
-    rejectedOption.reply == 'Recorded material issues',
+    rejectedOption.reply == 'I checked your order. Recorded material issues',
     'default rejection reply did not use the reagent audit'
 )
 QuickReplies:GetConfig().templates.REJECTED_ORDER.response = "Edited rejected-order reply"

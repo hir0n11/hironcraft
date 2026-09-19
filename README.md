@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Natural reagent replies (0.3.55)
+
+- `{reagent_issues}` now writes conversational sentences: `Looks like you're
+  missing ...` and `Could you replace ..., please?`. Each sentence lists every
+  confirmed material, quantity and relevant tier, including several lower tiers
+  of the same material and selected optional reagents. The underlying saved
+  customer-only counts and quality checks are unchanged.
+- Recraft and unavailable-data explanations also use natural wording without
+  inventing shortages or claiming a proven game bug. The detailed hover tooltip
+  retains its compact quantities and tier comparisons.
+- The default rejected-order reply is `I checked your order. {reagent_issues}`.
+  On first upgrade, the old defaults and the exact `Resend. You missed ...`
+  variant (curly or square brackets) migrate to it. Other custom pastes, renamed
+  labels, priorities, disabled/deleted replies and subsequent edits are preserved.
+- Chat reports stay in English with captured item names. Long reports still
+  split only after a manual click/bind and share the existing cooldown; no
+  material is dropped just to fit a single whisper. Tests cover multi-material
+  reports, both locales, migrations and real UTF-8 chat splitting.
+
 ## Editable replies and equipment names (0.3.54)
 
 - Config > Quick Replies now offers **Name** and **Delete** for every answer,

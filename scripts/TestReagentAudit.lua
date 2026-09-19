@@ -23,30 +23,32 @@ local function reagent(id,quantity,index,source)
 end
 schematic={reagentSlotSchematics={slot({101,102,103},40,1),slot({201},2,2),slot({401,402,403},1,3,true)}}
 local order={orderID=7001,spellID=123,isRecraft=true,reagents={reagent(101,20,1),reagent(102,15,1),
-    reagent(103,5,1,2),reagent(201,2,2),reagent(401,1,3)}}
+    reagent(103,5,1,2),reagent(201,1,2),reagent(401,1,3)}}
 local audit=A.Capture(order)
 assert(audit.complete and #audit.rows==3)
 local total,missing,replace=A.Analyze(audit.rows[1])
 assert(total==35 and missing==5 and #replace==2,'crafter inventory or ranks polluted customer counts')
 assert(audit.rows[3].supplied[1].maxQuality==2,'unrelated optional reagent raised the maximum tier')
 local issues=A.Issues(audit)
-assert(issues:find('Missing: 5x Alloy',1,true) and issues:find('Replace: 20x Alloy T1 -> T3',1,true))
+assert(issues=="Looks like you're missing 5 Alloy (T3) and 1 Thread. "
+    ..'Could you replace 20 T1 Alloy with T3, 15 T2 Alloy with T3 and 1 T1 Missive A with T2, please?',
+    'multiple shortages, mixed tiers or optional reagent replacement were lost')
 order.reagents[1].reagentInfo.quantity=999
 assert(audit.rows[1].supplied[1].quantity==20,'snapshot retained mutable API tables')
 assert(not A.MaterialsOK(audit))
 order.reagents={reagent(103,40,1),reagent(201,2,2),reagent(402,1,3)}
 local details={reason='insufficient_quality',quality={currentQuality=4,requestedQuality=5,skill=488,nextQualitySkill=620,maxAllowed=40}}
 local good=A.Capture(order,details)
-assert(A.MaterialsOK(good) and A.QualityProblem(good):find('Possible recraft',1,true))
-assert(not A.Issues(good):find('Replace:',1,true),'normal max materials received a replace instruction')
-assert(A.Issues(good):find('current skill/settings',1,true),'quality failure was declared a proven game bug')
+assert(A.MaterialsOK(good) and A.QualityProblem(good):find('might be a recraft',1,true))
+assert(not A.Issues(good):find('Could you replace',1,true),'normal max materials received a replace instruction')
+assert(A.Issues(good):find('current setup',1,true),'quality failure was declared a proven game bug')
 good.isRecraft=false
 assert(not A.Issues(good):find('recraft',1,true),'ordinary skill shortfall called a recraft bug')
 good.quality.currentQuality=5
 assert(not A.QualityProblem(good))
 order.reagents=nil
 local unavailable=A.Capture(order,details)
-assert(not unavailable.complete and not A.MaterialsOK(unavailable) and not A.Issues(unavailable):find('Missing:',1,true))
+assert(not unavailable.complete and not A.MaterialsOK(unavailable) and not A.Issues(unavailable):find("you're missing",1,true))
 order.reagents={reagent(103,nil,1)}
 local partial=A.Capture(order)
 assert(not partial.complete and select(2,A.Analyze(partial.rows[1]))==nil,'unknown quantity treated as zero')
@@ -63,13 +65,13 @@ assert(not A.Capture(order).complete and select(2,A.Analyze(A.Capture(order).row
 schematic={reagentSlotSchematics={slot({101,102,103},5,1),slot({101,102,103},5,2)}}
 order.reagents={{itemID=101,quantity=5}}
 local ambiguous=A.Capture(order)
-assert(not ambiguous.complete and not A.Issues(ambiguous):find('Missing:',1,true),'ambiguous slot falsely accused customer')
+assert(not ambiguous.complete and not A.Issues(ambiguous):find("you're missing",1,true),'ambiguous slot falsely accused customer')
 order.reagents={reagent(101,5,2)}
 local indexed=A.Capture(order)
 assert(indexed.rows[1].supplied[1]==nil and indexed.rows[2].supplied[1].quantity==5)
 schematic={reagentSlotSchematics={{reagents={{currencyID=7}},quantityRequired=1,required=true}}}
 order.reagents={}
-assert(not A.Capture(order).complete and not A.Issues(A.Capture(order)):find('Missing:',1,true))
+assert(not A.Capture(order).complete and not A.Issues(A.Capture(order)):find("you're missing",1,true))
 local clean=A.Sanitize(audit)
 clean.rows[1].name='|Hitem:1|h[Injected]|h\n{crafter}'
 clean.rows[1].supplied[1].quantity=-1
@@ -124,7 +126,7 @@ Scan.QuickReplies={ResolveResponses=function() return {{response=other}} end}
 assert(#Scan.CustomExplanations:GetPendingResponses('Buyer')==0)
 assert(#Scan.CustomExplanations:GetPendingResponses('Buyer',true)==1)
 local rendered=Scan.CustomExplanations:Render('Order declined: {reagent_issues}','Buyer')
-assert(rendered and rendered:find('Missing: 5x Alloy',1,true),'paste chose fulfilled context instead of declined item')
+assert(rendered and rendered:find("you're missing 5 Alloy",1,true),'paste chose fulfilled context instead of declined item')
 statuses[1].status='fulfilled'
 assert(not Scan.CustomExplanations:Render('{reagent_issues}','Buyer'),'paste revived an obsolete rejection')
 print('Reagent custom paste context tests passed.')

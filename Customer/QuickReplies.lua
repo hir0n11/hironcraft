@@ -17,6 +17,12 @@ local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 local ORDER_GREETING_ACTION = 'order-greeting'
 local REPLY_COOLDOWN = 6
 local LEGACY_REJECTION_TEXT = 'You need provide all mats and they all should be max tier (even missive and embelishment)'
+local REJECTION_TEXT_MIGRATIONS = {
+    [LEGACY_REJECTION_TEXT] = true,
+    ['{reagent_issues}'] = true,
+    ['Resend. You missed {reagent_issues}'] = true,
+    ['Resend. You missed [reagent_issues]'] = true,
+}
 local sentReplies = {}
 
 local function ReplyKey(customer, reply)
@@ -44,7 +50,7 @@ local DEFAULT_TEMPLATES = {
         key = REJECTED_ORDER_TEMPLATE_KEY,
         eventOnly = true,
         keywords = '',
-        response = '{reagent_issues}',
+        response = 'I checked your order. {reagent_issues}',
     },
     {
         key = 'NAME',
@@ -101,7 +107,8 @@ local function EnsureConfig()
     if config.typo_tolerance == nil then
         config.typo_tolerance = true
     end
-    config.schema_version = 7
+    local previousSchema = tonumber(config.schema_version) or 0
+    config.schema_version = 8
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -112,8 +119,11 @@ local function EnsureConfig()
         if template.keywords == nil then
             template.keywords = definition.keywords
         end
+        -- Upgrade only known old wording once, including the user's exact
+        -- screenshot text. Preserve other custom pastes and future edits.
         if template.response == nil or (definition.key == REJECTED_ORDER_TEMPLATE_KEY
-            and template.response == LEGACY_REJECTION_TEXT) then
+            and not template.deleted and previousSchema < 8
+            and REJECTION_TEXT_MIGRATIONS[Trim(template.response)]) then
             template.response = definition.response
         end
     end

@@ -251,37 +251,49 @@ function Audit.QualityProblem(snapshot, localized)
         or not quality or not quality.currentQuality or not quality.requestedQuality
         or quality.currentQuality>=quality.requestedQuality then return nil end
     local function text(key) return localized and L(key) or key end
-    local message=string.format(text('Your materials are complete and at maximum tier. The game calculates T%d instead of T%d with my current skill/settings.'),
+    local message=string.format(text('Your materials look fine, but the game is only showing T%d instead of T%d with my current setup.'),
         quality.currentQuality,quality.requestedQuality)
     if snapshot.isRecraft then
-        message=message..' '..text('Possible recraft calculation issue; replacing your materials is not indicated.')
+        message=message..' '..text("This might be a recraft calculation issue, so there's no need to replace your materials.")
     end
     return message
 end
 function Audit.Issues(snapshot, localized)
     local function text(key) return localized and L(key) or key end
-    local issues={}
+    local function join(items)
+        if #items<2 then return items[1] or '' end
+        return table.concat(items,', ',1,#items-1)..text(' and ')..items[#items]
+    end
+    local issues,missingItems,replacementItems={},{},{}
     local qualityProblem=Audit.QualityProblem(snapshot,localized)
     if qualityProblem then return qualityProblem end
     if snapshot then
         for _, row in ipairs(snapshot.rows) do
             local _,missing,replacements=Audit.Analyze(row)
             if missing and missing>0 then
-                issues[#issues+1]=string.format(text('Missing: %dx %s'),missing,Name(row))
+                missingItems[#missingItems+1]=string.format('%d %s',missing,Name(row))
                     ..(row.maxQuality and (' (T'..row.maxQuality..')') or '')
             end
             for _, item in ipairs(replacements) do
-                issues[#issues+1]=string.format(text('Replace: %dx %s T%d -> T%d'),
-                    item.quantity,Name(item),item.quality,item.maxQuality)
+                replacementItems[#replacementItems+1]=string.format(text('%d T%d %s with T%d'),
+                    item.quantity,item.quality,Name(item),item.maxQuality)
             end
         end
     end
-    if #issues==0 then
-        return snapshot and text('No specific missing or lower-tier materials could be confirmed; please recheck the order.')
-            or text('The declined order reagent details were not recorded; please recheck the materials.')
+    if #missingItems>0 then
+        issues[#issues+1]=string.format(text("Looks like you're missing %s."),join(missingItems))
     end
-    if snapshot.complete~=true then issues[#issues+1]=text('Some reagent data was unavailable; please recheck the remaining materials.') end
-    return table.concat(issues,'; ')
+    if #replacementItems>0 then
+        issues[#issues+1]=string.format(text('Could you replace %s, please?'),join(replacementItems))
+    end
+    if #issues==0 then
+        return snapshot and text("I couldn't confirm which materials need changing. Could you double-check the order, please?")
+            or text("I couldn't find the material details for this order. Could you double-check them, please?")
+    end
+    if snapshot.complete~=true then
+        issues[#issues+1]=text("I couldn't check all of the materials, so please double-check the rest too.")
+    end
+    return table.concat(issues,' ')
 end
 
 function Audit.ShowTooltip(owner, name, history, snapshot)
