@@ -665,22 +665,25 @@ C_ChatInfo={GetChatLineText=function(id) assert(id==44);chatReads=chatReads+1;re
 menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ManualBuyer-Realm',lineID='44'})
 assert(#sent==0 and countRows()==0, 'opening the manual menu took an action')
 buttons[2].click()
-assert(#sent==0 and #manualOffers==1 and manualOffers[1].customer=='ManualBuyer-Realm' and chatReads==1)
-assert(manualBanners==0,'manual match displayed both a quick reply and greeting banner')
+-- A line the crafter linked by hand raises the normal request banner; the
+-- greeting card belongs to whispers the customer actually sent.
+assert(#sent==0 and chatReads==1)
+assert(#manualOffers==0,'a hand-linked line was answered with a quick reply')
+assert(manualBanners==1,'a hand-linked line raised no request banner')
 local manualResponse=Scan.DB.customers['ManualBuyer-Realm'].responses[197]
 assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.itemID and not manualResponse.greeting_sent)
 assert(Scan.SendOrderGreeting({customerName='ManualBuyer-Realm',responseID=197},true))
 assert(#sent==1 and manualResponse.greeting_sent)
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Expired-Realm'})
 buttons[1].click()
-assert(#sent==1 and #manualOffers==2 and manualOffers[2].customer=='Expired-Realm' and chatReads==1,
+assert(#sent==1 and #manualOffers==0 and chatReads==1,
     'expired line blocked the profession suggestion or sent it immediately')
 flushTimers();assert(#sent==1, 'manual matching scheduled more messages')
-assert(manualBanners==0,'deferred manual match reopened a second banner')
+assert(manualBanners==2,'the expired line raised no banner of its own')
 Scan.QuickReplies.GetConfig=function() return {enabled=false} end
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='NoQuick-Realm'})
 buttons[1].click()
-assert(manualBanners==1 and #manualOffers==2 and #sent==1,'disabled quick replies did not fall back to one banner')
+assert(manualBanners==3 and #manualOffers==0 and #sent==1,'disabled quick replies changed manual matching')
 Scan.DB.characters['Seller-Realm'].parent_professions[164].visual_alert_enabled=nil
 Scan.DB.characters['Tailor-Realm'].parent_professions[197].visual_alert_enabled=nil
 HironCraftScanScannerMenu.TriggerAlert,Scan.QuickReplies.GetConfig=oldManualTrigger,oldManualConfig

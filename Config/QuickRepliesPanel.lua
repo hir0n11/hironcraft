@@ -146,10 +146,10 @@ local function CreateRow(panel, index)
     row.RepeatLabel:SetJustifyV('MIDDLE')
 
     row.Repeat = CreateFrame('EditBox', nil, row, 'InputBoxTemplate')
-    row.Repeat:SetSize(42, 20)
+    row.Repeat:SetSize(46, 20)
     row.Repeat:SetAutoFocus(false)
     row.Repeat:SetNumeric(true)
-    row.Repeat:SetMaxLetters(4)
+    row.Repeat:SetMaxLetters(5)
     row.Repeat:SetJustifyH('CENTER')
 
     row.Keywords = CreateFrame('Frame', nil, row, 'HironCraftScanTextInputTemplate')
@@ -188,7 +188,7 @@ local function LayoutRow(row, isCollapsed)
         row.Delete:SetPoint('TOPLEFT', 86, -29)
 
         row.RepeatLabel:SetPoint('TOPLEFT', 4, -53)
-        row.Repeat:SetPoint('TOPLEFT', 78, -51)
+        row.Repeat:SetPoint('TOPLEFT', 76, -51)
 
         if eventOnly then
             row.PriorityLabel:Hide()
@@ -220,14 +220,14 @@ local function LayoutRow(row, isCollapsed)
             row.PriorityLabel:Hide()
             row.Priority:Hide()
             row.RepeatLabel:SetPoint('TOPLEFT', 5, -39)
-            row.Repeat:SetPoint('TOPLEFT', 70, -37)
+            row.Repeat:SetPoint('TOPLEFT', 68, -37)
             row.Response:SetSize(508, 102)
             row.Response:SetPoint('TOPLEFT', 188, 0)
         else
             row.PriorityLabel:SetPoint('TOPLEFT', 5, -30)
             row.Priority:SetPoint('TOPLEFT', 70, -28)
             row.RepeatLabel:SetPoint('TOPLEFT', 5, -52)
-            row.Repeat:SetPoint('TOPLEFT', 70, -50)
+            row.Repeat:SetPoint('TOPLEFT', 68, -50)
             row.PriorityLabel:Show()
             row.Priority:Show()
 
@@ -322,7 +322,7 @@ end
 
 local function SetupRepeatInput(panel, row, keyword)
     SetupNumericInput(panel, row.Repeat, keyword,
-        HironCraftScan.QuickReplies.NormalizeRepeatMinutes,
+        HironCraftScan.QuickReplies.NormalizeRepeatSeconds,
         'dialog.quick_reply.repeat',
         'dialog.quick_reply.repeat.tooltip.body')
 end
@@ -347,7 +347,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
 
         local prefix = 'quick_reply.' .. definition.key .. '.'
         HironCraftScan.SetupCheckBox(self, row.Enabled, prefix .. 'enabled', 98)
-        SetupRepeatInput(self, row, prefix .. 'repeat_minutes')
+        SetupRepeatInput(self, row, prefix .. 'repeat_seconds')
         if definition.eventOnly then
             row.Keywords:Hide()
         else
@@ -498,8 +498,8 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
     if template then
         if field == 'priority' then
             value = HironCraftScan.QuickReplies.NormalizePriority(value)
-        elseif field == 'repeat_minutes' then
-            value = HironCraftScan.QuickReplies.NormalizeRepeatMinutes(value)
+        elseif field == 'repeat_seconds' then
+            value = HironCraftScan.QuickReplies.NormalizeRepeatSeconds(value)
         end
         template[field] = value
     end

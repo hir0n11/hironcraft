@@ -47,14 +47,14 @@ end
 -- person after it was sent. Two "omw" a few seconds apart help nobody, while
 -- an unrelated question must still be answered immediately, so the delay is
 -- kept per template and per customer instead of muting the whole stack.
-local MAX_REPEAT_MINUTES = 1440
+local MAX_REPEAT_SECONDS = 86400
 
-local function NormalizeRepeatMinutes(value)
+local function NormalizeRepeatSeconds(value)
     value = math.floor(tonumber(value) or 0)
-    return math.max(0, math.min(MAX_REPEAT_MINUTES, value))
+    return math.max(0, math.min(MAX_REPEAT_SECONDS, value))
 end
 
-QuickReplies.NormalizeRepeatMinutes = NormalizeRepeatMinutes
+QuickReplies.NormalizeRepeatSeconds = NormalizeRepeatSeconds
 
 local sentTemplates = {}
 
@@ -67,7 +67,7 @@ function QuickReplies:GetTemplateRepeatDelay(templateKey)
     -- GetConfig, not the EnsureConfig local: this runs above its definition.
     local template = templateKey and self:GetConfig().templates[templateKey]
     if type(template) ~= 'table' then return 0 end
-    return NormalizeRepeatMinutes(template.repeat_minutes) * 60
+    return NormalizeRepeatSeconds(template.repeat_seconds)
 end
 
 function QuickReplies:IsTemplateOnRepeatCooldown(customer, templateKey)
@@ -83,7 +83,7 @@ function QuickReplies:RememberSentTemplate(customer, templateKey)
 
     local now = GetTime()
     for key, sentAt in pairs(sentTemplates) do
-        if now - sentAt > MAX_REPEAT_MINUTES * 60 then sentTemplates[key] = nil end
+        if now - sentAt > MAX_REPEAT_SECONDS then sentTemplates[key] = nil end
     end
     sentTemplates[TemplateCustomerKey(customer, templateKey)] = now
 end
@@ -160,7 +160,7 @@ local function EnsureConfig()
         config.typo_tolerance = true
     end
     local previousSchema = tonumber(config.schema_version) or 0
-    config.schema_version = 8
+    config.schema_version = 9
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -182,7 +182,15 @@ local function EnsureConfig()
     for _, template in pairs(templates) do
         if type(template) == 'table' then
             template.priority = NormalizePriority(template.priority)
-            template.repeat_minutes = NormalizeRepeatMinutes(template.repeat_minutes)
+            -- 0.3.70 asked for this delay in minutes. Carry those values over
+            -- once so a configured delay keeps its real length in seconds.
+            if template.repeat_minutes ~= nil then
+                if template.repeat_seconds == nil then
+                    template.repeat_seconds = (tonumber(template.repeat_minutes) or 0) * 60
+                end
+                template.repeat_minutes = nil
+            end
+            template.repeat_seconds = NormalizeRepeatSeconds(template.repeat_seconds)
         end
     end
     return config

@@ -2113,12 +2113,7 @@ local function OfferDeferredQuickReply(customer, message, customerInfo, override
 
     if #responses > 0 then
         if HironCraftScan.QuickReplies.ShowOrderGreeting then
-            local shown = HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
-            if shown and overrides.manualMatch and HironCraftScanScannerMenu then
-                for _, response in ipairs(responses) do
-                    HironCraftScanScannerMenu:ClearAlert({customerName=customer,responseID=response.responseID})
-                end
-            end
+            HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
         end
     elseif HironCraftScan.QuickReplies.OnWhisper then
         -- Ordinary follow-up questions that are not new crafting requests keep
@@ -2238,12 +2233,11 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         -- Global and profession exclusions are still checked normally.
         overrides.genericFollowup = true
     end
+    -- A line the crafter linked by hand is their own decision, not a customer
+    -- greeting, so it raises the normal request banner. Only a real incoming
+    -- whisper is answered with a greeting card.
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
-    local quickReplies = HironCraftScan.QuickReplies
-    local manualQuickReply = overrides.manualMatch and quickReplies and quickReplies.ShowOrderGreeting
-        and (not quickReplies.GetConfig or quickReplies:GetConfig().enabled)
-    if manualQuickReply and not overrides.remoteRequest then overrides.suppressGreetingBanner = true end
-    if (incomingWhisper or manualQuickReply) and not overrides.remoteRequest then
+    if incomingWhisper and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
 

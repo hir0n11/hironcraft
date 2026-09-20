@@ -25,15 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Banner for hand-linked lines, repeat delay in seconds (0.3.71)
+
+- Matching a chat line by hand (right-click on the name) raises the normal
+  request banner again. It used to suppress the banner and offer a greeting
+  card instead; a line the crafter links is their own decision, so the
+  greeting card is now reserved for whispers the customer actually sent.
+- The per-reply repeat delay is entered in seconds instead of minutes, up to
+  86400. A delay configured in 0.3.70 keeps its real length.
+
 ## Repeat delay per quick reply (0.3.70)
 
-- Every quick reply, built-in or custom, gained a "Repeat, min" setting in
+- Every quick reply, built-in or custom, gained a repeat-delay setting in
   Quick Replies. After the reply is sent to someone, it is not offered to that
-  same person again for that many minutes, so a customer who writes "will
-  send" and then "sent" is offered one "omw" instead of two. Other quick
-  replies for the same person are unaffected, and 0 (the default) keeps the
-  previous behaviour. The delay is counted within the current session and is
-  shared with linked accounts as part of the quick-reply settings.
+  same person again for that long, so a customer who writes "will send" and
+  then "sent" is offered one "omw" instead of two. Other quick replies for the
+  same person are unaffected, and 0 (the default) keeps the previous
+  behaviour. The delay is counted within the current session and is shared
+  with linked accounts as part of the quick-reply settings.
 
 ## Public tab refresh, stable row background (0.3.69)
 

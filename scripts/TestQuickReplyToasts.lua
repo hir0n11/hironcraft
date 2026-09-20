@@ -433,11 +433,11 @@ assert(#visible()==0 and not QuickReplies:SendTopReply(true) and #sent==beforeEd
 -- Per quick reply: after it is sent, the same answer stays out of the way for
 -- that one person. Two "omw" a few seconds apart help nobody.
 dismissAll()
-assert(QuickReplies.NormalizeRepeatMinutes('7')==7 and QuickReplies.NormalizeRepeatMinutes(-3)==0
-    and QuickReplies.NormalizeRepeatMinutes(99999)==1440 and QuickReplies.NormalizeRepeatMinutes('later')==0,
+assert(QuickReplies.NormalizeRepeatSeconds('45')==45 and QuickReplies.NormalizeRepeatSeconds(-3)==0
+    and QuickReplies.NormalizeRepeatSeconds(99999)==86400 and QuickReplies.NormalizeRepeatSeconds('later')==0,
     'the repeat delay accepted a value outside its range')
 local repeatKey=QuickReplies:CreateCustomTemplate('Coming back','omw now','omw')
-QuickReplies:GetConfig().templates[repeatKey].repeat_minutes=2
+QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=120
 addCustomer('RepeatBuyer');addCustomer('OtherRepeatBuyer')
 local beforeRepeat=#sent
 whisper('RepeatBuyer','omw now')
@@ -455,12 +455,21 @@ whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==1,'the reply never came back after its delay')
 dismissAll()
 -- A delay of zero is the old behaviour: offer it every time.
-QuickReplies:GetConfig().templates[repeatKey].repeat_minutes=0
+QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=0
 whisper('RepeatBuyer','omw now');click(visible('RepeatBuyer')[1])
 now=now+10
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==1,'a reply without a delay was withheld')
 dismissAll()
+-- A delay configured in minutes by 0.3.70 keeps its real length in seconds.
+local legacyKey=QuickReplies:CreateCustomTemplate('Legacy delay','legacy delay','omw')
+local legacyTemplate=QuickReplies:GetConfig().templates[legacyKey]
+legacyTemplate.repeat_seconds=nil
+legacyTemplate.repeat_minutes=3
+Scan.DB.settings.quick_replies.schema_version=8
+assert(QuickReplies:GetTemplateRepeatDelay(legacyKey)==180,'a delay set in minutes changed length')
+assert(QuickReplies:GetConfig().templates[legacyKey].repeat_minutes==nil,'the old field survived the upgrade')
+assert(QuickReplies:DeleteTemplate(legacyKey))
 assert(QuickReplies:DeleteTemplate(repeatKey))
 
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')

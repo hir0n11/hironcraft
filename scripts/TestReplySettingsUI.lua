@@ -84,14 +84,14 @@ assert(dialog.key=='rename_quick_reply' and dialog.elements[2].initial_text==Sca
 assert(not dialog.elements[2].Validator(1,'Commission'))
 dialog.OnAccept('Commission')
 assert(findRow('PRICE').Enabled.Title.text=='Commission')
-price.Repeat:SetText('7');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
+price.Repeat:SetText('45');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
 local template=Scan.QuickReplies:GetConfig().templates.PRICE
 assert(template.keywords=='cost, fee' and template.response=='500g' and template.priority==12 and template.enabled==false)
-assert(template.repeat_minutes==7,'the repeat delay was not saved')
+assert(template.repeat_seconds==45,'the repeat delay was not saved')
 price.Repeat:SetText('99999');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
-assert(template.repeat_minutes==1440 and price.Repeat.text=='1440','the repeat delay was not clamped')
+assert(template.repeat_seconds==86400 and price.Repeat.text=='86400','the repeat delay was not clamped')
 price.Repeat:SetText('');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
-assert(template.repeat_minutes==0,'an empty repeat delay did not turn the delay off')
+assert(template.repeat_seconds==0,'an empty repeat delay did not turn the delay off')
 click(findRow('PRICE').Delete)
 assert(replies.definitionCount==5 and not findRow('PRICE'))
 -- The completed-order reply is a normal built-in row: editable and switchable.
