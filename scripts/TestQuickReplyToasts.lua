@@ -472,4 +472,53 @@ assert(QuickReplies:GetConfig().templates[legacyKey].repeat_minutes==nil,'the ol
 assert(QuickReplies:DeleteTemplate(legacyKey))
 assert(QuickReplies:DeleteTemplate(repeatKey))
 
+-- One "your order is done" per batch. A customer with several orders in
+-- flight is told once, when the last of them is finished, instead of after
+-- every third check mark.
+dismissAll()
+local previousStatusLookup=Scan.OrderFulfillment.GetStatus
+local batchStatuses={}
+Scan.OrderFulfillment.GetStatus=function(_,order) return batchStatuses[tostring(order.responseID)] end
+local _,batchFirst,batchSecond=addCustomer('BatchBuyer')
+batchFirst.conversationCharacter='Seller-Realm'
+batchSecond.conversationCharacter='Seller-Realm'
+local firstDone={status='fulfilled',craftingOrderID=91001,requestToken=batchFirst.requestToken}
+local secondDone={status='fulfilled',craftingOrderID=91002,requestToken=batchSecond.requestToken}
+batchStatuses['101']=firstDone
+batchStatuses['102']={status='claimed',craftingOrderID=91002,requestToken=batchSecond.requestToken}
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
+assert(#visible('BatchBuyer')==0,'the first of several orders already offered the done reply')
+batchStatuses['102']={status='crafted',craftingOrderID=91002,requestToken=batchSecond.requestToken}
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
+assert(#visible('BatchBuyer')==0,'an order still being crafted did not hold the done reply')
+batchStatuses['102']=secondDone
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=102},secondDone)
+local batchCard=visible('BatchBuyer')[1]
+assert(batchCard and batchCard.option.templateKey=='COMPLETED_ORDER',
+    'the last order of the batch offered no done reply')
+assert(#visible('BatchBuyer')==1,'the batch offered more than one done reply')
+dismissAll()
+-- A declined order is a finished one: it does not hold the reply back, and a
+-- decline is still reported per order.
+local _,declFirst,declSecond=addCustomer('DeclineBatchBuyer')
+declFirst.conversationCharacter='Seller-Realm'
+declSecond.conversationCharacter='Seller-Realm'
+batchStatuses['101']={status='rejected',craftingOrderID=92001,requestToken=declFirst.requestToken}
+local declDone={status='fulfilled',craftingOrderID=92002,requestToken=declSecond.requestToken}
+batchStatuses['102']=declDone
+QuickReplies:OnOrderFulfillmentUpdated({customerName='DeclineBatchBuyer',responseID=102},declDone)
+assert(#visible('DeclineBatchBuyer')==1,'a declined order held back the done reply')
+dismissAll()
+-- An old request that never became an order must not mute the reply forever.
+local _,staleFirst=addCustomer('StaleBuyer')
+staleFirst.conversationCharacter='Seller-Realm'
+batchStatuses['101']={status='fulfilled',craftingOrderID=93001,requestToken=staleFirst.requestToken}
+batchStatuses['102']=nil
+time=function() return 100+13*60*60 end
+QuickReplies:OnOrderFulfillmentUpdated({customerName='StaleBuyer',responseID=101},batchStatuses['101'])
+assert(#visible('StaleBuyer')==1,'a stale request from the same customer muted the done reply')
+dismissAll()
+time=nil
+Scan.OrderFulfillment.GetStatus=previousStatusLookup
+
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')

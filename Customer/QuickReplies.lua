@@ -778,8 +778,52 @@ end
 -- react to, their template and the toast headline differ.
 local STATUS_OPTIONS = {
     rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected' },
-    fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed' },
+    fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed',
+        lastOrderOnly = true },
 }
+
+-- A customer who placed several orders at once gets one "your order is done",
+-- not one per order, so the reply waits for the last of their orders. A
+-- decline is the opposite: it names the materials of one specific order and
+-- must still be offered for each.
+local PENDING_SIBLING_WINDOW = 12 * 60 * 60
+
+-- OrderFulfillment.Status holds exactly these strings; compare against them
+-- directly so a partially built status table cannot silently match nothing.
+local FINAL_ORDER_RESULTS = { fulfilled = true, rejected = true, failed = true }
+local STARTED_ORDER_RESULTS = { claimed = true, crafted = true }
+
+function QuickReplies:HasUnfinishedSiblingOrders(order)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if type(order) ~= 'table' or not fulfillment or not fulfillment.GetStatus then
+        return false
+    end
+
+    local now = time and time() or 0
+    for _, listed in pairs(HironCraftScan.DB.listed_orders or {}) do
+        if type(listed) == 'table'
+            and listed.customerName == order.customerName
+            and tostring(listed.responseID) ~= tostring(order.responseID)
+        then
+            local ok, entry = pcall(fulfillment.GetStatus, fulfillment, listed)
+            local status = ok and type(entry) == 'table' and entry.status or nil
+            if STARTED_ORDER_RESULTS[status] then
+                return true
+            elseif not FINAL_ORDER_RESULTS[status] then
+                -- No result yet. Only a request from the same working session
+                -- counts: an old question that never became an order must not
+                -- mute this reply forever.
+                local okResponse, response = pcall(HironCraftScan.OrderToResponse, listed)
+                local requestedAt = okResponse and type(response) == 'table' and tonumber(response.time)
+                if requestedAt and now - requestedAt <= PENDING_SIBLING_WINDOW then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
 
 function QuickReplies:BuildOrderStatusOption(order, entry)
     local config = EnsureConfig()
@@ -806,6 +850,9 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     end
     if not self:IsConversationCharacter(response) then return nil end
     if self:IsTemplateOnRepeatCooldown(order.customerName, statusOption.template) then
+        return nil
+    end
+    if statusOption.lastOrderOnly and self:HasUnfinishedSiblingOrders(order) then
         return nil
     end
 

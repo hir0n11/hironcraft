@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One completion reply per batch of orders (0.3.72)
+
+- A customer who placed several orders at once is told once, when the last of
+  their orders is finished, instead of after every third check mark. An order
+  of theirs that is claimed, being crafted, or still waiting for a result
+  holds the reply back; an order that was completed or declined does not, and
+  a declined order still gets its own reply with the materials to fix. An old
+  request that never became an order stops holding the reply after 12 hours,
+  so a stale chat row cannot mute it forever.
+
 ## Banner for hand-linked lines, repeat delay in seconds (0.3.71)
 
 - Matching a chat line by hand (right-click on the name) raises the normal
