@@ -1249,6 +1249,13 @@ local function SendOption(toast, option)
         return
     end
 
+    -- The order may have finished between the card appearing and this click.
+    if QuickReplies:IsTemplateWaitingForOpenOrder(option.customer, templateKey or option.templateKey) then
+        print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
+        DismissEquivalentToasts(option)
+        return
+    end
+
     -- Long reagent audits are split only on this explicit click; the complete
     -- reply shares one cooldown. Each whisper is recorded in chat history.
     if QuickReplies:IsReplyOnCooldown(option.customer, reply) then return end
@@ -1610,7 +1617,31 @@ function QuickReplies:IsWaitingForMaterials(order, entry)
     return type(snapshot) ~= 'table' or snapshot.complete ~= true
 end
 
+-- A card that was offered while the order was still open stays on screen
+-- after it is finished, and a blind click sends "omw" right behind "Done,
+-- ty". Take those cards away as soon as the order has its result.
+function QuickReplies:DismissRepliesWaitingForOpenOrder(customer)
+    if type(customer) ~= 'string' then return 0 end
+
+    local dismissed = 0
+    for _, toast in ipairs(toastPool) do
+        local option = toast.option
+        if toast:IsShown() and type(option) == 'table' and option.customer == customer
+            and self:IsTemplateWaitingForOpenOrder(customer, option.templateKey)
+        then
+            DismissToast(toast)
+            dismissed = dismissed + 1
+        end
+    end
+
+    return dismissed
+end
+
 function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
+    if type(entry) == 'table' and FINAL_ORDER_RESULTS[entry.status] and type(order) == 'table' then
+        self:DismissRepliesWaitingForOpenOrder(order.customerName)
+    end
+
     if self:IsWaitingForMaterials(order, entry) then
         local delay = MATERIAL_WAIT_DELAYS[(attempt or 0) + 1]
         if delay and C_Timer and C_Timer.After then

@@ -603,6 +603,33 @@ QuickReplies:GetConfig().templates[omwKey].active_orders_only=false
 whisper('OpenOrderBuyer','sending it')
 assert(#visible('OpenOrderBuyer')==1,'a reply without the setting was withheld')
 dismissAll()
+-- A card offered while the order was open must go away the moment the order
+-- is finished, and a blind click on one that slipped through sends nothing.
+QuickReplies:GetConfig().templates[omwKey].active_orders_only=true
+QuickReplies:GetConfig().templates.COMPLETED_ORDER.enabled=false
+openStatuses['101']={status='crafted',craftingOrderID=96001}
+whisper('OpenOrderBuyer','sending it')
+assert(#visible('OpenOrderBuyer')==1,'the open order offered no reply to go stale')
+local staleSends=#sent
+local doneStatus={status='fulfilled',craftingOrderID=96001}
+openStatuses['101']=doneStatus
+QuickReplies:OnOrderFulfillmentUpdated({customerName='OpenOrderBuyer',responseID=101},doneStatus)
+for _,card in ipairs(visible('OpenOrderBuyer')) do
+    assert(card.option.templateKey~=omwKey,'the reply stayed on screen after the order was finished')
+end
+QuickReplies:GetConfig().templates.COMPLETED_ORDER.enabled=true
+
+-- The order can also finish between the card appearing and the click.
+dismissAll()
+openStatuses['101']={status='crafted',craftingOrderID=96001}
+whisper('OpenOrderBuyer','sending it')
+local staleCard=visible('OpenOrderBuyer')[1]
+assert(staleCard and staleCard.option.templateKey==omwKey)
+openStatuses['101']=doneStatus
+click(staleCard)
+assert(#sent==staleSends,'a click after the order was finished still sent the reply')
+
+dismissAll()
 assert(QuickReplies:DeleteTemplate(omwKey))
 Scan.OrderFulfillment.GetStatus=nil
 

@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Replies that only make sense before the craft (0.3.80)
+## Replies that only make sense before the craft (0.3.81)
 
 - Every keyword reply gained an "Only while an order is open" switch in Quick
   Replies. With it on, the reply is offered only while that customer still has
@@ -36,6 +36,10 @@ The original CraftScan and ProfitHUB folders are not required after migration an
   stops counting after 12 hours. Default off, so nothing changes until the
   switch is ticked; the event replies do not have it, because an order event
   is the order.
+- A card that was offered while the order was still open is taken off the
+  screen the moment the order gets its result, and a click on one that
+  slipped through sends nothing: "omw" no longer goes out one second behind
+  "Done, ty".
 
 ## Replies that waited while their character was away (0.3.79)
 
