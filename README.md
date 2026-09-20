@@ -25,10 +25,10 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Concentration cell tells its three answers apart (0.3.73)
+## Concentration cell tells its three answers apart (0.3.74)
 
 - A requested quality that concentration cannot reach is no longer printed as
-  "?" - the cell shows a red "!" and says so in its tooltip. Concentration
+  "?" - the cell shows a red dash and says so in its tooltip. Concentration
   bridges one quality step, so for an order far below its requested quality
   the client answers with no cost at all, which is not the same as data that
   has not loaded yet; "?" now means only the latter.

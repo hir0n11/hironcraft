@@ -767,7 +767,7 @@ CL:PopulateRow(row,{orderID=51,spellID=1234,minQuality=5})
 assert(row.concBtn:IsShown() and row.concBtn.text.text=='102','a known cost was not printed')
 engineAnswer={needs=true,reachable=false,concentrationCost=0}
 CL:PopulateRow(row,{orderID=52,spellID=1234,minQuality=5})
-assert(row.concBtn.text.text=='!','a quality out of reach was reported as missing data')
+assert(row.concBtn.text.text=='—','a quality out of reach was reported as missing data')
 engineAnswer={needs=true,reachable=true,concentrationCost=0}
 CL:PopulateRow(row,{orderID=53,spellID=1234,minQuality=5})
 assert(row.concBtn.text.text=='?','unloaded data lost its own marker')

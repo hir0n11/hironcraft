@@ -1409,7 +1409,7 @@ function CL:PopulateRow(row, order)
         if cost and cost > 0 then
             row.concBtn.text:SetText(tostring(math.floor(cost + 0.5)))
         elseif outOfReach then
-            row.concBtn.text:SetText("!")
+            row.concBtn.text:SetText("—")
         else
             row.concBtn.text:SetText("?")
         end
