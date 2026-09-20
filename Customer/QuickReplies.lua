@@ -843,7 +843,11 @@ end
 -- Both order-status replies are built the same way; only the status they
 -- react to, their template and the toast headline differ.
 local STATUS_OPTIONS = {
-    rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected' },
+    -- A decline has to reach the customer from wherever the craft happened:
+    -- it names the reagents they must fix before resending. A completion is a
+    -- courtesy note and stays with the character they were talking to.
+    rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected',
+        crafterMayAnswer = true },
     fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed',
         lastOrderOnly = true, automaticOnly = true, oncePerCustomer = true },
 }
@@ -1013,7 +1017,7 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     -- two may say it - unlike a conversational reply, which stays with the
     -- character holding the conversation.
     if not self:IsConversationCharacter(response)
-        and not self:IsOrderCrafter(response, entry)
+        and not (statusOption.crafterMayAnswer and self:IsOrderCrafter(response, entry))
     then
         self:ReportWithheldStatusReply(order, entry, response)
         return nil

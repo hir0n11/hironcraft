@@ -423,6 +423,42 @@ QuickReplies:OnOrderFulfillmentUpdated(auditOrder,lateStatus)
 for index=1,8 do if timers[index] then timers[index]() end end
 assert(#visible('AuditBuyer')==1,'decline without a material list never offered any reply')
 C_Timer=nil
+-- Orders collected on another account, crafted here: the decline has to reach
+-- the customer from the machine that did the craft, because it names the
+-- reagents to fix. The completion is a courtesy note and stays with the
+-- character the customer was talking to.
+dismissAll()
+Scan.DB.characters={['Seller-Realm']={}}
+local _,awayResponse,awaySecond=addCustomer('AwayBuyer')
+awayResponse.conversationCharacter='Collector-OtherRealm'
+awaySecond.conversationCharacter='Collector-OtherRealm'
+awayResponse.crafterFullName='Seller-Realm'
+awaySecond.crafterFullName='Seller-Realm'
+Scan.ReagentAudit={GetForOrder=function() return {rows={},complete=true} end}
+local awayOrder={customerName='AwayBuyer',responseID=101}
+local awayDecline={status='rejected',craftingOrderID=97001,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return awayDecline end
+QuickReplies:OnOrderFulfillmentUpdated(awayOrder,awayDecline)
+assert(#visible('AwayBuyer')==1,'the crafter could not tell a customer why the order was declined')
+dismissAll()
+local awayDone={status='fulfilled',craftingOrderID=97002,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return awayDone end
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},awayDone)
+assert(#visible('AwayBuyer')==0,'the completion note left the character the customer talked to')
+-- A conversation held by one of our own characters keeps both replies.
+awayResponse.conversationCharacter='Alt-Realm'
+Scan.DB.characters={['Seller-Realm']={},['Alt-Realm']={}}
+Scan.OrderFulfillment.GetStatus=function() return awayDecline end
+QuickReplies:OnOrderFulfillmentUpdated(awayOrder,
+    {status='rejected',craftingOrderID=97003,crafterFullName='Seller-Realm',
+        requestToken=awayResponse.requestToken})
+assert(#visible('AwayBuyer')==0,'a decline leaked onto the crafting alt of this account')
+Scan.DB.characters=nil
+Scan.OrderFulfillment.GetStatus=nil
+dismissAll()
+
 print('Order status reply tests passed (completed reply with switch, decline waits for materials).')
 
 -- Deleting or renaming a template invalidates already visible callbacks as well
