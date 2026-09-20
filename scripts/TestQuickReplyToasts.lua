@@ -133,27 +133,30 @@ assert(#visible('AnotherBuyer')==1, 'sending hid another customer\'s reply')
 dismissAll()
 
 -- Removing the representative item must not invalidate an identical answer
--- for another original member of the same suggestion.
-whisper('Geete', 'sent')
+-- for another original member of the same suggestion. Each of these uses its
+-- own customer: the same answer is not offered twice in a row to one person.
+local merged=addCustomer('MergedBuyer')
+whisper('MergedBuyer', 'sent')
 toast=visible()[1]
 local removed=toast.option.responseID
-Scan.DB.listed_orders['Geete-'..removed]=nil
-geete.responses[removed]=nil
+Scan.DB.listed_orders['MergedBuyer-'..removed]=nil
+merged.responses[removed]=nil
 click(toast)
 assert(#sent==3 and sent[3].text=='omw', 'remaining original row could not send the merged reply')
 
-geete, first, second=addCustomer('Geete')
-whisper('Geete', 'sent')
+addCustomer('ReplacedBuyer')
+whisper('ReplacedBuyer', 'sent')
 toast=visible()[1]
-addCustomer('Geete') -- Replaced tables, same customer/recipe/answer text.
+addCustomer('ReplacedBuyer') -- Replaced tables, same customer/recipe/answer text.
 click(toast)
 assert(#sent==3 and #visible()==0, 'old suggestion attached to replacement response tables')
-geete, first, second=addCustomer('Geete')
-whisper('Geete', 'sent')
+local _,retokenFirst,retokenSecond=addCustomer('RetokenBuyer')
+whisper('RetokenBuyer', 'sent')
 toast=visible()[1]
-first.requestToken='new-first'; second.requestToken='new-second'
+retokenFirst.requestToken='new-first'; retokenSecond.requestToken='new-second'
 click(toast)
 assert(#sent==3, 'old suggestion survived in-place request identity changes')
+
 
 -- Rendered values matter: item links, distinct prices and different crafters
 -- still produce separate alternatives, whereas identical generic text does not.
@@ -182,8 +185,9 @@ QuickReplies:GetConfig().templates.CUSTOM_1.enabled=false
 click(toast)
 assert(#sent==6 and sent[6].text=='hey hey', 'disabling one duplicate template killed all equivalent sources')
 QuickReplies:GetConfig().templates.CUSTOM_1.enabled=true
-whisper('Geete', 'yo')
-toast=visible()[1]
+addCustomer('ChangedTextBuyer')
+whisper('ChangedTextBuyer', 'yo')
+toast=visible('ChangedTextBuyer')[1]
 QuickReplies:GetConfig().templates.CUSTOM_1.response='changed'
 QuickReplies:GetConfig().templates.CUSTOM_3.response='changed'
 click(toast)
@@ -278,21 +282,24 @@ propose('CooldownBuyer','sent'); HironCraftScanSendQuickReply()
 assert(#sent==baseline+1 and #visible()==0,'keyboard did not click the top quick reply')
 propose('CooldownBuyer','sending orders'); now=now+5.99
 HironCraftScanSendQuickReply()
-assert(#sent==baseline+1 and #visible('CooldownBuyer')==1,'same reply bypassed six-second cooldown')
+assert(#sent==baseline+1 and #visible('CooldownBuyer')==0,
+    'the answer just sent was offered again right away')
 propose('OtherCooldownBuyer','sent'); HironCraftScanSendQuickReply()
 assert(#sent==baseline+2 and sent[#sent].customer=='OtherCooldownBuyer','cooldown leaked to another customer')
 propose('CooldownBuyer','yo'); HironCraftScanSendQuickReply()
 assert(#sent==baseline+3 and sent[#sent].text=='hey hey','cooldown blocked another reply')
 now=now+0.01
+propose('CooldownBuyer','sending orders')
 HironCraftScanSendQuickReply()
-assert(#sent==baseline+4 and sent[#sent].text=='omw','reply did not unlock after six seconds')
+assert(#sent==baseline+4 and sent[#sent].text=='omw',
+    'the answer stayed blocked after the talk moved on')
 assert(not QuickReplies:SendTopReply(false),'unguarded keyboard entry point')
 local send=Scan.Utils.SendResponses
 Scan.Utils.SendResponses=function() return false end
-now=now+10;propose('CooldownBuyer','sent');HironCraftScanSendQuickReply()
+now=now+10;propose('CooldownBuyer','yo');HironCraftScanSendQuickReply()
 Scan.Utils.SendResponses=send
 HironCraftScanSendQuickReply()
-assert(#sent==baseline+5,'failed send consumed the cooldown')
+assert(#sent==baseline+5 and sent[#sent].text=='hey hey','failed send consumed the cooldown')
 assert(not QuickReplies:SendTopReply(true),'empty stack consumed keyboard action')
 print('Quick reply cooldown and keyboard tests passed (6s, independent recipients/text, failure retry).')
 
@@ -432,6 +439,8 @@ assert(#visible()==0 and not QuickReplies:SendTopReply(true))
 oldPriceClick(oldPrice,'LeftButton')
 whisper('CooldownBuyer','price')
 assert(#visible()==0 and #sent==beforeEdits,'deleted default sent or proposed an answer')
+-- Long enough after the last "omw" that saying it again is natural.
+now=now+400
 whisper('CooldownBuyer','sent')
 local oldCustom=visible()[1]
 local oldCustomClick=oldCustom.scripts.OnClick
@@ -449,27 +458,29 @@ assert(QuickReplies.NormalizeRepeatSeconds('45')==45 and QuickReplies.NormalizeR
     and QuickReplies.NormalizeRepeatSeconds(99999)==86400 and QuickReplies.NormalizeRepeatSeconds('later')==0,
     'the repeat delay accepted a value outside its range')
 local repeatKey=QuickReplies:CreateCustomTemplate('Coming back','omw now','omw')
-QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=120
+-- Longer than the few minutes in which nobody repeats themselves anyway, so
+-- this measures the configured delay and nothing else.
+QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=600
 addCustomer('RepeatBuyer');addCustomer('OtherRepeatBuyer')
 local beforeRepeat=#sent
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==1,'the reply was not offered the first time')
 click(visible('RepeatBuyer')[1])
 assert(#sent==beforeRepeat+1 and sent[#sent].text=='omw','the reply was not sent')
-now=now+100
+now=now+400
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==0,'the same reply was offered again inside its own delay')
 whisper('OtherRepeatBuyer','omw now')
 assert(#visible('OtherRepeatBuyer')==1,'the delay reached another person')
 dismissAll()
-now=now+130
+now=now+300
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==1,'the reply never came back after its delay')
 dismissAll()
--- A delay of zero is the old behaviour: offer it every time.
+-- A delay of zero is the old behaviour: offer it whenever it fits.
 QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=0
 whisper('RepeatBuyer','omw now');click(visible('RepeatBuyer')[1])
-now=now+10
+now=now+400
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==1,'a reply without a delay was withheld')
 dismissAll()
@@ -664,5 +675,35 @@ assert(#sent==staleSends,'a click after the order was finished still sent the re
 dismissAll()
 assert(QuickReplies:DeleteTemplate(omwKey))
 Scan.OrderFulfillment.GetStatus=nil
+
+-- Nobody repeats themselves back to back: while the last thing said to this
+-- customer is exactly this answer, it is not offered again. Saying anything
+-- else moves the talk on and the answer is available once more.
+dismissAll()
+QuickReplies:GetConfig().templates.CUSTOM_1.enabled=true
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords='yo,hello'
+QuickReplies:GetConfig().templates.CUSTOM_1.response='hey hey'
+local repeatKey2=QuickReplies:CreateCustomTemplate('Coming','sending it now','omw')
+addCustomer('NoRepeatBuyer')
+local beforeRepeat2=#sent
+whisper('NoRepeatBuyer','sending it now')
+assert(#visible('NoRepeatBuyer')==1,'the answer was not offered the first time')
+click(visible('NoRepeatBuyer')[1])
+assert(#sent==beforeRepeat2+1 and sent[#sent].text=='omw')
+whisper('NoRepeatBuyer','sending it now')
+assert(#visible('NoRepeatBuyer')==0,'the same answer was offered twice in a row')
+whisper('NoRepeatBuyer','yo')
+assert(#visible('NoRepeatBuyer')==1,'a different answer was blocked as a repeat')
+click(visible('NoRepeatBuyer')[1])
+assert(#sent==beforeRepeat2+2 and sent[#sent].text=='hey hey')
+whisper('NoRepeatBuyer','sending it now')
+assert(#visible('NoRepeatBuyer')==1,'the answer stayed blocked after the talk moved on')
+dismissAll()
+-- Another customer is another conversation.
+addCustomer('OtherRepeatBuyer2')
+whisper('OtherRepeatBuyer2','sending it now')
+assert(#visible('OtherRepeatBuyer2')==1,'the block reached another customer')
+dismissAll()
+assert(QuickReplies:DeleteTemplate(repeatKey2))
 
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')

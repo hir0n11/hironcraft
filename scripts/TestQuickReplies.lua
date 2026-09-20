@@ -147,10 +147,10 @@ assert(classifiedHas("CUSTOM_1") and not classifiedHas("CUSTOM_2"),
 QuickReplies:GetConfig().templates.CUSTOM_1.priority = 0
 
 local answers = QuickReplies:GetConfig().templates
-assert(answers.NAME.response == '{crafter} will craft it.'
-    and answers.PRICE.response == 'The commission is {commission}.'
-    and answers.ORDER.response == 'Send a personal order to {crafter}.',
-    'the default answers are back to bare placeholders')
+assert(answers.NAME.response == '{crafter}'
+    and answers.PRICE.response == '{commission}'
+    and answers.ORDER.response == 'Send personal order to {crafter}',
+    'the default answers changed wording on their own')
 
 local definitions = QuickReplies:GetDefinitions()
 assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")

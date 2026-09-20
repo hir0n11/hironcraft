@@ -31,19 +31,19 @@ assert(Q:ApplyRemoteConfig(remote) and Q:GetTemplateLabel('NAME')=='Who makes it
 assert(Q:GetConfig().templates.PRICE.deleted and not Q:BuildReply('PRICE',{}))
 assert(Q:DeleteTemplate('REJECTED_ORDER') and not Q:BuildReply('REJECTED_ORDER',{}))
 assert(not Q:DeleteTemplate('REJECTED_ORDER') and not Q:RenameTemplate('REJECTED_ORDER','Declined'))
--- An answer the crafter wrote themselves is theirs; only the untouched
--- default wording is carried over to the friendlier one.
-local upgrade={quick_replies={schema_version=9,templates={
-    NAME={enabled=true,keywords='who',response='{crafter}'},
+-- 0.3.85 rewrote three built-in answers and 0.3.86 put them back. An answer
+-- the crafter wrote themselves is theirs and survives both.
+local upgrade={quick_replies={schema_version=10,templates={
+    NAME={enabled=true,keywords='who',response='{crafter} will craft it.'},
     PRICE={enabled=true,keywords='price',response='pay me {commission} pls'},
 }}}
 local previousDB=Scan.DB.settings
 Scan.DB.settings=upgrade
 assert(loadfile('Customer/QuickReplies.lua'))('HironCraft',Scan)
 local upgraded=Scan.QuickReplies:GetConfig().templates
-assert(upgraded.NAME.response=='{crafter} will craft it.','an untouched default kept the bare tag')
+assert(upgraded.NAME.response=='{crafter}','the rewritten answer was not restored')
 assert(upgraded.PRICE.response=='pay me {commission} pls','an edited answer was overwritten')
-assert(Scan.QuickReplies:GetConfig().schema_version==10)
+assert(Scan.QuickReplies:GetConfig().schema_version==11)
 Scan.DB.settings=previousDB
 assert(loadfile('Customer/QuickReplies.lua'))('HironCraft',Scan);Q=Scan.QuickReplies
 

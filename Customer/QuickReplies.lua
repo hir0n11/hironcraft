@@ -24,19 +24,25 @@ local REJECTION_TEXT_MIGRATIONS = {
     ['Resend. You missed {reagent_issues}'] = true,
     ['Resend. You missed [reagent_issues]'] = true,
 }
--- Answers that used to be a bare placeholder read like a database row rather
--- than a person. Upgrade the wording for anyone who never edited it; a text
--- the crafter wrote themselves is theirs and is left alone.
+-- 0.3.85 rewrote these three answers and 0.3.86 put them back. Undo that
+-- rewrite for anyone who never edited them; a text the crafter wrote
+-- themselves is theirs and is left alone.
 local DEFAULT_TEXT_MIGRATIONS = {
-    NAME = { ['{crafter}'] = true },
-    PRICE = { ['{commission}'] = true },
-    ORDER = { ['Send personal order to {crafter}'] = true },
+    NAME = { ['{crafter} will craft it.'] = true },
+    PRICE = { ['The commission is {commission}.'] = true },
+    ORDER = { ['Send a personal order to {crafter}.'] = true },
 }
 local sentReplies = {}
 
-local function ReplyKey(customer, reply)
+local lastSentReply = {}
+
+local function CustomerKey(customer)
     local info = HironCraftScan.DB.customers[customer]
-    return tostring(info and info.guid or customer):lower() .. '\31' .. reply
+    return tostring(info and info.guid or customer):lower()
+end
+
+local function ReplyKey(customer, reply)
+    return CustomerKey(customer) .. '\31' .. reply
 end
 
 function QuickReplies:IsReplyOnCooldown(customer, reply)
@@ -49,6 +55,22 @@ end
 
 function QuickReplies:RememberSentReply(customer, reply)
     sentReplies[ReplyKey(customer, reply)] = GetTime()
+    lastSentReply[CustomerKey(customer)] = { reply = reply, at = GetTime() }
+end
+
+-- Nobody repeats themselves back to back. While the last thing said to this
+-- customer is exactly this answer, offering it again is noise: they have it
+-- in front of them. Saying anything else - another reply, an order status -
+-- moves the conversation on and lifts the block at once, and after a few
+-- minutes the same question deserves an answer again anyway.
+local LAST_REPLY_REPEAT_WINDOW = 300
+
+function QuickReplies:IsReplyTheLastThingSaid(customer, reply)
+    if type(reply) ~= 'string' or reply == '' then return false end
+
+    local entry = lastSentReply[CustomerKey(customer)]
+    if type(entry) ~= 'table' or entry.reply ~= reply then return false end
+    return (GetTime() - (tonumber(entry.at) or 0)) < LAST_REPLY_REPEAT_WINDOW
 end
 
 -- Per quick reply: how long the same answer stays out of the way for the same
@@ -115,17 +137,17 @@ local DEFAULT_TEMPLATES = {
     {
         key = 'NAME',
         keywords = 'name, crafter, char, character, who',
-        response = '{crafter} will craft it.',
+        response = '{crafter}',
     },
     {
         key = 'PRICE',
         keywords = 'price, cost, fee, how much, commission, tip',
-        response = 'The commission is {commission}.',
+        response = '{commission}',
     },
     {
         key = 'ORDER',
         keywords = 'where, where to send, send where, order where, who to send, personal order',
-        response = 'Send a personal order to {crafter}.',
+        response = 'Send personal order to {crafter}',
     },
     {
         key = 'QUALITY',
@@ -168,7 +190,7 @@ local function EnsureConfig()
         config.typo_tolerance = true
     end
     local previousSchema = tonumber(config.schema_version) or 0
-    config.schema_version = 10
+    config.schema_version = 11
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -185,7 +207,7 @@ local function EnsureConfig()
         if template.response == nil or (definition.key == REJECTED_ORDER_TEMPLATE_KEY
             and not template.deleted and previousSchema < 8
             and REJECTION_TEXT_MIGRATIONS[Trim(template.response)])
-            or (upgrades and not template.deleted and previousSchema < 10
+            or (upgrades and not template.deleted and previousSchema < 11
                 and upgrades[Trim(template.response)]) then
             template.response = definition.response
         end
@@ -1331,6 +1353,14 @@ local function SendOption(toast, option)
         return
     end
 
+    -- Only conversational answers: an order event that repeats itself is a
+    -- new attempt at the same order, and the customer has to hear about it.
+    if not option.statusEntry and QuickReplies:IsReplyTheLastThingSaid(option.customer, reply) then
+        print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
+        DismissEquivalentToasts(option)
+        return
+    end
+
     -- Long reagent audits are split only on this explicit click; the complete
     -- reply shares one cooldown. Each whisper is recorded in chat history.
     if QuickReplies:IsReplyOnCooldown(option.customer, reply) then return end
@@ -1503,6 +1533,9 @@ function QuickReplies:BuildPopupOptions(customer, message, responses, templateKe
     for _, candidate in ipairs(responses) do
         for _, templateKey in ipairs(templateKeys) do
             local reply = self:BuildReply(templateKey, candidate.response)
+            if reply and self:IsReplyTheLastThingSaid(customer, reply) then
+                reply = nil
+            end
             if reply then
                 local contextLabel = ResponseLabel(candidate.response)
                 local option = {

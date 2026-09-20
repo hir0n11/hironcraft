@@ -25,18 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Which reply wins, and answers that read like a person (0.3.85)
+## No answer twice in a row, built-in wording restored (0.3.86)
+
+- The same answer is no longer offered to the same customer twice in a row.
+  While the last thing said to them is exactly this text, the card does not
+  appear and a click on one made earlier sends nothing. Saying anything else
+  to them lifts it at once, and after five minutes the same question is
+  answered again anyway. Order events are exempt: a decline repeating itself
+  is a new attempt at the same order, and the customer has to hear about it.
+- The three built-in answers 0.3.85 rewrote are back to their original
+  wording. Anything the crafter edited was never touched by either change.
+
+## Which reply wins (0.3.85)
 
 - Ranking now follows what the customer actually said. A longer phrase they
   wrote beats a single word, and a word they really wrote beats one read
   through a typo. Priority ranks answers that match the message equally well;
   it no longer lets a guess on a high-priority reply outrank a certain match
   on another.
-- The three built-in answers that were a bare placeholder now read like a
-  person: "{crafter} will craft it.", "The commission is {commission}." and
-  "Send a personal order to {crafter}." An answer that was edited is left
-  exactly as it is; only wording still identical to the old default is
-  carried over, once.
 
 ## One completion reply, even when two orders finish together (0.3.84)
 
