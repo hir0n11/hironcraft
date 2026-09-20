@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Replies that waited while their character was away (0.3.79)
+
+- A decline or completion whose reply never appeared is offered again when
+  its conversation character logs in. The card was built from a live event,
+  so a status that arrived while that character was logged out - because the
+  crafting happened on another character or on the linked account - lost its
+  reply for good. Replies that were actually sent are remembered, so a reload
+  does not offer them a second time, and only the five newest unanswered ones
+  from the last six hours are offered.
+- When a status arrives on a character that did not speak to this customer,
+  the addon now says so in chat and names the character that can answer,
+  instead of staying silent. The reply itself still belongs to that
+  character: a whisper from anyone else reaches the customer as a stranger,
+  and cannot cross factions at all.
+
 ## Typos in short keywords, general greeting from the chat menu (0.3.78)
 
 - The existing "Recognize typos" switch now also forgives typos in short

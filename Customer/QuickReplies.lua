@@ -803,6 +803,48 @@ function QuickReplies:HasUnfinishedSiblingOrders(order)
     return false
 end
 
+-- A decline or a completion that happened while its conversation character
+-- was logged out - on another character, or on the linked account that did
+-- the crafting - never got its reply offered: the card is built from a live
+-- event, and the event had already passed. Remember which replies were
+-- actually sent so the ones that were not can be offered again at login.
+local PENDING_STATUS_REPLY_MAX_AGE = 6 * 60 * 60
+local MAX_PENDING_STATUS_REPLIES = 5
+
+local function StatusReplyKey(order, entry)
+    if type(order) ~= 'table' or type(entry) ~= 'table' then return nil end
+    local orderID = HironCraftScan.OrderToOrderID(order)
+    if not orderID then return nil end
+    return table.concat({
+        tostring(orderID),
+        tostring(entry.craftingOrderID or entry.requestToken or ''),
+        tostring(entry.status or ''),
+    }, '\31')
+end
+
+local function SentStatusReplies()
+    return HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'status_replies_sent', {})
+end
+
+function QuickReplies:WasStatusReplySent(order, entry)
+    local key = StatusReplyKey(order, entry)
+    return key ~= nil and SentStatusReplies()[key] ~= nil
+end
+
+function QuickReplies:RememberSentStatusReply(order, entry)
+    local key = StatusReplyKey(order, entry)
+    if not key then return end
+
+    local sent = SentStatusReplies()
+    local now = time and time() or 0
+    for stored, sentAt in pairs(sent) do
+        if type(sentAt) ~= 'number' or now - sentAt > PENDING_STATUS_REPLY_MAX_AGE then
+            sent[stored] = nil
+        end
+    end
+    sent[key] = now
+end
+
 function QuickReplies:BuildOrderStatusOption(order, entry)
     local config = EnsureConfig()
     local statusOption = type(entry) == 'table' and STATUS_OPTIONS[entry.status]
@@ -826,7 +868,10 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     if not ok or type(response) ~= 'table' then
         return nil
     end
-    if not self:IsConversationCharacter(response) then return nil end
+    if not self:IsConversationCharacter(response) then
+        self:ReportWithheldStatusReply(order, entry, response)
+        return nil
+    end
     if self:IsTemplateOnRepeatCooldown(order.customerName, statusOption.template) then
         return nil
     end
@@ -847,6 +892,7 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         requestToken = response.requestToken,
         requestTime = response.time,
         templateKey = statusOption.template,
+        statusEntry = entry,
         rejectionOrderID = entry.status == 'rejected' and entry.craftingOrderID or nil,
         templateLabel = self:GetTemplateLabel(statusOption.template),
         reply = reply,
@@ -1192,6 +1238,11 @@ local function SendOption(toast, option)
     if HironCraftScan.Utils.SendResponses(messages, option.customer, true) == false then return end
     QuickReplies:RememberSentReply(option.customer, reply)
     QuickReplies:RememberSentTemplate(option.customer, templateKey or option.templateKey)
+    if option.statusEntry then
+        QuickReplies:RememberSentStatusReply(
+            { customerName = option.customer, responseID = option.responseID },
+            option.statusEntry)
+    end
     DismissEquivalentToasts(option)
 end
 
@@ -1584,8 +1635,80 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
     LayoutToasts()
 end
 
+local reportedWithheld = {}
+
+-- The reply belongs to the character that spoke to this customer, and a
+-- whisper from anyone else would reach the customer as a stranger. Say so
+-- once per order instead of letting the crafter wonder why nothing appeared.
+function QuickReplies:ReportWithheldStatusReply(order, entry, response)
+    local owner = type(response) == 'table' and response.conversationCharacter
+    if type(owner) ~= 'string' or owner == '' then return end
+    if self:WasStatusReplySent(order, entry) then return end
+
+    local key = StatusReplyKey(order, entry)
+    if not key or reportedWithheld[key] then return end
+    reportedWithheld[key] = true
+
+    local customer = HironCraftScan.NameAndRealmToName
+        and HironCraftScan.NameAndRealmToName(order.customerName) or order.customerName
+    local message = L('Order reply waits for its character')
+    if type(message) == 'string' and message:find('%%s') then
+        message = message:format(tostring(customer), owner)
+    else
+        -- A locale without this line still has to name who can answer.
+        message = tostring(message) .. ' ' .. tostring(customer) .. ' / ' .. tostring(owner)
+    end
+    print('|cffffd100HironCraftScan:|r ' .. tostring(message))
+end
+
+-- Offer the replies whose moment passed while this character was elsewhere.
+function QuickReplies:OfferPendingOrderStatusReplies()
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if not fulfillment or not fulfillment.GetStatuses then return 0 end
+    if not EnsureConfig().enabled then return 0 end
+
+    local now = time and time() or 0
+    local pending = {}
+    for _, entry in pairs(fulfillment:GetStatuses() or {}) do
+        if type(entry) == 'table' and STATUS_OPTIONS[entry.status]
+            and type(entry.customerName) == 'string' and entry.responseID ~= nil
+        then
+            local updatedAt = tonumber(entry.updatedAt) or 0
+            local order = { customerName = entry.customerName, responseID = entry.responseID }
+            if now - updatedAt <= PENDING_STATUS_REPLY_MAX_AGE
+                and not self:WasStatusReplySent(order, entry)
+            then
+                pending[#pending + 1] = { order = order, entry = entry, updatedAt = updatedAt }
+            end
+        end
+    end
+
+    -- Newest first: an old decline matters less than the one just made, and
+    -- the stack of cards stays short.
+    table.sort(pending, function(lhs, rhs) return lhs.updatedAt > rhs.updatedAt end)
+
+    local offered = 0
+    for index, candidate in ipairs(pending) do
+        if index > MAX_PENDING_STATUS_REPLIES then break end
+        -- Everything that decides whether this reply may be offered at all -
+        -- the listing, the conversation character, the template - is checked
+        -- by the normal path.
+        self:OnOrderFulfillmentUpdated(candidate.order, candidate.entry)
+        offered = offered + 1
+    end
+
+    return offered
+end
+
 HironCraftScan.Utils.onLoad(function()
     EnsureConfig()
+
+    -- Linked-account statuses and the order list both arrive after load, so
+    -- look once things have settled, and once more for a slow sync.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(8, function() QuickReplies:OfferPendingOrderStatusReplies() end)
+        C_Timer.After(25, function() QuickReplies:OfferPendingOrderStatusReplies() end)
+    end
 end)
 
 HironCraftScan.Events:Register('ORDER_FULFILLMENT_UPDATED', function(order, entry)

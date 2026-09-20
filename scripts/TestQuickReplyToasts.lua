@@ -521,4 +521,52 @@ dismissAll()
 time=nil
 Scan.OrderFulfillment.GetStatus=previousStatusLookup
 
+-- A decline made while its conversation character was logged out, or while
+-- the crafting happened on the linked account, must still be offered when
+-- that character comes back. The live event is long gone by then.
+dismissAll()
+Scan.DB.settings.status_replies_sent=nil
+local storedStatuses={}
+Scan.OrderFulfillment.GetStatuses=function() return storedStatuses end
+local catchupCustomer,catchupFirst=addCustomer('CatchupBuyer')
+catchupFirst.conversationCharacter='Seller-Realm'
+local catchupStatus={customerName='CatchupBuyer',responseID=101,status='rejected',
+    craftingOrderID=95001,requestToken=catchupFirst.requestToken,updatedAt=(now or 0)}
+storedStatuses['CatchupBuyer-101']=catchupStatus
+Scan.OrderFulfillment.GetStatus=function() return catchupStatus end
+Scan.ReagentAudit={GetForOrder=function() return {rows={},complete=true} end}
+local beforeCatchup=#sent
+assert(QuickReplies:OfferPendingOrderStatusReplies()>0,'no pending reply was found at login')
+local catchupCard=visible('CatchupBuyer')[1]
+assert(catchupCard and catchupCard.option.templateKey=='REJECTED_ORDER',
+    'a decline made while this character was away offered no reply')
+assert(#sent==beforeCatchup,'the catch-up sent the reply by itself')
+click(catchupCard)
+assert(#sent==beforeCatchup+1,'the caught-up reply could not be sent')
+-- Once it is sent it is finished, including after a reload.
+assert(QuickReplies:WasStatusReplySent({customerName='CatchupBuyer',responseID=101},catchupStatus),
+    'the sent reply was not remembered')
+dismissAll()
+assert(QuickReplies:OfferPendingOrderStatusReplies()==0,'an answered decline was offered again')
+assert(#visible('CatchupBuyer')==0)
+-- A reply for another character stays hers, and is not silently dropped.
+storedStatuses={}
+Scan.DB.settings.status_replies_sent=nil
+local _,otherFirst=addCustomer('OtherCharBuyer')
+otherFirst.conversationCharacter='Someone-Else'
+local otherStatus={customerName='OtherCharBuyer',responseID=101,status='rejected',
+    craftingOrderID=95002,requestToken=otherFirst.requestToken,updatedAt=(now or 0)}
+storedStatuses['OtherCharBuyer-101']=otherStatus
+Scan.OrderFulfillment.GetStatus=function() return otherStatus end
+local printed={}
+local realPrint=print
+print=function(text) printed[#printed+1]=tostring(text) end
+QuickReplies:OfferPendingOrderStatusReplies()
+print=realPrint
+assert(#visible('OtherCharBuyer')==0,'a reply was offered on the wrong character')
+assert(#printed==1 and printed[1]:find('Someone-Else',1,true),
+    'the crafter was not told which character owns the reply')
+storedStatuses={}
+Scan.OrderFulfillment.GetStatuses=nil
+
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')
