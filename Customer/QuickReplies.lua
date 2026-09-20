@@ -760,7 +760,7 @@ end
 local STATUS_OPTIONS = {
     rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected' },
     fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed',
-        lastOrderOnly = true, automaticOnly = true },
+        lastOrderOnly = true, automaticOnly = true, oncePerCustomer = true },
 }
 
 -- A customer who placed several orders at once gets one "your order is done",
@@ -849,6 +849,26 @@ function QuickReplies:WasStatusReplySent(order, entry)
     return key ~= nil and SentStatusReplies()[key] ~= nil
 end
 
+-- Mark every finished order this customer has as announced, and take the
+-- cards that would announce them again off the screen.
+function QuickReplies:MarkCustomerCompletionAnswered(customer, templateKey)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if type(customer) ~= 'string' or not fulfillment or not fulfillment.GetStatus then return end
+
+    for _, listed in pairs(HironCraftScan.DB.listed_orders or {}) do
+        if type(listed) == 'table' and listed.customerName == customer then
+            local ok, entry = pcall(fulfillment.GetStatus, fulfillment, listed)
+            if ok and type(entry) == 'table' and STATUS_OPTIONS[entry.status]
+                and STATUS_OPTIONS[entry.status].oncePerCustomer
+            then
+                self:RememberSentStatusReply(listed, entry)
+            end
+        end
+    end
+
+    self:DismissTemplateToasts(customer, templateKey)
+end
+
 function QuickReplies:RememberSentStatusReply(order, entry)
     local key = StatusReplyKey(order, entry)
     if not key then return end
@@ -880,6 +900,12 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     -- A check mark set by hand says the crafter already dealt with this order
     -- their own way. Announcing it again is their call, not ours.
     if statusOption.automaticOnly and entry.automatic == false then
+        return nil
+    end
+
+    -- Two orders can finish in the same moment and each ask to announce
+    -- itself. One "your order is done" answers for all of them.
+    if statusOption.oncePerCustomer and self:WasStatusReplySent(order, entry) then
         return nil
     end
 
@@ -1255,6 +1281,17 @@ local function SendOption(toast, option)
         return
     end
 
+    local statusEntry = option.statusEntry
+    local statusOption = statusEntry and STATUS_OPTIONS[statusEntry.status]
+    if statusOption and statusOption.oncePerCustomer
+        and QuickReplies:WasStatusReplySent(
+            { customerName = option.customer, responseID = option.responseID }, statusEntry)
+    then
+        print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
+        DismissEquivalentToasts(option)
+        return
+    end
+
     -- The order may have finished between the card appearing and this click.
     if QuickReplies:IsTemplateWaitingForOpenOrder(option.customer, templateKey or option.templateKey) then
         print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
@@ -1273,6 +1310,10 @@ local function SendOption(toast, option)
         QuickReplies:RememberSentStatusReply(
             { customerName = option.customer, responseID = option.responseID },
             option.statusEntry)
+        local statusOption = STATUS_OPTIONS[option.statusEntry.status]
+        if statusOption and statusOption.oncePerCustomer then
+            QuickReplies:MarkCustomerCompletionAnswered(option.customer, option.templateKey)
+        end
     end
     DismissEquivalentToasts(option)
 end
@@ -1626,6 +1667,25 @@ end
 -- A card that was offered while the order was still open stays on screen
 -- after it is finished, and a blind click sends "omw" right behind "Done,
 -- ty". Take those cards away as soon as the order has its result.
+-- Every card of one template for one customer, used when a single reply has
+-- already answered for all of them.
+function QuickReplies:DismissTemplateToasts(customer, templateKey)
+    if type(customer) ~= 'string' or templateKey == nil then return 0 end
+
+    local dismissed = 0
+    for _, toast in ipairs(toastPool) do
+        local option = toast.option
+        if toast:IsShown() and type(option) == 'table' and option.customer == customer
+            and option.templateKey == templateKey
+        then
+            DismissToast(toast)
+            dismissed = dismissed + 1
+        end
+    end
+
+    return dismissed
+end
+
 function QuickReplies:DismissRepliesWaitingForOpenOrder(customer)
     if type(customer) ~= 'string' then return 0 end
 

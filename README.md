@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One completion reply, even when two orders finish together (0.3.84)
+
+- Two orders finishing in the same moment each asked to announce themselves,
+  and both messages went out. Sending one "your order is done" now counts as
+  the answer for everything of that customer's that is already finished: the
+  other cards leave the screen, a click on one that slipped through sends
+  nothing, and they are not offered again after a reload. An order that
+  finishes later still gets its own reply.
+
 ## No completion reply for a check mark set by hand (0.3.83)
 
 - Marking an order complete by hand no longer offers the completion reply. A

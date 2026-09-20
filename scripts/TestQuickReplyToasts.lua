@@ -509,6 +509,26 @@ local batchCard=visible('BatchBuyer')[1]
 assert(batchCard and batchCard.option.templateKey=='COMPLETED_ORDER',
     'the last order of the batch offered no done reply')
 assert(#visible('BatchBuyer')==1,'the batch offered more than one done reply')
+
+-- Two orders can finish in the same moment and each ask to announce itself.
+-- One "your order is done" answers for both: the second card disappears when
+-- the first is sent, and a click on one that slipped through sends nothing.
+Scan.DB.settings.status_replies_sent=nil
+batchStatuses['101']=firstDone
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
+local batchCards=visible('BatchBuyer')
+assert(#batchCards==2,'the second finished order offered no card of its own')
+local sentBeforeBatch=#sent
+click(batchCards[1])
+assert(#sent==sentBeforeBatch+1,'the done reply was not sent')
+assert(#visible('BatchBuyer')==0,'the second done reply stayed on screen')
+click(batchCards[2])
+assert(#sent==sentBeforeBatch+1,'the second done reply was sent as well')
+-- It is not offered again either, including after a reload.
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=102},secondDone)
+assert(#visible('BatchBuyer')==0,'an answered batch offered the done reply again')
+Scan.DB.settings.status_replies_sent=nil
 dismissAll()
 -- A declined order is a finished one: it does not hold the reply back, and a
 -- decline is still reported per order.
