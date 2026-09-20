@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One completion note per customer, not per order (0.3.93)
+
+- Orders of one customer are crafted one after another, often on different
+  characters, so each completion landed when nothing else was pending any
+  more and asked to announce itself: three "your order is done" to the same
+  person. Sending that reply now keeps the addon quiet about completions for
+  that customer for fifteen minutes, across character switches and reloads,
+  so a batch is announced once however it is spread out. A customer whose
+  next batch finishes later still hears about it.
+
 ## A greeting the server refused comes back as a card (0.3.92)
 
 - A greeting taken back after the server refused it is now offered again on

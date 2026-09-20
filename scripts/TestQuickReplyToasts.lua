@@ -575,8 +575,25 @@ assert(#sent==sentBeforeBatch+1,'the second done reply was sent as well')
 QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
 QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=102},secondDone)
 assert(#visible('BatchBuyer')==0,'an answered batch offered the done reply again')
+-- Orders are crafted one after another, often on different characters, so a
+-- later completion lands when nothing else is pending any more. The customer
+-- was told a minute ago; they are not told again.
+local laterDone={status='fulfilled',craftingOrderID=91003,requestToken=batchFirst.requestToken}
+batchStatuses['101']=laterDone
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},laterDone)
+assert(#visible('BatchBuyer')==0,
+    'an order finished right after the batch announced itself again')
+-- Much later it is a new batch, and it is announced.
+local previousTime=time
+time=function() return 20*60 end
+local newBatch={status='fulfilled',craftingOrderID=91004,requestToken=batchFirst.requestToken}
+batchStatuses['101']=newBatch
+QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},newBatch)
+assert(#visible('BatchBuyer')==1,'a new batch was never announced')
+time=previousTime
 Scan.DB.settings.status_replies_sent=nil
 dismissAll()
+
 -- A declined order is a finished one: it does not hold the reply back, and a
 -- decline is still reported per order.
 local _,declFirst,declSecond=addCustomer('DeclineBatchBuyer')

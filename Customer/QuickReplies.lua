@@ -918,6 +918,17 @@ end
 local PENDING_STATUS_REPLY_MAX_AGE = 6 * 60 * 60
 local MAX_PENDING_STATUS_REPLIES = 5
 
+-- One "your order is done" covers the whole batch, but a batch is not always
+-- finished at once: orders are crafted one after another, often on different
+-- characters, and each completion that lands when nothing else is left
+-- pending would ask to announce itself. Remember that this customer was told,
+-- per customer and across character switches, and stay quiet for a while.
+local COMPLETION_QUIET_WINDOW = 15 * 60
+
+local function CustomerStatusReplyKey(customer, templateKey)
+    return 'customer\31' .. CustomerKey(customer) .. '\31' .. tostring(templateKey)
+end
+
 local function StatusReplyKey(order, entry)
     if type(order) ~= 'table' or type(entry) ~= 'table' then return nil end
     local orderID = HironCraftScan.OrderToOrderID(order)
@@ -931,6 +942,18 @@ end
 
 local function SentStatusReplies()
     return HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'status_replies_sent', {})
+end
+
+function QuickReplies:WasCustomerTold(customer, templateKey, window)
+    local sentAt = tonumber(SentStatusReplies()[CustomerStatusReplyKey(customer, templateKey)])
+    if not sentAt then return false end
+
+    local now = time and time() or 0
+    return (now - sentAt) < (tonumber(window) or COMPLETION_QUIET_WINDOW)
+end
+
+function QuickReplies:RememberCustomerTold(customer, templateKey)
+    SentStatusReplies()[CustomerStatusReplyKey(customer, templateKey)] = time and time() or 0
 end
 
 function QuickReplies:WasStatusReplySent(order, entry)
@@ -992,9 +1015,13 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         return nil
     end
 
-    -- Two orders can finish in the same moment and each ask to announce
-    -- itself. One "your order is done" answers for all of them.
-    if statusOption.oncePerCustomer and self:WasStatusReplySent(order, entry) then
+    -- Two orders can finish in the same moment, or one after another over a
+    -- few minutes, and each would ask to announce itself. One "your order is
+    -- done" answers for all of them.
+    if statusOption.oncePerCustomer
+        and (self:WasStatusReplySent(order, entry)
+            or self:WasCustomerTold(order.customerName, statusOption.template))
+    then
         return nil
     end
 
@@ -1423,6 +1450,7 @@ local function SendOption(toast, option)
         local statusOption = STATUS_OPTIONS[option.statusEntry.status]
         if statusOption and statusOption.oncePerCustomer then
             QuickReplies:MarkCustomerCompletionAnswered(option.customer, option.templateKey)
+            QuickReplies:RememberCustomerTold(option.customer, option.templateKey)
         end
     end
     DismissEquivalentToasts(option)
