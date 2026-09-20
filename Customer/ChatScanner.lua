@@ -2297,7 +2297,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 overrides,
                 customerGuid
             )
-            if not crafterInfo and not classPending and not IsGenericRequest(message) then
+            if not crafterInfo and not classPending and not overrides.forceGeneralRequest
+                and not IsGenericRequest(message) then
                 OfferDeferredQuickReply(customer, message, customerInfo, overrides)
                 return false
             end
@@ -2315,7 +2316,12 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         overrides.customerStartedInteraction = true
     end
 
-    if not crafterInfo then
+    -- A general greeting the crafter started themselves answers for every
+    -- profession on purpose. Do not let a profession named in the line turn it
+    -- into one specific request.
+    if overrides.forceGeneralRequest then
+        crafterInfo, itemID, recipeInfo, itemMatches, classPending = nil, nil, nil, nil, nil
+    elseif not crafterInfo then
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
     if not crafterInfo then
@@ -2335,7 +2341,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                     HironCraftScan.OnMessage(event, message, customer, guid, options)
                 end)
             end)
-        elseif IsGenericRequest(message) then
+        elseif overrides.forceGeneralRequest or IsGenericRequest(message) then
             customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
             customerInfo.guid = customerGuid or customerInfo.guid
             local response = HandleGeneralRequest(

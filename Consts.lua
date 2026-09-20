@@ -144,6 +144,8 @@ HironCraftScan.CONST.TEXT = {
     UNLEARNED = 140,
     GENERIC_REQUEST_KEYWORDS_DEFAULT = 141,
     GREETING_GENERIC_REQUEST = 142,
+    MANUAL_GENERAL_GREETING = 143,
+    MANUAL_GENERAL_GREETING_DESC = 144,
 
     -- Release notes have multiple lines that are sequential. Spaced out by hundreds to give more than enough room.
     RN_WELCOME = 10000,

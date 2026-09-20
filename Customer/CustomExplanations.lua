@@ -443,6 +443,49 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end);
         end
 
+        -- "LF crafter" names no profession, so offer the general greeting the
+        -- scanner would have offered on its own. Its text lives in
+        -- Settings - Customer Greetings, next to the phrases that trigger it.
+        do
+            local generalGreeting = subMenu:CreateButton(
+                prefix .. L(LID.MANUAL_GENERAL_GREETING),
+                function()
+                    local lineID = contextData.lineID
+                    if issecretvalue and issecretvalue(lineID) then return end
+                    if type(lineID) == 'string' then lineID = lineID:match('^%d+$') and tonumber(lineID) end
+                    local message, customerGuid
+                    if type(lineID) == 'number' and lineID > 0 and C_ChatInfo then
+                        if C_ChatInfo.GetChatLineText then
+                            local ok, text = pcall(C_ChatInfo.GetChatLineText, lineID)
+                            if ok then message = text end
+                        end
+                        if C_ChatInfo.GetChatLineSenderGUID then
+                            local ok, guid = pcall(C_ChatInfo.GetChatLineSenderGUID, lineID)
+                            if ok then customerGuid = guid end
+                        end
+                    end
+                    if issecretvalue and (issecretvalue(message) or issecretvalue(customerGuid)) then return end
+                    if isBattleNet then customerGuid = nil end
+                    local response = HironCraftScan.OnMessage(nil,
+                        type(message) == 'string' and message or '', target, customerGuid, {
+                            battleNet = isBattleNet,
+                            manualMatch = true,
+                            forceGeneralRequest = true,
+                            -- The crafter asked for this row again on purpose.
+                            restartTerminalRequest = true,
+                            chatEntry = not message and {chatType='SYSTEM',
+                                message='[Manual matching] ' .. L('General crafting request')} or nil,
+                        })
+                    if response ~= nil then
+                        HironCraftScanCraftingOrderPage:ShowGeneric()
+                    end
+                end)
+            generalGreeting:SetTooltip(function(tooltip, elementDescription)
+                GameTooltip_AddNormalLine(tooltip,
+                    HironCraftScan.MakeTextWhite(L(LID.MANUAL_GENERAL_GREETING_DESC)))
+            end)
+        end
+
         local crafterRows = HironCraftScan.GetSortedCrafters();
         for _, crafterInfo in ipairs(crafterRows) do
             local char = crafterInfo.name;

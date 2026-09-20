@@ -103,6 +103,28 @@ for _, templateKey in ipairs(classified) do
     assert(templateKey ~= "CUSTOM_3", "short words must not fuzzy-match a longer keyword")
 end
 
+-- Short keywords are the common ones ("char", "name", "wrist"), and a doubled
+-- or swapped letter must not cost the match.
+local previousKeywords = {
+    QuickReplies:GetConfig().templates.CUSTOM_1.keywords,
+    QuickReplies:GetConfig().templates.CUSTOM_2.keywords,
+}
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords = "char"
+QuickReplies:GetConfig().templates.CUSTOM_2.keywords = "chat"
+QuickReplies:GetConfig().templates.CUSTOM_1.priority = 5
+classified = QuickReplies:Classify("charr")
+assert(#classified == 1 and classified[1] == "CUSTOM_1", "a doubled letter lost the keyword")
+-- "chat" is a keyword of its own, so it is never read as a misspelled "char",
+-- not even for a reply that asks louder.
+classified = QuickReplies:Classify("chat")
+assert(#classified == 1 and classified[1] == "CUSTOM_2", "an exact keyword was taken for a typo")
+QuickReplies:GetConfig().typo_tolerance = false
+assert(#QuickReplies:Classify("charr") == 0, "the switch did not turn typos off")
+QuickReplies:GetConfig().typo_tolerance = true
+QuickReplies:GetConfig().templates.CUSTOM_1.priority = 0
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords = previousKeywords[1]
+QuickReplies:GetConfig().templates.CUSTOM_2.keywords = previousKeywords[2]
+
 local definitions = QuickReplies:GetDefinitions()
 assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")
 assert(definitions[1].eventOnly == true, "rejected-order reply must not use chat keywords")

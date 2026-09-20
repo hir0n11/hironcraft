@@ -177,6 +177,59 @@ local weaponHandPhrases={
     '1 handed','2 handed','1 hand','2 hands','2 hand','main hand','off hand',
     'onehanded','twohanded','onehand','twohand','1handed','2handed','1hand','2hand','1h','2h',
 }
+-- "writs" for "wrist" is the same request with two letters swapped. Only a
+-- leftover word is considered: anything that matched an alias exactly, or that
+-- is a word of its own (an alias, a profession, a material), is already
+-- understood and must never be read as a misspelling of something else. A word
+-- that resembles two different slots is ambiguous and is left alone, so a
+-- guess can never silently retarget a request.
+local function TypoToleranceEnabled()
+    local settings=Scan.DB.settings and Scan.DB.settings.quick_replies
+    return not settings or settings.typo_tolerance~=false
+end
+
+local function MatchMisspelledAliases(remaining,matches,replace)
+    if not TypoToleranceEnabled() then return end
+    local fuzzy=Scan.Utils and Scan.Utils.FuzzyWordDistance
+    if not fuzzy then return end
+
+    local corrections={}
+    for word in remaining:gmatch('%S+') do
+        if not corrections[word] and #word>=4 and not explicitWords[word]
+            and not explicitArmor[word] and not explicitProfessions[word] then
+            local bestKey,bestDistance,ambiguous=nil,nil,false
+            for _,alias in ipairs(aliasCache) do
+                if not alias.text:find(' ',1,true) and alias.text~=word then
+                    local distance=fuzzy(word,alias.text,4)
+                    if distance and distance>0 then
+                        if bestDistance==nil or distance<bestDistance then
+                            bestKey,bestDistance,ambiguous=alias.key,distance,false
+                        elseif distance==bestDistance and alias.key~=bestKey then
+                            ambiguous=true
+                        end
+                    end
+                end
+            end
+            corrections[word]=(bestKey and not ambiguous) and bestKey or false
+        end
+    end
+
+    local changed=false
+    for word,key in pairs(corrections) do
+        if key then
+            matches[key]=true
+            changed=true
+            local pattern=' '..word..' '
+            local start,finish=remaining:find(pattern,1,true)
+            while start do
+                remaining=remaining:sub(1,start)..string.rep(' ',finish-start-1)..remaining:sub(finish)
+                start,finish=remaining:find(pattern,1,true)
+            end
+        end
+    end
+    if changed and replace then replace(remaining) end
+end
+
 local function MatchAliases(message)
     local signature={}
     for _,definition in ipairs(aliasDefinitions) do signature[#signature+1]=M.GetSynonyms(definition.key) end
@@ -244,6 +297,7 @@ local function MatchAliases(message)
             start,finish=remaining:find(pattern,1,true)
         end
     end
+    MatchMisspelledAliases(remaining,matches,function(replacement) remaining=replacement end)
     return matches,remaining
 end
 

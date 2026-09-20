@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Typos in short keywords, general greeting from the chat menu (0.3.78)
+
+- The existing "Recognize typos" switch now also forgives typos in short
+  words, which is where they actually happen: "charr" finds char, "writs"
+  finds wrist. Words of three letters or fewer still require an exact match,
+  a word that is a keyword in its own right is never read as a misspelling of
+  another one ("waist" stays waist), and a guess that fits two different
+  keywords equally well is skipped.
+- The same switch now covers equipment aliases as well, so a misspelled slot
+  in "LF writs" still creates the request and its greeting. One switch
+  controls both; turning it off restores exact matching everywhere.
+- Right-clicking a name in chat offers "General greeting (LF crafter)". It
+  creates the same general request an "LF crafter" line creates on its own and
+  offers its greeting to send, without naming a profession. The text stays
+  editable in Settings - Customer Greetings, and the phrases that trigger it
+  on their own in Settings - Matching.
+
 ## Concentration priced from the recipe's own slots (0.3.77)
 
 - The refusal the diagnostics recorded is the whole answer being withheld, not

@@ -122,4 +122,20 @@ assert(contains(requests('need shield'),'INVTYPE_SHIELD').parentProfID==164)
 assert(loadfile('Customer/ClassMatching.lua'))('HironCraft',Scan);M=Scan.ClassMatching
 Scan.DB.settings.match_customer_class=true
 assert(contains(requests('need reinforced hand cover','WARRIOR'),'INVTYPE_WRIST'),'reload lost aliases')
-print('Equipment aliases passed (26 starter types, jewelry/off-hand/trinkets, complete craftable weapons, edits, reload, class opt-out).')
+-- Typos: the same switch that forgives misspelled quick-reply keywords also
+-- forgives them in equipment aliases, and only where the guess is safe.
+assert(contains(requests('need writs','WARRIOR'),'INVTYPE_WRIST'),'swapped letters lost the request')
+assert(contains(requests('need bracerss','WARRIOR'),'INVTYPE_WRIST'),'a doubled letter lost the request')
+assert(contains(requests('need glove s','WARRIOR'),'INVTYPE_HAND'))
+-- A word that means something on its own is never read as a misspelling.
+assert(contains(requests('need waist','WARRIOR'),'INVTYPE_WAIST'),'an exact alias changed meaning')
+assert(not contains(requests('need waist','WARRIOR'),'INVTYPE_WRIST'),'an exact alias was read as a typo')
+assert(not M.GetContext('need wristwatch',nil,'WARRIOR'),'a longer word became a typo')
+assert(not contains(requests('need ring','WARRIOR'),'INVTYPE_WRIST'),'a short word was guessed at')
+-- The switch turns it off again.
+Scan.DB.settings.quick_replies.typo_tolerance=false
+assert(not contains(requests('need writs','WARRIOR'),'INVTYPE_WRIST'),'the switch did not turn typos off')
+assert(contains(requests('need wrist','WARRIOR'),'INVTYPE_WRIST'),'the switch broke exact matching')
+Scan.DB.settings.quick_replies.typo_tolerance=nil
+
+print('Equipment aliases passed (26 starter types, jewelry/off-hand/trinkets, complete craftable weapons, edits, reload, class opt-out, typos).')

@@ -664,7 +664,13 @@ C_ChatInfo={GetChatLineText=function(id) assert(id==44);chatReads=chatReads+1;re
     GetChatLineSenderGUID=function() return 'Manual-GUID' end}
 menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ManualBuyer-Realm',lineID='44'})
 assert(#sent==0 and countRows()==0, 'opening the manual menu took an action')
-buttons[2].click()
+-- Pick menu entries by what they say, not by where they sit.
+local function menuButton(text)
+    for _,entry in ipairs(buttons) do
+        if tostring(entry.label):find(text,1,true) then return entry end
+    end
+end
+menuButton('Tailor-Realm').click()
 -- A line the crafter linked by hand raises the normal request banner; the
 -- greeting card belongs to whispers the customer actually sent.
 assert(#sent==0 and chatReads==1)
@@ -675,15 +681,32 @@ assert(manualResponse.crafterFullName=='Tailor-Realm' and not manualResponse.ite
 assert(Scan.SendOrderGreeting({customerName='ManualBuyer-Realm',responseID=197},true))
 assert(#sent==1 and manualResponse.greeting_sent)
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Expired-Realm'})
-buttons[1].click()
+menuButton('Seller-Realm').click()
 assert(#sent==1 and #manualOffers==0 and chatReads==1,
     'expired line blocked the profession suggestion or sent it immediately')
 flushTimers();assert(#sent==1, 'manual matching scheduled more messages')
 assert(manualBanners==2,'the expired line raised no banner of its own')
 Scan.QuickReplies.GetConfig=function() return {enabled=false} end
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='NoQuick-Realm'})
-buttons[1].click()
+menuButton('Seller-Realm').click()
 assert(manualBanners==3 and #manualOffers==0 and #sent==1,'disabled quick replies changed manual matching')
+
+-- "LF crafter" names no profession: the menu offers the general greeting, and
+-- the row it creates answers for every crafter rather than one of them.
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='GeneralBuyer-Realm',lineID='44'})
+local general=menuButton(tostring(Scan.CONST.TEXT.MANUAL_GENERAL_GREETING))
+assert(general,'the general greeting is missing from the chat menu')
+general.click()
+local generalResponses=Scan.DB.customers['GeneralBuyer-Realm'].responses
+local generalRow=generalResponses[Scan.Scanner.GENERAL_REQUEST_ID]
+assert(generalRow and generalRow.generic_request and not generalRow.greeting_sent,
+    'the general greeting created no row to send')
+assert(not generalResponses[197] and not generalResponses[164],
+    'the general greeting created a request for one profession')
+assert(#sent==1,'the general greeting sent itself')
+assert(Scan.SendOrderGreeting({customerName='GeneralBuyer-Realm',
+    responseID=Scan.Scanner.GENERAL_REQUEST_ID},true))
+assert(#sent==2 and generalRow.greeting_sent,'the general greeting could not be sent')
 Scan.DB.characters['Seller-Realm'].parent_professions[164].visual_alert_enabled=nil
 Scan.DB.characters['Tailor-Realm'].parent_professions[197].visual_alert_enabled=nil
 HironCraftScanScannerMenu.TriggerAlert,Scan.QuickReplies.GetConfig=oldManualTrigger,oldManualConfig

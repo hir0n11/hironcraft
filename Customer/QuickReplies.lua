@@ -394,57 +394,16 @@ local function SplitWords(text)
     return words
 end
 
-local function IsAsciiWord(word)
-    return type(word) == 'string' and word:match('^[a-z]+$') ~= nil
-end
+-- Four letters is the shortest word a typo can still be read through
+-- ("charr" for "char"). Below that a single edit turns one real word into
+-- another, so those keep requiring an exact match.
+local MIN_TYPO_LENGTH = 4
 
--- Bounded Damerau-Levenshtein distance for ASCII words. Adjacent swapped
--- letters count as one typo, which covers a common kind of misspelling.
 local function FuzzyWordDistance(lhs, rhs)
-    if lhs == rhs then return 0 end
-    if not IsAsciiWord(lhs) or not IsAsciiWord(rhs) then return nil end
-
-    local longest = math.max(#lhs, #rhs)
-    if longest < 6 then return nil end
-    local limit = longest >= 10 and 2 or 1
-    if math.abs(#lhs - #rhs) > limit then return nil end
-
-    local distance = {}
-    for i = 0, #lhs do
-        distance[i] = { [0] = i }
-    end
-    for j = 0, #rhs do
-        distance[0][j] = j
-    end
-
-    for i = 1, #lhs do
-        local rowMinimum = limit + 1
-        for j = 1, #rhs do
-            local cost = lhs:byte(i) == rhs:byte(j) and 0 or 1
-            local value = math.min(
-                distance[i - 1][j] + 1,
-                distance[i][j - 1] + 1,
-                distance[i - 1][j - 1] + cost
-            )
-            if i > 1 and j > 1
-                and lhs:byte(i) == rhs:byte(j - 1)
-                and lhs:byte(i - 1) == rhs:byte(j)
-            then
-                value = math.min(value, distance[i - 2][j - 2] + 1)
-            end
-            distance[i][j] = value
-            rowMinimum = math.min(rowMinimum, value)
-        end
-        if rowMinimum > limit and i > #rhs + limit then
-            return nil
-        end
-    end
-
-    local result = distance[#lhs][#rhs]
-    return result <= limit and result or nil
+    return HironCraftScan.Utils.FuzzyWordDistance(lhs, rhs, MIN_TYPO_LENGTH)
 end
 
-local function KeywordScore(message, keyword, allowTypos)
+local function KeywordScore(message, keyword, allowTypos, exactWords)
     keyword = Normalize(keyword)
     if keyword == '' then
         return nil
@@ -470,6 +429,12 @@ local function KeywordScore(message, keyword, allowTypos)
         for keywordIndex, keywordWord in ipairs(keywordWords) do
             local messageWord = messageWords[startIndex + keywordIndex - 1]
             if messageWord ~= keywordWord then
+                -- "waist" is a word of its own; it must never be read as a
+                -- misspelled "wrist", whichever template asks for it.
+                if exactWords and exactWords[messageWord] then
+                    valid = false
+                    break
+                end
                 local wordDistance = FuzzyWordDistance(messageWord, keywordWord)
                 if not wordDistance then
                     valid = false
@@ -512,6 +477,19 @@ function QuickReplies:Classify(message)
         return {}
     end
 
+    local exactWords = {}
+    for _, definition in ipairs(self:GetDefinitions()) do
+        local template = config.templates[definition.key]
+        if template and template.enabled and not definition.eventOnly then
+            local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
+            for keyword in keywords:gmatch('[^,\n]+') do
+                for _, word in ipairs(SplitWords(Normalize(keyword))) do
+                    exactWords[word] = true
+                end
+            end
+        end
+    end
+
     local bestPriority = nil
     local bestScore = nil
     local matched = {}
@@ -521,7 +499,7 @@ function QuickReplies:Classify(message)
             local templateScore = nil
             local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
             for keyword in keywords:gmatch('[^,\n]+') do
-                local score = KeywordScore(normalized, keyword, config.typo_tolerance)
+                local score = KeywordScore(normalized, keyword, config.typo_tolerance, exactWords)
                 if score and (not templateScore or score > templateScore) then
                     templateScore = score
                 end
