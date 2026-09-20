@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Concentration priced from the recipe's own slots (0.3.77)
+
+- The refusal the diagnostics recorded is the whole answer being withheld, not
+  a complaint about one entry, so the lists are now built the way the client
+  addresses slots: one entry per required slot of the recipe, taken from the
+  schematic, carrying the customer's item where they supplied one. This is
+  asked first, before the lists built from the order's own reagent payloads,
+  whose slot numbers do not always line up with the schematic.
+- The cheapest list could send two entries for the same slot, which is never a
+  valid request; it now sends one entry per slot like every other list.
+- When a cost can still only be had from an empty list, the diagnostics also
+  print the recipe's slots as the schematic reports them.
+
 ## Concentration for recipes the client prices only empty (0.3.76)
 
 - `/ahuicodbg conc` output showed the cause of the rows that print "?": for

@@ -3369,13 +3369,18 @@ function CO:BuildFastCraftingReagentInfoTbl(order)
     if not order or not order.spellID then return list end
 
     local providedSlots = {}
+    local seenSlot = {}
     local function AddCraftingReagent(itemID, dataSlotIndex, quantity)
         itemID = tonumber(itemID)
         dataSlotIndex = tonumber(dataSlotIndex)
         quantity = tonumber(quantity)
-        if not itemID or not dataSlotIndex or not quantity or quantity <= 0 then
+        -- One entry per slot. Two entries for the same slot are not a richer
+        -- request, they are an invalid one the client refuses as a whole.
+        if not itemID or not dataSlotIndex or not quantity or quantity <= 0
+            or seenSlot[dataSlotIndex] then
             return false
         end
+        seenSlot[dataSlotIndex] = true
         list[#list + 1] = {
             reagent = { itemID = itemID },
             dataSlotIndex = dataSlotIndex,
@@ -3446,6 +3451,60 @@ function CO:BuildOrderOnlyCraftingReagentInfoTbl(order)
     return list
 end
 
+-- One entry per required slot of the recipe, addressed by the schematic's own
+-- dataSlotIndex: the customer's item where they supplied one, the first
+-- option otherwise. Tables built from the order's reagent payloads can carry
+-- slot numbers that do not line up with the schematic, and the client then
+-- answers nothing at all rather than pointing at the bad entry.
+function CO:BuildSchematicCraftingReagentInfoTbl(order)
+    local list = {}
+    if not order or not order.spellID or not C_TradeSkillUI or not C_TradeSkillUI.GetRecipeSchematic then
+        return list
+    end
+
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, order.spellID, order.isRecraft)
+    if not ok or type(schematic) ~= "table" or type(schematic.reagentSlotSchematics) ~= "table" then
+        return list
+    end
+
+    local provided = GetOrderProvidedReagentQuantities(order)
+    local seenSlot = {}
+
+    for index, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
+        if IsBasicOrAutomaticReagentSlot(slotSchematic)
+            and IsRequiredCraftingOrderReagentSlot(slotSchematic)
+        then
+            local choices = GetSchematicReagentChoices(slotSchematic)
+            local firstChoice, firstItemID = GetFirstSchematicChoice(slotSchematic)
+            local firstPayload = firstChoice and GetOrderReagentPayload(firstChoice)
+            local dataSlotIndex = tonumber(slotSchematic.dataSlotIndex
+                or slotSchematic.slotDataIndex or slotSchematic.slotIndex or index)
+            local quantity = tonumber(GetSlotRequiredQuantity(slotSchematic, firstPayload, nil)) or 0
+
+            local itemID
+            for _, choice in ipairs(type(choices) == "table" and choices or {}) do
+                local candidate = GetSchematicChoiceItemID(choice)
+                if candidate and (tonumber(provided[candidate]) or 0) > 0 then
+                    itemID = candidate
+                    break
+                end
+            end
+            itemID = itemID or firstItemID
+
+            if itemID and dataSlotIndex and quantity > 0 and not seenSlot[dataSlotIndex] then
+                seenSlot[dataSlotIndex] = true
+                list[#list + 1] = {
+                    reagent = { itemID = itemID },
+                    dataSlotIndex = dataSlotIndex,
+                    quantity = quantity,
+                }
+            end
+        end
+    end
+
+    return list
+end
+
 local CONCENTRATION_COST_TTL = 60
 -- A miss is cached too, so a recipe the client cannot price yet does not run
 -- the whole ladder on every repaint. The window is short enough that the cost
@@ -3467,6 +3526,7 @@ function CO:ResolveConcentrationCost(order, collect)
     end
 
     local allocations = {
+        { label = "schematic", build = function() return self:BuildSchematicCraftingReagentInfoTbl(order) end },
         { label = "planned", build = function() return self:BuildCraftingReagentInfoTbl(order) end },
         { label = "cheapest", build = function() return self:BuildFastCraftingReagentInfoTbl(order) end },
         { label = "as-placed", build = function() return self:BuildOrderOnlyCraftingReagentInfoTbl(order) end },
@@ -5371,6 +5431,28 @@ function CO:DebugDumpConcentration()
         for _, line in ipairs(attempts) do
             push("  " .. line)
             if not cost then self:DebugPrint("  " .. line) end
+        end
+
+        if not cost or source == "empty" then
+            local okSchematic, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic,
+                order.spellID, order.isRecraft)
+            if okSchematic and type(schematic) == "table"
+                and type(schematic.reagentSlotSchematics) == "table" then
+                for slotIndex, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
+                    local _, firstItemID = GetFirstSchematicChoice(slotSchematic)
+                    push(string.format(
+                        "  SLOT[%d] dataSlot=%s slot=%s type=%s required=%s qty=%s item=%s choices=%s",
+                        slotIndex,
+                        tostring(slotSchematic.dataSlotIndex or "nil"),
+                        tostring(slotSchematic.slotIndex or "nil"),
+                        tostring(GetSlotReagentType(slotSchematic) or "nil"),
+                        tostring(slotSchematic.required),
+                        tostring(slotSchematic.quantityRequired or "nil"),
+                        tostring(firstItemID or "nil"),
+                        tostring(type(GetSchematicReagentChoices(slotSchematic)) == "table"
+                            and #GetSchematicReagentChoices(slotSchematic) or "nil")))
+                end
+            end
         end
 
         -- The prepared order view is the path that still answers for these

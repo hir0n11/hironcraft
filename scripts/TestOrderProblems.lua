@@ -141,15 +141,28 @@ end,
 GetCraftingOperationInfoForOrder=function(_,reagents,orderID,applied)
     assert(orderID==91,'the order cost was asked for without its order')
     tried[#tried+1]=(reagents and #reagents or -1)..':'..tostring(applied)
-    -- Only the order as placed is priced, exactly like Blizzard's order page.
-    if reagents and #reagents==1 then return {concentrationCost=271} end
+    -- Only the order exactly as the customer placed it is priced, like
+    -- Blizzard's own order page: one entry, in the slot they filled.
+    if reagents and #reagents==1 and reagents[1].dataSlotIndex==1 then
+        return {concentrationCost=271}
+    end
     return {concentrationCost=0}
 end}
 local cost,source=CO:ResolveConcentrationCost(ladder)
 assert(cost==271 and source=='as-placed',
     'the cost Blizzard shows for the order as placed was never asked for')
-assert(tried[1]=='2:false','the allocation we would craft with must be asked first')
-assert(#tried==5,'the ladder kept asking after it had an answer')
+assert(tried[1]=='1:false','the recipe slots must be asked about first')
+assert(#tried==7,'the ladder kept asking after it had an answer')
+local schematicTable=CO:BuildSchematicCraftingReagentInfoTbl(ladder)
+assert(#schematicTable==1 and schematicTable[1].dataSlotIndex==2
+    and schematicTable[1].quantity==5 and schematicTable[1].reagent.itemID==777,
+    'the recipe slots were not addressed by the schematic')
+local fastTable=CO:BuildFastCraftingReagentInfoTbl(ladder)
+local fastSlots={}
+for _,entry in ipairs(fastTable) do
+    assert(not fastSlots[entry.dataSlotIndex],'two entries claimed the same slot')
+    fastSlots[entry.dataSlotIndex]=true
+end
 CO._fastConcCostCache=nil
 assert(CO:GetFastConcentrationCost(ladder)==271,'the row still has no number to print')
 -- A cost read from an allocation we would not craft with is not evidence that
