@@ -381,6 +381,18 @@ QuickReplies:OnOrderFulfillmentUpdated({customerName='AuditBuyer',responseID=101
     {status='fulfilled',craftingOrderID=81101})
 assert(#visible('AuditBuyer')==0,'a disabled completed-order reply was still offered')
 Scan.DB.settings.quick_replies.templates.COMPLETED_ORDER.enabled=true
+-- A check mark set by hand is the crafter's own bookkeeping: announcing it
+-- is their call. The decline reply is not affected, it carries the materials.
+local manualDone={status='fulfilled',craftingOrderID=81102,automatic=false}
+Scan.OrderFulfillment.GetStatus=function() return manualDone end
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AuditBuyer',responseID=102},manualDone)
+assert(#visible('AuditBuyer')==0,'a check mark set by hand offered the completion reply')
+local manualDecline={status='rejected',craftingOrderID=81103,automatic=false,
+    requestToken=auditResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return manualDecline end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,manualDecline)
+assert(#visible('AuditBuyer')==1,'a decline recorded by hand lost its reply')
+dismissAll()
 
 -- A decline recorded before its material list waits for the list instead of
 -- replying that the details could not be found.

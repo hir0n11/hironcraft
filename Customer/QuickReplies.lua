@@ -760,7 +760,7 @@ end
 local STATUS_OPTIONS = {
     rejected = { template = REJECTED_ORDER_TEMPLATE_KEY, message = 'Crafting order status rejected' },
     fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed',
-        lastOrderOnly = true },
+        lastOrderOnly = true, automaticOnly = true },
 }
 
 -- A customer who placed several orders at once gets one "your order is done",
@@ -874,6 +874,12 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         or order.responseID == nil
         or not IsListedOrder(order.customerName, order.responseID)
     then
+        return nil
+    end
+
+    -- A check mark set by hand says the crafter already dealt with this order
+    -- their own way. Announcing it again is their call, not ours.
+    if statusOption.automaticOnly and entry.automatic == false then
         return nil
     end
 

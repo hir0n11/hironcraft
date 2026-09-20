@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No completion reply for a check mark set by hand (0.3.83)
+
+- Marking an order complete by hand no longer offers the completion reply. A
+  check mark set that way is the crafter's own bookkeeping - the customer may
+  have been told already, or not be waiting for anything - so announcing it is
+  their call. A completion the addon detected itself still offers the reply,
+  and a decline recorded by hand keeps its own reply, because that one carries
+  the materials to fix.
+
 ## Minimum profit of its own for knowledge orders (0.3.82)
 
 - Order filters gained a "Knowledge: min. profit" field next to the ordinary
