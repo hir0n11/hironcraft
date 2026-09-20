@@ -8,13 +8,13 @@ local panel = nil
 
 local FULL_PANEL_WIDTH = 750
 local FULL_CONTENT_WIDTH = 700
-local FULL_ROW_HEIGHT = 112
-local FULL_ROW_STEP = 116
+local FULL_ROW_HEIGHT = 134
+local FULL_ROW_STEP = 138
 
 local COMPACT_PANEL_WIDTH = 350
 local COMPACT_CONTENT_WIDTH = 300
-local COMPACT_ROW_HEIGHT = 250
-local COMPACT_ROW_STEP = 254
+local COMPACT_ROW_HEIGHT = 276
+local COMPACT_ROW_STEP = 280
 
 local allowedContext = {
     crafter = true,
@@ -141,6 +141,8 @@ local function CreateRow(panel, index)
     row.Priority:SetMaxLetters(3)
     row.Priority:SetJustifyH('CENTER')
 
+    row.ActiveOnly = CreateFrame('Frame', nil, row, 'HironCraftScanCheckButtonTemplate')
+
     row.RepeatLabel = CreateLabel(row, 'GameFontNormalSmall', L('dialog.quick_reply.repeat'))
     row.RepeatLabel:SetSize(64, 20)
     row.RepeatLabel:SetJustifyV('MIDDLE')
@@ -172,6 +174,7 @@ local function LayoutRow(row, isCollapsed)
     row.Priority:ClearAllPoints()
     row.RepeatLabel:ClearAllPoints()
     row.Repeat:ClearAllPoints()
+    row.ActiveOnly:ClearAllPoints()
     row.Keywords:ClearAllPoints()
     row.Response:ClearAllPoints()
 
@@ -189,6 +192,9 @@ local function LayoutRow(row, isCollapsed)
 
         row.RepeatLabel:SetPoint('TOPLEFT', 4, -53)
         row.Repeat:SetPoint('TOPLEFT', 76, -51)
+        row.ActiveOnly:SetPoint('TOPLEFT', 3, -248)
+        row.ActiveOnly:SetWidth(COMPACT_CONTENT_WIDTH - 10)
+        row.ActiveOnly.Title:SetWidth(COMPACT_CONTENT_WIDTH - 50)
 
         if eventOnly then
             row.PriorityLabel:Hide()
@@ -209,6 +215,9 @@ local function LayoutRow(row, isCollapsed)
         end
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
+        row.ActiveOnly:SetPoint('TOPLEFT', 116, -106)
+        row.ActiveOnly:SetWidth(FULL_CONTENT_WIDTH - 126)
+        row.ActiveOnly.Title:SetWidth(FULL_CONTENT_WIDTH - 166)
         row.Enabled:SetWidth(eventOnly and 184 or 114)
         row.Enabled.Title:SetWidth(eventOnly and 145 or 75)
         row.Rename:SetSize(eventOnly and 80 or 48, 22)
@@ -350,7 +359,17 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
         SetupRepeatInput(self, row, prefix .. 'repeat_seconds')
         if definition.eventOnly then
             row.Keywords:Hide()
+            -- An order event is the order: it cannot wait for another one.
+            row.ActiveOnly:Hide()
         else
+            HironCraftScan.SetupCheckBox(self, row.ActiveOnly, prefix .. 'active_orders_only')
+            row.ActiveOnly.Title:SetText(L('dialog.quick_reply.active_orders_only'))
+            SetupCustomTooltip(
+                row.ActiveOnly,
+                L('dialog.quick_reply.active_orders_only'),
+                L('dialog.quick_reply.active_orders_only.tooltip.body')
+            )
+            row.ActiveOnly:Show()
             SetupPriorityInput(self, row, prefix .. 'priority')
             HironCraftScan.SetupTextInput(self, row.Keywords, prefix .. 'keywords')
             row.Keywords:Show()
@@ -500,6 +519,8 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
             value = HironCraftScan.QuickReplies.NormalizePriority(value)
         elseif field == 'repeat_seconds' then
             value = HironCraftScan.QuickReplies.NormalizeRepeatSeconds(value)
+        elseif field == 'active_orders_only' then
+            value = value == true
         end
         template[field] = value
     end

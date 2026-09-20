@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Replies that only make sense before the craft (0.3.80)
+
+- Every keyword reply gained an "Only while an order is open" switch in Quick
+  Replies. With it on, the reply is offered only while that customer still has
+  something in the works, so a customer who writes "sent" again after their
+  item was handed over no longer brings "omw" back. An order that is claimed,
+  being crafted or still waiting for a result counts as open; one that was
+  completed or declined does not, and a request that never became an order
+  stops counting after 12 hours. Default off, so nothing changes until the
+  switch is ticked; the event replies do not have it, because an order event
+  is the order.
+
 ## Replies that waited while their character was away (0.3.79)
 
 - A decline or completion whose reply never appeared is offered again when

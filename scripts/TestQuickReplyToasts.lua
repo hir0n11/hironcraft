@@ -569,4 +569,41 @@ assert(#printed==1 and printed[1]:find('Someone-Else',1,true),
 storedStatuses={}
 Scan.OrderFulfillment.GetStatuses=nil
 
+-- "omw" after the item was already handed over reads as if nothing happened.
+-- A reply can be kept for customers who still have something in the works.
+dismissAll()
+local openStatuses={}
+Scan.OrderFulfillment.GetStatus=function(_,order) return openStatuses[tostring(order.responseID)] end
+local _,openFirst,openSecond=addCustomer('OpenOrderBuyer')
+openFirst.conversationCharacter='Seller-Realm'
+openSecond.conversationCharacter='Seller-Realm'
+local omwKey=QuickReplies:CreateCustomTemplate('On my way','sending it','omw')
+QuickReplies:GetConfig().templates[omwKey].active_orders_only=true
+-- Nothing decided yet: the order is open, so the reply is offered.
+whisper('OpenOrderBuyer','sending it')
+assert(#visible('OpenOrderBuyer')==1,'an open order did not offer the reply')
+dismissAll()
+-- Being crafted still counts as open.
+openStatuses['101']={status='crafted',craftingOrderID=96001}
+openStatuses['102']={status='rejected',craftingOrderID=96002}
+whisper('OpenOrderBuyer','sending it')
+assert(#visible('OpenOrderBuyer')==1,'an order being crafted did not count as open')
+dismissAll()
+-- Everything finished: a repeated "sent" must not bring "omw" back.
+openStatuses['101']={status='fulfilled',craftingOrderID=96001}
+whisper('OpenOrderBuyer','sending it')
+assert(#visible('OpenOrderBuyer')==0,'a finished order still offered the reply')
+-- Other replies for the same customer are untouched.
+assert(QuickReplies:GetConfig().templates.CUSTOM_1.enabled)
+whisper('OpenOrderBuyer','yo')
+assert(#visible('OpenOrderBuyer')==1,'the setting muted an unrelated reply')
+dismissAll()
+-- Without the setting the reply behaves as before.
+QuickReplies:GetConfig().templates[omwKey].active_orders_only=false
+whisper('OpenOrderBuyer','sending it')
+assert(#visible('OpenOrderBuyer')==1,'a reply without the setting was withheld')
+dismissAll()
+assert(QuickReplies:DeleteTemplate(omwKey))
+Scan.OrderFulfillment.GetStatus=nil
+
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')

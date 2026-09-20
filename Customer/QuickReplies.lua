@@ -182,6 +182,9 @@ local function EnsureConfig()
     for _, template in pairs(templates) do
         if type(template) == 'table' then
             template.priority = NormalizePriority(template.priority)
+            if template.active_orders_only == nil then
+                template.active_orders_only = false
+            end
             -- 0.3.70 asked for this delay in minutes. Carry those values over
             -- once so a configured delay keeps its real length in seconds.
             if template.repeat_minutes ~= nil then
@@ -771,17 +774,21 @@ local PENDING_SIBLING_WINDOW = 12 * 60 * 60
 local FINAL_ORDER_RESULTS = { fulfilled = true, rejected = true, failed = true }
 local STARTED_ORDER_RESULTS = { claimed = true, crafted = true }
 
-function QuickReplies:HasUnfinishedSiblingOrders(order)
+-- Does this customer have anything of theirs still in the works? A request
+-- that was never claimed counts while it is fresh; one that was completed or
+-- declined does not. Used by replies that only make sense before the craft is
+-- finished: "omw" reads strangely after the item was already handed over.
+function QuickReplies:HasUnfinishedOrders(customerName, exceptResponseID)
     local fulfillment = HironCraftScan.OrderFulfillment
-    if type(order) ~= 'table' or not fulfillment or not fulfillment.GetStatus then
+    if type(customerName) ~= 'string' or not fulfillment or not fulfillment.GetStatus then
         return false
     end
 
     local now = time and time() or 0
     for _, listed in pairs(HironCraftScan.DB.listed_orders or {}) do
-        if type(listed) == 'table'
-            and listed.customerName == order.customerName
-            and tostring(listed.responseID) ~= tostring(order.responseID)
+        if type(listed) == 'table' and listed.customerName == customerName
+            and (exceptResponseID == nil
+                or tostring(listed.responseID) ~= tostring(exceptResponseID))
         then
             local ok, entry = pcall(fulfillment.GetStatus, fulfillment, listed)
             local status = ok and type(entry) == 'table' and entry.status or nil
@@ -790,7 +797,7 @@ function QuickReplies:HasUnfinishedSiblingOrders(order)
             elseif not FINAL_ORDER_RESULTS[status] then
                 -- No result yet. Only a request from the same working session
                 -- counts: an old question that never became an order must not
-                -- mute this reply forever.
+                -- keep a customer "busy" forever.
                 local okResponse, response = pcall(HironCraftScan.OrderToResponse, listed)
                 local requestedAt = okResponse and type(response) == 'table' and tonumber(response.time)
                 if requestedAt and now - requestedAt <= PENDING_SIBLING_WINDOW then
@@ -801,6 +808,17 @@ function QuickReplies:HasUnfinishedSiblingOrders(order)
     end
 
     return false
+end
+
+function QuickReplies:IsTemplateWaitingForOpenOrder(customer, templateKey)
+    local template = templateKey and self:GetConfig().templates[templateKey]
+    if type(template) ~= 'table' or template.active_orders_only ~= true then return false end
+    return not self:HasUnfinishedOrders(customer)
+end
+
+function QuickReplies:HasUnfinishedSiblingOrders(order)
+    if type(order) ~= 'table' then return false end
+    return self:HasUnfinishedOrders(order.customerName, order.responseID)
 end
 
 -- A decline or a completion that happened while its conversation character
@@ -1507,7 +1525,9 @@ function QuickReplies:OnWhisper(customer, message, customerInfo)
 
     local offerable = {}
     for _, templateKey in ipairs(templateKeys) do
-        if not self:IsTemplateOnRepeatCooldown(customer, templateKey) then
+        if not self:IsTemplateOnRepeatCooldown(customer, templateKey)
+            and not self:IsTemplateWaitingForOpenOrder(customer, templateKey)
+        then
             offerable[#offerable + 1] = templateKey
         end
     end
