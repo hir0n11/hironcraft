@@ -718,6 +718,26 @@ local function ReadProviderOrders(pageFrame)
     return out
 end
 
+-- The set of orders on screen, used to tell a tab's own answer apart from the
+-- previous tab's results that C_CraftingOrders still holds.
+local function OrdersSignature(orders)
+    local ids = {}
+    for _, order in ipairs(orders or {}) do
+        local orderID = type(order) == "table" and order.orderID
+        if orderID then ids[#ids + 1] = tostring(orderID) end
+    end
+    table.sort(ids)
+    return table.concat(ids, ",")
+end
+
+function CL:RowsSignature(container)
+    local orders = {}
+    for _, row in ipairs(container and container.rows or {}) do
+        orders[#orders + 1] = row and row._order
+    end
+    return OrdersSignature(orders)
+end
+
 function CL:GetOrders(pageFrame)
     if C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
         local ok, apiOrders = pcall(C_CraftingOrders.GetCrafterOrders)
@@ -731,6 +751,14 @@ function CL:GetOrders(pageFrame)
                 if type(order) == "table" then
                     out[#out + 1] = order
                 end
+            end
+            if container and container._staleTabSignature then
+                -- Still the list the previous tab showed: this tab has not
+                -- been answered yet, exactly as Blizzard's own empty list says.
+                if OrdersSignature(out) == container._staleTabSignature then
+                    return {}
+                end
+                container._staleTabSignature = nil
             end
             return out
         end
@@ -1989,15 +2017,24 @@ local function AttachHooks()
 
     -- Switching to a tab that sends no request (Public without favourites,
     -- an empty Guild tab) never reaches ShowGeneric or a data-provider change,
-    -- so the list kept showing the previous tab's orders. The order type is
-    -- already set here, and Refresh drops rows that belong to another tab.
+    -- so the list kept showing the previous tab's orders. Dropping rows by
+    -- order type is not enough on its own: C_CraftingOrders keeps the last
+    -- answered list, so the Public tab was handed its own previous results
+    -- back and looked unchanged. Remember exactly what the previous tab
+    -- showed and refuse that same set until the server answers for this tab.
     if ProfessionsCraftingOrderPageMixin.SetCraftingOrderType then
         hooksecurefunc(ProfessionsCraftingOrderPageMixin, "SetCraftingOrderType", function(pageFrame)
             if not CO:IsEnabled() then return end
             local container = pageFrame and pageFrame.ahuiCustomList
-            if container then
-                container._freshSearchPending = nil
+            -- Blizzard also calls this with the type the page already has.
+            -- Only a real tab change may withhold what is on screen.
+            if container and ListScopeKey(pageFrame) ~= container._listScope then
                 container._allowEmptyOnce = true
+                container._lastGoodOrders = nil
+                container._lastGoodType = nil
+                container._lastGoodScope = nil
+                local signature = CL:RowsSignature(container)
+                container._staleTabSignature = signature ~= "" and signature or nil
             end
             QueueRefresh()
         end)
@@ -2030,6 +2067,7 @@ local function AttachHooks()
                 pf.ahuiCustomList._orderType = nil
                 pf.ahuiCustomList._listScope = nil
                 pf.ahuiCustomList._allowEmptyOnce = true
+                pf.ahuiCustomList._staleTabSignature = nil
                 pf.ahuiCustomList._actionOrders = nil
                 pf.ahuiCustomList._actionHoldUntil = nil
                 if pf.ahuiCustomList.rows then

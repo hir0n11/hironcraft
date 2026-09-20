@@ -166,6 +166,7 @@ dofile('ProfitHub/Orders/CraftingOrders/ClassicTheme.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Panel.lua')
 dofile('ProfitHub/Orders/CraftingOrders/CustomList.lua')
 local CL = CO.CustomList
+local RealGetOrders = CL.GetOrders
 CO.IsEnabled = function() return true end
 CO.UpdateControlPanel = noop
 CO.GetQueueReagentMode = function() return 't1' end
@@ -754,6 +755,27 @@ for _, scale in ipairs({.65, 1, 1.3}) do
 end
 CO:HideRowProgressVisual(row.action)
 page:SetScale(1)
+-- Switching tabs: C_CraftingOrders keeps the last answered list, so the Public
+-- tab used to be handed the orders the previous tab had shown and looked as if
+-- it had never refreshed. That exact set must be withheld until this tab is
+-- answered for.
+local apiOrders={{orderID=201},{orderID=202}}
+C_CraftingOrders.GetCrafterOrders=function() return apiOrders end
+local tabPage={ahuiCustomList={rows={{_order={orderID=202}},{_order={orderID=201}}}}}
+local tabContainer=tabPage.ahuiCustomList
+assert(CL:RowsSignature(tabContainer)=='201,202', 'row signature depends on row order')
+tabContainer._staleTabSignature=CL:RowsSignature(tabContainer)
+assert(#RealGetOrders(CL,tabPage)==0,
+    'the new tab was handed the previous tab orders straight back')
+assert(tabContainer._staleTabSignature, 'the stale set was forgotten before an answer arrived')
+apiOrders={{orderID=301}}
+local answered=RealGetOrders(CL,tabPage)
+assert(#answered==1 and answered[1].orderID==301, 'the tab answer never reached the list')
+assert(not tabContainer._staleTabSignature, 'an answered tab kept withholding orders')
+tabContainer.rows={}
+assert(CL:RowsSignature(tabContainer)=='', 'an empty list must not withhold anything')
+C_CraftingOrders.GetCrafterOrders=nil
+
 print('Classic orders UI tests passed.')
 
 if arg[1] == '--scene' then

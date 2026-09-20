@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Public tab refresh, stable row background (0.3.69)
+
+- Switching to the Public tab kept showing the orders of the tab left behind.
+  `C_CraftingOrders` holds the last answered list, so the tab was handed those
+  same orders back and the list looked unchanged; dropping rows by order type
+  did not catch it, because the previous results pass a type check of their
+  own. The list now remembers exactly what the previous tab showed and
+  withholds that set until the server answers for the tab now open, which is
+  what Blizzard's own empty list already says. A deliberate Search, a real
+  answer with different orders, or closing the window release it.
+- The row background no longer drops back to neutral while an order is being
+  claimed, crafted or handed in. Those steps invalidate the data the state is
+  read from, and a finished row is not analysed at all, so the last answer for
+  the row is kept and reused while the live one is missing.
+
 ## Personal order row states, concentration cost (0.3.68)
 
 - A Personal order row now says what the order is before it is claimed. Red:

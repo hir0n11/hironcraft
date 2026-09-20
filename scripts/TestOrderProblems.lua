@@ -167,11 +167,12 @@ CO.BuildDisplayReagents=function() return {ahuiSchematicReady=true} end
 order=reset()
 assert(CO:GetOrderReadinessState(order,nil,'claim',false,false)=='ready')
 assert(CO:GetOrderReadinessState(order,nil,'claim',true,false)=='concentration')
-q=nil;CO.concentrationRequirementCache={};CO.qualityCache={}
+q=nil;CO.concentrationRequirementCache={};CO.qualityCache={};CO.readinessStateCache={}
 assert(CO:GetOrderReadinessState(order,nil,'claim',nil,false)==nil,
     'an order Blizzard has not answered for yet was painted as ready')
 q={quality=5,skill=410,upper=410};CO.concentrationRequirementCache={}
 CO.BuildDisplayReagents=function() return {ahuiSchematicReady=false} end
+CO.readinessStateCache={}
 assert(CO:GetOrderReadinessState(order,nil,'claim',false,false)==nil,
     'an unloaded schematic was painted as ready')
 CO.BuildDisplayReagents=function() return {ahuiSchematicReady=true} end
@@ -179,8 +180,19 @@ assert(CO:GetOrderReadinessState(order,nil,'claim',false,'Missing reagents')=='b
 order.reagents={}
 assert(CO:GetOrderReadinessState(order,nil,'claim',false)=='blocked',
     'missing customer reagents were not red')
-assert(CO:GetOrderReadinessState(order,nil,'fulfill',false)==nil,
-    'a finished row kept a state colour')
+-- Claiming, crafting and handing in wipe the data behind these answers. The
+-- row must keep the colour it had instead of falling back to a neutral
+-- background half way through the work.
+CO.readinessStateCache={}
+order=reset()
+assert(CO:GetOrderReadinessState(order,nil,'claim',false,false)=='ready')
+assert(CO:GetOrderReadinessState(order,nil,'fulfill',nil,false)=='ready',
+    'the row lost its colour while the order was being handed in')
+assert(CO:GetOrderReadinessState(order,nil,'crafting',nil,false)=='ready',
+    'the row lost its colour while the order was being crafted')
+CO.readinessStateCache={}
+assert(CO:GetOrderReadinessState(order,nil,'fulfill',false,false)==nil,
+    'a row nobody ever analysed invented a colour')
 order=reset();order.orderType=4
 assert(CO:GetOrderReadinessState(order,nil,'claim',true,false)==nil,
     'patron orders must keep their plain rows')

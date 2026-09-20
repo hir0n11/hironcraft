@@ -106,6 +106,9 @@ function CO:PrepareFreshOrderSearch(pageFrame)
     container._lastGoodScope = nil
     container._lastOrderCount = 0
     container._allowEmptyOnce = true
+    -- A deliberate search answers for this tab, so the previous tab's rows are
+    -- no longer a reason to hold a result back.
+    container._staleTabSignature = nil
     container._orderType = pageFrame.orderType
     container._freshSearchPending = true
     container._freshSearchStartedAt = Now()

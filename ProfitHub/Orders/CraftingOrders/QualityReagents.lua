@@ -3054,10 +3054,56 @@ end
 -- operation info asynchronously, and an unknown answer must never be painted
 -- as good news: that is what let a row look fine until the craft said
 -- otherwise. Pass false for problemReason when the caller already checked it.
+-- Claiming, crafting and handing an order in invalidate the caches these
+-- answers are read from, and a finished row is not analysed at all. Without a
+-- memory the background would drop back to neutral in the middle of the work,
+-- so the last answer for a row is kept and reused while the live one is
+-- missing.
+local READINESS_STATE_TTL = 120
+local READINESS_STATE_CACHE_LIMIT = 200
+
+function CO:GetCachedOrderReadinessState(order)
+    local key = OrderKey(order and order.orderID)
+    local cached = key and self.readinessStateCache and self.readinessStateCache[key]
+    if cached and cached.expiresAt and cached.expiresAt > CacheNow() then
+        return cached.state, cached.reason
+    end
+    return nil
+end
+
+function CO:SetCachedOrderReadinessState(order, state, reason)
+    local key = OrderKey(order and order.orderID)
+    if not key then return end
+
+    self.readinessStateCache = self.readinessStateCache or {}
+    local count = 0
+    for _ in pairs(self.readinessStateCache) do count = count + 1 end
+    if count > READINESS_STATE_CACHE_LIMIT then
+        self.readinessStateCache = {}
+    end
+    self.readinessStateCache[key] = {
+        state = state,
+        reason = reason,
+        expiresAt = CacheNow() + READINESS_STATE_TTL,
+    }
+end
+
 function CO:GetOrderReadinessState(order, pageFrame, action, needsConcentration, problemReason)
     if not order or not order.orderID then return nil end
-    if action == "fulfill" or action == "fulfilling" then return nil end
     if not self:IsPersonalCraftingOrder(order, pageFrame) then return nil end
+
+    local state, reason = self:ComputeOrderReadinessState(
+        order, pageFrame, action, needsConcentration, problemReason)
+    if state then
+        self:SetCachedOrderReadinessState(order, state, reason)
+        return state, reason
+    end
+
+    return self:GetCachedOrderReadinessState(order)
+end
+
+function CO:ComputeOrderReadinessState(order, pageFrame, action, needsConcentration, problemReason)
+    if action == "fulfill" or action == "fulfilling" then return nil end
 
     if problemReason == nil then
         problemReason = self:GetOrderProblemReason(order, pageFrame, action)
