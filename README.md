@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Orders collected on one account and crafted on another (0.3.89)
+
+- The character that spoke to a customer often sits on another account, on
+  another machine, while the order is crafted here. The result of an order is
+  the crafter's own news and the customer already knows their name, so the
+  character that crafted the order may now send its decline or completion
+  reply when the character holding the conversation belongs to another
+  account. While that character is one of this account's own, the reply still
+  waits for it: switching to it is the right thing to do.
+- The fact that a customer has been told now travels with the order status
+  itself, so the account that sends the message answers for all of them and
+  no second account offers it again.
+
 ## Orders from customers who never wrote (0.3.88)
 
 - A personal order can arrive from someone who never said a word in chat.

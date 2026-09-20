@@ -801,6 +801,37 @@ function QuickReplies:ApplyConversationOwners(customerInfo, owners)
     end
 end
 
+local function SameCharacter(lhs, rhs)
+    if type(lhs) ~= 'string' or type(rhs) ~= 'string' then return false end
+    return lhs:gsub('%s+', ''):lower() == rhs:gsub('%s+', ''):lower()
+end
+
+local function IsCharacterOnThisAccount(name)
+    if type(name) ~= 'string' or name == '' then return false end
+    for character in pairs(HironCraftScan.DB.characters or {}) do
+        if SameCharacter(character, name) then return true end
+    end
+    return false
+end
+
+-- The character this order was assigned to and crafted by, when the character
+-- that spoke to the customer cannot be reached from here: orders are often
+-- collected on one account and crafted on another. While the conversation
+-- belongs to a character of this account, switching to it is the right thing
+-- to do and the reply stays there.
+function QuickReplies:IsOrderCrafter(response, entry)
+    local current = HironCraftScan.GetPlayerName(true)
+    if type(current) ~= 'string' then return false end
+
+    local owner = type(response) == 'table' and response.conversationCharacter or nil
+    if IsCharacterOnThisAccount(owner) then return false end
+
+    if type(entry) == 'table' and SameCharacter(entry.crafterFullName, current) then
+        return true
+    end
+    return type(response) == 'table' and SameCharacter(response.crafterFullName, current)
+end
+
 function QuickReplies:IsConversationCharacter(response)
     local owner = response and response.conversationCharacter
     local current = HironCraftScan.GetPlayerName(true)
@@ -963,6 +994,9 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         return nil
     end
 
+    -- Another account of this crafter already told the customer.
+    if entry.answeredAt then return nil end
+
     local customerInfo = HironCraftScan.DB.customers[order.customerName]
     if not customerInfo then
         return nil
@@ -972,7 +1006,15 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     if not ok or type(response) ~= 'table' then
         return nil
     end
-    if not self:IsConversationCharacter(response) then
+    -- The character that talked to this customer may sit on another account,
+    -- on another machine, while the order itself was crafted here. The result
+    -- of an order is the crafter's own news, and the customer already knows
+    -- their name: the greeting told them where to send it. So either of the
+    -- two may say it - unlike a conversational reply, which stays with the
+    -- character holding the conversation.
+    if not self:IsConversationCharacter(response)
+        and not self:IsOrderCrafter(response, entry)
+    then
         self:ReportWithheldStatusReply(order, entry, response)
         return nil
     end
@@ -1369,9 +1411,12 @@ local function SendOption(toast, option)
     QuickReplies:RememberSentReply(option.customer, reply)
     QuickReplies:RememberSentTemplate(option.customer, templateKey or option.templateKey)
     if option.statusEntry then
-        QuickReplies:RememberSentStatusReply(
-            { customerName = option.customer, responseID = option.responseID },
-            option.statusEntry)
+        local statusOrder = { customerName = option.customer, responseID = option.responseID }
+        QuickReplies:RememberSentStatusReply(statusOrder, option.statusEntry)
+        local fulfillment = HironCraftScan.OrderFulfillment
+        if fulfillment and fulfillment.MarkStatusAnswered then
+            fulfillment:MarkStatusAnswered(statusOrder)
+        end
         local statusOption = STATUS_OPTIONS[option.statusEntry.status]
         if statusOption and statusOption.oncePerCustomer then
             QuickReplies:MarkCustomerCompletionAnswered(option.customer, option.templateKey)

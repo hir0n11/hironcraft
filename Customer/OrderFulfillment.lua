@@ -423,6 +423,9 @@ local function SanitizeEntry(entry)
         automatic = entry.automatic ~= false,
     }
 
+    if type(entry.answeredAt) == 'number' then
+        clean.answeredAt = entry.answeredAt
+    end
     if type(entry.requestToken) == 'string' then
         clean.requestToken = entry.requestToken:sub(1, 192)
     end
@@ -789,6 +792,29 @@ local function MigrateMaterialDelivery(entries)
             entry.materialsPending = pending
         end
     end
+end
+
+-- Orders are often collected on one account and crafted on another, so the
+-- same result reaches several of them and each would offer to tell the
+-- customer about it. Record on the status itself that they were told, and
+-- share it: whoever sends the message answers for all of them.
+function OrderFulfillment:MarkStatusAnswered(order)
+    local statuses = EnsureStorage()
+    local key = HironCraftScan.OrderToOrderID(order)
+    local entry = key and statuses[key]
+    if type(entry) ~= 'table' or entry.answeredAt then return false end
+
+    entry.answeredAt = time()
+    entry.rev = (tonumber(entry.rev) or 0) + 1
+    entry.updatedAt = time()
+
+    if HironCraftScanComm and HironCraftScanComm.PrepareOrderStatusDelivery then
+        HironCraftScanComm:PrepareOrderStatusDelivery(entry)
+    end
+    if HironCraftScanComm and HironCraftScanComm.ShareOrderStatus then
+        HironCraftScanComm:ShareOrderStatus(entry)
+    end
+    return true
 end
 
 function OrderFulfillment:GetStatuses()

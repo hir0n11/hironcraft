@@ -216,8 +216,20 @@ assert(first.conversationCharacter == "Seller-Realm")
 currentCharacter = "Farrierr-Realm"
 QuickReplies:RememberCustomerConversation(CraftScan.DB.customers.Valnihra)
 assert(first.conversationCharacter == "Seller-Realm", "crafting alt stole the conversation")
+-- The character that talked to this customer is one of ours: switching to it
+-- is the right thing to do, so the reply stays there.
+CraftScan.DB.characters = { ['Seller-Realm'] = {} }
 assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
     "rejection reply leaked onto the crafting alt")
+-- Orders collected on another account, crafted here: nobody on this account
+-- can switch to that character, so the crafter of the order may answer.
+CraftScan.DB.characters = { ['Farrierr-Realm'] = {} }
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) ~= nil,
+    "the crafter could not answer for an order collected on another account")
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder,
+    { status = 'rejected', rev = 1, answeredAt = 100 }) == nil,
+    "a customer already told by another account was told again")
+CraftScan.DB.characters = { ['Seller-Realm'] = {} }
 currentCharacter = "Seller-OtherRealm"
 assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
     "same name on another realm inherited the rejection")
