@@ -174,6 +174,7 @@ CO.GetQueueConcMode = function() return 'off' end
 CO.GetAutoFinishingLabel = function() return '+10' end
 CO.GetSelectedProfessionExpansionLabel = function() return 'Midnight' end
 CO.GetQueueMinProfitCopper = function() return nil end
+CO.GetKnowledgeMinProfitCopper = function() return nil end
 CO.GetBagRewardValueCopper = function() return nil end
 CO.GetKnowledgePointValueCopper = function() return nil end
 CO.IsAutoQueueOnOpen = function() return true end

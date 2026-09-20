@@ -149,6 +149,37 @@ for _, serverBacked in ipairs({false,true}) do
     CO:QueueWorkOrdersSelection(true)
     if serverBacked then completeRequest() end
     assertSelection('2,6,7,9') -- opt back in to negative/unknown-profit knowledge
+
+    -- Knowledge orders can have a threshold of their own, in the loss the
+    -- knowledge is worth. While it is set it decides on its own, whatever the
+    -- ignore-profit switch says.
+    opts.knowledgeMinProfitCopper=-500
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('2,7') -- -600 is too deep a loss, unknown profit still fails
+    opts.knowledgeIgnoreProfit=false
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('2,7') -- the switch no longer decides while the field is set
+    opts.knowledgeMinProfitCopper=nil
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('7') -- an empty field hands the decision back to the switch
+    opts.knowledgeIgnoreProfit=true
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection(true)
+    if serverBacked then completeRequest() end
+    assertSelection('2,6,7,9')
+    -- The ordinary queue keeps its own minimum profit either way.
+    opts.knowledgeMinProfitCopper=-500
+    CO.selectedOrders={}
+    CO:QueueWorkOrdersSelection()
+    if serverBacked then completeRequest() end
+    assertSelection('1,7')
+    opts.knowledgeMinProfitCopper=nil
 end
 
 hasProfession=false

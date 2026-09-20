@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Minimum profit of its own for knowledge orders (0.3.82)
+
+- Order filters gained a "Knowledge: min. profit" field next to the ordinary
+  minimum. Knowledge orders are taken for the knowledge, often at a loss, so
+  they can now have their own threshold - a negative value is the loss you
+  agree to. While the field is filled it decides for knowledge orders instead
+  of the "Knowledge: ignore min. profit" switch, every other order keeps using
+  the ordinary minimum, and clearing the field hands the decision back to the
+  switch.
+
 ## Replies that only make sense before the craft (0.3.81)
 
 - Every keyword reply gained an "Only while an order is open" switch in Quick

@@ -1127,6 +1127,10 @@ function CO:UpdateQueueSettingWidgets()
         panel.minProfitInput:RefreshValue()
     end
 
+    if panel.knowledgeMinProfitInput and panel.knowledgeMinProfitInput.RefreshValue then
+        panel.knowledgeMinProfitInput:RefreshValue()
+    end
+
     if panel.bagValueInput and panel.bagValueInput.RefreshValue then
         panel.bagValueInput:RefreshValue()
     end
@@ -1446,6 +1450,28 @@ function CO:EnsureControlPanel(pageFrame)
     panel.minProfitInput:SetPoint("TOPRIGHT", -PADX, y)
     y = y - 26
 
+    -- Min profit for knowledge orders
+    local kmpHeader = body:CreateFontString(nil, "OVERLAY")
+    ApplyFont(kmpHeader, 11, "OUTLINE")
+    kmpHeader:SetPoint("TOPLEFT", PADX, y - 4)
+    kmpHeader:SetTextColor(1, 0.82, 0.35, 1)
+    kmpHeader:SetText(T("COA_QUEUE_KNOWLEDGE_MINPROFIT_HEADER", "Знания: мин. профит"))
+    panel.knowledgeMinProfitInput = self:CreateValueInput(body, 62, 20,
+        function() return CO:GetKnowledgeMinProfitCopper() end,
+        function(c) CO:SetKnowledgeMinProfitCopper(c) end)
+    panel.knowledgeMinProfitInput:SetPoint("TOPRIGHT", -PADX, y)
+    panel.knowledgeMinProfitInput:HookScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_QUEUE_KNOWLEDGE_MINPROFIT_HEADER", "Знания: мин. профит"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_QUEUE_KNOWLEDGE_MINPROFIT_TIP",
+            "Own minimum profit for knowledge orders, in gold; a negative value is an allowed loss. While it is set it decides for knowledge orders instead of the switch below. Leave it empty to let the switch decide again."),
+            11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.knowledgeMinProfitInput:HookScript("OnLeave", HideStyledTooltip)
+    y = y - 26
+
     -- Bag reward value
     local bagHeader = body:CreateFontString(nil, "OVERLAY")
     ApplyFont(bagHeader, 11, "OUTLINE")
@@ -1478,7 +1504,7 @@ function CO:EnsureControlPanel(pageFrame)
         if not Tooltip then return end
         Tooltip:Clear()
         Tooltip:AddLine(T("COA_KNOWLEDGE_IGNORE_PROFIT", "Knowledge: ignore min. profit"), 13, 1, 0.82, 0.35)
-        Tooltip:AddLine(T("COA_KNOWLEDGE_IGNORE_PROFIT_TIP", "When disabled, knowledge orders must pass the normal minimum-profit filter. Applies to the knowledge button and automatic selection."), 11, 0.85, 0.85, 0.85)
+        Tooltip:AddLine(T("COA_KNOWLEDGE_IGNORE_PROFIT_TIP", "When disabled, knowledge orders must pass the normal minimum-profit filter. Applies to the knowledge button and automatic selection. A filled \"Knowledge: min. profit\" field decides instead of this switch."), 11, 0.85, 0.85, 0.85)
         ShowStyledTooltip(self)
     end)
     panel.knowledgeProfitCheck:HookScript("OnLeave", HideStyledTooltip)
@@ -1736,7 +1762,8 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateCheckToggle(panel.autoKnowledgeCheck)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
-    for _, w in ipairs({ panel.minProfitInput, panel.bagValueInput, panel.kpValueInput }) do
+    for _, w in ipairs({ panel.minProfitInput, panel.knowledgeMinProfitInput,
+        panel.bagValueInput, panel.kpValueInput }) do
         if w then self:StyleWidget(w) end
     end
 

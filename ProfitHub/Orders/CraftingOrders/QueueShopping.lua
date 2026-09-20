@@ -199,6 +199,37 @@ function CO:GetQueueMinProfitCopper()
     return tonumber(self:GetQueueOptions().minProfitCopper)
 end
 
+-- Knowledge orders are usually taken at a loss for the knowledge itself, so
+-- they get a threshold of their own. When it is set it decides on its own,
+-- whatever the "knowledge ignores the minimum profit" switch says; when it is
+-- empty that switch keeps deciding as before.
+function CO:GetKnowledgeMinProfitCopper()
+    if not self:IsNpcTab() then return nil end
+    return tonumber(self:GetQueueOptions().knowledgeMinProfitCopper)
+end
+
+function CO:GetKnowledgeMinProfitText()
+    local value = self:GetKnowledgeMinProfitCopper()
+    if not value then
+        return T("COA_QUEUE_PROFIT_FILTER_OFF", "Off")
+    end
+    return FormatProfitCopper(value)
+end
+
+function CO:SetKnowledgeMinProfitCopper(value)
+    local opts = self:GetQueueOptions()
+    value = tonumber(value)
+    opts.knowledgeMinProfitCopper = value
+    if value then
+        self:SetStatus(string.format(
+            T("COA_STATUS_KNOWLEDGE_PROFIT_FILTER", "Knowledge profit filter: %s."),
+            self:GetKnowledgeMinProfitText()))
+    else
+        self:SetStatus(T("COA_STATUS_KNOWLEDGE_PROFIT_FILTER_OFF", "Knowledge profit filter disabled."))
+    end
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+end
+
 function CO:GetQueueMinProfitText()
     local value = self:GetQueueMinProfitCopper()
     if not value then
@@ -1028,8 +1059,8 @@ function CO:ApplyQueueReagentModeToOrder(order)
     return ok
 end
 
-function CO:OrderPassesQueueProfitFilter(order)
-    local minProfit = self:GetQueueMinProfitCopper()
+function CO:OrderPassesQueueProfitFilter(order, minProfitOverride)
+    local minProfit = minProfitOverride or self:GetQueueMinProfitCopper()
     if not minProfit then return true end
     if not order then return false end
 
@@ -1285,7 +1316,17 @@ function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     -- deliberately concentration-free even when the normal queue allows it.
     if needsConcentration == nil then return false end
     if needsConcentration == true and not concentrationAllowed then return false end
-    if (not knowledgeOnly or opts.knowledgeIgnoreProfit == false) and not self:OrderPassesQueueProfitFilter(order) then return false end
+    if knowledgeOnly then
+        local knowledgeMinProfit = self:GetKnowledgeMinProfitCopper()
+        if knowledgeMinProfit then
+            if not self:OrderPassesQueueProfitFilter(order, knowledgeMinProfit) then return false end
+        elseif opts.knowledgeIgnoreProfit == false
+            and not self:OrderPassesQueueProfitFilter(order) then
+            return false
+        end
+    elseif not self:OrderPassesQueueProfitFilter(order) then
+        return false
+    end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
     return rank == 1 or rank == 2 or (rank == 3 and concentrationAllowed)
