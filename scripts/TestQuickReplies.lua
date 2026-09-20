@@ -125,6 +125,33 @@ QuickReplies:GetConfig().templates.CUSTOM_1.priority = 0
 QuickReplies:GetConfig().templates.CUSTOM_1.keywords = previousKeywords[1]
 QuickReplies:GetConfig().templates.CUSTOM_2.keywords = previousKeywords[2]
 
+-- Priority ranks answers that match the message equally well. It must not
+-- let a word read through a typo beat a word the customer really wrote.
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords = "quality"
+QuickReplies:GetConfig().templates.CUSTOM_1.priority = 9
+QuickReplies:GetConfig().templates.CUSTOM_2.keywords = "price"
+QuickReplies:GetConfig().templates.CUSTOM_2.priority = 0
+local function classifiedHas(key)
+    for _, candidate in ipairs(classified) do
+        if candidate == key then return true end
+    end
+end
+classified = QuickReplies:Classify("price qualiti")
+assert(classifiedHas("CUSTOM_2") and not classifiedHas("CUSTOM_1"),
+    "a typo on a high-priority reply outranked a word the customer really wrote")
+-- Two words the customer wrote are still stronger evidence than one.
+QuickReplies:GetConfig().templates.CUSTOM_1.keywords = "max quality"
+classified = QuickReplies:Classify("price max quality")
+assert(classifiedHas("CUSTOM_1") and not classifiedHas("CUSTOM_2"),
+    "a longer phrase lost to a single word")
+QuickReplies:GetConfig().templates.CUSTOM_1.priority = 0
+
+local answers = QuickReplies:GetConfig().templates
+assert(answers.NAME.response == '{crafter} will craft it.'
+    and answers.PRICE.response == 'The commission is {commission}.'
+    and answers.ORDER.response == 'Send a personal order to {crafter}.',
+    'the default answers are back to bare placeholders')
+
 local definitions = QuickReplies:GetDefinitions()
 assert(definitions[1].key == "REJECTED_ORDER", "rejected-order setting must be first")
 assert(definitions[1].eventOnly == true, "rejected-order reply must not use chat keywords")

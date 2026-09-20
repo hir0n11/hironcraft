@@ -24,6 +24,14 @@ local REJECTION_TEXT_MIGRATIONS = {
     ['Resend. You missed {reagent_issues}'] = true,
     ['Resend. You missed [reagent_issues]'] = true,
 }
+-- Answers that used to be a bare placeholder read like a database row rather
+-- than a person. Upgrade the wording for anyone who never edited it; a text
+-- the crafter wrote themselves is theirs and is left alone.
+local DEFAULT_TEXT_MIGRATIONS = {
+    NAME = { ['{crafter}'] = true },
+    PRICE = { ['{commission}'] = true },
+    ORDER = { ['Send personal order to {crafter}'] = true },
+}
 local sentReplies = {}
 
 local function ReplyKey(customer, reply)
@@ -107,17 +115,17 @@ local DEFAULT_TEMPLATES = {
     {
         key = 'NAME',
         keywords = 'name, crafter, char, character, who',
-        response = '{crafter}',
+        response = '{crafter} will craft it.',
     },
     {
         key = 'PRICE',
         keywords = 'price, cost, fee, how much, commission, tip',
-        response = '{commission}',
+        response = 'The commission is {commission}.',
     },
     {
         key = 'ORDER',
         keywords = 'where, where to send, send where, order where, who to send, personal order',
-        response = 'Send personal order to {crafter}',
+        response = 'Send a personal order to {crafter}.',
     },
     {
         key = 'QUALITY',
@@ -160,7 +168,7 @@ local function EnsureConfig()
         config.typo_tolerance = true
     end
     local previousSchema = tonumber(config.schema_version) or 0
-    config.schema_version = 9
+    config.schema_version = 10
 
     local templates = HironCraftScan.Utils.saved(config, 'templates', {})
     for _, definition in ipairs(DEFAULT_TEMPLATES) do
@@ -173,9 +181,12 @@ local function EnsureConfig()
         end
         -- Upgrade only known old wording once, including the user's exact
         -- screenshot text. Preserve other custom pastes and future edits.
+        local upgrades = DEFAULT_TEXT_MIGRATIONS[definition.key]
         if template.response == nil or (definition.key == REJECTED_ORDER_TEMPLATE_KEY
             and not template.deleted and previousSchema < 8
-            and REJECTION_TEXT_MIGRATIONS[Trim(template.response)]) then
+            and REJECTION_TEXT_MIGRATIONS[Trim(template.response)])
+            or (upgrades and not template.deleted and previousSchema < 10
+                and upgrades[Trim(template.response)]) then
             template.response = definition.response
         end
     end
@@ -416,7 +427,7 @@ local function KeywordScore(message, keyword, allowTypos, exactWords)
     if paddedMessage:find(' ' .. keyword .. ' ', 1, true) then
         -- Prefer longer phrases ("who to send") over contained short words
         -- ("who") so ORDER wins over NAME in that example.
-        return CountWords(keyword) * 1000 + #keyword
+        return CountWords(keyword) * 1000 + #keyword, true, CountWords(keyword)
     end
     if not allowTypos then return nil end
 
@@ -459,7 +470,7 @@ local function KeywordScore(message, keyword, allowTypos, exactWords)
 
     if bestDistance == nil then return nil end
     -- An exact phrase with the same word count must always beat its fuzzy form.
-    return #keywordWords * 1000 + #keyword - bestDistance * 100 - 1
+    return #keywordWords * 1000 + #keyword - bestDistance * 100 - 1, false, #keywordWords
 end
 
 function QuickReplies:Classify(message)
@@ -493,31 +504,52 @@ function QuickReplies:Classify(message)
         end
     end
 
+    local bestExact = nil
+    local bestWords = nil
     local bestPriority = nil
     local bestScore = nil
     local matched = {}
     for _, definition in ipairs(self:GetDefinitions()) do
         local template = config.templates[definition.key]
         if template and template.enabled and not definition.eventOnly then
-            local templateScore = nil
+            local templateScore, templateExact, templateWords = nil, false, 0
             local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
             for keyword in keywords:gmatch('[^,\n]+') do
-                local score = KeywordScore(normalized, keyword, config.typo_tolerance, exactWords)
+                local score, exact, words = KeywordScore(
+                    normalized, keyword, config.typo_tolerance, exactWords)
                 if score and (not templateScore or score > templateScore) then
                     templateScore = score
+                    templateExact = exact == true
+                    templateWords = words or 0
                 end
             end
 
             if templateScore then
                 local priority = NormalizePriority(template.priority)
-                if bestPriority == nil
-                    or priority > bestPriority
-                    or (priority == bestPriority and templateScore > bestScore)
-                then
+                -- What the customer actually said decides first: a longer
+                -- phrase is stronger evidence than a single word, and a word
+                -- they really wrote is stronger than one read through a typo.
+                -- Priority only ranks answers that match the message equally
+                -- well; it does not promote a guess over a certainty.
+                local better = bestScore == nil
+                    or templateWords > bestWords
+                    or (templateWords == bestWords and templateExact and not bestExact)
+                    or (templateWords == bestWords and templateExact == bestExact
+                        and (priority > bestPriority
+                            or (priority == bestPriority and templateScore > bestScore)))
+                local tied = bestScore ~= nil
+                    and templateWords == bestWords
+                    and templateExact == bestExact
+                    and priority == bestPriority
+                    and templateScore == bestScore
+
+                if better then
+                    bestExact = templateExact
+                    bestWords = templateWords
                     bestPriority = priority
                     bestScore = templateScore
                     matched = { definition.key }
-                elseif priority == bestPriority and templateScore == bestScore then
+                elseif tied then
                     table.insert(matched, definition.key)
                 end
             end
