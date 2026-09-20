@@ -1394,20 +1394,29 @@ function CL:PopulateRow(row, order)
     end
 
     if needsConc then
-        local cost = (engineCost and engineCost > 0) and engineCost
-            or (CO.GetFastConcentrationCost and CO:GetFastConcentrationCost(order)) or nil
+        local cost, costSource
+        if engineCost and engineCost > 0 then
+            cost, costSource = engineCost, "engine"
+        elseif CO.ResolveConcentrationCost then
+            cost, costSource = CO:ResolveConcentrationCost(order)
+        end
         if not (cost and cost > 0) then
             local qInfoConc = CO.GetOrderQualityInfo and CO:GetOrderQualityInfo(order, true, true)
             if qInfoConc and qInfoConc.concentrationCost and qInfoConc.concentrationCost > 0 then
-                cost = qInfoConc.concentrationCost
+                cost, costSource = qInfoConc.concentrationCost, "prepared"
             end
         end
+        -- The client refuses to price some recipes with any reagents attached
+        -- and answers only for an empty allocation. That number ignores the
+        -- reagents, so say so instead of passing it off as exact.
+        local approximateCost = cost ~= nil and costSource == "empty"
 
         local key = order.orderID and tostring(order.orderID)
         local concOn = key and CO.useConcentration and CO.useConcentration[key] == true
 
         if cost and cost > 0 then
-            row.concBtn.text:SetText(tostring(math.floor(cost + 0.5)))
+            row.concBtn.text:SetText((approximateCost and "~" or "")
+                .. tostring(math.floor(cost + 0.5)))
         elseif outOfReach then
             row.concBtn.text:SetText("—")
         else
@@ -1439,12 +1448,17 @@ function CL:PopulateRow(row, order)
         row.concBtn._order = order
         row.concBtn._cost = cost
         row.concBtn._outOfReach = outOfReach
+        row.concBtn._approximate = approximateCost
         row.concBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:ClearLines()
             GameTooltip:AddLine(L("COA_CL_CONC_TITLE", "Concentration"), 1, 0.82, 0.35)
             if self._cost and self._cost > 0 then
                 GameTooltip:AddLine(L("COA_CL_CONC_REQUIRED", "Required: %s"):format(tostring(math.floor(self._cost + 0.5))), 1, 1, 1)
+                if self._approximate then
+                    GameTooltip:AddLine(L("COA_CL_CONC_APPROXIMATE",
+                        "Approximate: this client prices the recipe only without reagents."), 1, 0.82, 0.35, true)
+                end
             elseif self._outOfReach then
                 GameTooltip:AddLine(L("COA_CL_CONC_OUT_OF_REACH",
                     "The requested quality is out of reach even with concentration."), 1, 0.45, 0.40, true)

@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Concentration for recipes the client prices only empty (0.3.76)
+
+- `/ahuicodbg conc` output showed the cause of the rows that print "?": for
+  those recipes the client answers nothing at all - not a zero cost, no answer
+  - for every reagent list we attach, while it answers normally for an empty
+  list. The lookup now also asks with an empty allocation. That number ignores
+  the reagents, so the cell prefixes it with "~" and the tooltip says it is
+  approximate.
+- A nil reagent list is never accepted by the client, so that attempt was
+  replaced rather than added to.
+- When the client refuses a list, the diagnostics now record its refusal and
+  the exact reagents that were sent, which is what the remaining exact-cost
+  work needs.
+
 ## Concentration diagnostics report the client's answer (0.3.75)
 
 - `/ahuicodbg conc` now prints which operation-info and concentration

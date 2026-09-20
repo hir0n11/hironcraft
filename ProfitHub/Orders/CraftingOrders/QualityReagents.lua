@@ -3470,7 +3470,10 @@ function CO:ResolveConcentrationCost(order, collect)
         { label = "planned", build = function() return self:BuildCraftingReagentInfoTbl(order) end },
         { label = "cheapest", build = function() return self:BuildFastCraftingReagentInfoTbl(order) end },
         { label = "as-placed", build = function() return self:BuildOrderOnlyCraftingReagentInfoTbl(order) end },
-        { label = "unallocated", build = function() return nil end },
+        -- An empty list is still a list. The client answers for it even when
+        -- it rejects a filled one, and refuses a nil table outright, so this
+        -- is the last allocation worth asking about.
+        { label = "empty", build = function() return {} end },
     }
 
     local forOrder = order.orderID and C_TradeSkillUI.GetCraftingOperationInfoForOrder
@@ -3482,14 +3485,23 @@ function CO:ResolveConcentrationCost(order, collect)
         if not okBuild then reagents = nil end
 
         for _, applied in ipairs({ false, true }) do
-            local info
+            local info, refusal
             if forOrder then
                 local ok, result = pcall(forOrder, order.spellID, reagents, order.orderID, applied)
-                if ok and type(result) == "table" then info = result end
+                if ok and type(result) == "table" then
+                    info = result
+                else
+                    refusal = ok and "order:no answer" or ("order:" .. tostring(result))
+                end
             end
             if info == nil and plain then
                 local ok, result = pcall(plain, order.spellID, reagents, nil, applied)
-                if ok and type(result) == "table" then info = result end
+                if ok and type(result) == "table" then
+                    info = result
+                else
+                    refusal = (refusal and (refusal .. " | ") or "")
+                        .. (ok and "recipe:no answer" or ("recipe:" .. tostring(result)))
+                end
             end
 
             local value = ReadConcentrationCostFromInfo(info)
@@ -3502,6 +3514,17 @@ function CO:ResolveConcentrationCost(order, collect)
                     tostring(info ~= nil),
                     tostring(info and (info.craftingQuality or info.quality) or "nil"),
                     tostring(value or "nil"))
+                if info == nil and refusal then
+                    collect[#collect + 1] = "  REFUSED " .. refusal
+                    for index, entry in ipairs(reagents or {}) do
+                        local payload = type(entry) == "table" and (entry.reagent or entry)
+                        collect[#collect + 1] = string.format("  SENT[%d] item=%s dataSlot=%s qty=%s",
+                            index,
+                            tostring(type(payload) == "table" and payload.itemID or "nil"),
+                            tostring(type(entry) == "table" and entry.dataSlotIndex or "nil"),
+                            tostring(type(entry) == "table" and entry.quantity or "nil"))
+                    end
+                end
                 if type(info) == "table" and not value then
                     -- The client answered but we found no cost in the answer:
                     -- report what the answer actually carries, so the field

@@ -158,6 +158,24 @@ CO._fastConcCostCache=nil
 local _,fallbackSource=CO:ResolveConcentrationCost(ladder)
 assert(fallbackSource~='planned' and fallbackSource~='cheapest',
     'an unplanned allocation was reported as our own')
+-- Some recipes this client refuses to price with any reagents attached and
+-- answers only for an empty allocation, so the ladder has to ask for that too.
+CO._fastConcCostCache=nil
+local emptyAsked={}
+E.C_TradeSkillUI={
+GetRecipeSchematic=function()
+    return {reagentSlotSchematics={{slotIndex=2,dataSlotIndex=2,required=true,
+        quantityRequired=5,reagents={{itemID=777}}}}}
+end,
+GetCraftingOperationInfoForOrder=function(_,reagents,_,_)
+    emptyAsked[#emptyAsked+1]=reagents and #reagents or -1
+    if reagents and #reagents==0 then return {concentrationCost=227} end
+    return nil
+end}
+local emptyCost,emptySource=CO:ResolveConcentrationCost(ladder)
+assert(emptyCost==227 and emptySource=='empty',
+    'a recipe the client prices only without reagents stayed unknown')
+assert(emptyAsked[#emptyAsked]==0,'the empty allocation was never asked for')
 E.C_TradeSkillUI=nil
 CO._fastConcCostCache=nil
 
