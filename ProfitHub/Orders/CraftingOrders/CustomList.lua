@@ -1380,6 +1380,10 @@ function CL:PopulateRow(row, order)
     end
 
     local needsConc, engineCost
+    -- Concentration only bridges one quality step. When even that cannot reach
+    -- the requested quality the client answers with no cost at all, which is
+    -- not the same as data that has not loaded yet.
+    local outOfReach = concInfo ~= nil and concInfo.needs == true and concInfo.reachable == false
     if target <= 0 then
         needsConc = false
     elseif concInfo then
@@ -1404,11 +1408,18 @@ function CL:PopulateRow(row, order)
 
         if cost and cost > 0 then
             row.concBtn.text:SetText(tostring(math.floor(cost + 0.5)))
+        elseif outOfReach then
+            row.concBtn.text:SetText("!")
         else
             row.concBtn.text:SetText("?")
         end
 
-        if concOn then
+        if outOfReach and not (cost and cost > 0) then
+            row.concBtn.text:SetTextColor(1.00, 0.35, 0.30)
+            row.concBtn:SetBackdropColor(0.20, 0.04, 0.03, 0.85)
+            row.concBtn:SetBackdropBorderColor(1.00, 0.35, 0.30, 0.90)
+            if row.concBtn.icon then row.concBtn.icon:SetVertexColor(1, 0.55, 0.50) end
+        elseif concOn then
             row.concBtn.text:SetTextColor(0.30, 0.95, 1.00)
             row.concBtn:SetBackdropColor(0.10, 0.30, 0.40, 0.95)
             row.concBtn:SetBackdropBorderColor(0.30, 0.95, 1.00, 1)
@@ -1427,12 +1438,16 @@ function CL:PopulateRow(row, order)
 
         row.concBtn._order = order
         row.concBtn._cost = cost
+        row.concBtn._outOfReach = outOfReach
         row.concBtn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:ClearLines()
             GameTooltip:AddLine(L("COA_CL_CONC_TITLE", "Concentration"), 1, 0.82, 0.35)
             if self._cost and self._cost > 0 then
                 GameTooltip:AddLine(L("COA_CL_CONC_REQUIRED", "Required: %s"):format(tostring(math.floor(self._cost + 0.5))), 1, 1, 1)
+            elseif self._outOfReach then
+                GameTooltip:AddLine(L("COA_CL_CONC_OUT_OF_REACH",
+                    "The requested quality is out of reach even with concentration."), 1, 0.45, 0.40, true)
             else
                 GameTooltip:AddLine(L("COA_CL_CONC_NO_DATA", "Exact data not loaded"), 0.85, 0.85, 0.85)
             end

@@ -5276,6 +5276,61 @@ function CO:DebugDumpOrder(order, title, printLines)
     return lines
 end
 
+-- Short, chat-sized report for the one question that keeps coming back: why
+-- a row prints "?" instead of a concentration cost. Every lookup the row
+-- makes is listed with what the client answered.
+function CO:DebugDumpConcentration()
+    local visible = self:GetVisibleDebugOrders()
+    local allLines = {}
+    local function push(line) allLines[#allLines + 1] = line end
+
+    push("=== HironCraftProfit CO CONCENTRATION DEBUG count=" .. tostring(#visible) .. " ===")
+    self:DebugPrint("Заказов на экране: " .. tostring(#visible))
+
+    for index, entry in ipairs(visible) do
+        local order = entry.order
+        local recipeName = "?"
+        if order.spellID and C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+            local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, order.spellID)
+            if ok and info and info.name then recipeName = info.name end
+        end
+
+        local attempts = {}
+        local cost, source = self:ResolveConcentrationCost(order, attempts)
+        local needed = self:DoesOrderNeedConcentrationForTargetQuality(order, true)
+        local engineCost, engineNeeds
+        local CE = PT and PT.CraftEngine
+        if CE and CE.NeedsConcentrationCached and order.spellID then
+            local target = self:GetOrderRequestedQuality(order)
+            local mode = self.GetQueueReagentMode and self:GetQueueReagentMode() or "auto"
+            local locked = self.BuildLockedReagentsForEngine and self:BuildLockedReagentsForEngine(order) or nil
+            local info = target > 0 and CE:NeedsConcentrationCached(order.spellID, target, order.orderID, mode, locked)
+            if type(info) == "table" then
+                engineCost, engineNeeds = info.concentrationCost, info.needs
+            end
+        end
+
+        local header = string.format(
+            "[%02d] %s orderID=%s spellID=%s minQ=%s needs=%s cost=%s source=%s engine=%s/%s",
+            index, recipeName, tostring(order.orderID), tostring(order.spellID),
+            tostring(self:GetOrderRequestedQuality(order)), tostring(needed),
+            tostring(cost or "nil"), tostring(source or "nil"),
+            tostring(engineNeeds), tostring(engineCost or "nil"))
+        push(header)
+        self:DebugPrint(header)
+
+        for _, line in ipairs(attempts) do
+            push("  " .. line)
+            if not cost then self:DebugPrint("  " .. line) end
+        end
+    end
+
+    push("=== END HironCraftProfit CO CONCENTRATION DEBUG ===")
+    self:DebugStoreLines(allLines)
+    self:DebugPrint("Полный лог: /dump HironCraftProfit_DB.craftingOrders.lastReagentDebug")
+    return allLines
+end
+
 function CO:DebugDumpVisibleOrders()
     local visible = self:GetVisibleDebugOrders()
     local allLines = {}
@@ -5333,6 +5388,9 @@ function CO:HandleReagentDebugSlash(msg)
     elseif msg == "visible" or msg == "all" then
         self:DebugDumpVisibleOrders()
         return
+    elseif msg == "conc" or msg == "concentration" then
+        self:DebugDumpConcentration()
+        return
     elseif msg == "hover" or msg == "dump" or msg == "" then
         local order = self:GetHoveredDebugOrder()
         if not order then
@@ -5345,6 +5403,7 @@ function CO:HandleReagentDebugSlash(msg)
         self:DebugPrint("/ahuicodbg on - включает диагностические клики")
         self:DebugPrint("/ahuicodbg hover - дамп заказа под мышкой")
         self:DebugPrint("/ahuicodbg visible - дамп всех видимых заказов")
+        self:DebugPrint("/ahuicodbg conc - почему в строке заказа '?' вместо концентрации")
         self:DebugPrint("/ahuicodbg clear - очистить кэши реагентов")
         self:DebugPrint("После дампа: /dump HironCraftProfit_DB.craftingOrders.lastReagentDebug")
         return

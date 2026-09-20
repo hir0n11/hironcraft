@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Concentration cell tells its three answers apart (0.3.73)
+
+- A requested quality that concentration cannot reach is no longer printed as
+  "?" - the cell shows a red "!" and says so in its tooltip. Concentration
+  bridges one quality step, so for an order far below its requested quality
+  the client answers with no cost at all, which is not the same as data that
+  has not loaded yet; "?" now means only the latter.
+- `/ahuicodbg conc` prints, for every order on screen, the requested quality,
+  what the engine decided, and every concentration lookup with the client's
+  answer. Use it on a row that still shows no number.
+
 ## One completion reply per batch of orders (0.3.72)
 
 - A customer who placed several orders at once is told once, when the last of

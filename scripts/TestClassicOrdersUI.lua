@@ -755,6 +755,28 @@ for _, scale in ipairs({.65, 1, 1.3}) do
 end
 CO:HideRowProgressVisual(row.action)
 page:SetScale(1)
+-- The concentration cell tells the three answers apart: a real cost, a quality
+-- that concentration cannot reach, and data that has not loaded yet.
+local engineAnswer
+local previousEngine=_G.HironCraft
+_G.HironCraft={CraftEngine={NeedsConcentrationCached=function() return engineAnswer end}}
+local previousQuality=CO.GetOrderRequestedQuality
+CO.GetOrderRequestedQuality=function() return 5 end
+engineAnswer={needs=true,reachable=true,concentrationCost=102}
+CL:PopulateRow(row,{orderID=51,spellID=1234,minQuality=5})
+assert(row.concBtn:IsShown() and row.concBtn.text.text=='102','a known cost was not printed')
+engineAnswer={needs=true,reachable=false,concentrationCost=0}
+CL:PopulateRow(row,{orderID=52,spellID=1234,minQuality=5})
+assert(row.concBtn.text.text=='!','a quality out of reach was reported as missing data')
+engineAnswer={needs=true,reachable=true,concentrationCost=0}
+CL:PopulateRow(row,{orderID=53,spellID=1234,minQuality=5})
+assert(row.concBtn.text.text=='?','unloaded data lost its own marker')
+engineAnswer={needs=false,reachable=true,concentrationCost=0}
+CL:PopulateRow(row,{orderID=54,spellID=1234,minQuality=5})
+assert(not row.concBtn:IsShown(),'an order without concentration kept the cell')
+_G.HironCraft=previousEngine
+CO.GetOrderRequestedQuality=previousQuality
+
 -- Switching tabs: C_CraftingOrders keeps the last answered list, so the Public
 -- tab used to be handed the orders the previous tab had shown and looked as if
 -- it had never refreshed. That exact set must be withheld until this tab is
