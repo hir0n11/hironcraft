@@ -1,5 +1,9 @@
 local Scan = select(2, ...)
 
+-- The last greeting handed to the server, kept only long enough to take it
+-- back if the server says it was sent too fast.
+local lastGreeting = nil
+
 -- Persist only identities, not response references: SavedVariables and linked
 -- accounts must not reconnect a later request to an old multi-item greeting.
 function Scan.GroupOrderGreetings(responses)
@@ -73,5 +77,40 @@ function Scan.SendOrderGreeting(order, userInitiated)
         sentResponse.greeting_sent = true
         sentResponse.destination_only_greeting = nil
     end
+    lastGreeting = {
+        customer = order.customerName,
+        responses = pending,
+        at = (GetTime and GetTime()) or (time and time()) or 0,
+    }
     return true
 end
+
+-- The server can swallow a whisper it considers too fast, and it says so a
+-- moment later. The greeting was already marked as sent, which leaves the row
+-- looking answered while the customer heard nothing. Offer it again: nothing
+-- is resent on its own, the row simply becomes clickable once more.
+local THROTTLE_UNDO_WINDOW = 2
+
+if Scan.Utils and Scan.Utils.OnChatThrottled then
+    Scan.Utils.OnChatThrottled(function()
+        local recent = lastGreeting
+        lastGreeting = nil
+        if type(recent) ~= 'table' then return end
+
+        local now = (GetTime and GetTime()) or (time and time()) or 0
+        if now - (tonumber(recent.at) or 0) > THROTTLE_UNDO_WINDOW then return end
+
+        for _, response in ipairs(recent.responses or {}) do
+            response.greeting_sent = false
+            response.greetingSentAt = nil
+        end
+        print('|cffffd100HironCraftScan:|r ' .. string.format(
+            Scan.LOCAL:GetText('Greeting was not sent, the server limited the rate'),
+            tostring(Scan.NameAndRealmToName and Scan.NameAndRealmToName(recent.customer)
+                or recent.customer)))
+        if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
+            HironCraftScanCraftingOrderPage:ShowGeneric()
+        end
+    end)
+end
+

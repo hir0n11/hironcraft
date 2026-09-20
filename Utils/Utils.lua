@@ -82,6 +82,53 @@ function HironCraftScan.Utils.ColorizedProfessionNameByID(professionID)
     )
 end
 
+-- The server squelches a character that whispers too fast, and as far as an
+-- addon can see it does so silently: SendChatMessage reports nothing, the
+-- message never arrives, and the row is already marked as greeted. The
+-- server's own complaint is the only signal, so take it seriously: stop
+-- sending for a few seconds and let the caller undo what it believed it sent.
+-- No guess is made about the limit itself; a limit invented here would block
+-- work that the server was perfectly happy to carry.
+local CHAT_THROTTLE_BACKOFF = 5
+local throttledUntil = nil
+local throttleListeners = {}
+
+-- Whoever believed it had just sent something asks to hear about this.
+function HironCraftScan.Utils.OnChatThrottled(callback)
+    if type(callback) ~= 'function' then return end
+    throttleListeners[#throttleListeners + 1] = callback
+end
+
+local function SendClock()
+    return (GetTime and GetTime()) or (time and time()) or 0
+end
+
+function HironCraftScan.Utils.CanSendMessages()
+    return not throttledUntil or SendClock() >= throttledUntil
+end
+
+function HironCraftScan.Utils.NoteChatThrottled()
+    throttledUntil = SendClock() + CHAT_THROTTLE_BACKOFF
+    for _, callback in ipairs(throttleListeners) do
+        pcall(callback)
+    end
+end
+
+-- Created on the first send: an addon that never speaks has nothing to hear.
+local throttleWatcher = nil
+local function WatchChatThrottle()
+    if throttleWatcher or not CreateFrame then return end
+
+    throttleWatcher = CreateFrame('Frame')
+    throttleWatcher:RegisterEvent('UI_ERROR_MESSAGE')
+    throttleWatcher:SetScript('OnEvent', function(_, _, _, message)
+        local throttled = _G and _G.ERR_CHAT_THROTTLED
+        if type(message) == 'string' and type(throttled) == 'string' and message == throttled then
+            HironCraftScan.Utils.NoteChatThrottled()
+        end
+    end)
+end
+
 function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
     -- Only explicit UI actions opt into sending. Scanner events, timers and
     -- linked-account packets must remain read-only with respect to player chat.
@@ -95,6 +142,12 @@ function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
             return false
         end
     end
+    if not HironCraftScan.Utils.CanSendMessages() then
+        print('HironCraft: ' .. L('Reply could not be sent: the server limits how fast messages go out. Try again in a few seconds.'))
+        return false
+    end
+    WatchChatThrottle()
+
     if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then
         local id = HironCraftScan.BattleNet.ResolveTarget(customer)
         if not id then HironCraftScan.BattleNet.Unavailable(); return false end

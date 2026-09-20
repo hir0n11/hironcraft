@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A greeting the server swallowed is offered again (0.3.87)
+
+- The server limits how fast whispers go out, and when it refuses one the
+  addon hears nothing: the message never arrives while the row is already
+  marked as greeted. The row now un-marks itself when the server says it was
+  sending too fast right after a greeting, and says so in chat naming the
+  customer. Nothing is resent on its own - the row simply becomes clickable
+  again.
+- For the few seconds after such a refusal no further message is handed to
+  the server, and a reply attempted in that window says so instead of
+  disappearing. No guess is made about the limit itself: a made-up limit
+  would block work the server was happy to carry.
+
 ## No answer twice in a row, built-in wording restored (0.3.86)
 
 - The same answer is no longer offered to the same customer twice in a row.

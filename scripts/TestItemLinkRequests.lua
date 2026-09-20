@@ -714,6 +714,40 @@ Scan.ColorizePlayerName=oldManualColor
 Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.GetSortedCrafters, Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName, Scan.Utils.ProfessionNameByID=
     getSorted, colorCrafter, colorProfession, professionName
+-- The server can swallow a whisper it considers too fast and say so a moment
+-- later. The greeting was already marked as sent, which leaves the row
+-- looking answered while the customer heard nothing.
+reset()
+scan(a)
+local realGetTime=GetTime
+local clock=100
+GetTime=function() return clock end
+local throttled=order(101)
+Scan.GreetCustomer('LeftButton', throttled)
+local sentBeforeThrottle=#sent
+assert(response(101).greeting_sent, 'the greeting was not marked as sent')
+Scan.Utils.NoteChatThrottled()
+assert(not response(101).greeting_sent, 'a swallowed greeting stayed marked as sent')
+assert(#sent==sentBeforeThrottle, 'the undo resent the greeting by itself')
+-- While the server is holding us back, nothing else is handed to it.
+assert(Scan.Utils.SendResponses({'hello'}, 'Someone-Realm', true)==false,
+    'a message was sent during the server back-off')
+-- The row can be greeted again by hand once the hold passes.
+Scan.Utils.NoteChatThrottled()
+clock=clock+10
+assert(Scan.Utils.CanSendMessages(), 'the back-off never ended')
+Scan.GreetCustomer('LeftButton', throttled)
+assert(#sent==sentBeforeThrottle+1 and response(101).greeting_sent,
+    'the row could not be greeted again after the back-off')
+-- A complaint that arrives long after the greeting belongs to something else.
+clock=clock+10
+Scan.Utils.NoteChatThrottled()
+assert(response(101).greeting_sent, 'an unrelated complaint undid an older greeting')
+-- Leave the clock past the back-off so the rest of the file can send again.
+clock=clock+10
+assert(Scan.Utils.CanSendMessages(), 'the back-off outlived its window')
+realGetTime=nil
+
 print('Request lifecycle tests passed (30-second reoffer, independent inquiries, latest greeted reply, full history, synchronous manual matching).')
 
 -- Generic armor requests: deliberately put the WRONG armor crafter first.
