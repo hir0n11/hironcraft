@@ -1501,8 +1501,15 @@ function CO:UpdateConcentrationRequiredBorder(row, order)
         border.ahuiConcentrationRequiredCacheKey = cacheKey
         border.ahuiConcentrationRequiredVisualKey = visualKey
 
-        local fastCost = self.GetFastConcentrationCost and self:GetFastConcentrationCost(order) or nil
-        if fastCost and fastCost > 0 then
+        -- Only the allocations we would really craft with may stand in for an
+        -- unknown requirement here. Blizzard prices almost any unfinished
+        -- allocation, so a cost read from one of those is not evidence that
+        -- this order needs concentration.
+        local fastCost, costSource
+        if self.ResolveConcentrationCost then
+            fastCost, costSource = self:ResolveConcentrationCost(order)
+        end
+        if fastCost and fastCost > 0 and (costSource == "planned" or costSource == "cheapest") then
             border.ahuiConcentrationRequiredVisualKey = self:SetCachedConcentrationRequirementVisualState(order, true) or visualKey
             self:SyncRowStateBackgroundLayers(row)
             border:Show()
@@ -3035,6 +3042,46 @@ function CO:GetOrderProblemReason(order, pageFrame, action)
     return T("COA_PROBLEM_FINISHER_LIMIT", "Likely decline: the requested quality cannot be reached with available finishers within the skill limit.")
 end
 
+-- Presentation only: the three states a crafter can read off a Personal order
+-- row before touching it.
+--   "blocked"       red    - something stops this craft: reagents the customer
+--                            did not supply, reagents we cannot supply, an
+--                            unknown recipe, or a quality out of reach.
+--   "concentration" yellow - everything is in place, but the requested quality
+--                            is only reachable with concentration.
+--   "ready"         green  - craftable as requested without concentration.
+-- nil means "not known yet". Blizzard delivers the schematic and the crafting
+-- operation info asynchronously, and an unknown answer must never be painted
+-- as good news: that is what let a row look fine until the craft said
+-- otherwise. Pass false for problemReason when the caller already checked it.
+function CO:GetOrderReadinessState(order, pageFrame, action, needsConcentration, problemReason)
+    if not order or not order.orderID then return nil end
+    if action == "fulfill" or action == "fulfilling" then return nil end
+    if not self:IsPersonalCraftingOrder(order, pageFrame) then return nil end
+
+    if problemReason == nil then
+        problemReason = self:GetOrderProblemReason(order, pageFrame, action)
+    end
+    if problemReason then return "blocked", problemReason end
+
+    if needsConcentration == nil then
+        needsConcentration = self:DoesOrderNeedConcentrationForTargetQuality(order, false)
+    end
+    if needsConcentration == true then
+        return "concentration", T("COA_STATE_CONCENTRATION",
+            "The reagents are in place, but the requested quality needs concentration.")
+    end
+    if needsConcentration ~= false then return nil end
+
+    -- Concentration is not needed. Report success only once the reagents are
+    -- actually known.
+    local reagents = self:BuildDisplayReagents(order)
+    if type(reagents) ~= "table" or reagents.ahuiSchematicReady ~= true then return nil end
+
+    return "ready", T("COA_STATE_READY",
+        "All reagents are in place and the requested quality is reachable.")
+end
+
 function CO:GetReagentCandidates(order, reagentEntry)
     local candidates = {}
     if not order or not reagentEntry then return candidates end
@@ -3322,49 +3369,123 @@ function CO:BuildFastCraftingReagentInfoTbl(order)
     return list
 end
 
-function CO:GetFastConcentrationCost(order)
-    if not order or not order.spellID then return nil end
-    if not C_TradeSkillUI then return nil end
+-- Blizzard answers with the concentration cost of one specific reagent
+-- allocation, and refuses to answer at all for some of them. Its own order
+-- page reads the cost from the order exactly as the customer left it, with
+-- the crafter slots still empty, while our projections fill those slots. When
+-- the allocation we planned produced no answer the row used to fall back to
+-- "?" instead of trying the allocation Blizzard itself can price. Walk the
+-- allocations from the one we would really craft with down to the one on
+-- screen, and keep the first real answer.
+function CO:BuildOrderOnlyCraftingReagentInfoTbl(order)
+    local list = {}
+    if type(order) ~= "table" or type(order.reagents) ~= "table" then return list end
 
-    local cacheKey = OrderKey(order.orderID)
-    if cacheKey and self._fastConcCostCache then
+    local seenSlot = {}
+    for _, reagentInfo in ipairs(order.reagents) do
+        local itemID = tonumber(GetOrderReagentItemID(reagentInfo))
+        local dataSlotIndex = tonumber(GetOrderReagentDataSlotIndex(reagentInfo)
+            or GetOrderReagentSlotIndex(reagentInfo))
+        local quantity = tonumber(GetOrderReagentQuantity(reagentInfo))
+        if itemID and dataSlotIndex and quantity and quantity > 0 and not seenSlot[dataSlotIndex] then
+            seenSlot[dataSlotIndex] = true
+            list[#list + 1] = {
+                reagent = { itemID = itemID },
+                dataSlotIndex = dataSlotIndex,
+                quantity = quantity,
+            }
+        end
+    end
+
+    return list
+end
+
+local CONCENTRATION_COST_TTL = 60
+-- A miss is cached too, so a recipe the client cannot price yet does not run
+-- the whole ladder on every repaint. The window is short enough that the cost
+-- still appears on its own once the data loads.
+local CONCENTRATION_COST_MISS_TTL = 5
+local CONCENTRATION_COST_CACHE_LIMIT = 200
+
+function CO:ResolveConcentrationCost(order, collect)
+    if not order or not order.spellID or not C_TradeSkillUI then return nil end
+
+    local orderKey = OrderKey(order.orderID)
+    local cacheKey = orderKey
+        and (orderKey .. ":" .. tostring(GetOrderRevision(self, order.orderID)))
+    if cacheKey and not collect and self._fastConcCostCache then
         local cached = self._fastConcCostCache[cacheKey]
         if cached and cached.expiresAt and cached.expiresAt > CacheNow() then
-            return cached.value
+            return cached.value or nil, cached.source
         end
     end
 
-    local function tryGetCost()
-        local reagents = self:BuildFastCraftingReagentInfoTbl(order)
-        local attempts = {
-            -- The unapplied projection carries the cost required to reach the
-            -- next quality. With concentration already applied, several 12.x
-            -- recipes report concentrationCost as zero.
-            { C_TradeSkillUI.GetCraftingOperationInfo, { order.spellID, reagents, nil, false } },
-        }
-        if C_TradeSkillUI.GetCraftingOperationInfoForOrder and order.orderID then
-            attempts[#attempts + 1] = { C_TradeSkillUI.GetCraftingOperationInfoForOrder, { order.spellID, reagents, order.orderID, false } }
-        end
-        for _, a in ipairs(attempts) do
-            local ok, info = pcall(a[1], unpack(a[2]))
-            if ok and info then
-                local cost = ReadConcentrationCostFromInfo(info)
-                if cost and cost > 0 then return cost end
+    local allocations = {
+        { label = "planned", build = function() return self:BuildCraftingReagentInfoTbl(order) end },
+        { label = "cheapest", build = function() return self:BuildFastCraftingReagentInfoTbl(order) end },
+        { label = "as-placed", build = function() return self:BuildOrderOnlyCraftingReagentInfoTbl(order) end },
+        { label = "unallocated", build = function() return nil end },
+    }
+
+    local forOrder = order.orderID and C_TradeSkillUI.GetCraftingOperationInfoForOrder
+    local plain = C_TradeSkillUI.GetCraftingOperationInfo
+    local cost, source
+
+    for _, allocation in ipairs(allocations) do
+        local okBuild, reagents = pcall(allocation.build)
+        if not okBuild then reagents = nil end
+
+        for _, applied in ipairs({ false, true }) do
+            local info
+            if forOrder then
+                local ok, result = pcall(forOrder, order.spellID, reagents, order.orderID, applied)
+                if ok and type(result) == "table" then info = result end
+            end
+            if info == nil and plain then
+                local ok, result = pcall(plain, order.spellID, reagents, nil, applied)
+                if ok and type(result) == "table" then info = result end
+            end
+
+            local value = ReadConcentrationCostFromInfo(info)
+            if collect then
+                collect[#collect + 1] = string.format(
+                    "CONC_TRY alloc=%s reagents=%s applied=%s answered=%s quality=%s cost=%s",
+                    allocation.label,
+                    tostring(type(reagents) == "table" and #reagents or "nil"),
+                    tostring(applied),
+                    tostring(info ~= nil),
+                    tostring(info and (info.craftingQuality or info.quality) or "nil"),
+                    tostring(value or "nil"))
+            end
+
+            if value and value > 0 and not cost then
+                cost, source = value, allocation.label
+                if not collect then break end
             end
         end
-        return nil
+
+        if cost and not collect then break end
     end
 
-    local cost = tryGetCost()
-    if cost and cost > 0 then
+    if cacheKey then
         self._fastConcCostCache = self._fastConcCostCache or {}
-        if cacheKey then
-            self._fastConcCostCache[cacheKey] = { value = cost, expiresAt = CacheNow() + 60 }
+        local count = 0
+        for _ in pairs(self._fastConcCostCache) do count = count + 1 end
+        if count > CONCENTRATION_COST_CACHE_LIMIT then
+            self._fastConcCostCache = {}
         end
-        return cost
+        self._fastConcCostCache[cacheKey] = {
+            value = cost or false,
+            source = source,
+            expiresAt = CacheNow() + (cost and CONCENTRATION_COST_TTL or CONCENTRATION_COST_MISS_TTL),
+        }
     end
 
-    return nil
+    return cost, source
+end
+
+function CO:GetFastConcentrationCost(order)
+    return self:ResolveConcentrationCost(order)
 end
 
 function CO:GetOrderOperationInfo(order, applyConcentration)
@@ -4973,6 +5094,17 @@ function CO:DebugCollectOrderLines(order, title)
             add("CRAFT[%02d] item=%s name=%s qty=%s dataSlot=%s keys={%s}", i, tostring(itemID or "nil"), self:DebugSafeItemName(itemID), tostring(reagentInfo.quantity or "nil"), tostring(reagentInfo.dataSlotIndex or "nil"), self:DebugTableKeys(reagentInfo, 12))
         end
     end
+
+    local concentrationLines = {}
+    local concentrationCost, concentrationSource = self:ResolveConcentrationCost(order, concentrationLines)
+    local state, stateReason = self:GetOrderReadinessState(order, nil, nil)
+    add("CONCENTRATION requestedQuality=%s needed=%s cost=%s source=%s",
+        tostring(self:GetOrderRequestedQuality(order)),
+        tostring(self:DoesOrderNeedConcentrationForTargetQuality(order, true)),
+        tostring(concentrationCost or "nil"),
+        tostring(concentrationSource or "nil"))
+    for _, line in ipairs(concentrationLines) do add(line) end
+    add("READINESS state=%s reason=%s", tostring(state or "unknown"), tostring(stateReason or "nil"))
 
     local profitInfo = self:GetOrderProfitInfo(order)
     if profitInfo then

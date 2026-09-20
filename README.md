@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Personal order row states, concentration cost (0.3.68)
+
+- A Personal order row now says what the order is before it is claimed. Red:
+  reagents are missing, either the customer's or ours. Yellow: everything is
+  in place, but the requested quality is only reachable with concentration.
+  Green: craftable as requested without concentration. A row whose data
+  Blizzard has not delivered yet keeps its plain stripe instead of looking
+  healthy until the craft says otherwise, and repaints as soon as the answer
+  arrives. Patron, Guild and Public rows are not coloured this way.
+- The concentration button printed "?" for orders the client would not price
+  with the allocation we planned. The cost is now looked up through the
+  allocations Blizzard can answer for, down to the order exactly as the
+  customer left it - the same one its own order page prices. A cost read from
+  an allocation we would not craft with is still not treated as evidence that
+  an order needs concentration.
+- `/ahuicodbg hover` reports every concentration lookup it tried and the row
+  state, for orders that still show no number.
+
 ## Completed-order reply, material lists on fast declines (0.3.67)
 
 - New built-in quick reply COMPLETED ORDER, offered when an order is completed

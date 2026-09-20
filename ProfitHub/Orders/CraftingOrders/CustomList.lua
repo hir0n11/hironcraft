@@ -1012,23 +1012,47 @@ function CL:FitIconBar(bar, icons, maxRows, title)
 end
 
 function CL:ShowOrderProblemTooltip(row)
-    if not row._problemReason then return end
+    local state, reason = row._readinessState, row._problemReason
+    if not reason and not state then return end
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     GameTooltip:ClearLines()
-    GameTooltip:AddLine(L("COA_PROBLEM_TITLE", "Order needs attention"), 1, 0.35, 0.30)
-    GameTooltip:AddLine(row._problemReason, 1, 0.75, 0.70, true)
+    if state == "ready" then
+        GameTooltip:AddLine(L("COA_STATE_READY_TITLE", "Ready to craft"), 0.35, 1, 0.45)
+    elseif state == "concentration" then
+        GameTooltip:AddLine(L("COA_STATE_CONCENTRATION_TITLE", "Concentration needed"), 1, 0.82, 0.25)
+    else
+        GameTooltip:AddLine(L("COA_PROBLEM_TITLE", "Order needs attention"), 1, 0.35, 0.30)
+    end
+    if reason then GameTooltip:AddLine(reason, 1, 0.92, 0.85, true) end
     GameTooltip:Show()
 end
 
-function CL:ApplyOrderProblemStyle(row, reason, selected)
+-- The row background carries the state of a Personal order: red when it
+-- cannot be crafted as it stands, yellow when only concentration can reach
+-- the requested quality, green when everything is in place. No state means
+-- the answer has not arrived yet, and the row keeps its neutral stripe rather
+-- than claiming everything is fine.
+local STATE_BACKGROUNDS = {
+    blocked       = { 0.80, 0.06, 0.04, 0.17, 0.26 },
+    concentration = { 1.00, 0.68, 0.00, 0.19, 0.28 },
+    ready         = { 0.16, 0.78, 0.26, 0.15, 0.24 },
+}
+
+function CL:ApplyOrderStateStyle(row, state, reason, selected)
+    row._readinessState = state
     row._problemReason = reason
-    if reason then
-        row.bg:SetColorTexture(0.80, 0.06, 0.04, selected and 0.26 or 0.17)
+    local colors = state and STATE_BACKGROUNDS[state]
+    if colors then
+        row.bg:SetColorTexture(colors[1], colors[2], colors[3], selected and colors[5] or colors[4])
     elseif selected then
         row.bg:SetColorTexture(0.80, 0.58, 0.18, 0.12)
     else
         row.bg:SetColorTexture(1, 0.90, 0.70, (row._index or 0) % 2 == 0 and 0.035 or 0)
     end
+end
+
+function CL:ApplyOrderProblemStyle(row, reason, selected)
+    self:ApplyOrderStateStyle(row, reason and "blocked" or nil, reason, selected)
 end
 
 function CL:PopulateRow(row, order)
@@ -1411,7 +1435,15 @@ function CL:PopulateRow(row, order)
         nr, ng, nb = 0.95, 0.95, 0.95
     end
     local problem = CO.GetOrderProblemReason and CO:GetOrderProblemReason(order, CO.activePageFrame, action)
-    self:ApplyOrderProblemStyle(row, problem, CO.IsOrderSelected and CO:IsOrderSelected(order.orderID))
+    -- needsConc above is the answer Blizzard has already given for this row,
+    -- including nil for "still loading", so the state costs nothing extra.
+    local state, stateReason
+    if CO.GetOrderReadinessState then
+        state, stateReason = CO:GetOrderReadinessState(order, CO.activePageFrame, action, needsConc, problem or false)
+    elseif problem then
+        state, stateReason = "blocked", problem
+    end
+    self:ApplyOrderStateStyle(row, state, problem or stateReason, CO.IsOrderSelected and CO:IsOrderSelected(order.orderID))
     if problem then nr, ng, nb = 1, 0.45, 0.40 end
     row.name:SetTextColor(nr, ng, nb)
 

@@ -661,6 +661,12 @@ function CO:WarmOrderQualityForList(order, pageFrame, opts)
         end
     end
 
+    -- The custom list paints an order's state from this data. Repaint once it
+    -- arrives, so a row stops sitting on "unknown" until the next craft.
+    if (q or qConc) and CO.CustomList and CO.CustomList.QueueRefresh then
+        CO.CustomList:QueueRefresh()
+    end
+
     return q ~= nil or qConc ~= nil
 end
 

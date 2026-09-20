@@ -486,6 +486,28 @@ CL:PopulateRow(row,{orderID=43,spellID=1234})
 assert(not row._problemReason and row.bg.color[2]>.5, 'reused row retained a red warning')
 CO.IsOrderSelected=nil
 
+-- A Personal row states what the order is before it is claimed: yellow when
+-- only concentration reaches the requested quality, green when everything is
+-- in place, and a plain stripe while the answer is still missing.
+local readiness
+CO.GetOrderReadinessState=function()
+    if readiness then return readiness, 'reason' end
+end
+readiness='concentration'
+CL:PopulateRow(row,{orderID=44,spellID=1234})
+assert(row._readinessState=='concentration'
+    and row.bg.color[1]>.9 and row.bg.color[2]>.5 and row.bg.color[3]<.2,
+    'an order that only concentration can finish was not yellow')
+readiness='ready'
+CL:PopulateRow(row,{orderID=45,spellID=1234})
+assert(row._readinessState=='ready' and row.bg.color[1]<.3 and row.bg.color[2]>.6,
+    'a craftable order was not green')
+readiness=nil
+CL:PopulateRow(row,{orderID=46,spellID=1234})
+assert(not row._readinessState and row.bg.color[4]<.06,
+    'an order still being analysed was painted as good news')
+CO.GetOrderReadinessState=nil
+
 -- Exercise the actual finisher settings menu callbacks, including the picker.
 local originalLabel=CO.GetAutoFinishingLabel
 dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')

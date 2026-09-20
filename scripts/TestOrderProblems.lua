@@ -119,4 +119,71 @@ assert(not CO:GetOrderProblemReason(order), 'expired rejection persisted')
 order=reset();effective=reset();effective.reagents={}
 assert(CO:GetOrderProblemReason(order)=='COA_PROBLEM_CUSTOMER_REAGENTS', 'warning ignored fresh order details')
 assert(next(CO.qualityRejectOrderIDs)==nil, 'warning armed a destructive action')
-print('Order problem tests passed (missing customer/crafter reagents, quality/limits, concentration, unknown data, terminal rows, no actions).')
+
+-- Blizzard prices one reagent allocation at a time and refuses some of them.
+-- When the allocation we planned goes unanswered the row printed "?", even
+-- though the client happily prices the order as the customer left it.
+CO._fastConcCostCache=nil
+CO.craftingReagentInfoCache={}
+CO.selectedReagents={}
+CO.BuildDisplayReagents=function()
+    return {{itemID=777,quantity=5,slotIndex=2,dataSlotIndex=2,crafterRequired=true},
+        ahuiSchematicReady=true}
+end
+local ladder={orderID=91,spellID=9,reagentState=1,minQuality=5,orderType=2,
+    reagents={{reagentInfo={reagent={itemID=555},dataSlotIndex=1,quantity=3}}}}
+local tried={}
+E.C_TradeSkillUI={
+GetRecipeSchematic=function()
+    return {reagentSlotSchematics={{slotIndex=2,dataSlotIndex=2,required=true,
+        quantityRequired=5,reagents={{itemID=777}}}}}
+end,
+GetCraftingOperationInfoForOrder=function(_,reagents,orderID,applied)
+    assert(orderID==91,'the order cost was asked for without its order')
+    tried[#tried+1]=(reagents and #reagents or -1)..':'..tostring(applied)
+    -- Only the order as placed is priced, exactly like Blizzard's order page.
+    if reagents and #reagents==1 then return {concentrationCost=271} end
+    return {concentrationCost=0}
+end}
+local cost,source=CO:ResolveConcentrationCost(ladder)
+assert(cost==271 and source=='as-placed',
+    'the cost Blizzard shows for the order as placed was never asked for')
+assert(tried[1]=='2:false','the allocation we would craft with must be asked first')
+assert(#tried==5,'the ladder kept asking after it had an answer')
+CO._fastConcCostCache=nil
+assert(CO:GetFastConcentrationCost(ladder)==271,'the row still has no number to print')
+-- A cost read from an allocation we would not craft with is not evidence that
+-- this order needs concentration.
+CO._fastConcCostCache=nil
+local _,fallbackSource=CO:ResolveConcentrationCost(ladder)
+assert(fallbackSource~='planned' and fallbackSource~='cheapest',
+    'an unplanned allocation was reported as our own')
+E.C_TradeSkillUI=nil
+CO._fastConcCostCache=nil
+
+-- Row colour: a Personal order says what it is before it is claimed, and an
+-- answer that has not arrived stays unknown instead of looking healthy.
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=true} end
+order=reset()
+assert(CO:GetOrderReadinessState(order,nil,'claim',false,false)=='ready')
+assert(CO:GetOrderReadinessState(order,nil,'claim',true,false)=='concentration')
+q=nil;CO.concentrationRequirementCache={};CO.qualityCache={}
+assert(CO:GetOrderReadinessState(order,nil,'claim',nil,false)==nil,
+    'an order Blizzard has not answered for yet was painted as ready')
+q={quality=5,skill=410,upper=410};CO.concentrationRequirementCache={}
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=false} end
+assert(CO:GetOrderReadinessState(order,nil,'claim',false,false)==nil,
+    'an unloaded schematic was painted as ready')
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=true} end
+assert(CO:GetOrderReadinessState(order,nil,'claim',false,'Missing reagents')=='blocked')
+order.reagents={}
+assert(CO:GetOrderReadinessState(order,nil,'claim',false)=='blocked',
+    'missing customer reagents were not red')
+assert(CO:GetOrderReadinessState(order,nil,'fulfill',false)==nil,
+    'a finished row kept a state colour')
+order=reset();order.orderType=4
+assert(CO:GetOrderReadinessState(order,nil,'claim',true,false)==nil,
+    'patron orders must keep their plain rows')
+CO.BuildDisplayReagents=function() return {ahuiSchematicReady=false} end
+
+print('Order problem tests passed (missing customer/crafter reagents, quality/limits, concentration, unknown data, terminal rows, no actions, row states, concentration cost ladder).')
