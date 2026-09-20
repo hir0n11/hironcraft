@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Concentration diagnostics report the client's answer (0.3.75)
+
+- `/ahuicodbg conc` now prints which operation-info and concentration
+  functions this client exposes, and for every order it cannot price: the
+  fields the client's answer actually carries, every value whose name mentions
+  concentration, currency or cost, and what the prepared order view reports
+  for the same order. A row that shows "?" while Blizzard's own crafting
+  details show a number can be explained from this output instead of guessed.
+
 ## Concentration cell tells its three answers apart (0.3.74)
 
 - A requested quality that concentration cannot reach is no longer printed as

@@ -3502,6 +3502,21 @@ function CO:ResolveConcentrationCost(order, collect)
                     tostring(info ~= nil),
                     tostring(info and (info.craftingQuality or info.quality) or "nil"),
                     tostring(value or "nil"))
+                if type(info) == "table" and not value then
+                    -- The client answered but we found no cost in the answer:
+                    -- report what the answer actually carries, so the field
+                    -- this client uses can be read instead of guessed.
+                    collect[#collect + 1] = "  ANSWER keys={" .. self:DebugTableKeys(info, 40) .. "}"
+                    for key, entry in pairs(info) do
+                        local name = tostring(key):lower()
+                        if name:find("conc") or name:find("currenc") or name:find("cost") then
+                            collect[#collect + 1] = string.format("  ANSWER %s = %s%s",
+                                tostring(key), tostring(entry),
+                                type(entry) == "table"
+                                    and (" {" .. self:DebugTableKeys(entry, 20) .. "}") or "")
+                        end
+                    end
+                end
             end
 
             if value and value > 0 and not cost then
@@ -5287,6 +5302,17 @@ function CO:DebugDumpConcentration()
     push("=== HironCraftProfit CO CONCENTRATION DEBUG count=" .. tostring(#visible) .. " ===")
     self:DebugPrint("Заказов на экране: " .. tostring(#visible))
 
+    local api = {}
+    for name, value in pairs(C_TradeSkillUI or {}) do
+        local lowered = tostring(name):lower()
+        if type(value) == "function"
+            and (lowered:find("operation") or lowered:find("concentrat")) then
+            api[#api + 1] = tostring(name)
+        end
+    end
+    table.sort(api)
+    push("API " .. table.concat(api, ","))
+
     for index, entry in ipairs(visible) do
         local order = entry.order
         local recipeName = "?"
@@ -5322,6 +5348,26 @@ function CO:DebugDumpConcentration()
         for _, line in ipairs(attempts) do
             push("  " .. line)
             if not cost then self:DebugPrint("  " .. line) end
+        end
+
+        -- The prepared order view is the path that still answers for these
+        -- rows, so report what it says about the same order.
+        for _, applied in ipairs({ false, true }) do
+            local quality = self.GetOrderQualityInfo and self:GetOrderQualityInfo(order, applied, true)
+            local line = string.format("  PREPARED applied=%s quality=%s/%s skill=%s upper=%s cost=%s",
+                tostring(applied),
+                tostring(quality and quality.quality or "nil"),
+                tostring(quality and quality.maxQuality or "nil"),
+                tostring(quality and quality.skill or "nil"),
+                tostring(quality and quality.upper or "nil"),
+                tostring(quality and quality.concentrationCost or "nil"))
+            push(line)
+            if not cost then self:DebugPrint(line) end
+            local info = quality and quality.operationInfo
+            if not cost and type(info) == "table" then
+                push("  PREPARED keys={" .. self:DebugTableKeys(info, 40) .. "}")
+                self:DebugPrint("  PREPARED keys={" .. self:DebugTableKeys(info, 40) .. "}")
+            end
         end
     end
 
