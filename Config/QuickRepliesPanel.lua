@@ -13,8 +13,8 @@ local FULL_ROW_STEP = 116
 
 local COMPACT_PANEL_WIDTH = 350
 local COMPACT_CONTENT_WIDTH = 300
-local COMPACT_ROW_HEIGHT = 226
-local COMPACT_ROW_STEP = 230
+local COMPACT_ROW_HEIGHT = 250
+local COMPACT_ROW_STEP = 254
 
 local allowedContext = {
     crafter = true,
@@ -141,6 +141,17 @@ local function CreateRow(panel, index)
     row.Priority:SetMaxLetters(3)
     row.Priority:SetJustifyH('CENTER')
 
+    row.RepeatLabel = CreateLabel(row, 'GameFontNormalSmall', L('dialog.quick_reply.repeat'))
+    row.RepeatLabel:SetSize(64, 20)
+    row.RepeatLabel:SetJustifyV('MIDDLE')
+
+    row.Repeat = CreateFrame('EditBox', nil, row, 'InputBoxTemplate')
+    row.Repeat:SetSize(42, 20)
+    row.Repeat:SetAutoFocus(false)
+    row.Repeat:SetNumeric(true)
+    row.Repeat:SetMaxLetters(4)
+    row.Repeat:SetJustifyH('CENTER')
+
     row.Keywords = CreateFrame('Frame', nil, row, 'HironCraftScanTextInputTemplate')
     row.Keywords:SetSize(280, 102)
     row.Keywords:SetPoint('TOPLEFT', 116, 0)
@@ -159,6 +170,8 @@ local function LayoutRow(row, isCollapsed)
     row.Rename:ClearAllPoints()
     row.PriorityLabel:ClearAllPoints()
     row.Priority:ClearAllPoints()
+    row.RepeatLabel:ClearAllPoints()
+    row.Repeat:ClearAllPoints()
     row.Keywords:ClearAllPoints()
     row.Response:ClearAllPoints()
 
@@ -174,11 +187,14 @@ local function LayoutRow(row, isCollapsed)
         row.Rename:SetPoint('TOPLEFT', 8, -29)
         row.Delete:SetPoint('TOPLEFT', 86, -29)
 
+        row.RepeatLabel:SetPoint('TOPLEFT', 4, -53)
+        row.Repeat:SetPoint('TOPLEFT', 78, -51)
+
         if eventOnly then
             row.PriorityLabel:Hide()
             row.Priority:Hide()
             row.Response:SetSize(COMPACT_CONTENT_WIDTH, 150)
-            row.Response:SetPoint('TOPLEFT', 0, -55)
+            row.Response:SetPoint('TOPLEFT', 0, -79)
         else
             row.PriorityLabel:SetPoint('TOPLEFT', 174, -29)
             row.Priority:SetPoint('TOPLEFT', 248, -29)
@@ -186,10 +202,10 @@ local function LayoutRow(row, isCollapsed)
             row.Priority:Show()
 
             row.Keywords:SetSize(COMPACT_CONTENT_WIDTH, 80)
-            row.Keywords:SetPoint('TOPLEFT', 0, -55)
+            row.Keywords:SetPoint('TOPLEFT', 0, -79)
 
             row.Response:SetSize(COMPACT_CONTENT_WIDTH, 80)
-            row.Response:SetPoint('TOPLEFT', 0, -139)
+            row.Response:SetPoint('TOPLEFT', 0, -163)
         end
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
@@ -203,11 +219,15 @@ local function LayoutRow(row, isCollapsed)
         if eventOnly then
             row.PriorityLabel:Hide()
             row.Priority:Hide()
+            row.RepeatLabel:SetPoint('TOPLEFT', 5, -39)
+            row.Repeat:SetPoint('TOPLEFT', 70, -37)
             row.Response:SetSize(508, 102)
             row.Response:SetPoint('TOPLEFT', 188, 0)
         else
-            row.PriorityLabel:SetPoint('TOPLEFT', 5, -39)
-            row.Priority:SetPoint('TOPLEFT', 70, -37)
+            row.PriorityLabel:SetPoint('TOPLEFT', 5, -30)
+            row.Priority:SetPoint('TOPLEFT', 70, -28)
+            row.RepeatLabel:SetPoint('TOPLEFT', 5, -52)
+            row.Repeat:SetPoint('TOPLEFT', 70, -50)
             row.PriorityLabel:Show()
             row.Priority:Show()
 
@@ -268,35 +288,43 @@ local function SetupCustomTooltip(frame, title, body)
     end)
 end
 
-local function SetupPriorityInput(panel, row, keyword)
+local function SetupNumericInput(panel, editBox, keyword, normalize, title, tooltip)
     local function RefreshValue()
-        row.Priority:SetText(tostring(HironCraftScan.QuickReplies.NormalizePriority(
-            panel:GetConfigValue(keyword)
-        )))
+        editBox:SetText(tostring(normalize(panel:GetConfigValue(keyword))))
     end
 
     RefreshValue()
-    row.Priority:SetScript('OnEnterPressed', function(self)
+    editBox:SetScript('OnEnterPressed', function(self)
         self:ClearFocus()
     end)
-    row.Priority:SetScript('OnEscapePressed', function(self)
+    editBox:SetScript('OnEscapePressed', function(self)
         RefreshValue()
         self:ClearFocus()
     end)
-    row.Priority:SetScript('OnEditFocusLost', function(self)
-        local priority = HironCraftScan.QuickReplies.NormalizePriority(self:GetText())
-        panel:UpdateConfigValue(keyword, priority)
-        self:SetText(tostring(priority))
+    editBox:SetScript('OnEditFocusLost', function(self)
+        local value = normalize(self:GetText())
+        panel:UpdateConfigValue(keyword, value)
+        self:SetText(tostring(value))
         panel:OnConfigChange(keyword)
     end)
-    SetupCustomTooltip(
-        row.Priority,
-        L('dialog.quick_reply.priority'),
-        L('dialog.quick_reply.priority.tooltip.body')
-    )
+    SetupCustomTooltip(editBox, L(title), L(tooltip))
     if panel.tabGroup then
-        panel.tabGroup:AddFrame(row.Priority)
+        panel.tabGroup:AddFrame(editBox)
     end
+end
+
+local function SetupPriorityInput(panel, row, keyword)
+    SetupNumericInput(panel, row.Priority, keyword,
+        HironCraftScan.QuickReplies.NormalizePriority,
+        'dialog.quick_reply.priority',
+        'dialog.quick_reply.priority.tooltip.body')
+end
+
+local function SetupRepeatInput(panel, row, keyword)
+    SetupNumericInput(panel, row.Repeat, keyword,
+        HironCraftScan.QuickReplies.NormalizeRepeatMinutes,
+        'dialog.quick_reply.repeat',
+        'dialog.quick_reply.repeat.tooltip.body')
 end
 
 function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
@@ -319,6 +347,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
 
         local prefix = 'quick_reply.' .. definition.key .. '.'
         HironCraftScan.SetupCheckBox(self, row.Enabled, prefix .. 'enabled', 98)
+        SetupRepeatInput(self, row, prefix .. 'repeat_minutes')
         if definition.eventOnly then
             row.Keywords:Hide()
         else
@@ -469,6 +498,8 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
     if template then
         if field == 'priority' then
             value = HironCraftScan.QuickReplies.NormalizePriority(value)
+        elseif field == 'repeat_minutes' then
+            value = HironCraftScan.QuickReplies.NormalizeRepeatMinutes(value)
         end
         template[field] = value
     end

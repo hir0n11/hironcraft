@@ -43,6 +43,51 @@ function QuickReplies:RememberSentReply(customer, reply)
     sentReplies[ReplyKey(customer, reply)] = GetTime()
 end
 
+-- Per quick reply: how long the same answer stays out of the way for the same
+-- person after it was sent. Two "omw" a few seconds apart help nobody, while
+-- an unrelated question must still be answered immediately, so the delay is
+-- kept per template and per customer instead of muting the whole stack.
+local MAX_REPEAT_MINUTES = 1440
+
+local function NormalizeRepeatMinutes(value)
+    value = math.floor(tonumber(value) or 0)
+    return math.max(0, math.min(MAX_REPEAT_MINUTES, value))
+end
+
+QuickReplies.NormalizeRepeatMinutes = NormalizeRepeatMinutes
+
+local sentTemplates = {}
+
+local function TemplateCustomerKey(customer, templateKey)
+    local info = HironCraftScan.DB.customers[customer]
+    return tostring(info and info.guid or customer):lower() .. '' .. tostring(templateKey)
+end
+
+function QuickReplies:GetTemplateRepeatDelay(templateKey)
+    -- GetConfig, not the EnsureConfig local: this runs above its definition.
+    local template = templateKey and self:GetConfig().templates[templateKey]
+    if type(template) ~= 'table' then return 0 end
+    return NormalizeRepeatMinutes(template.repeat_minutes) * 60
+end
+
+function QuickReplies:IsTemplateOnRepeatCooldown(customer, templateKey)
+    local delay = self:GetTemplateRepeatDelay(templateKey)
+    if delay <= 0 then return false end
+
+    local sentAt = sentTemplates[TemplateCustomerKey(customer, templateKey)]
+    return sentAt ~= nil and (GetTime() - sentAt) < delay
+end
+
+function QuickReplies:RememberSentTemplate(customer, templateKey)
+    if not templateKey then return end
+
+    local now = GetTime()
+    for key, sentAt in pairs(sentTemplates) do
+        if now - sentAt > MAX_REPEAT_MINUTES * 60 then sentTemplates[key] = nil end
+    end
+    sentTemplates[TemplateCustomerKey(customer, templateKey)] = now
+end
+
 -- Adding another built-in quick reply only requires another definition here.
 -- The SavedVariables defaults and the configuration UI are generated from
 -- this list.
@@ -137,6 +182,7 @@ local function EnsureConfig()
     for _, template in pairs(templates) do
         if type(template) == 'table' then
             template.priority = NormalizePriority(template.priority)
+            template.repeat_minutes = NormalizeRepeatMinutes(template.repeat_minutes)
         end
     end
     return config
@@ -751,6 +797,9 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         return nil
     end
     if not self:IsConversationCharacter(response) then return nil end
+    if self:IsTemplateOnRepeatCooldown(order.customerName, statusOption.template) then
+        return nil
+    end
 
     local reply = self:BuildReply(statusOption.template, response)
     if not reply then
@@ -1109,6 +1158,7 @@ local function SendOption(toast, option)
     local messages = #reply > MAX_CHAT_BYTES and HironCraftScan.Utils.SplitResponse(reply) or { reply }
     if HironCraftScan.Utils.SendResponses(messages, option.customer, true) == false then return end
     QuickReplies:RememberSentReply(option.customer, reply)
+    QuickReplies:RememberSentTemplate(option.customer, templateKey or option.templateKey)
     DismissEquivalentToasts(option)
 end
 
@@ -1367,6 +1417,17 @@ function QuickReplies:OnWhisper(customer, message, customerInfo)
     end
 
     local templateKeys = self:Classify(message)
+    if #templateKeys == 0 then
+        return
+    end
+
+    local offerable = {}
+    for _, templateKey in ipairs(templateKeys) do
+        if not self:IsTemplateOnRepeatCooldown(customer, templateKey) then
+            offerable[#offerable + 1] = templateKey
+        end
+    end
+    templateKeys = offerable
     if #templateKeys == 0 then
         return
     end

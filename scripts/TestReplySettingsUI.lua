@@ -84,13 +84,20 @@ assert(dialog.key=='rename_quick_reply' and dialog.elements[2].initial_text==Sca
 assert(not dialog.elements[2].Validator(1,'Commission'))
 dialog.OnAccept('Commission')
 assert(findRow('PRICE').Enabled.Title.text=='Commission')
+price.Repeat:SetText('7');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
 local template=Scan.QuickReplies:GetConfig().templates.PRICE
 assert(template.keywords=='cost, fee' and template.response=='500g' and template.priority==12 and template.enabled==false)
+assert(template.repeat_minutes==7,'the repeat delay was not saved')
+price.Repeat:SetText('99999');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
+assert(template.repeat_minutes==1440 and price.Repeat.text=='1440','the repeat delay was not clamped')
+price.Repeat:SetText('');price.Repeat.scripts.OnEditFocusLost(price.Repeat)
+assert(template.repeat_minutes==0,'an empty repeat delay did not turn the delay off')
 click(findRow('PRICE').Delete)
 assert(replies.definitionCount==5 and not findRow('PRICE'))
 -- The completed-order reply is a normal built-in row: editable and switchable.
 local done=findRow('COMPLETED_ORDER')
 assert(done and done.Keywords and not done.Keywords:IsShown(),'completed-order reply asked for keywords')
+assert(done.Repeat:IsShown(),'an event reply had no repeat delay of its own')
 edit(done.Response,'Your order is ready!')
 done.Enabled.Act:SetChecked(false);click(done.Enabled.Act)
 local completed=Scan.QuickReplies:GetConfig().templates.COMPLETED_ORDER
@@ -108,7 +115,8 @@ assert(replies.width==350 and replies.Description.height==76)
 for _,row in ipairs(replies.Rows) do if row:IsShown() then
     assert(row.Rename.width+row.Rename.points[1][2]<=row.Delete.points[1][2])
     assert(row.Delete.width+row.Delete.points[1][2]<=300)
-    assert(row.Response.height-row.Response.points[1][3]<=226)
+    assert(row.Response.height-row.Response.points[1][3]<=250)
+    assert(row.Repeat.points[1][2]+row.Repeat.width<=300)
 end end
 click(findRow('REJECTED_ORDER').Delete)
 assert(not findRow('REJECTED_ORDER') and findRow('NAME').Keywords:IsShown())

@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Repeat delay per quick reply (0.3.70)
+
+- Every quick reply, built-in or custom, gained a "Repeat, min" setting in
+  Quick Replies. After the reply is sent to someone, it is not offered to that
+  same person again for that many minutes, so a customer who writes "will
+  send" and then "sent" is offered one "omw" instead of two. Other quick
+  replies for the same person are unaffected, and 0 (the default) keeps the
+  previous behaviour. The delay is counted within the current session and is
+  shared with linked accounts as part of the quick-reply settings.
+
 ## Public tab refresh, stable row background (0.3.69)
 
 - Switching to the Public tab kept showing the orders of the tab left behind.

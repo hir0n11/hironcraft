@@ -430,4 +430,37 @@ whisper('CooldownBuyer','sent')
 assert(#visible()==1 and visible()[1].option.templateLabel=='On my way')
 assert(QuickReplies:DeleteTemplate('CUSTOM_2'))
 assert(#visible()==0 and not QuickReplies:SendTopReply(true) and #sent==beforeEdits)
-print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send).')
+-- Per quick reply: after it is sent, the same answer stays out of the way for
+-- that one person. Two "omw" a few seconds apart help nobody.
+dismissAll()
+assert(QuickReplies.NormalizeRepeatMinutes('7')==7 and QuickReplies.NormalizeRepeatMinutes(-3)==0
+    and QuickReplies.NormalizeRepeatMinutes(99999)==1440 and QuickReplies.NormalizeRepeatMinutes('later')==0,
+    'the repeat delay accepted a value outside its range')
+local repeatKey=QuickReplies:CreateCustomTemplate('Coming back','omw now','omw')
+QuickReplies:GetConfig().templates[repeatKey].repeat_minutes=2
+addCustomer('RepeatBuyer');addCustomer('OtherRepeatBuyer')
+local beforeRepeat=#sent
+whisper('RepeatBuyer','omw now')
+assert(#visible('RepeatBuyer')==1,'the reply was not offered the first time')
+click(visible('RepeatBuyer')[1])
+assert(#sent==beforeRepeat+1 and sent[#sent].text=='omw','the reply was not sent')
+now=now+100
+whisper('RepeatBuyer','omw now')
+assert(#visible('RepeatBuyer')==0,'the same reply was offered again inside its own delay')
+whisper('OtherRepeatBuyer','omw now')
+assert(#visible('OtherRepeatBuyer')==1,'the delay reached another person')
+dismissAll()
+now=now+130
+whisper('RepeatBuyer','omw now')
+assert(#visible('RepeatBuyer')==1,'the reply never came back after its delay')
+dismissAll()
+-- A delay of zero is the old behaviour: offer it every time.
+QuickReplies:GetConfig().templates[repeatKey].repeat_minutes=0
+whisper('RepeatBuyer','omw now');click(visible('RepeatBuyer')[1])
+now=now+10
+whisper('RepeatBuyer','omw now')
+assert(#visible('RepeatBuyer')==1,'a reply without a delay was withheld')
+dismissAll()
+assert(QuickReplies:DeleteTemplate(repeatKey))
+
+print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')
