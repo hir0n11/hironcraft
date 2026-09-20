@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A greeting the server refused comes back as a card (0.3.92)
+
+- A greeting taken back after the server refused it is now offered again on
+  its own, a few seconds later, once the server lets messages through. It
+  arrives as the usual greeting card, one click away, instead of something to
+  remember and find in the table. Nothing is ever sent by a timer, a greeting
+  the crafter sent by hand in the meantime is not offered again, and the
+  offer is retried at most three times while the server keeps refusing.
+
 ## No chat line about a reply held elsewhere (0.3.91)
 
 - The line explaining that a reply belongs to another character is gone. It

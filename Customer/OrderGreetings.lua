@@ -87,9 +87,39 @@ end
 
 -- The server can swallow a whisper it considers too fast, and it says so a
 -- moment later. The greeting was already marked as sent, which leaves the row
--- looking answered while the customer heard nothing. Offer it again: nothing
--- is resent on its own, the row simply becomes clickable once more.
+-- looking answered while the customer heard nothing. Take it back and put the
+-- greeting card up again once the server lets us speak, so it is one click
+-- away instead of something to remember. Nothing is ever sent by a timer.
 local THROTTLE_UNDO_WINDOW = 2
+local THROTTLE_RETRY_DELAY = 6
+local THROTTLE_RETRY_ATTEMPTS = 3
+
+local function OfferGreetingAgain(recent, attempt)
+    local customerInfo = Scan.DB.customers and Scan.DB.customers[recent.customer]
+    if type(customerInfo) ~= 'table' then return end
+
+    local pending = {}
+    for _, response in ipairs(recent.responses or {}) do
+        -- The crafter may have greeted them by hand in the meantime.
+        if type(response) == 'table' and not response.greeting_sent then
+            pending[#pending + 1] = response
+        end
+    end
+    if #pending == 0 then return end
+
+    if not (Scan.Utils.CanSendMessages and Scan.Utils.CanSendMessages()) then
+        if attempt < THROTTLE_RETRY_ATTEMPTS and C_Timer and C_Timer.After then
+            C_Timer.After(THROTTLE_RETRY_DELAY, function()
+                OfferGreetingAgain(recent, attempt + 1)
+            end)
+        end
+        return
+    end
+
+    if Scan.QuickReplies and Scan.QuickReplies.ShowOrderGreeting then
+        Scan.QuickReplies:ShowOrderGreeting(recent.customer, '', customerInfo, pending)
+    end
+end
 
 if Scan.Utils and Scan.Utils.OnChatThrottled then
     Scan.Utils.OnChatThrottled(function()
@@ -110,6 +140,12 @@ if Scan.Utils and Scan.Utils.OnChatThrottled then
                 or recent.customer)))
         if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
             HironCraftScanCraftingOrderPage:ShowGeneric()
+        end
+
+        if C_Timer and C_Timer.After then
+            C_Timer.After(THROTTLE_RETRY_DELAY, function()
+                OfferGreetingAgain(recent, 1)
+            end)
         end
     end)
 end

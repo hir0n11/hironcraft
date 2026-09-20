@@ -726,19 +726,48 @@ local throttled=order(101)
 Scan.GreetCustomer('LeftButton', throttled)
 local sentBeforeThrottle=#sent
 assert(response(101).greeting_sent, 'the greeting was not marked as sent')
+local offeredAgain={}
+local previousShow=Scan.QuickReplies.ShowOrderGreeting
+Scan.QuickReplies.ShowOrderGreeting=function(_,customer,_,_,responses)
+    offeredAgain[#offeredAgain+1]={customer=customer,count=#responses}
+    return true
+end
+local throttleTimers={}
+local previousAfter=C_Timer.After
+C_Timer.After=function(delay,callback) throttleTimers[#throttleTimers+1]=callback end
 Scan.Utils.NoteChatThrottled()
 assert(not response(101).greeting_sent, 'a swallowed greeting stayed marked as sent')
 assert(#sent==sentBeforeThrottle, 'the undo resent the greeting by itself')
+-- The greeting comes back as a card once the server lets us speak again.
+assert(#throttleTimers==1, 'nothing was scheduled to offer the greeting again')
+throttleTimers[1]()
+assert(#offeredAgain==0 and #throttleTimers==2,
+    'the greeting was offered while the server was still holding us back')
+clock=clock+10
+throttleTimers[2]()
+assert(#offeredAgain==1 and offeredAgain[1].customer=='Buyer' and offeredAgain[1].count==1,
+    'the greeting was never offered again')
+assert(#sent==sentBeforeThrottle, 'offering the greeting again sent it by itself')
 -- While the server is holding us back, nothing else is handed to it.
+Scan.Utils.NoteChatThrottled()
 assert(Scan.Utils.SendResponses({'hello'}, 'Someone-Realm', true)==false,
     'a message was sent during the server back-off')
 -- The row can be greeted again by hand once the hold passes.
-Scan.Utils.NoteChatThrottled()
 clock=clock+10
 assert(Scan.Utils.CanSendMessages(), 'the back-off never ended')
 Scan.GreetCustomer('LeftButton', throttled)
 assert(#sent==sentBeforeThrottle+1 and response(101).greeting_sent,
     'the row could not be greeted again after the back-off')
+-- A greeting the crafter sent by hand in the meantime is not offered again.
+throttleTimers={}
+Scan.Utils.NoteChatThrottled()
+assert(#throttleTimers==1 and not response(101).greeting_sent)
+response(101).greeting_sent=true
+clock=clock+10
+throttleTimers[1]()
+assert(#offeredAgain==1, 'a greeting already sent by hand was offered again')
+C_Timer.After=previousAfter
+Scan.QuickReplies.ShowOrderGreeting=previousShow
 -- A complaint that arrives long after the greeting belongs to something else.
 clock=clock+10
 Scan.Utils.NoteChatThrottled()
