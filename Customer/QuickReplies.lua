@@ -1019,7 +1019,6 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     if not self:IsConversationCharacter(response)
         and not (statusOption.crafterMayAnswer and self:IsOrderCrafter(response, entry))
     then
-        self:ReportWithheldStatusReply(order, entry, response)
         return nil
     end
     if self:IsTemplateOnRepeatCooldown(order.customerName, statusOption.template) then
@@ -1864,32 +1863,6 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
     popupSerial = popupSerial + 1
     SetupToast(GetToast(), option, customerInfo, popupSerial, 1)
     LayoutToasts()
-end
-
-local reportedWithheld = {}
-
--- The reply belongs to the character that spoke to this customer, and a
--- whisper from anyone else would reach the customer as a stranger. Say so
--- once per order instead of letting the crafter wonder why nothing appeared.
-function QuickReplies:ReportWithheldStatusReply(order, entry, response)
-    local owner = type(response) == 'table' and response.conversationCharacter
-    if type(owner) ~= 'string' or owner == '' then return end
-    if self:WasStatusReplySent(order, entry) then return end
-
-    local key = StatusReplyKey(order, entry)
-    if not key or reportedWithheld[key] then return end
-    reportedWithheld[key] = true
-
-    local customer = HironCraftScan.NameAndRealmToName
-        and HironCraftScan.NameAndRealmToName(order.customerName) or order.customerName
-    local message = L('Order reply waits for its character')
-    if type(message) == 'string' and message:find('%%s') then
-        message = message:format(tostring(customer), owner)
-    else
-        -- A locale without this line still has to name who can answer.
-        message = tostring(message) .. ' ' .. tostring(customer) .. ' / ' .. tostring(owner)
-    end
-    print('|cffffd100HironCraftScan:|r ' .. tostring(message))
 end
 
 -- Offer the replies whose moment passed while this character was elsewhere.

@@ -640,11 +640,14 @@ Scan.OrderFulfillment.GetStatus=function() return otherStatus end
 local printed={}
 local realPrint=print
 print=function(text) printed[#printed+1]=tostring(text) end
+Scan.DB.characters={['Someone-Else']={}}
 QuickReplies:OfferPendingOrderStatusReplies()
 print=realPrint
+Scan.DB.characters=nil
 assert(#visible('OtherCharBuyer')==0,'a reply was offered on the wrong character')
-assert(#printed==1 and printed[1]:find('Someone-Else',1,true),
-    'the crafter was not told which character owns the reply')
+-- Withholding it is not news: the account that holds the conversation offers
+-- the reply itself, and a line in chat about it is noise.
+assert(#printed==0,'a withheld reply announced itself in chat')
 storedStatuses={}
 Scan.OrderFulfillment.GetStatuses=nil
 

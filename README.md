@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No chat line about a reply held elsewhere (0.3.91)
+
+- The line explaining that a reply belongs to another character is gone. It
+  was added in 0.3.79 to break the silence when nothing appeared; with the
+  crafter now able to send a decline and the collecting account offering the
+  rest, it only repeated what the other account was already doing.
+
 ## Orders collected on one account and crafted on another (0.3.90)
 
 - The character that spoke to a customer often sits on another account, on
@@ -135,11 +142,6 @@ The original CraftScan and ProfitHUB folders are not required after migration an
   reply for good. Replies that were actually sent are remembered, so a reload
   does not offer them a second time, and only the five newest unanswered ones
   from the last six hours are offered.
-- When a status arrives on a character that did not speak to this customer,
-  the addon now says so in chat and names the character that can answer,
-  instead of staying silent. The reply itself still belongs to that
-  character: a whisper from anyone else reaches the customer as a stranger,
-  and cannot cross factions at all.
 
 ## Typos in short keywords, general greeting from the chat menu (0.3.78)
 
