@@ -84,4 +84,42 @@ for _,callback in ipairs(timers) do callback() end
 local late=F:GetStatus(later)
 assert(late.reagentAudit and late.reagentAudit.rows[1].supplied[1].quantity==2,
     'a list captured right after the decline never reached the status')
-print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated, late material lists recovered).')
+-- A personal order can arrive from someone who never wrote a word. Its result
+-- had nowhere to show: no cross, and no reply to offer. Such an order gets a
+-- row of its own, owned by the character that received it.
+Scan.DB.customers['Silent-Realm']=nil
+local silentInfo={orderID=904,customerName='Silent-Realm',spellID=123,itemID=321,
+    orderType=2,parentProfessionID=164,
+    reagents={{itemID=11,quantity=1,slotIndex=1,source=1}}}
+assert(F:RecordRejection(silentInfo,904,'missing_customer_reagents'),
+    'an order from a stranger was not recorded at all')
+local silentRow=Scan.DB.listed_orders['Silent-Realm:order:904']
+    or Scan.DB.listed_orders['Silent-Realm-order:904']
+if not silentRow then
+    for key,row in pairs(Scan.DB.listed_orders) do
+        if row.customerName=='Silent-Realm' then silentRow=row end
+    end
+end
+assert(silentRow,'no row was created for an order from a stranger')
+local silentStatus=F:GetStatus(silentRow)
+assert(silentStatus and silentStatus.status=='rejected','the new row has no cross')
+local silentResponse=Scan.DB.customers['Silent-Realm'].responses[silentRow.responseID]
+assert(silentResponse and silentResponse.conversationCharacter=='Smith-Realm',
+    'the row belongs to no character, so nothing could answer for it')
+assert(silentResponse.greeting_sent,'a greeting was offered for an order nobody asked about')
+-- The same order again keeps the one row.
+F:RecordRejection(silentInfo,904,'missing_customer_reagents')
+local rows=0
+for _,row in pairs(Scan.DB.listed_orders) do
+    if row.customerName=='Silent-Realm' then rows=rows+1 end
+end
+assert(rows==1,'a second decline made a second row')
+-- A patron order is not a conversation and gets no row.
+local patron={orderID=905,customerName='Patron-Realm',npcCustomerName='Patron',spellID=123,
+    itemID=321,orderType=4,parentProfessionID=164,reagents={}}
+F:RecordRejection(patron,905,'missing_customer_reagents')
+for _,row in pairs(Scan.DB.listed_orders) do
+    assert(row.customerName~='Patron-Realm','a patron order was given a customer row')
+end
+
+print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated, late material lists recovered, rows for orders nobody asked about).')

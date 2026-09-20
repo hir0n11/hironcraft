@@ -176,6 +176,8 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID, beforeCraft)
         spellID = tonumber(orderInfo.spellID),
         itemID = tonumber(orderInfo.itemID) or ItemIDFromLink(orderInfo.outputItemHyperlink),
         parentProfessionID = tonumber(orderInfo.parentProfessionID) or CurrentParentProfessionID(),
+        orderType = orderInfo.orderType,
+        npcCustomerName = orderInfo.npcCustomerName,
         capturedAt = time(),
         reagentAudit = audit,
     }
@@ -1359,10 +1361,71 @@ local function FreshLastSnapshot()
     return nil
 end
 
+-- A personal order can arrive from someone who never wrote a word. Nothing in
+-- the table matches it, so its result had nowhere to show and its reply had
+-- nobody to belong to: no cross appeared and no message could be offered.
+-- Give such an order a row of its own, owned by the character that received
+-- it. Only a finished order gets one - there is something to say about it -
+-- and only a real player's personal order, never a patron's.
+function OrderFulfillment:CreateOrderRowForCraftingOrder(orderInfo, craftingOrderID)
+    local customer = type(orderInfo) == 'table' and orderInfo.customerName or nil
+    if type(customer) ~= 'string' or customer == '' then return nil end
+    if orderInfo.npcCustomerName then return nil end
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then return nil end
+
+    local personal = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
+    if personal ~= nil and orderInfo.orderType ~= nil and orderInfo.orderType ~= personal then
+        return nil
+    end
+
+    local orderID = craftingOrderID or orderInfo.orderID
+    if not orderID then return nil end
+
+    local responseID = 'order:' .. tostring(orderID)
+    local customerInfo = HironCraftScan.Utils.saved(HironCraftScan.DB.customers, customer, {})
+    customerInfo.guid = customerInfo.guid or PlayerGUID(orderInfo.customerGuid)
+    local responses = HironCraftScan.Utils.saved(customerInfo, 'responses', {})
+
+    if not responses[responseID] then
+        local crafter = HironCraftScan.GetPlayerName(true)
+        local professionID = tonumber(orderInfo.parentProfessionID)
+        responses[responseID] = {
+            responseID = responseID,
+            requestToken = responseID,
+            time = time(),
+            recipeID = tonumber(orderInfo.spellID),
+            itemID = tonumber(orderInfo.itemID),
+            crafterFullName = crafter,
+            crafterName = HironCraftScan.NameAndRealmToName
+                and HironCraftScan.NameAndRealmToName(crafter) or crafter,
+            parentProfID = professionID,
+            professionID = professionID,
+            professionName = HironCraftScan.Utils.ProfessionNameByID
+                and HironCraftScan.Utils.ProfessionNameByID(professionID) or nil,
+            -- The customer asked for nothing in chat, so there is no greeting
+            -- to send; what is worth saying is the result of the order.
+            greeting_sent = true,
+            customer_answered = true,
+            conversationCharacter = crafter,
+            fromCraftingOrder = true,
+        }
+    end
+
+    local order = { customerName = customer, responseID = responseID }
+    HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
+    return order
+end
+
 local function TrackOrderInfo(status, craftingOrderID, result, orderInfo, genericOnly, force)
     local order = FindStoredOrder(craftingOrderID)
     if not order and orderInfo and not genericOnly then
         order = OrderFulfillment:FindMatchingOrder(orderInfo)
+    end
+    if not order and orderInfo and not genericOnly
+        and (status == OrderFulfillment.Status.Rejected
+            or status == OrderFulfillment.Status.Fulfilled)
+    then
+        order = OrderFulfillment:CreateOrderRowForCraftingOrder(orderInfo, craftingOrderID)
     end
     if not orderInfo and order then
         orderInfo = OrderInfoFromHironCraftScanOrder(order, craftingOrderID)

@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Orders from customers who never wrote (0.3.88)
+
+- A personal order can arrive from someone who never said a word in chat.
+  Nothing in the table matched it, so a decline left no cross and no reply to
+  send: the customer was never told what was wrong with their reagents. Such
+  an order now gets a row of its own when it is declined or completed, owned
+  by the character that received it, so the result shows and its reply can be
+  sent. No greeting is offered for it - the customer asked nothing - and a
+  second result for the same order reuses the same row. Patron orders are
+  never given one.
+
 ## A greeting the server swallowed is offered again (0.3.87)
 
 - The server limits how fast whispers go out, and when it refuses one the
