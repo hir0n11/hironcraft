@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Requests take turns on the banner (0.4.1)
+
+- Two requests in the same second shared one banner: the second replaced the
+  first, which then had to be found in the order list. While a banner is up,
+  a new request now waits and gets the banner once the current one is
+  answered, dismissed or has timed out. A waiting request answered from the
+  order list, removed, or older than 10 minutes is skipped.
+
 ## Error log for every HironCraft error (0.4.0)
 
 - Every Lua error that passes through HironCraft - chat scanning, the order

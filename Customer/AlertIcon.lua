@@ -142,12 +142,71 @@ local function UpdateAlertDuration()
     bannerTimeout = setting;
 end
 
+-- Two requests in the same second used to share one banner: the second
+-- replaced the first, which then had to be found in the order list. While a
+-- banner is up, a new request waits here and is shown once the current one
+-- is answered, dismissed or has timed out.
+local QUEUE_MAX_AGE = 10 * 60
+local alertQueue = {}
+
+local function SameOrder(lhs, rhs)
+    return lhs and rhs and lhs.customerName == rhs.customerName and lhs.responseID == rhs.responseID
+end
+
+local function RemoveQueued(order)
+    for index = #alertQueue, 1, -1 do
+        if SameOrder(alertQueue[index].order, order) then table.remove(alertQueue, index) end
+    end
+end
+
+-- A queued request is still worth a banner only while it is the same,
+-- unanswered request it was when it arrived.
+local function StillWaiting(item)
+    local response = HironCraftScan.OrderToResponse(item.order)
+    return response ~= nil
+        and response.requestToken == item.requestToken
+        and (item.requestToken ~= nil or response.time == item.requestTime)
+        and not response.greeting_sent
+        and HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(item.order)] ~= nil
+        and (time() - item.queuedAt) <= QUEUE_MAX_AGE
+end
+
+function HironCraftScanScannerMenuMixin:GetQueuedAlertCount()
+    return #alertQueue
+end
+
+function HironCraftScanScannerMenuMixin:ShowNextAlert()
+    if self.AlertBGButton:GetOrder() then return false end
+    while #alertQueue > 0 do
+        local item = table.remove(alertQueue, 1)
+        if StillWaiting(item) then
+            self:TriggerAlert(item.text, item.order)
+            return true
+        end
+    end
+    return false
+end
+
 function HironCraftScanScannerMenuMixin:TriggerAlert(text, order)
+    local response = HironCraftScan.OrderToResponse(order)
+    if not response then return end
+
+    local displayed = self.AlertBGButton:GetOrder()
+    if displayed and not SameOrder(displayed, order) then
+        -- The banner on screen stays the one a key press acts on.
+        RemoveQueued(order)
+        alertQueue[#alertQueue + 1] = {
+            text = text, order = order, queuedAt = time(),
+            requestToken = response.requestToken, requestTime = response.time,
+        }
+        HironCraftScan.State.activeOrder = displayed
+        return
+    end
+    RemoveQueued(order)
+
     -- Stop the old animation before binding the new target: OnHide releases
     -- its request. A later whisper must not retarget this displayed banner.
     self.PageButton.MinimapAlertAnim:Stop()
-    local response = HironCraftScan.OrderToResponse(order)
-    if not response then return end
     HironCraftScan.State.activeOrder = order
     self.AlertBGButton.order = order
     self.AlertBGButton.response = response
@@ -170,6 +229,10 @@ function HironCraftScanScannerMenuMixin:ClearAlert(order)
         self:ClearPulses()
         self.AlertBGButton:OnHide()
         self.AlertBGButton.HighlightTexture:Hide()
+        self:ShowNextAlert()
+    elseif order then
+        -- Answered from the order list while it was still waiting its turn.
+        RemoveQueued(order)
     end
 end
 
@@ -240,6 +303,11 @@ HironCraftScan.Utils.onLoad(function()
     HironCraftScan.Frames.makeMovable(frame.PageButton)
 
     HironCraftScan.UpdateAlertIconScale();
+
+    -- The banner timed out: the next waiting request gets its turn.
+    frame.PageButton.MinimapAlertAnim:HookScript('OnFinished', function()
+        frame:ShowNextAlert()
+    end)
 
     frame:SetScript("OnEvent", function(self, event, ...)
         local callbacks = eventCallbacks[event];

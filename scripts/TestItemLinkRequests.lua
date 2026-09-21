@@ -247,6 +247,35 @@ do
         fresh();scan('LF '..a);invalidate();key()
         assert(#sent==0,'hidden/deleted/reused request was sent by an old banner')
     end
+    -- Two requests in the same second: the first keeps the banner, the
+    -- second waits its turn instead of replacing it.
+    fresh()
+    scan('LF '..a)
+    scan('LF '..a,nil,'Second')
+    assert(banner:GetOrder().customerName=='Buyer','the second request replaced the first banner')
+    assert(Scan.State.activeOrder.customerName=='Buyer','a key press would act on the hidden request')
+    assert(menu:GetQueuedAlertCount()==1,'the second request was not kept for later')
+    key()
+    assert(#sent==1 and sent[1].customer=='Buyer','the first banner did not answer the first customer')
+    assert(banner:GetOrder() and banner:GetOrder().customerName=='Second',
+        'the waiting request did not get the banner after the first was answered')
+    key()
+    assert(#sent==2 and sent[2].customer=='Second','the second banner did not answer the second customer')
+    assert(not banner:GetOrder() and menu:GetQueuedAlertCount()==0)
+    -- A banner that timed out passes the turn on as well.
+    fresh()
+    scan('LF '..a)
+    scan('LF '..a,nil,'Second')
+    banner:Hide();menu:ShowNextAlert()
+    assert(banner:GetOrder() and banner:GetOrder().customerName=='Second','a timed-out banner kept the next one waiting')
+    -- A waiting request answered from the order list does not come back.
+    fresh()
+    scan('LF '..a)
+    scan('LF '..a,nil,'Second')
+    menu:ClearAlert(order(101,'Second'))
+    assert(menu:GetQueuedAlertCount()==0,'an answered request stayed in the queue')
+    key()
+    assert(not banner:GetOrder(),'an answered request came back on the banner')
     fresh();scan('LF '..a);key('MiddleButton')
     assert(#sent==0 and opened==1,'visible banner could not open chat without sending')
     fresh();scan('LF '..a);key('RightButton')
