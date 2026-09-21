@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A decline always reaches the linked account (0.3.99)
+
+- A decline of an order from a customer this client never talked to got no
+  cross on the linked account that held the conversation: that account finds
+  its row only through the notice, and an error in a listener of the status
+  change stopped the notice from being recorded (ProfitHub swallowed it).
+  Listeners can no longer break the code that raised the event.
+- Errors in listeners are kept in SavedVariables (`error_log`, newest 20) and
+  still reported through the game's error handler.
+- On load, a missing notice for such an order row (last 24 hours) is rebuilt
+  from the saved status and shared again.
+
 ## A request that narrows down replaces its row (0.3.98)
 
 - Requests narrow down: "LF crafter" -> "LF tailor" -> "chest" -> the linked

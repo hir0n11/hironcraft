@@ -122,4 +122,39 @@ for _,row in pairs(Scan.DB.listed_orders) do
     assert(row.customerName~='Patron-Realm','a patron order was given a customer row')
 end
 
+-- The linked account that talked to the customer finds its own row only
+-- through the notice. A listener that fails while the decline is recorded
+-- must not cost that notice.
+local mockEvents=Scan.Events
+assert(loadfile('Utils/EventBus.lua'))('HironCraft',Scan)
+local previousHandler=geterrorhandler
+geterrorhandler=function() return function() end end
+Scan.Events:Register('ORDER_FULFILLMENT_UPDATED',function() error('listener broke') end)
+local brokenInfo={orderID=906,customerName='Broken-Realm',spellID=123,itemID=321,
+    orderType=2,parentProfessionID=164,reagents={{itemID=11,quantity=1,slotIndex=1,source=1}}}
+assert(F:RecordRejection(brokenInfo,906,'missing_customer_reagents'),'the decline was not recorded')
+local function noticeFor(orderID)
+    for _,notice in pairs(F:GetCompletionNotices()) do
+        if tostring(notice.orderID)==tostring(orderID) and notice.status=='rejected' then return notice end
+    end
+end
+assert(noticeFor(906),'a failing listener cost the notice the other account needs')
+local logged=Scan.DB.settings.error_log and Scan.DB.settings.error_log[1]
+assert(logged and logged.context=='ORDER_FULFILLMENT_UPDATED' and logged.error:find('listener broke'),
+    'the error was not kept for later')
+Scan.Events=mockEvents
+geterrorhandler=previousHandler
+-- A notice that was lost anyway is rebuilt from the saved status, with the
+-- time of the decline itself.
+local lost=noticeFor(906)
+local declinedAt=lost.updatedAt
+for key,notice in pairs(F:GetCompletionNotices()) do
+    if notice==lost then F:GetCompletionNotices()[key]=nil end
+end
+assert(not noticeFor(906))
+now=now+120
+assert(F:RepairOrderRowNotices()==1,'the lost notice was not rebuilt')
+assert(noticeFor(906) and noticeFor(906).updatedAt==declinedAt,'the rebuilt notice has the wrong time')
+assert(F:RepairOrderRowNotices()==0,'a notice was rebuilt twice')
+
 print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated, late material lists recovered, rows for orders nobody asked about).')

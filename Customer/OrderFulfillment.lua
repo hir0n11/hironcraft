@@ -1316,10 +1316,11 @@ function OrderFulfillment:ApplyRemoteCompletionNotices(remoteNotices)
     return changed
 end
 
-function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
+function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status, details)
     if type(orderInfo) ~= 'table' or not orderInfo.customerName then
         return false
     end
+    details = type(details) == 'table' and details or {}
 
     local notice = {
         orderID = craftingOrderID or orderInfo.orderID,
@@ -1328,8 +1329,8 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status)
         spellID = tonumber(orderInfo.spellID),
         itemID = tonumber(orderInfo.itemID),
         parentProfessionID = tonumber(orderInfo.parentProfessionID),
-        crafterFullName = HironCraftScan.GetPlayerName(true),
-        updatedAt = time(),
+        crafterFullName = details.crafterFullName or HironCraftScan.GetPlayerName(true),
+        updatedAt = tonumber(details.updatedAt) or time(),
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
         status = status or self.Status.Fulfilled,
         requestToken = orderInfo.requestToken,
@@ -1949,8 +1950,63 @@ local function RegisterEvents()
     )
 end
 
+-- A row this client made for an order from someone it never talked to
+-- ("order:<id>") is known to no other account: the linked account that holds
+-- the conversation finds its own row only through the notice. A notice lost
+-- on the way (an error while recording it) left that row without its cross
+-- for good; rebuild it from the status that did get saved.
+local NOTICE_REPAIR_MAX_AGE = 24 * 60 * 60
+
+function OrderFulfillment:RepairOrderRowNotices()
+    local myOrigin = HironCraftScan.DB.settings.my_uuid
+    local now = time()
+    local known = {}
+    for _, notice in pairs(EnsureCompletionStorage()) do
+        if type(notice) == 'table' and notice.orderID ~= nil then
+            known[tostring(notice.orderID) .. ':' .. tostring(notice.status)] = true
+        end
+    end
+
+    local repaired = 0
+    for _, entry in pairs(EnsureStorage()) do
+        if type(entry) == 'table'
+            and (entry.status == self.Status.Rejected or entry.status == self.Status.Fulfilled)
+            and type(entry.responseID) == 'string' and entry.responseID:match('^order:')
+            and entry.craftingOrderID ~= nil
+            and (not myOrigin or entry.origin == myOrigin)
+            and now - (tonumber(entry.updatedAt) or 0) <= NOTICE_REPAIR_MAX_AGE
+            and not known[tostring(entry.craftingOrderID) .. ':' .. entry.status]
+        then
+            local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[entry.customerName]
+            local response = customerInfo and customerInfo.responses
+                and customerInfo.responses[entry.responseID]
+            if type(response) == 'table' then
+                local recorded = self:RecordNotice({
+                    customerName = entry.customerName,
+                    customerGuid = customerInfo.guid,
+                    spellID = response.recipeID,
+                    itemID = response.itemID,
+                    parentProfessionID = response.parentProfID,
+                    requestToken = entry.requestToken,
+                    requestTime = entry.requestTime,
+                    reagentAudit = entry.reagentAudit,
+                }, entry.craftingOrderID, entry.status, {
+                    updatedAt = entry.updatedAt,
+                    crafterFullName = entry.crafterFullName,
+                })
+                if recorded then
+                    known[tostring(entry.craftingOrderID) .. ':' .. entry.status] = true
+                    repaired = repaired + 1
+                end
+            end
+        end
+    end
+    return repaired
+end
+
 HironCraftScan.Utils.onLoad(function()
     PruneStorage()
+    OrderFulfillment:RepairOrderRowNotices()
     MigrateMaterialDelivery(EnsureStorage())
     MigrateMaterialDelivery(EnsureCompletionStorage())
     -- Re-apply the current snapshot rules to stored lists (e.g. drop sparks
@@ -1982,6 +2038,9 @@ end)
 -- bridge lets its safe reject action feed the CraftScan status journal without
 -- coupling either module to the other's private Lua environment.
 _G.HironCraft = _G.HironCraft or {}
+_G.HironCraft.ReportError = function(context, err)
+    if HironCraftScan.ReportError then HironCraftScan.ReportError(context, err) end
+end
 _G.HironCraft.RecordRejectedCraftingOrder = function(orderInfo, reason, reagentAudit)
     return OrderFulfillment:RecordRejection(
         orderInfo,

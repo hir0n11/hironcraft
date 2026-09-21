@@ -451,6 +451,9 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
         )
         if not recorded then
             self:DActionPrint("CraftScan rejection status failed:", err)
+            if _G.HironCraft.ReportError then
+                _G.HironCraft.ReportError("RecordRejectedCraftingOrder", err)
+            end
         end
     end
 
