@@ -622,6 +622,96 @@ local function CompletionNoticeMatchesOrder(notice, order)
         and CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid)
 end
 
+-- Why a notice from another account does not fit a row of the same customer.
+-- The same checks as CompletionNoticeMatchesOrder, in the same order, each
+-- naming what differed; nil when it fits.
+local function ExplainNoticeMismatch(notice, order)
+    local response = ResponseForOrder(order)
+    if not response then return 'no request data for the row' end
+
+    local tokensMatch = type(response.requestToken) == 'string'
+        and type(notice.requestToken) == 'string' and notice.requestToken == response.requestToken
+    local responseTime = tonumber(response.time)
+    if not tokensMatch and responseTime
+        and OlderThanRequest(notice.updatedAt, notice.clockOffset, responseTime) then
+        return string.format('result %s (clock %s) is older than the request %s (clock %s)',
+            tostring(notice.updatedAt), tostring(notice.clockOffset),
+            tostring(responseTime), tostring(ClockOffset()))
+    end
+
+    local responseRecipeID = tonumber(response.recipeID)
+    local responseItemID = tonumber(response.itemID)
+    if responseRecipeID or responseItemID then
+        local recipeMatches = responseRecipeID and notice.spellID and responseRecipeID == notice.spellID
+        local itemMatches = responseItemID and notice.itemID and responseItemID == notice.itemID
+        if not (recipeMatches or itemMatches) then
+            return string.format('row recipe %s item %s, order recipe %s item %s',
+                tostring(responseRecipeID), tostring(responseItemID),
+                tostring(notice.spellID), tostring(notice.itemID))
+        end
+    else
+        if response.equipmentRequest and (not HironCraftScan.ClassMatching
+            or not HironCraftScan.ClassMatching.MatchesItem(response.equipmentRequest, notice.itemID)) then
+            return string.format('row slot %s does not fit item %s',
+                tostring(response.equipmentRequest.key), tostring(notice.itemID))
+        end
+        local responseParentProfessionID = tonumber(response.parentProfID)
+        if notice.parentProfessionID and responseParentProfessionID
+            and notice.parentProfessionID ~= responseParentProfessionID then
+            return string.format('row profession %s, order profession %s',
+                tostring(responseParentProfessionID), tostring(notice.parentProfessionID))
+        end
+    end
+    if not CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid) then
+        return string.format('row customer %s, order customer %s',
+            tostring(order.customerName), tostring(notice.customerName))
+    end
+    return nil
+end
+
+-- A result from another account that fits none of this customer's rows shows
+-- no mark at all, and nothing tells why. Say it once in chat and keep it in
+-- SavedVariables (settings.notice_mismatch_log), so it can be fixed.
+local NOTICE_DIAGNOSIS_MAX_AGE = 30 * 60
+local MAX_MISMATCH_LOG = 20
+local diagnosedNotices = {}
+
+local function DiagnoseUnmatchedNotice(notice, key)
+    if type(notice) ~= 'table' or diagnosedNotices[key] then return end
+    if notice.origin and notice.origin == HironCraftScan.DB.settings.my_uuid then return end
+    if time() - (tonumber(notice.updatedAt) or 0) > NOTICE_DIAGNOSIS_MAX_AGE then return end
+
+    local reasons = {}
+    for _, order in pairs(HironCraftScan.DB.listed_orders or {}) do
+        if type(order) == 'table' and NamesMatch(order.customerName, notice.customerName) then
+            local ok, reason = pcall(ExplainNoticeMismatch, notice, order)
+            if ok and not reason then return end -- it fits a row
+            reasons[#reasons + 1] = tostring(order.responseID) .. ': ' .. tostring(reason)
+        end
+    end
+    diagnosedNotices[key] = true
+    -- A customer this account never talked to is normal: nothing to report.
+    if #reasons == 0 then return end
+
+    local settings = HironCraftScan.DB.settings
+    local log = type(settings.notice_mismatch_log) == 'table' and settings.notice_mismatch_log or {}
+    settings.notice_mismatch_log = log
+    table.insert(log, 1, {
+        at = time(), customerName = notice.customerName, status = notice.status,
+        orderID = notice.orderID, reasons = reasons,
+    })
+    for index = #log, MAX_MISMATCH_LOG + 1, -1 do log[index] = nil end
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            '|cffffd200HironCraft:|r %s для %s не привязан к строке: %s',
+            notice.status == OrderFulfillment.Status.Rejected and 'отказ' or 'результат',
+            tostring(notice.customerName), table.concat(reasons, '; ')))
+    end
+end
+
+OrderFulfillment.ExplainNoticeMismatch = ExplainNoticeMismatch
+
 -- Completion notices grouped by customer base name. GetStatus runs for every
 -- visible status mark on each refresh, and a decline or completion triggers
 -- several refreshes; scanning the whole journal (hundreds of notices) per mark
@@ -1341,6 +1431,7 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
     notices[key] = notice
     InvalidateNoticeIndex()
     MaterializeMatchingStatuses(notice)
+    DiagnoseUnmatchedNotice(notice, key)
     NotifyCompletionUpdated(notice)
     return true
 end

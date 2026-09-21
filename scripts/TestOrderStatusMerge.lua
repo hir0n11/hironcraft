@@ -550,3 +550,41 @@ local stamped = CraftScan.OrderFulfillment:SetStatus(olderOrder, "claimed", { cr
 assert(stamped and stamped.clockOffset == 0, "a new status does not say how its clock stood")
 GetServerTime = nil
 print('Clock tests passed (slow crafter clock, genuinely old decline, stamped records).')
+
+-- A result that fits none of the customer's rows says why, once, and keeps it.
+local printed = {}
+DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) printed[#printed + 1] = text end }
+now = 6000
+CraftScan.DB.customers["Mismatch-Realm"] = {
+    responses = {
+        [5151] = { responseID = 5151, requestToken = "mm-token", time = 5990,
+            crafterFullName = "RemoteCrafter-Realm", recipeID = 5151, itemID = 1515 },
+    },
+}
+local mismatchOrder = { customerName = "Mismatch-Realm", responseID = 5151 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(mismatchOrder)] = mismatchOrder
+local foreign = {
+    orderID = 9950, customerName = "Mismatch", spellID = 7777, itemID = 8888,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = 5995, status = "rejected",
+}
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(foreign)
+assert(#printed == 1 and printed[1]:find("5151", 1, true) and printed[1]:find("7777", 1, true),
+    "an unmatched result did not say why")
+local mismatchLog = CraftScan.DB.settings.notice_mismatch_log
+assert(mismatchLog and mismatchLog[1].customerName == "Mismatch" and #mismatchLog[1].reasons == 1,
+    "the reason was not kept")
+local again = {}
+for key, value in pairs(foreign) do again[key] = value end
+again.updatedAt = 5996
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(again)
+assert(#printed == 1, "the same order was explained twice")
+-- A result for a customer this account never talked to is normal and silent.
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9951, customerName = "Stranger", spellID = 1, itemID = 2,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = 5995, status = "rejected",
+})
+assert(#printed == 1, "a customer without a row was reported")
+DEFAULT_CHAT_FRAME = nil
+print('Unmatched result diagnosis passed.')

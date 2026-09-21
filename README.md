@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Say why a result fits no row (0.4.3)
+
+- A result from a linked account that fits none of the rows of the same
+  customer used to show nothing at all. The receiving account now says
+  once in chat which check failed for each of that customer's rows (time,
+  recipe/item, slot, profession, customer name) and keeps it in
+  `settings.notice_mismatch_log` (newest 20). Customers the account never
+  talked to stay silent.
+
 ## Order results compared on the server clock (0.4.2)
 
 - Each client stamps order results with its own computer clock. A crafting
