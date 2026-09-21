@@ -1433,6 +1433,7 @@ function OrderFulfillment:CreateOrderRowForCraftingOrder(orderInfo, craftingOrde
             greeting_sent = true,
             customer_answered = true,
             conversationCharacter = crafter,
+            conversationFaction = UnitFactionGroup and UnitFactionGroup('player') or nil,
             fromCraftingOrder = true,
         }
     end

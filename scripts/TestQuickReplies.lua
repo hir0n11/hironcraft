@@ -211,8 +211,12 @@ local rejectionOrder = { customerName = "Valnihra", responseID = 101 }
 local rejectionEntry = { status = "rejected", rev = 1 }
 assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
     "a legacy row without conversation ownership was assigned to an arbitrary character")
+UnitFactionGroup = function() return "Alliance" end
 QuickReplies:RememberConversationCharacter(first)
 assert(first.conversationCharacter == "Seller-Realm")
+assert(first.conversationFaction == "Alliance", "the side of the conversation was not kept")
+local owners = QuickReplies:GetConversationOwners(CraftScan.DB.customers.Valnihra)
+assert(owners[1] and owners[1].faction == "Alliance", "the side did not travel to the linked account")
 currentCharacter = "Farrierr-Realm"
 QuickReplies:RememberCustomerConversation(CraftScan.DB.customers.Valnihra)
 assert(first.conversationCharacter == "Seller-Realm", "crafting alt stole the conversation")

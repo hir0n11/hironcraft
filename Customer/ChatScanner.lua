@@ -1660,6 +1660,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
             and { id = response.inquiryID or response.requestToken } or nil
         response.requestToken = requestToken
         response.conversationCharacter = nil
+        response.conversationFaction = nil
         response.greetingGroup = nil
         response.battleNetCharacters = nil
         response.inquiryID = nil
@@ -1917,6 +1918,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         response.previousGreeting = reoffer and {id=response.inquiryID or response.requestToken} or nil
         response.requestToken = requestToken
         response.conversationCharacter = nil
+        response.conversationFaction = nil
         response.greetingGroup = nil
         response.battleNetCharacters = nil
         response.inquiryID = nil

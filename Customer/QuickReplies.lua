@@ -767,18 +767,40 @@ local function ResponseLabel(response)
     return crafter
 end
 
+local function PlayerFaction()
+    if type(UnitFactionGroup) ~= 'function' then return nil end
+    local ok, faction = pcall(UnitFactionGroup, 'player')
+    if ok and (faction == 'Alliance' or faction == 'Horde') then return faction end
+end
+
+local function ValidFaction(faction)
+    return (faction == 'Alliance' or faction == 'Horde') and faction or nil
+end
+
 -- The character handling the conversation is not necessarily the crafter.
 -- Keep ownership on the individual request, not on the account/customer.
-function QuickReplies:RememberConversationCharacter(response, character)
+-- Its side is kept too: a whisper cannot cross from Horde to Alliance, so
+-- only a character of the same side can answer that customer.
+function QuickReplies:RememberConversationCharacter(response, character, faction)
     if type(response) ~= 'table' then return end
     if not character then
         if HironCraftScanComm and HironCraftScanComm.applying_remote_state then return end
         character = HironCraftScan.GetPlayerName(true)
+        faction = PlayerFaction()
     end
     if HironCraftScan.CharacterRenames then character = HironCraftScan.CharacterRenames.Resolve(character) end
     if type(character) == 'string' and character ~= '' and not response.conversationCharacter then
         response.conversationCharacter = character
+        response.conversationFaction = ValidFaction(faction)
     end
+end
+
+-- Whether this character can reach the customer at all. A request whose side
+-- was never recorded (an older row) is not held back.
+function QuickReplies:IsOnConversationSide(response)
+    local side = type(response) == 'table' and ValidFaction(response.conversationFaction) or nil
+    local current = PlayerFaction()
+    return not side or not current or side == current
 end
 
 function QuickReplies:GetConversationOwners(customerInfo)
@@ -791,6 +813,7 @@ function QuickReplies:GetConversationOwners(customerInfo)
                 requestToken = response.requestToken,
                 time = response.time,
                 character = response.conversationCharacter,
+                faction = response.conversationFaction,
             }
         end
     end
@@ -817,7 +840,7 @@ function QuickReplies:ApplyConversationOwners(customerInfo, owners)
                         or (not response.requestToken and not owner.requestToken
                             and response.time and response.time == owner.time))
                 then
-                    self:RememberConversationCharacter(response, owner.character)
+                    self:RememberConversationCharacter(response, owner.character, owner.faction)
                 end
             end
         end
@@ -1066,7 +1089,8 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     -- two may say it - unlike a conversational reply, which stays with the
     -- character holding the conversation.
     if not self:IsConversationCharacter(response)
-        and not (self:CrafterMayAnswer(statusOption) and self:IsOrderCrafter(response, entry))
+        and not (self:CrafterMayAnswer(statusOption) and self:IsOrderCrafter(response, entry)
+            and self:IsOnConversationSide(response))
     then
         return nil
     end

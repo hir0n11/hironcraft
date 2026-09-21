@@ -452,6 +452,25 @@ local doneTemplate=QuickReplies:GetConfig().templates.COMPLETED_ORDER
 doneTemplate.from_crafter=true
 QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},awayDone)
 assert(#visible('AwayBuyer')==1,'the crafter could not send the completion when allowed to')
+Scan.DB.settings.status_replies_sent=nil
+dismissAll()
+-- A whisper cannot cross from Horde to Alliance: an order taken on the
+-- Alliance side is answered only by an Alliance crafter.
+local previousFaction=UnitFactionGroup
+UnitFactionGroup=function() return 'Horde' end
+awayResponse.conversationFaction='Alliance';awaySecond.conversationFaction='Alliance'
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},awayDone)
+assert(#visible('AwayBuyer')==0,'a Horde crafter was offered to write to an Alliance customer')
+QuickReplies:OnOrderFulfillmentUpdated(awayOrder,awayDecline)
+assert(#visible('AwayBuyer')==0,'a Horde crafter was offered a decline for an Alliance customer')
+UnitFactionGroup=function() return 'Alliance' end
+local allianceDone={status='fulfilled',craftingOrderID=97004,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return allianceDone end
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},allianceDone)
+assert(#visible('AwayBuyer')==1,'an Alliance crafter could not answer an Alliance customer')
+UnitFactionGroup=previousFaction
+awayResponse.conversationFaction=nil;awaySecond.conversationFaction=nil
 doneTemplate.from_crafter=nil
 Scan.DB.settings.status_replies_sent=nil
 dismissAll()

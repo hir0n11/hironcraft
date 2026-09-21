@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Replies stay on the customer's side (0.3.97)
+
+- The side (Alliance/Horde) of the character that talked to the customer is
+  kept with the request and shared with linked accounts. A decline or a
+  completion note is offered on the crafter only when it is on that same
+  side: a whisper cannot cross from Horde to Alliance. Older rows without a
+  recorded side are not held back.
+
 ## One account that talks and crafts (0.3.96)
 
 - A decline is offered on the crafting character even when the character that
