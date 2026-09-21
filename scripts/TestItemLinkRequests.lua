@@ -935,7 +935,20 @@ assert(countRows()==1 and Scan.DB.customers.LateClass.responses['equipment:164:I
 assert(#sent==0, 'class-cache retry sent player chat')
 reset();Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','NeverClass','Never-GUID')
 for i=1,4 do flushTimers() end
+assert(countRows()==0 and #timers==1 and #sent==0, 'the request stopped waiting for the class too early')
+now=now+11*60;flushTimers()
 assert(countRows()==0 and #timers==0 and #sent==0, 'unknown class retries did not stop safely')
+-- The class turns up only minutes later (the customer left an instance): the
+-- row is added then, and nothing is said by itself.
+reset();Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','SlowClass','Slow-GUID')
+for i=1,4 do flushTimers() end
+now=now+3*60;flushTimers()
+assert(countRows()==0 and #timers==1, 'waiting for the class gave up or guessed')
+classByGUID['Slow-GUID']='WARRIOR';flushTimers()
+assert(countRows()==1 and Scan.DB.customers.SlowClass.responses['equipment:164:INVTYPE_WRIST'],
+    'the wrist never appeared once the class was known')
+assert(#timers==0 and #sent==0, 'a late class kept polling or sent chat')
+classByGUID['Slow-GUID']=nil
 
 reset()
 classByGUID['Buyer-GUID']='WARRIOR'
@@ -1116,6 +1129,17 @@ classByGUID['Stranger-GUID']='WARRIOR'
 flushTimers()
 assert(strangerRow('equipment:164:INVTYPE_WRIST'),'the wrist never followed once the class was known')
 assert(strangerRow('equipment:755:INVTYPE_FINGER'),'looking again lost the ring')
+-- The same when the class takes minutes instead of a moment.
+reset()
+Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Stranger','Slow-Stranger-GUID')
+for i=1,4 do flushTimers() end
+now=now+5*60;flushTimers()
+assert(strangerRow('equipment:755:INVTYPE_FINGER') and not strangerRow('equipment:164:INVTYPE_WRIST'),
+    'the ring was lost or the wrist guessed while the class was unknown')
+classByGUID['Slow-Stranger-GUID']='WARRIOR';flushTimers()
+assert(strangerRow('equipment:164:INVTYPE_WRIST') and strangerRow('equipment:755:INVTYPE_FINGER'),
+    'the wrist was not added when the class arrived minutes later')
+assert(countRows()==2 and #sent==0 and #timers==0,'a late class duplicated rows, sent chat or kept polling')
 Scan.QuickReplies.HasUnfinishedOrders=nil
 
 print('Jewelry/off-hand/trinket scanner tests passed (fixed routing, monitored dynamic professions, exact replacement).')

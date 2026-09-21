@@ -2212,6 +2212,55 @@ local function RunRequestCallback(options, callback)
     if not ok then error(err, 0) end
 end
 
+-- A request whose armor slot waits for the customer's class. The quick
+-- retries right after the message cover a class the client is still loading;
+-- this covers a class that only turns up later - the customer leaves the
+-- instance, whispers again from their character, or the linked account
+-- shares it. The row is added then, not guessed now.
+local CLASS_WAIT_SECONDS = 10 * 60
+local CLASS_WAIT_POLL = 2
+local waitingForClass, classWaitScheduled = {}, false
+
+local function PollWaitingForClass()
+    classWaitScheduled = false
+    local matching = HironCraftScan.ClassMatching
+    local remaining = false
+    for key, entry in pairs(waitingForClass) do
+        local stored = HironCraftScan.DB.customers and HironCraftScan.DB.customers[entry.customer]
+        local guid = entry.guid or (stored and stored.guid)
+        if time() > entry.expires or (entry.hadRow and not stored)
+            or (HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[entry.customer]) then
+            -- Too late, or the crafter removed or ignored the customer meanwhile.
+            waitingForClass[key] = nil
+        elseif matching and guid and matching.ResolveClass(guid) then
+            waitingForClass[key] = nil
+            RunRequestCallback(entry.options, function()
+                HironCraftScan.OnMessage(entry.event, entry.message, entry.customer, guid, entry.options)
+            end)
+        else
+            remaining = true
+        end
+    end
+    if remaining and C_Timer and C_Timer.After then
+        classWaitScheduled = true
+        C_Timer.After(CLASS_WAIT_POLL, PollWaitingForClass)
+    end
+end
+
+local function WaitForClass(event, message, customer, guid, options)
+    if not (C_Timer and C_Timer.After) then return false end
+    local stored = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
+    waitingForClass[customer .. '\n' .. message] = {
+        event=event, message=message, customer=customer, guid=guid, options=options,
+        hadRow=stored ~= nil, expires=time() + CLASS_WAIT_SECONDS,
+    }
+    if not classWaitScheduled then
+        classWaitScheduled = true
+        C_Timer.After(CLASS_WAIT_POLL, PollWaitingForClass)
+    end
+    return true
+end
+
 function HironCraftScan.OnMessage(event, message, customer, customerGuid, overrides)
     if not message or not customer then
         return false
@@ -2343,10 +2392,15 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
     local function RetryOnceClassIsKnown()
-        if (overrides.classRetry or 0) >= 3 or not (C_Timer and C_Timer.After) then return false end
+        if (overrides.classRetry or 0) > 3 or not (C_Timer and C_Timer.After) then return false end
         local options = {}
         for key, value in pairs(overrides) do options[key] = value end
         options.classRetry = (overrides.classRetry or 0) + 1
+        if options.classRetry > 3 then
+            -- The quick retries are spent: keep waiting for the class in the
+            -- background and add the slot once it is known.
+            return WaitForClass(event, message, customer, customerGuid, options)
+        end
         C_Timer.After(options.classRetry == 1 and 0.1 or 0.5, function()
             -- Only re-evaluate the request; never send chat from a timer.
             if time() - options.chatEntry.receivedAt > 5 then return end

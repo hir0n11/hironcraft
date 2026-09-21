@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Armor slots wait for a late class (0.3.95)
+
+- An armor slot such as a wrist needs the customer's class, and the class was
+  looked up only for about a second after the message. When it arrives later
+  (the customer leaves an instance, whispers again from their character) the
+  request now keeps waiting for up to 10 minutes and the missing row is added
+  as soon as the class is known. Rows that need no class (ring, cloak,
+  weapon) are still created at once. Nothing is sent by itself; removing or
+  ignoring the customer meanwhile cancels the wait.
+
 ## Follow-up items in a running conversation (0.3.94)
 
 - A whisper like "dagger for Favu, wrist for ? and ring for ?" asks for more
