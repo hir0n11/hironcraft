@@ -17,6 +17,9 @@ local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 local COMPLETED_ORDER_TEMPLATE_KEY = 'COMPLETED_ORDER'
 local ORDER_GREETING_ACTION = 'order-greeting'
 local REPLY_COOLDOWN = 6
+-- How long the last answer to a customer keeps the same answer from being
+-- offered again (see IsReplyTheLastThingSaid).
+local LAST_REPLY_REPEAT_WINDOW = 300
 local LEGACY_REJECTION_TEXT = 'You need provide all mats and they all should be max tier (even missive and embelishment)'
 local REJECTION_TEXT_MIGRATIONS = {
     [LEGACY_REJECTION_TEXT] = true,
@@ -32,9 +35,20 @@ local DEFAULT_TEXT_MIGRATIONS = {
     PRICE = { ['The commission is {commission}.'] = true },
     ORDER = { ['Send a personal order to {crafter}.'] = true },
 }
-local sentReplies = {}
+-- What was said to whom is kept in SavedVariables: a crafter who relogs to a
+-- crafting alt and back for every order must not be offered the same "omw"
+-- again each time. GetTime() counts from the machine's start, so it goes on
+-- across relogs; a stamp from before a restart is ahead of it and is dropped.
+local function ReplyMemory(name)
+    local memory = HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'quick_reply_memory', {})
+    return HironCraftScan.Utils.saved(memory, name, {})
+end
 
-local lastSentReply = {}
+local function Elapsed(sentAt, now)
+    sentAt = tonumber(sentAt)
+    if not sentAt or sentAt > now then return nil end
+    return now - sentAt
+end
 
 local function CustomerKey(customer)
     local info = HironCraftScan.DB.customers[customer]
@@ -47,15 +61,23 @@ end
 
 function QuickReplies:IsReplyOnCooldown(customer, reply)
     local now = GetTime()
+    local sentReplies = ReplyMemory('replies')
     for key, sentAt in pairs(sentReplies) do
-        if now - sentAt >= REPLY_COOLDOWN then sentReplies[key] = nil end
+        local elapsed = Elapsed(sentAt, now)
+        if not elapsed or elapsed >= REPLY_COOLDOWN then sentReplies[key] = nil end
     end
     return sentReplies[ReplyKey(customer, reply)] ~= nil
 end
 
 function QuickReplies:RememberSentReply(customer, reply)
-    sentReplies[ReplyKey(customer, reply)] = GetTime()
-    lastSentReply[CustomerKey(customer)] = { reply = reply, at = GetTime() }
+    local now = GetTime()
+    ReplyMemory('replies')[ReplyKey(customer, reply)] = now
+    local lastSentReply = ReplyMemory('last')
+    for key, entry in pairs(lastSentReply) do
+        local elapsed = type(entry) == 'table' and Elapsed(entry.at, now)
+        if not elapsed or elapsed >= LAST_REPLY_REPEAT_WINDOW then lastSentReply[key] = nil end
+    end
+    lastSentReply[CustomerKey(customer)] = { reply = reply, at = now }
 end
 
 -- Nobody repeats themselves back to back. While the last thing said to this
@@ -63,14 +85,13 @@ end
 -- in front of them. Saying anything else - another reply, an order status -
 -- moves the conversation on and lifts the block at once, and after a few
 -- minutes the same question deserves an answer again anyway.
-local LAST_REPLY_REPEAT_WINDOW = 300
-
 function QuickReplies:IsReplyTheLastThingSaid(customer, reply)
     if type(reply) ~= 'string' or reply == '' then return false end
 
-    local entry = lastSentReply[CustomerKey(customer)]
+    local entry = ReplyMemory('last')[CustomerKey(customer)]
     if type(entry) ~= 'table' or entry.reply ~= reply then return false end
-    return (GetTime() - (tonumber(entry.at) or 0)) < LAST_REPLY_REPEAT_WINDOW
+    local elapsed = Elapsed(entry.at, GetTime())
+    return elapsed ~= nil and elapsed < LAST_REPLY_REPEAT_WINDOW
 end
 
 -- Per quick reply: how long the same answer stays out of the way for the same
@@ -86,7 +107,6 @@ end
 
 QuickReplies.NormalizeRepeatSeconds = NormalizeRepeatSeconds
 
-local sentTemplates = {}
 
 local function TemplateCustomerKey(customer, templateKey)
     local info = HironCraftScan.DB.customers[customer]
@@ -104,16 +124,18 @@ function QuickReplies:IsTemplateOnRepeatCooldown(customer, templateKey)
     local delay = self:GetTemplateRepeatDelay(templateKey)
     if delay <= 0 then return false end
 
-    local sentAt = sentTemplates[TemplateCustomerKey(customer, templateKey)]
-    return sentAt ~= nil and (GetTime() - sentAt) < delay
+    local elapsed = Elapsed(ReplyMemory('templates')[TemplateCustomerKey(customer, templateKey)], GetTime())
+    return elapsed ~= nil and elapsed < delay
 end
 
 function QuickReplies:RememberSentTemplate(customer, templateKey)
     if not templateKey then return end
 
     local now = GetTime()
+    local sentTemplates = ReplyMemory('templates')
     for key, sentAt in pairs(sentTemplates) do
-        if now - sentAt > MAX_REPEAT_SECONDS then sentTemplates[key] = nil end
+        local elapsed = Elapsed(sentAt, now)
+        if not elapsed or elapsed > MAX_REPEAT_SECONDS then sentTemplates[key] = nil end
     end
     sentTemplates[TemplateCustomerKey(customer, templateKey)] = now
 end
@@ -227,6 +249,7 @@ local function EnsureConfig()
                 template.repeat_minutes = nil
             end
             template.repeat_seconds = NormalizeRepeatSeconds(template.repeat_seconds)
+            if template.from_crafter ~= nil then template.from_crafter = template.from_crafter == true end
         end
     end
     return config
@@ -806,25 +829,13 @@ local function SameCharacter(lhs, rhs)
     return lhs:gsub('%s+', ''):lower() == rhs:gsub('%s+', ''):lower()
 end
 
-local function IsCharacterOnThisAccount(name)
-    if type(name) ~= 'string' or name == '' then return false end
-    for character in pairs(HironCraftScan.DB.characters or {}) do
-        if SameCharacter(character, name) then return true end
-    end
-    return false
-end
-
--- The character this order was assigned to and crafted by, when the character
--- that spoke to the customer cannot be reached from here: orders are often
--- collected on one account and crafted on another. While the conversation
--- belongs to a character of this account, switching to it is the right thing
--- to do and the reply stays there.
+-- The character this order was assigned to and crafted by. Orders are often
+-- collected on one character and crafted on another - on another account, or
+-- on the same account after a relog - and while the crafter is logged in the
+-- character that talked to the customer is not.
 function QuickReplies:IsOrderCrafter(response, entry)
     local current = HironCraftScan.GetPlayerName(true)
     if type(current) ~= 'string' then return false end
-
-    local owner = type(response) == 'table' and response.conversationCharacter or nil
-    if IsCharacterOnThisAccount(owner) then return false end
 
     if type(entry) == 'table' and SameCharacter(entry.crafterFullName, current) then
         return true
@@ -851,6 +862,17 @@ local STATUS_OPTIONS = {
     fulfilled = { template = COMPLETED_ORDER_TEMPLATE_KEY, message = 'Crafting order status completed',
         lastOrderOnly = true, automaticOnly = true, oncePerCustomer = true },
 }
+
+-- A decline may always come from the crafter. A completion stays with the
+-- conversation unless the crafter chose to send it from the crafting
+-- character too: with one account that talks and crafts, waiting for a relog
+-- back to the talking character only delays it.
+function QuickReplies:CrafterMayAnswer(statusOption)
+    if type(statusOption) ~= 'table' then return false end
+    if statusOption.crafterMayAnswer then return true end
+    local template = EnsureConfig().templates[statusOption.template]
+    return type(template) == 'table' and template.from_crafter == true
+end
 
 -- A customer who placed several orders at once gets one "your order is done",
 -- not one per order, so the reply waits for the last of their orders. A
@@ -1044,7 +1066,7 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     -- two may say it - unlike a conversational reply, which stays with the
     -- character holding the conversation.
     if not self:IsConversationCharacter(response)
-        and not (statusOption.crafterMayAnswer and self:IsOrderCrafter(response, entry))
+        and not (self:CrafterMayAnswer(statusOption) and self:IsOrderCrafter(response, entry))
     then
         return nil
     end

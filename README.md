@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One account that talks and crafts (0.3.96)
+
+- A decline is offered on the crafting character even when the character that
+  talked to the customer is on the same account. Before, it waited for a relog
+  back to that character; it is still marked as sent for the whole account, so
+  it is not offered twice.
+- "Also send from the crafter" on the completed-order reply offers the
+  completion note on the crafting character too. Off by default; the customer
+  still hears it once.
+- Sent quick replies (repeat delay, "not the same answer twice in a row") and
+  armor slots waiting for the class are saved, so frequent relogs between the
+  talking and the crafting character no longer reset them.
+
 ## Armor slots wait for a late class (0.3.95)
 
 - An armor slot such as a wrist needs the customer's class, and the class was

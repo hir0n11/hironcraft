@@ -215,7 +215,7 @@ local function LayoutRow(row, isCollapsed)
         end
     else
         row:SetSize(FULL_CONTENT_WIDTH, FULL_ROW_HEIGHT)
-        row.ActiveOnly:SetPoint('TOPLEFT', 116, -106)
+        row.ActiveOnly:SetPoint('TOPLEFT', eventOnly and 3 or 116, -106)
         row.ActiveOnly:SetWidth(FULL_CONTENT_WIDTH - 126)
         row.ActiveOnly.Title:SetWidth(FULL_CONTENT_WIDTH - 166)
         row.Enabled:SetWidth(eventOnly and 184 or 114)
@@ -360,7 +360,19 @@ function HironCraftScanQuickReplyConfigPanelMixin:RefreshRows()
         if definition.eventOnly then
             row.Keywords:Hide()
             -- An order event is the order: it cannot wait for another one.
-            row.ActiveOnly:Hide()
+            -- The completion note may instead be sent by the crafter.
+            if definition.key == 'COMPLETED_ORDER' then
+                HironCraftScan.SetupCheckBox(self, row.ActiveOnly, prefix .. 'from_crafter')
+                row.ActiveOnly.Title:SetText(L('dialog.quick_reply.from_crafter'))
+                SetupCustomTooltip(
+                    row.ActiveOnly,
+                    L('dialog.quick_reply.from_crafter'),
+                    L('dialog.quick_reply.from_crafter.tooltip.body')
+                )
+                row.ActiveOnly:Show()
+            else
+                row.ActiveOnly:Hide()
+            end
         else
             HironCraftScan.SetupCheckBox(self, row.ActiveOnly, prefix .. 'active_orders_only')
             row.ActiveOnly.Title:SetText(L('dialog.quick_reply.active_orders_only'))
@@ -519,7 +531,7 @@ function HironCraftScanQuickReplyConfigPanelMixin:UpdateConfigValue(keyword, val
             value = HironCraftScan.QuickReplies.NormalizePriority(value)
         elseif field == 'repeat_seconds' then
             value = HironCraftScan.QuickReplies.NormalizeRepeatSeconds(value)
-        elseif field == 'active_orders_only' then
+        elseif field == 'active_orders_only' or field == 'from_crafter' then
             value = value == true
         end
         template[field] = value

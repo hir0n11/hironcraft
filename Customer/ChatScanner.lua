@@ -2216,26 +2216,49 @@ end
 -- retries right after the message cover a class the client is still loading;
 -- this covers a class that only turns up later - the customer leaves the
 -- instance, whispers again from their character, or the linked account
--- shares it. The row is added then, not guessed now.
+-- shares it. The row is added then, not guessed now. The wait is saved, so a
+-- relog to another character in between does not lose it.
 local CLASS_WAIT_SECONDS = 10 * 60
 local CLASS_WAIT_POLL = 2
-local waitingForClass, classWaitScheduled = {}, false
+local classWaitScheduled = false
+
+local function WaitingForClass()
+    return saved(HironCraftScan.DB.settings, 'class_waits', {})
+end
+
+-- Only plain data survives into SavedVariables.
+local function PlainCopy(value, depth)
+    local kind = type(value)
+    if kind == 'string' or kind == 'number' or kind == 'boolean' then return value end
+    if kind ~= 'table' or (depth or 0) > 4 then return nil end
+    local copy = {}
+    for key, item in pairs(value) do
+        if type(key) == 'string' or type(key) == 'number' then
+            copy[key] = PlainCopy(item, (depth or 0) + 1)
+        end
+    end
+    return copy
+end
 
 local function PollWaitingForClass()
     classWaitScheduled = false
     local matching = HironCraftScan.ClassMatching
+    local waiting = WaitingForClass()
     local remaining = false
-    for key, entry in pairs(waitingForClass) do
-        local stored = HironCraftScan.DB.customers and HironCraftScan.DB.customers[entry.customer]
-        local guid = entry.guid or (stored and stored.guid)
-        if time() > entry.expires or (entry.hadRow and not stored)
+    for key, entry in pairs(waiting) do
+        local stored = type(entry) == 'table' and HironCraftScan.DB.customers
+            and HironCraftScan.DB.customers[entry.customer]
+        local guid = type(entry) == 'table' and (entry.guid or (stored and stored.guid))
+        if type(entry) ~= 'table' or type(entry.message) ~= 'string' or type(entry.customer) ~= 'string'
+            or time() > (tonumber(entry.expires) or 0) or (entry.hadRow and not stored)
             or (HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[entry.customer]) then
             -- Too late, or the crafter removed or ignored the customer meanwhile.
-            waitingForClass[key] = nil
+            waiting[key] = nil
         elseif matching and guid and matching.ResolveClass(guid) then
-            waitingForClass[key] = nil
-            RunRequestCallback(entry.options, function()
-                HironCraftScan.OnMessage(entry.event, entry.message, entry.customer, guid, entry.options)
+            waiting[key] = nil
+            local options = type(entry.options) == 'table' and entry.options or {}
+            RunRequestCallback(options, function()
+                HironCraftScan.OnMessage(entry.event, entry.message, entry.customer, guid, options)
             end)
         else
             remaining = true
@@ -2247,17 +2270,20 @@ local function PollWaitingForClass()
     end
 end
 
+local function ScheduleClassWait()
+    if classWaitScheduled or not (C_Timer and C_Timer.After) then return end
+    classWaitScheduled = true
+    C_Timer.After(CLASS_WAIT_POLL, PollWaitingForClass)
+end
+
 local function WaitForClass(event, message, customer, guid, options)
     if not (C_Timer and C_Timer.After) then return false end
     local stored = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
-    waitingForClass[customer .. '\n' .. message] = {
-        event=event, message=message, customer=customer, guid=guid, options=options,
+    WaitingForClass()[customer .. '\n' .. message] = {
+        event=event, message=message, customer=customer, guid=guid, options=PlainCopy(options),
         hadRow=stored ~= nil, expires=time() + CLASS_WAIT_SECONDS,
     }
-    if not classWaitScheduled then
-        classWaitScheduled = true
-        C_Timer.After(CLASS_WAIT_POLL, PollWaitingForClass)
-    end
+    ScheduleClassWait()
     return true
 end
 
@@ -2640,4 +2666,6 @@ HironCraftScan.Utils.onLoad(function()
     UpdateScannerEventRegistry()
 
     CleanRecentAnalytics()
+    -- A wait started on the previous character goes on here.
+    if next(WaitingForClass()) then ScheduleClassWait() end
 end)

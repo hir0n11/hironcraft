@@ -447,14 +447,23 @@ local awayDone={status='fulfilled',craftingOrderID=97002,crafterFullName='Seller
 Scan.OrderFulfillment.GetStatus=function() return awayDone end
 QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},awayDone)
 assert(#visible('AwayBuyer')==0,'the completion note left the character the customer talked to')
--- A conversation held by one of our own characters keeps both replies.
+-- With "also send from the crafter" the completion comes from here too.
+local doneTemplate=QuickReplies:GetConfig().templates.COMPLETED_ORDER
+doneTemplate.from_crafter=true
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},awayDone)
+assert(#visible('AwayBuyer')==1,'the crafter could not send the completion when allowed to')
+doneTemplate.from_crafter=nil
+Scan.DB.settings.status_replies_sent=nil
+dismissAll()
+-- One account that talks and crafts: the talking character is logged out
+-- while the crafter is in, so the crafter answers the decline right away.
 awayResponse.conversationCharacter='Alt-Realm'
 Scan.DB.characters={['Seller-Realm']={},['Alt-Realm']={}}
 Scan.OrderFulfillment.GetStatus=function() return awayDecline end
 QuickReplies:OnOrderFulfillmentUpdated(awayOrder,
     {status='rejected',craftingOrderID=97003,crafterFullName='Seller-Realm',
         requestToken=awayResponse.requestToken})
-assert(#visible('AwayBuyer')==0,'a decline leaked onto the crafting alt of this account')
+assert(#visible('AwayBuyer')==1,'a decline waited for a relog to the talking character')
 Scan.DB.characters=nil
 Scan.OrderFulfillment.GetStatus=nil
 dismissAll()
@@ -506,6 +515,20 @@ assert(#sent==beforeRepeat+1 and sent[#sent].text=='omw','the reply was not sent
 now=now+400
 whisper('RepeatBuyer','omw now')
 assert(#visible('RepeatBuyer')==0,'the same reply was offered again inside its own delay')
+-- The delay lives in SavedVariables, so a relog to the crafting alt and back
+-- does not forget it. A stamp from before a restart of the machine is ahead of
+-- GetTime() and no longer counts.
+local memory=Scan.DB.settings.quick_reply_memory
+assert(memory and next(memory.templates) and next(memory.last),'the sent replies are not saved')
+local savedTemplates=memory.templates
+memory.templates={}
+for key in pairs(savedTemplates) do memory.templates[key]=now+100000 end
+QuickReplies:GetConfig().templates[repeatKey].repeat_seconds=600
+local savedLast=memory.last;memory.last={}
+whisper('RepeatBuyer','omw now')
+assert(#visible('RepeatBuyer')==1,'a stamp from before a restart still held the reply back')
+dismissAll()
+memory.templates,memory.last=savedTemplates,savedLast
 whisper('OtherRepeatBuyer','omw now')
 assert(#visible('OtherRepeatBuyer')==1,'the delay reached another person')
 dismissAll()

@@ -216,11 +216,11 @@ assert(first.conversationCharacter == "Seller-Realm")
 currentCharacter = "Farrierr-Realm"
 QuickReplies:RememberCustomerConversation(CraftScan.DB.customers.Valnihra)
 assert(first.conversationCharacter == "Seller-Realm", "crafting alt stole the conversation")
--- The character that talked to this customer is one of ours: switching to it
--- is the right thing to do, so the reply stays there.
+-- The character that talked to this customer is on this account, but the
+-- crafter is the one logged in: waiting for a relog only delays the decline.
 CraftScan.DB.characters = { ['Seller-Realm'] = {} }
-assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) == nil,
-    "rejection reply leaked onto the crafting alt")
+assert(QuickReplies:BuildRejectedOrderOption(rejectionOrder, rejectionEntry) ~= nil,
+    "the crafter could not answer while the talking character is on this account")
 -- Orders collected on another account, crafted here: nobody on this account
 -- can switch to that character, so the crafter of the order may answer.
 CraftScan.DB.characters = { ['Farrierr-Realm'] = {} }

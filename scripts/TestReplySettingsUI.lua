@@ -103,7 +103,15 @@ assert(replies.definitionCount==5 and not findRow('PRICE'))
 local done=findRow('COMPLETED_ORDER')
 assert(done and done.Keywords and not done.Keywords:IsShown(),'completed-order reply asked for keywords')
 assert(done.Repeat:IsShown(),'an event reply had no repeat delay of its own')
-assert(not done.ActiveOnly:IsShown(),'an event reply asked to wait for an order')
+assert(done.ActiveOnly:IsShown(),'the completed-order reply had no crafter switch')
+done.ActiveOnly.Act:SetChecked(true);click(done.ActiveOnly.Act)
+assert(Scan.QuickReplies:GetConfig().templates.COMPLETED_ORDER.from_crafter==true,
+    'the crafter switch was not saved')
+done.ActiveOnly.Act:SetChecked(false);click(done.ActiveOnly.Act)
+assert(Scan.QuickReplies:GetConfig().templates.COMPLETED_ORDER.from_crafter==false,
+    'the crafter switch could not be turned off')
+local declined=findRow('REJECTED_ORDER')
+assert(declined and not declined.ActiveOnly:IsShown(),'a decline asked to wait for an order')
 edit(done.Response,'Your order is ready!')
 done.Enabled.Act:SetChecked(false);click(done.Enabled.Act)
 local completed=Scan.QuickReplies:GetConfig().templates.COMPLETED_ORDER

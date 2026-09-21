@@ -944,6 +944,11 @@ reset();Scan.OnMessage('CHAT_MSG_CHANNEL','need wrist','SlowClass','Slow-GUID')
 for i=1,4 do flushTimers() end
 now=now+3*60;flushTimers()
 assert(countRows()==0 and #timers==1, 'waiting for the class gave up or guessed')
+-- The wait is saved: a relog in between drops the timer, and the next
+-- character picks the wait up where it was.
+local waits=Scan.DB.settings.class_waits
+assert(waits and next(waits) and type(select(2,next(waits)).options)=='table',
+    'the wait for the class is not saved')
 classByGUID['Slow-GUID']='WARRIOR';flushTimers()
 assert(countRows()==1 and Scan.DB.customers.SlowClass.responses['equipment:164:INVTYPE_WRIST'],
     'the wrist never appeared once the class was known')
