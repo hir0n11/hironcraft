@@ -968,6 +968,11 @@ assert(response('equipment:164:INVTYPE_WRIST') and not response(164) and countRo
 scan('LF bs')
 assert(response('equipment:164:INVTYPE_WRIST') and not response(164) and countRows()==1,
     'a profession request replaced or duplicated the slot row')
+-- Another profession is another request: after the wrist, "do you have a
+-- tailor too?" gets its own row next to it.
+scan('LF tailor')
+assert(response('equipment:164:INVTYPE_WRIST') and response(197) and countRows()==2,
+    'a request for another profession did not get its own row')
 assert(#sent==0,'narrowing a request sent something by itself')
 
 reset()
