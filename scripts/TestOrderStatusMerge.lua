@@ -498,3 +498,55 @@ local wrong=copyEntry(remote);wrong.rev=wrong.rev+1;wrong.craftingOrderID=88003;
 CraftScan.OrderFulfillment:ApplyRemoteStatus(wrong)
 assert(not CraftScan.OrderFulfillment:GetStatuses()[auditKey].reagentAudit,'mismatched game ID accepted')
 print('Reagent audit persistence tests passed (journal enrichment, reload, resend, legacy peer, payload isolation).')
+
+-- The crafter's computer clock runs behind: its decline is stamped earlier
+-- than the request it answers on this computer. Compared on the game
+-- server's clock it is newer, and the row gets its cross.
+local serverNow = 5000
+GetServerTime = function() return serverNow end
+now = 5000 -- this computer's clock matches the server
+CraftScan.DB.customers.Skewed = {
+    responses = {
+        [4242] = { responseID = 4242, requestToken = "local-token", time = 4990,
+            crafterFullName = "RemoteCrafter-Realm", recipeID = 4242, itemID = 2424 },
+    },
+}
+local skewedOrder = { customerName = "Skewed", responseID = 4242 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(skewedOrder)] = skewedOrder
+local lateClock = {
+    orderID = 9901, customerName = "Skewed", spellID = 4242, itemID = 2424,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = 4930, status = "rejected", requestToken = "order:9901",
+}
+-- Without knowing the other clock, the decline looks older than the request.
+assert(CraftScan.OrderFulfillment:ApplyRemoteCompletion(lateClock))
+local seen = CraftScan.OrderFulfillment:GetStatus(skewedOrder)
+assert(not (seen and seen.status == "rejected"), "the test does not reproduce the clock problem")
+-- The same notice again, now with its clock 90 seconds behind the server.
+local withClock = {}
+for key, value in pairs(lateClock) do withClock[key] = value end
+withClock.clockOffset = 90
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(withClock)
+seen = CraftScan.OrderFulfillment:GetStatus(skewedOrder)
+assert(seen and seen.status == "rejected", "a decline from a computer with a slow clock was dropped")
+-- A decline that really is older than the request still stays off the row.
+CraftScan.DB.customers.Older = {
+    responses = {
+        [4343] = { responseID = 4343, requestToken = "local-token-2", time = 4990,
+            crafterFullName = "RemoteCrafter-Realm", recipeID = 4343, itemID = 3434 },
+    },
+}
+local olderOrder = { customerName = "Older", responseID = 4343 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(olderOrder)] = olderOrder
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9902, customerName = "Older", spellID = 4343, itemID = 3434,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = 4930, clockOffset = 0, status = "rejected", requestToken = "order:9902",
+})
+seen = CraftScan.OrderFulfillment:GetStatus(olderOrder)
+assert(not (seen and seen.status == "rejected"), "an old decline leaked onto a newer request")
+-- Records made here carry this computer's clock.
+local stamped = CraftScan.OrderFulfillment:SetStatus(olderOrder, "claimed", { craftingOrderID = 9903 })
+assert(stamped and stamped.clockOffset == 0, "a new status does not say how its clock stood")
+GetServerTime = nil
+print('Clock tests passed (slow crafter clock, genuinely old decline, stamped records).')

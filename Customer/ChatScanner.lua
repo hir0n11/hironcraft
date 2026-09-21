@@ -1466,7 +1466,13 @@ local function GetProfessionLink(profInfo)
         return nil
     end
 
-    local spellSkillIndex = C_SpellBook.GetSkillLineIndexByID(profInfo.parentProfessionID)
+    -- A row made from a crafting order stores the base profession (755),
+    -- whose info has no parent of its own: it is its own parent.
+    local skillLineID = profInfo.parentProfessionID or profInfo.professionID
+    if type(skillLineID) ~= 'number' then
+        return nil
+    end
+    local spellSkillIndex = C_SpellBook.GetSkillLineIndexByID(skillLineID)
     local skillLineInfo = spellSkillIndex
         and C_SpellBook.GetSpellBookSkillLineInfo(spellSkillIndex)
     if not skillLineInfo then
@@ -1493,7 +1499,7 @@ local function BuildResponseContext(crafterFullName, profID, itemID, itemLink, r
     local profInfo = C_TradeSkillUI.GetProfessionInfoBySkillLineID(profID)
     local crafter = HironCraftScan.NameAndRealmToName(crafterFullName)
     local altCraft = crafter ~= HironCraftScan.GetPlayerName()
-    local professionName = profInfo and profInfo.parentProfessionName or nil
+    local professionName = profInfo and (profInfo.parentProfessionName or profInfo.professionName) or nil
     local professionLink = professionName
     if not altCraft then
         professionLink = GetProfessionLink(profInfo) or professionName

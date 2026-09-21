@@ -78,6 +78,36 @@ local function NamesMatch(lhs, rhs)
     return lhsBase and rhsBase and lhsBase == rhsBase
 end
 
+-- Each client stamps with its own computer's clock, and those clocks drift
+-- apart: a crafter's clock running a minute behind made a decline look older
+-- than the request it answered, so the other account dropped it and showed no
+-- cross. A record now carries how far its clock was from the game server's,
+-- and times from two machines are compared on the server's clock.
+local MAX_CLOCK_OFFSET = 24 * 60 * 60
+
+local function ClockOffset()
+    if type(GetServerTime) ~= 'function' then return nil end
+    local ok, server = pcall(GetServerTime)
+    if not ok or type(server) ~= 'number' then return nil end
+    return server - time()
+end
+
+local function ValidClockOffset(value)
+    return type(value) == 'number' and math.abs(value) <= MAX_CLOCK_OFFSET and value or nil
+end
+
+-- Whether a record stamped `stamp` (on the clock described by `offset`) is
+-- older than a request stamped `requestTime` on this computer's clock.
+local function OlderThanRequest(stamp, offset, requestTime)
+    stamp = tonumber(stamp) or 0
+    local localOffset = ClockOffset()
+    offset = ValidClockOffset(offset)
+    if offset and localOffset then
+        return stamp + offset < requestTime + localOffset
+    end
+    return stamp < requestTime
+end
+
 local function PlayerGUID(value)
     return not (issecretvalue and issecretvalue(value)) and type(value) == 'string'
         and #value <= 128 and value:match('^Player%-%d+%-%x+$') and value or nil
@@ -432,6 +462,7 @@ local function SanitizeEntry(entry)
     if type(entry.requestTime) == 'number' then
         clean.requestTime = entry.requestTime
     end
+    clean.clockOffset = ValidClockOffset(entry.clockOffset)
 
     if type(entry.craftingOrderID) == 'number' then
         clean.craftingOrderID = entry.craftingOrderID
@@ -506,6 +537,7 @@ local function SanitizeCompletionNotice(notice)
     if type(notice.requestTime) == 'number' then
         clean.requestTime = notice.requestTime
     end
+    clean.clockOffset = ValidClockOffset(notice.clockOffset)
 
     clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
     return clean
@@ -566,7 +598,7 @@ local function CompletionNoticeMatchesOrder(notice, order)
         -- received from another account. Timestamps still prevent an older
         -- completion/rejection from leaking onto a newer request row.
         local responseTime = tonumber(response.time)
-        if responseTime and (tonumber(notice.updatedAt) or 0) < responseTime then
+        if responseTime and OlderThanRequest(notice.updatedAt, notice.clockOffset, responseTime) then
             return false
         end
     end
@@ -873,7 +905,7 @@ function OrderFulfillment:GetStatus(order)
             and entry.requestToken == response.requestToken
         if not requestTokensMatch
             and response.time
-            and (tonumber(entry.updatedAt) or 0) < tonumber(response.time)
+            and OlderThanRequest(entry.updatedAt, entry.clockOffset, tonumber(response.time))
         then
             entry = nil
         end
@@ -1133,6 +1165,8 @@ function OrderFulfillment:SetStatus(order, status, options)
         craftingOrderID = craftingOrderID,
         crafterFullName = options.crafterFullName or HironCraftScan.GetPlayerName(true),
         updatedAt = tonumber(options.updatedAt) or time(),
+        -- A time taken over from another record keeps that record's clock.
+        clockOffset = options.updatedAt and ValidClockOffset(options.clockOffset) or ClockOffset(),
         automatic = options.automatic ~= false,
         result = ResultForStorage(options.result),
         reagentAudit = reagentAudit,
@@ -1267,6 +1301,7 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
                         craftingOrderID = best.orderID,
                         crafterFullName = best.crafterFullName,
                         updatedAt = best.updatedAt,
+                        clockOffset = best.clockOffset,
                         automatic = true,
                         result = 'completion_notice',
                         reagentAudit = best.reagentAudit,
@@ -1286,6 +1321,12 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
         local enriched = current.updatedAt == notice.updatedAt and current.status == notice.status
             and HasMoreReagentDetails(notice.reagentAudit,current.reagentAudit)
         if enriched then current.reagentAudit = MergeReagentAudit(notice.reagentAudit,current.reagentAudit) end
+        -- The same notice again, now telling how its clock stood.
+        if current.updatedAt == notice.updatedAt and current.clockOffset == nil and notice.clockOffset ~= nil then
+            current.clockOffset = notice.clockOffset
+            InvalidateNoticeIndex()
+            enriched = true
+        end
         -- Replayed linked-account notices are also a cheap UI repair signal.
         -- The data is already current, but the ScrollBox row may have been
         -- rebound after the original notification was handled.
@@ -1331,6 +1372,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status, detai
         parentProfessionID = tonumber(orderInfo.parentProfessionID),
         crafterFullName = details.crafterFullName or HironCraftScan.GetPlayerName(true),
         updatedAt = tonumber(details.updatedAt) or time(),
+        clockOffset = details.updatedAt and ValidClockOffset(details.clockOffset) or ClockOffset(),
         origin = HironCraftScan.DB.settings.my_uuid or HironCraftScan.GetPlayerName(true),
         status = status or self.Status.Fulfilled,
         requestToken = orderInfo.requestToken,
@@ -1992,6 +2034,7 @@ function OrderFulfillment:RepairOrderRowNotices()
                     reagentAudit = entry.reagentAudit,
                 }, entry.craftingOrderID, entry.status, {
                     updatedAt = entry.updatedAt,
+                    clockOffset = entry.clockOffset,
                     crafterFullName = entry.crafterFullName,
                 })
                 if recorded then
@@ -2004,9 +2047,39 @@ function OrderFulfillment:RepairOrderRowNotices()
     return repaired
 end
 
+-- Notices of the last day recorded before they carried their clock: add it
+-- (this computer's clock drifts slowly, so its current offset is close) and
+-- send them again, so the other account can place them after all.
+function OrderFulfillment:BackfillNoticeClocks()
+    local myOrigin = HironCraftScan.DB.settings.my_uuid
+    local offset = ClockOffset()
+    if not myOrigin or not offset then return 0 end
+    local now = time()
+    local count = 0
+    for _, notice in pairs(EnsureCompletionStorage()) do
+        if type(notice) == 'table' and notice.origin == myOrigin and notice.clockOffset == nil
+            and now - (tonumber(notice.updatedAt) or 0) <= NOTICE_REPAIR_MAX_AGE
+        then
+            notice.clockOffset = offset
+            count = count + 1
+            if HironCraftScanComm and HironCraftScanComm.PrepareOrderCompletionDelivery then
+                HironCraftScanComm:PrepareOrderCompletionDelivery(notice)
+            end
+            if notice.status == self.Status.Rejected and HironCraftScanComm and HironCraftScanComm.ShareOrderOutcome then
+                HironCraftScanComm:ShareOrderOutcome(notice)
+            elseif HironCraftScanComm and HironCraftScanComm.ShareOrderCompletion then
+                HironCraftScanComm:ShareOrderCompletion(notice)
+            end
+        end
+    end
+    if count > 0 then InvalidateNoticeIndex() end
+    return count
+end
+
 HironCraftScan.Utils.onLoad(function()
     PruneStorage()
     OrderFulfillment:RepairOrderRowNotices()
+    OrderFulfillment:BackfillNoticeClocks()
     MigrateMaterialDelivery(EnsureStorage())
     MigrateMaterialDelivery(EnsureCompletionStorage())
     -- Re-apply the current snapshot rules to stored lists (e.g. drop sparks

@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order results compared on the server clock (0.4.2)
+
+- Each client stamps order results with its own computer clock. A crafting
+  PC whose clock runs behind made a decline look older than the request it
+  answered, so the linked account dropped it and showed no cross. Statuses
+  and notices now carry how far their clock stood from the game server
+  (`clockOffset`), and times from two computers are compared on the
+  server's clock. Notices of the last day are backfilled and sent again.
+- The reply context no longer fails for rows made from a crafting order,
+  which store the base profession (for example 755) instead of a branch.
+
 ## Requests take turns on the banner (0.4.1)
 
 - Two requests in the same second shared one banner: the second replaced the
