@@ -1768,6 +1768,19 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
     -- Replace only a compatible pending slot/type, never another requested
     -- item. Retain the conversation itself and invalidate its old toast.
+    -- Requests narrow down: "LF crafter" -> "LF tailor" -> "chest" -> the
+    -- linked item. Each step replaces the broader row of the same profession
+    -- and a broader request never pushes a narrower row aside.
+    local newIsSpecific = equipmentRequest ~= nil or itemID ~= nil or recipeID ~= nil
+    local function SameProfession(old)
+        return old.professionID == profID
+            or (old.parentProfID ~= nil and old.parentProfID == crafterParentProfID)
+    end
+    local function IsProfessionOnly(old, listedID)
+        return type(listedID) == 'number' and old.responseID == listedID
+            and old.professionID == listedID
+            and not old.itemID and not old.recipeID and not old.equipmentRequest
+    end
     if HironCraftScan.ClassMatching and not needsResultCallbackOnly then
         local remove = {}
         for orderID, order in pairs(HironCraftScan.DB.listed_orders) do
@@ -1776,6 +1789,16 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
                 local fulfillment = HironCraftScan.OrderFulfillment
                 local state = fulfillment and fulfillment.GetStatus and fulfillment:GetStatus(order)
                 local terminal = state and (state.status == 'fulfilled' or state.status == 'rejected' or state.status == 'failed')
+                if old and not terminal and order.responseID ~= responseID then
+                    if not newIsSpecific and not (overrides and overrides.manualMatch)
+                        and not IsProfessionOnly(old, order.responseID) and SameProfession(old)
+                        and (old.itemID or old.recipeID or old.equipmentRequest) then
+                        return nil -- "LF tailor" after "chest" is the same request
+                    end
+                    if newIsSpecific and IsProfessionOnly(old, order.responseID) and SameProfession(old) then
+                        remove[#remove+1] = {orderID=orderID, order=order, response=old}
+                    end
+                end
                 if old and not terminal then
                     if equipmentRequest and old.itemID
                         and HironCraftScan.ClassMatching.MatchesItem(equipmentRequest, old.itemID) then

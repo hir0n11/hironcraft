@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A request that narrows down replaces its row (0.3.98)
+
+- Requests narrow down: "LF crafter" -> "LF tailor" -> "chest" -> the linked
+  item. "LF tailor" followed by "can you craft chest?" left both rows; the
+  more specific one now replaces the profession row of the same profession.
+  A broader request later ("LF tailor" again) does not push the narrower row
+  aside or add a second one.
+
 ## Replies stay on the customer's side (0.3.97)
 
 - The side (Alliance/Horde) of the character that talked to the customer is

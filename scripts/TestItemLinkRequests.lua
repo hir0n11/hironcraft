@@ -955,6 +955,21 @@ assert(countRows()==1 and Scan.DB.customers.SlowClass.responses['equipment:164:I
 assert(#timers==0 and #sent==0, 'a late class kept polling or sent chat')
 classByGUID['Slow-GUID']=nil
 
+-- Requests narrow down: "LF tailor" then "can you craft chest?" is one
+-- request that got more specific, not a second one.
+reset()
+classByGUID['Buyer-GUID']='WARRIOR'
+scan('LF bs')
+assert(response(164) and countRows()==1,'the profession request made no row')
+scan('LF wrist')
+assert(response('equipment:164:INVTYPE_WRIST') and not response(164) and countRows()==1,
+    'the slot did not replace the profession row')
+-- Going broad again does not push the narrower row aside.
+scan('LF bs')
+assert(response('equipment:164:INVTYPE_WRIST') and not response(164) and countRows()==1,
+    'a profession request replaced or duplicated the slot row')
+assert(#sent==0,'narrowing a request sent something by itself')
+
 reset()
 classByGUID['Buyer-GUID']='WARRIOR'
 scan('need wrist')
