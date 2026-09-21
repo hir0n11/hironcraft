@@ -581,6 +581,35 @@ local function CustomerMatchesOrder(order, characterName, crafterFullName, custo
     return NamesMatch(characterName, order.customerName)
 end
 
+-- The customer asked one crafter for one thing and ordered something else
+-- from them: a neighbouring recipe, or the wrong item without its materials.
+-- The row is still the conversation that order came from. Only when it is the
+-- customer's one row with that crafter and profession; with several, which
+-- one it belongs to is not guessed.
+local function IsOnlyRowWithCrafter(notice, order, response)
+    if type(notice.crafterFullName) ~= 'string' or type(response.crafterFullName) ~= 'string'
+        or not NamesMatch(notice.crafterFullName, response.crafterFullName) then
+        return false
+    end
+    local professionID = tonumber(response.parentProfID)
+    if notice.parentProfessionID and professionID and notice.parentProfessionID ~= professionID then
+        return false
+    end
+    local orderKey = HironCraftScan.OrderToOrderID(order)
+    for key, other in pairs(HironCraftScan.DB.listed_orders or {}) do
+        if key ~= orderKey and type(other) == 'table'
+            and NamesMatch(other.customerName, order.customerName) then
+            local otherResponse = ResponseForOrder(other)
+            if type(otherResponse) == 'table' and type(otherResponse.crafterFullName) == 'string'
+                and NamesMatch(otherResponse.crafterFullName, notice.crafterFullName)
+                and (not professionID or tonumber(otherResponse.parentProfID) == professionID) then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 local function CompletionNoticeMatchesOrder(notice, order)
     local response = ResponseForOrder(order)
     if not response then
@@ -610,7 +639,10 @@ local function CompletionNoticeMatchesOrder(notice, order)
             and notice.spellID
             and responseRecipeID == notice.spellID
         local itemMatches = responseItemID and notice.itemID and responseItemID == notice.itemID
-        return (recipeMatches or itemMatches) and CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid) or false
+        if not (recipeMatches or itemMatches) and not IsOnlyRowWithCrafter(notice, order, response) then
+            return false
+        end
+        return CustomerMatchesOrder(order, notice.customerName, notice.crafterFullName, notice.customerGuid) or false
     end
 
     local responseParentProfessionID = tonumber(response.parentProfID)
@@ -644,7 +676,7 @@ local function ExplainNoticeMismatch(notice, order)
     if responseRecipeID or responseItemID then
         local recipeMatches = responseRecipeID and notice.spellID and responseRecipeID == notice.spellID
         local itemMatches = responseItemID and notice.itemID and responseItemID == notice.itemID
-        if not (recipeMatches or itemMatches) then
+        if not (recipeMatches or itemMatches) and not IsOnlyRowWithCrafter(notice, order, response) then
             return string.format('row recipe %s item %s, order recipe %s item %s',
                 tostring(responseRecipeID), tostring(responseItemID),
                 tostring(notice.spellID), tostring(notice.itemID))

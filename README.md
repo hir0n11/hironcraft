@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## An order for a neighbouring recipe marks its row (0.4.4)
+
+- A customer asked for one recipe and ordered a neighbouring one from the
+  same crafter (typically the wrong item, sent without materials). The
+  result matched no row by recipe or item, so the decline showed no cross on
+  the account holding the conversation. When that row is the customer's only
+  row with that crafter and profession, the result now marks it; with
+  several such rows nothing is guessed.
+
 ## Say why a result fits no row (0.4.3)
 
 - A result from a linked account that fits none of the rows of the same

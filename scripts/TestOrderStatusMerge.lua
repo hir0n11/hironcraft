@@ -565,7 +565,7 @@ local mismatchOrder = { customerName = "Mismatch-Realm", responseID = 5151 }
 CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(mismatchOrder)] = mismatchOrder
 local foreign = {
     orderID = 9950, customerName = "Mismatch", spellID = 7777, itemID = 8888,
-    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    crafterFullName = "OtherCrafter-Realm", origin = "remote-account",
     updatedAt = 5995, status = "rejected",
 }
 CraftScan.OrderFulfillment:ApplyRemoteCompletion(foreign)
@@ -588,3 +588,64 @@ CraftScan.OrderFulfillment:ApplyRemoteCompletion({
 assert(#printed == 1, "a customer without a row was reported")
 DEFAULT_CHAT_FRAME = nil
 print('Unmatched result diagnosis passed.')
+
+-- The customer asked for one recipe and ordered its neighbour from the same
+-- crafter (without materials). Their one row with that crafter is still the
+-- conversation the order came from.
+now = 7000
+CraftScan.DB.customers["Neighbour-Realm"] = {
+    responses = {
+        [1228944] = { responseID = 1228944, requestToken = "nb-token", time = 6900,
+            crafterFullName = "Vamo-Realm", recipeID = 1228944, itemID = 239653, parentProfID = 197 },
+    },
+}
+local neighbourRow = { customerName = "Neighbour-Realm", responseID = 1228944 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(neighbourRow)] = neighbourRow
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9960, customerName = "Neighbour", spellID = 1228946, itemID = 239655,
+    parentProfessionID = 197, crafterFullName = "Vamo-Realm", origin = "remote-account",
+    updatedAt = 6950, clockOffset = 0, status = "rejected", requestToken = "order:9960",
+})
+local neighbourStatus = CraftScan.OrderFulfillment:GetStatus(neighbourRow)
+assert(neighbourStatus and neighbourStatus.status == "rejected",
+    "a decline of a neighbouring recipe left the customer's only row without its cross")
+-- With two rows at that crafter, which one it was is not guessed.
+CraftScan.DB.customers["Two-Realm"] = {
+    responses = {
+        [1228944] = { responseID = 1228944, requestToken = "two-a", time = 6900,
+            crafterFullName = "Vamo-Realm", recipeID = 1228944, itemID = 239653, parentProfID = 197 },
+        [1228947] = { responseID = 1228947, requestToken = "two-b", time = 6900,
+            crafterFullName = "Vamo-Realm", recipeID = 1228947, itemID = 239657, parentProfID = 197 },
+    },
+}
+local twoA = { customerName = "Two-Realm", responseID = 1228944 }
+local twoB = { customerName = "Two-Realm", responseID = 1228947 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(twoA)] = twoA
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(twoB)] = twoB
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9961, customerName = "Two", spellID = 1228946, itemID = 239655,
+    parentProfessionID = 197, crafterFullName = "Vamo-Realm", origin = "remote-account",
+    updatedAt = 6950, clockOffset = 0, status = "rejected", requestToken = "order:9961",
+})
+for _, row in ipairs({ twoA, twoB }) do
+    local seenTwo = CraftScan.OrderFulfillment:GetStatus(row)
+    assert(not (seenTwo and seenTwo.status == "rejected"), "a decline was guessed onto one of two rows")
+end
+-- Another crafter's order is not this row's.
+CraftScan.DB.customers["Elsewhere-Realm"] = {
+    responses = {
+        [1228944] = { responseID = 1228944, requestToken = "else-token", time = 6900,
+            crafterFullName = "Vamo-Realm", recipeID = 1228944, itemID = 239653, parentProfID = 197 },
+    },
+}
+local elsewhereRow = { customerName = "Elsewhere-Realm", responseID = 1228944 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(elsewhereRow)] = elsewhereRow
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9962, customerName = "Elsewhere", spellID = 1228946, itemID = 239655,
+    parentProfessionID = 197, crafterFullName = "Favu-Realm", origin = "remote-account",
+    updatedAt = 6950, clockOffset = 0, status = "rejected", requestToken = "order:9962",
+})
+local elsewhereStatus = CraftScan.OrderFulfillment:GetStatus(elsewhereRow)
+assert(not (elsewhereStatus and elsewhereStatus.status == "rejected"),
+    "another crafter's decline landed on this row")
+print('Neighbouring recipe tests passed (only row with the crafter, two rows, another crafter).')
