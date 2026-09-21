@@ -126,6 +126,9 @@ end
 -- through the notice. A listener that fails while the decline is recorded
 -- must not cost that notice.
 local mockEvents=Scan.Events
+HironCraftScan_DB={settings=Scan.DB.settings}
+seterrorhandler=nil
+assert(loadfile('Utils/ErrorLog.lua'))('HironCraft',Scan)
 assert(loadfile('Utils/EventBus.lua'))('HironCraft',Scan)
 local previousHandler=geterrorhandler
 geterrorhandler=function() return function() end end

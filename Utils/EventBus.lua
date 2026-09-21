@@ -6,27 +6,8 @@ local registry = {}
 local Events = {}
 
 -- A failing listener must not stop the code that raised the event: a decline
--- is recorded, and then shared, after its listeners ran. The error is kept in
--- SavedVariables (the newest few) so it can be read after the session, and
--- still reported through WoW's error handler (or BugSack).
-local MAX_LOGGED_ERRORS = 20
-
-function HironCraftScan.ReportError(context, err, stack)
-    local settings = HironCraftScan.DB and HironCraftScan.DB.settings
-    if type(settings) == 'table' then
-        local log = type(settings.error_log) == 'table' and settings.error_log or {}
-        settings.error_log = log
-        table.insert(log, 1, {
-            at = time and time() or 0,
-            context = tostring(context),
-            error = tostring(err),
-            stack = type(stack) == 'string' and stack:sub(1, 2000) or nil,
-        })
-        for index = #log, MAX_LOGGED_ERRORS + 1, -1 do log[index] = nil end
-    end
-    local handler = geterrorhandler and geterrorhandler()
-    if handler then pcall(handler, err) end
-end
+-- is recorded, and then shared, after its listeners ran. The error goes to
+-- the error log (Utils/ErrorLog.lua) and on to the game's handler.
 
 --- Registers a function to be called when a specific event is emitted.
 -- @param eventName string The unique tag for the event.
@@ -70,7 +51,9 @@ function Events:Emit(eventName, ...)
 
     local count, args = select('#', ...), { ... }
     local function OnError(err)
-        HironCraftScan.ReportError(eventName, err, debugstack and debugstack(2) or nil)
+        if HironCraftScan.ReportError then
+            HironCraftScan.ReportError(eventName, err, debugstack and debugstack(2) or nil)
+        end
     end
     for _, func in ipairs(callbacks) do
         xpcall(function() return func(unpack(args, 1, count)) end, OnError)

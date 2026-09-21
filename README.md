@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Error log for every HironCraft error (0.4.0)
+
+- Every Lua error that passes through HironCraft - chat scanning, the order
+  table, windows, timers, listeners - is kept in SavedVariables
+  (`HironCraftScan_DB.settings.error_log`, newest 20, with its stack). A
+  repeating error is counted instead of filling the log; other addons'
+  errors are not kept.
+- Errors are still shown exactly as before: the game's error frame or
+  BugSack gets every one of them. With BugGrabber installed its
+  announcements are used, since it keeps the error handler to itself.
+
 ## A decline always reaches the linked account (0.3.99)
 
 - A decline of an order from a customer this client never talked to got no
