@@ -1835,6 +1835,41 @@ end
 -- what fast clicking through the queue does. Offering the reply right then
 -- produced "I couldn't find the material details"; wait for the list first.
 local MATERIAL_WAIT_DELAYS = { 0.4, 1, 2, 3 }
+-- A decline made on another account sends its list separately, behind the
+-- marks, and it can take far longer: the card waits for it (it appears as
+-- soon as the list arrives) and only then falls back to the text without it.
+local REMOTE_MATERIAL_WAIT_DELAYS = { 0.4, 1, 2, 3, 5, 5, 10, 10, 15, 15, 20, 30 }
+
+local function IsFromLinkedAccount(entry)
+    if type(entry) ~= 'table' then return false end
+    -- A result taken over from another account's notice is stamped with this
+    -- account as its origin, but its list still comes from over there.
+    if entry.completionNotice or entry.result == 'completion_notice' then return true end
+    local mine = HironCraftScan.DB.settings and HironCraftScan.DB.settings.my_uuid
+    return type(entry.origin) == 'string' and entry.origin ~= mine
+end
+
+-- A reagent the game has not loaded yet has no name, and the reply would say
+-- "item:251283". Ask for it and wait a moment.
+local function HasUnloadedReagentNames(snapshot)
+    if type(snapshot) ~= 'table' or type(snapshot.rows) ~= 'table' then return false end
+    local getName = C_Item and C_Item.GetItemNameByID or GetItemInfo
+    local waiting = false
+    local function Check(item)
+        if type(item) ~= 'table' or item.name or type(item.itemID) ~= 'number' then return end
+        local ok, name = pcall(getName or function() end, item.itemID)
+        if ok and type(name) == 'string' and name ~= '' then return end
+        waiting = true
+        if C_Item and C_Item.RequestLoadItemDataByID then
+            pcall(C_Item.RequestLoadItemDataByID, item.itemID)
+        end
+    end
+    for _, row in ipairs(snapshot.rows) do
+        Check(row)
+        for _, supplied in ipairs(type(row.supplied) == 'table' and row.supplied or {}) do Check(supplied) end
+    end
+    return waiting
+end
 
 function QuickReplies:IsWaitingForMaterials(order, entry)
     if type(entry) ~= 'table' or entry.status ~= 'rejected' or not HironCraftScan.ReagentAudit then
@@ -1848,7 +1883,7 @@ function QuickReplies:IsWaitingForMaterials(order, entry)
     end
     -- A list built from the recipe alone carries no customer amounts yet.
     local snapshot = HironCraftScan.ReagentAudit.GetForOrder(order)
-    return type(snapshot) ~= 'table' or snapshot.complete ~= true
+    return type(snapshot) ~= 'table' or snapshot.complete ~= true or HasUnloadedReagentNames(snapshot)
 end
 
 -- A card that was offered while the order was still open stays on screen
@@ -1896,7 +1931,8 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
     end
 
     if self:IsWaitingForMaterials(order, entry) then
-        local delay = MATERIAL_WAIT_DELAYS[(attempt or 0) + 1]
+        local delays = IsFromLinkedAccount(entry) and REMOTE_MATERIAL_WAIT_DELAYS or MATERIAL_WAIT_DELAYS
+        local delay = delays[(attempt or 0) + 1]
         if delay and C_Timer and C_Timer.After then
             C_Timer.After(delay, function()
                 local fulfillment = HironCraftScan.OrderFulfillment

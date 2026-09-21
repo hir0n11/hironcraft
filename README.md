@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A remote decline waits for its material list (0.4.5)
+
+- A decline made on another account sends its material list separately and
+  later than the cross. The decline card waited only a few seconds and then
+  offered "I couldn't find the material details". It now waits up to about
+  two minutes for a remote list and appears as soon as the list arrives.
+- A reagent whose name the game has not loaded yet is requested and waited
+  for, so the reply no longer says "item:251283".
+
 ## An order for a neighbouring recipe marks its row (0.4.4)
 
 - A customer asked for one recipe and ordered a neighbouring one from the

@@ -422,6 +422,37 @@ Scan.OrderFulfillment.GetStatus=function() return lateStatus end
 QuickReplies:OnOrderFulfillmentUpdated(auditOrder,lateStatus)
 for index=1,8 do if timers[index] then timers[index]() end end
 assert(#visible('AuditBuyer')==1,'decline without a material list never offered any reply')
+-- A decline made on another account: its list comes separately and later.
+-- The card waits past the local attempts and appears once the list is in.
+dismissAll();timers={};snapshot=nil
+local remoteStatus={status='rejected',craftingOrderID=81202,requestToken=auditResponse.requestToken,
+    result='completion_notice'}
+Scan.OrderFulfillment.GetStatus=function() return remoteStatus end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,remoteStatus)
+for index=1,4 do if timers[index] then timers[index]() end end
+assert(#visible('AuditBuyer')==0,'a remote decline gave up waiting for its list after a few seconds')
+snapshot={rows={},complete=true}
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,remoteStatus)
+assert(#visible('AuditBuyer')==1,'the list arrived but the remote decline offered nothing')
+for index=5,#timers do if timers[index] then timers[index]() end end
+assert(#visible('AuditBuyer')==1,'the waiting timers offered the decline a second time')
+-- A reagent the game has not loaded has no name yet: wait for it instead of
+-- telling the customer "item:251283".
+dismissAll();timers={}
+local names={}
+local previousItem=C_Item
+local requested={}
+C_Item={GetItemNameByID=function(id) return names[id] end,
+    RequestLoadItemDataByID=function(id) requested[#requested+1]=id end}
+snapshot={complete=true,rows={{itemID=251283,required=1,known=true,optional=false,supplied={}}}}
+local namedStatus={status='rejected',craftingOrderID=81203,requestToken=auditResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return namedStatus end
+QuickReplies:OnOrderFulfillmentUpdated(auditOrder,namedStatus)
+assert(#visible('AuditBuyer')==0 and requested[1]==251283,'a nameless reagent was not loaded first')
+names[251283]='Tormented Tantalum'
+timers[1]()
+assert(#visible('AuditBuyer')==1,'the decline never came once the name was known')
+C_Item=previousItem
 C_Timer=nil
 -- Orders collected on another account, crafted here: the decline has to reach
 -- the customer from the machine that did the craft, because it names the
