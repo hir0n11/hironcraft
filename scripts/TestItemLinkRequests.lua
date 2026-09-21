@@ -1087,6 +1087,37 @@ assert(countRows()==5 and response(211) and not response(ringID) and response(ne
 assert(#sent==0,'exact jewelry/trinket link sent automatically')
 reset();scan('need tailoring trinket')
 assert(countRows()==0,'unsupported explicit trinket profession produced a row')
+-- A conversation that is already about an order: "dagger for Favu, wrist for
+-- ? and ring for ?" asks for more items without saying LF again.
+reset()
+Scan.QuickReplies.HasUnfinishedOrders=function(_,customer) return customer=='Buyer' end
+classByGUID['Buyer-GUID']='WARRIOR'
+Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Buyer','Buyer-GUID')
+assert(response('equipment:755:INVTYPE_FINGER'),'the ring in a follow-up whisper made no row')
+assert(response('equipment:164:INVTYPE_WRIST'),'the wrist in a follow-up whisper made no row')
+assert(#sent==0,'a follow-up whisper sent something by itself')
+-- Outside a conversation with something open, the same words are no request.
+reset()
+Scan.QuickReplies.HasUnfinishedOrders=function() return false end
+Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Buyer','Buyer-GUID')
+assert(countRows()==0,'a whisper without LF became a request outside a conversation')
+-- The customer's class is not known yet: the ring needs no class and is
+-- routed at once, the wrist waits for it instead of losing the whole message.
+reset()
+Scan.QuickReplies.HasUnfinishedOrders=function(_,customer) return customer=='Stranger' end
+local function strangerRow(id)
+    local customer=Scan.DB.customers.Stranger
+    return customer and customer.responses and customer.responses[id]
+end
+Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Stranger','Stranger-GUID')
+assert(strangerRow('equipment:755:INVTYPE_FINGER'),'an unknown class threw away the ring')
+assert(not strangerRow('equipment:164:INVTYPE_WRIST'),'an armor slot was guessed without the class')
+classByGUID['Stranger-GUID']='WARRIOR'
+flushTimers()
+assert(strangerRow('equipment:164:INVTYPE_WRIST'),'the wrist never followed once the class was known')
+assert(strangerRow('equipment:755:INVTYPE_FINGER'),'looking again lost the ring')
+Scan.QuickReplies.HasUnfinishedOrders=nil
+
 print('Jewelry/off-hand/trinket scanner tests passed (fixed routing, monitored dynamic professions, exact replacement).')
 
 -- Less common weapon families are also recipe-driven so an expansion can

@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Follow-up items in a running conversation (0.3.94)
+
+- A whisper like "dagger for Favu, wrist for ? and ring for ?" asks for more
+  items without saying LF again, and the scanner ignored it: without a
+  primary keyword only a general request accepted such a follow-up. While the
+  customer has an order that is still open, their whispers now count as
+  requests too; once everything of theirs is finished, "the ring looks great"
+  is not taken for a new order.
+- When the customer's class was not known yet, the whole message was dropped,
+  even the parts that never need a class. A ring, a cloak or a weapon is now
+  routed at once, and only the armor slot waits for the class, looked up
+  again a moment later so the wrist follows as soon as it is known.
+
 ## One completion note per customer, not per order (0.3.93)
 
 - Orders of one customer are crafted one after another, often on different

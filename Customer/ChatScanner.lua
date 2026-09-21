@@ -1024,9 +1024,16 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             customerGuid or (existing and existing.guid),
             HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass)
     end
-    if armorContext and armorContext.unknownClass then return nil, nil, nil, nil, true end
     local equipmentRequests = HironCraftScan.ClassMatching
         and HironCraftScan.ClassMatching.GetRequests(armorContext) or nil
+    -- Without the customer's class an armor slot cannot be routed, but a ring,
+    -- a cloak or a dagger never needed it. Route those now; only when nothing
+    -- is left to route does the whole request wait for the class.
+    if armorContext and armorContext.unknownClass
+        and (not equipmentRequests or #equipmentRequests == 0) then
+        return nil, nil, nil, nil, true
+    end
+    local armorWaitsForClass = armorContext and armorContext.unknownClass or nil
     if armorContext and next(armorContext.slots or {})
         and (not equipmentRequests or #equipmentRequests==0)
         and not (overrides and overrides.equipmentRequest) then return nil end
@@ -1054,7 +1061,8 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
                     local recipeInfo = GetRequestID(message, crafterInfo, pConfig, armorContext)
                     if recipeInfo then
                         return { crafter = crafterInfo.crafter, profID = pID,
-                            equipmentRequests=equipmentRequests }, nil, recipeInfo
+                            equipmentRequests=equipmentRequests,
+                            classPending=armorWaitsForClass }, nil, recipeInfo
                     end
 
                     if pID > maxProfID then
@@ -1066,7 +1074,7 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             local profID = maxProfID
             if profID > 0 and not bestMatch then
                 bestMatch = { crafter = crafterInfo.crafter, profID = profID,
-                    equipmentRequests=equipmentRequests }
+                    equipmentRequests=equipmentRequests, classPending=armorWaitsForClass }
             end -- Keep looking for other crafters with keywords that match something specific.
         end
     end
@@ -2232,6 +2240,16 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         -- allowed to be just "BS", "wrist" or an item link without another LF.
         -- Global and profession exclusions are still checked normally.
         overrides.genericFollowup = true
+    elseif (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER')
+        and HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.HasUnfinishedOrders
+        and HironCraftScan.QuickReplies:HasUnfinishedOrders(customer)
+    then
+        -- The same holds in a conversation that is already about an order:
+        -- "dagger for Favu, wrist for ? and ring for ?" asks for two more
+        -- items without saying LF again. Only while something of theirs is
+        -- still open - after the craft, "the ring looks great" is not a new
+        -- order.
+        overrides.genericFollowup = true
     end
     -- A line the crafter linked by hand is their own decision, not a customer
     -- greeting, so it raises the normal request banner. Only a real incoming
@@ -2324,23 +2342,29 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     elseif not crafterInfo then
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
-    if not crafterInfo then
-        if classPending and (overrides.classRetry or 0) < 3 and C_Timer and C_Timer.After then
-            local options = {}
-            for key, value in pairs(overrides) do options[key] = value end
-            options.classRetry = (overrides.classRetry or 0) + 1
-            C_Timer.After(options.classRetry == 1 and 0.1 or 0.5, function()
-                -- Only re-evaluate the request; never send chat from a timer.
-                if time() - options.chatEntry.receivedAt > 5 then return end
-                local guid = customerGuid
-                if not guid and type(options.lineID) == 'number' and C_ChatInfo and C_ChatInfo.GetChatLineSenderGUID then
-                    local ok, value = pcall(C_ChatInfo.GetChatLineSenderGUID, options.lineID)
-                    if ok and not (issecretvalue and issecretvalue(value)) then guid = value end
-                end
-                RunRequestCallback(options, function()
-                    HironCraftScan.OnMessage(event, message, customer, guid, options)
-                end)
+    local function RetryOnceClassIsKnown()
+        if (overrides.classRetry or 0) >= 3 or not (C_Timer and C_Timer.After) then return false end
+        local options = {}
+        for key, value in pairs(overrides) do options[key] = value end
+        options.classRetry = (overrides.classRetry or 0) + 1
+        C_Timer.After(options.classRetry == 1 and 0.1 or 0.5, function()
+            -- Only re-evaluate the request; never send chat from a timer.
+            if time() - options.chatEntry.receivedAt > 5 then return end
+            local guid = customerGuid
+            if not guid and type(options.lineID) == 'number' and C_ChatInfo and C_ChatInfo.GetChatLineSenderGUID then
+                local ok, value = pcall(C_ChatInfo.GetChatLineSenderGUID, options.lineID)
+                if ok and not (issecretvalue and issecretvalue(value)) then guid = value end
+            end
+            RunRequestCallback(options, function()
+                HironCraftScan.OnMessage(event, message, customer, guid, options)
             end)
+        end)
+        return true
+    end
+
+    if not crafterInfo then
+        if classPending and RetryOnceClassIsKnown() then
+            -- Scheduled above.
         elseif overrides.forceGeneralRequest or IsGenericRequest(message) then
             customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
             customerInfo.guid = customerGuid or customerInfo.guid
@@ -2383,6 +2407,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 responses[1].requestToken, overrides.restartTerminalRequest, tokens)
         end
         OfferDeferredQuickReply(customer, message, customerInfo, overrides, responses)
+        -- The ring and the dagger are routed; the wrist still needs to know
+        -- what armor the customer wears. Look again once the class arrives.
+        if crafterInfo.classPending then RetryOnceClassIsKnown() end
         return false
     end
 

@@ -357,7 +357,10 @@ function M.GetContext(message, guid, sharedClass)
         local keys = {}; for key in pairs(requestedWeapons) do keys[#keys+1]=key end
         table.sort(keys)
         local class = M.ResolveClass(guid, sharedClass)
-        if needsArmor and not armor and not class then return {unknownClass=true,slots=slots} end
+        if needsArmor and not armor and not class then
+            return {unknownClass=true, slots=slots, weapons=requestedWeapons,
+                parentProfID=weapons[keys[1]].parentProfID}
+        end
         armor = armor or (class and armorByClass[class])
         return {parentProfID=weapons[keys[1]].parentProfID, slots=slots, weapons=requestedWeapons,
             class=class, armor=armor, armorParentProfID=armor and professionByArmor[armor]}
@@ -373,7 +376,10 @@ end
 
 function M.GetRequests(context)
     local requests = {}
-    if not context or context.unknownClass then return requests end
+    if not context then return requests end
+    -- Without the class only an armor slot is unknown: everything with a
+    -- profession of its own is still routed.
+    local classUnknown = context.unknownClass == true
     if context.weapons then
         for key in pairs(context.weapons) do
             local weapon=weapons[key]
@@ -402,7 +408,7 @@ function M.GetRequests(context)
                         parentProfID=profession,dynamicProfession=true}
                 end
             end
-        else
+        elseif not (classUnknown and not fixedProfession) then
             local profession=fixedProfession or armorProfession
             local armorProfessionValid=profession==164 or profession==165 or profession==197
             if profession and (fixedProfession or armorProfessionValid)
