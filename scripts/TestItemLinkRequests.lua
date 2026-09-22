@@ -424,6 +424,39 @@ assert(#sent==3 and opened==3, 'already answered rows must open chat, not resend
 scan(a .. a .. b .. c)
 assert(countRows()==3 and #sent==3)
 
+-- Recipe links count like item links: "LF crafter [Leatherworking: X] and
+-- [Inscription: Y]" is two requests, not the first one only. A recipe this
+-- account knows gets its exact row, an unknown one a profession row.
+reset()
+local function recipeLink(id, text)
+    return '|cffffd000|Henchant:' .. id .. '|h[' .. text .. ']|h|r'
+end
+local previousProfessionByRecipe=C_TradeSkillUI.GetProfessionInfoByRecipeID
+C_TradeSkillUI.GetProfessionInfoByRecipeID=function(id)
+    if id==999 then return {parentProfessionID=197, professionID=197} end
+end
+scan('LF crafter ' .. recipeLink(101, 'Blacksmithing: Item 1001') .. ' and '
+    .. recipeLink(999, 'Tailoring: Unknown Robe'))
+assert(countRows()==2 and response(101) and response(197),
+    'only the first recipe link of the message made a row')
+assert(response(101).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
+assert(#shared==1, 'two recipe links were shared as two requests')
+Scan.GreetCustomer('LeftButton', order(101))
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+    'the second recipe was not answered with the first: '..tostring(sent[2] and sent[2].message))
+assert(response(101).greeting_sent and response(197).greeting_sent)
+-- A recipe link and an item link of the same craft are one request.
+reset()
+scan('LF ' .. recipeLink(101, 'Blacksmithing: Item 1001') .. ' ' .. a)
+assert(countRows()==1 and response(101), 'the same craft linked twice made two rows')
+-- A lone unknown recipe still asks for its profession, and only with LF.
+reset()
+scan(recipeLink(999, 'Tailoring: Unknown Robe'))
+assert(countRows()==0, 'a bare unknown recipe link became a request without LF')
+scan('LF ' .. recipeLink(999, 'Tailoring: Unknown Robe'))
+assert(countRows()==1 and response(197), 'an unknown recipe did not ask for its profession')
+C_TradeSkillUI.GetProfessionInfoByRecipeID=previousProfessionByRecipe
+
 reset()
 scan(a .. b)
 Scan.DismissOrder(order(101))

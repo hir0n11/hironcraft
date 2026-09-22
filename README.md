@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Recipe links count like item links (0.4.10)
+
+- "LF crafter [Leatherworking: X] and [Inscription: Y]" made a row for the
+  first recipe link only; the second was lost and had to be asked again.
+  Every recipe link in a message now counts, in the order written, exactly
+  like item links: a recipe this account knows gets its exact row, an
+  unknown one a profession row for a crafter of that profession, and all of
+  them are answered by one greeting. A recipe linked together with its item
+  is one request. A bare unknown recipe link still needs LF.
+
 ## Set the "answered" mark back by hand (0.4.9)
 
 - A customer who went quiet may or may not come back. Right click on the

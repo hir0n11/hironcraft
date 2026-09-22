@@ -857,12 +857,49 @@ local function GetMonitoredItemMatches(message)
                     seen[crafterInfo.recipeID] = true
                     matches[#matches + 1] = {
                         crafterInfo = crafterInfo, itemID = itemID, recipeInfo = recipeInfo,
-                        itemLink = message:sub(first, last),
+                        itemLink = message:sub(first, last), position = first,
                     }
                 end
             end
         end
     end
+
+    -- Recipe links ("Midnight Inscription: Aln'hara Lantern") ask for a craft
+    -- just like item links. Every one of them counts, not only the first.
+    -- A recipe this account knows gets its exact row; one it does not know is
+    -- asked of a crafter of that profession, as a profession row.
+    local seenProfession = {}
+    for _, pattern in ipairs({ '()|henchant:(%d+)', '()|hrecipe:(%d+)' }) do
+        for linkStart, id in lower:gmatch(pattern) do
+            local recipeID = tonumber(id)
+            local exact = recipeID and config.recipes[recipeID]
+            if recipeID and not seen[recipeID] then
+                seen[recipeID] = true
+                local recipeInfo = exact and IsScanningEnabled(exact) and C_TradeSkillUI.GetRecipeInfo(recipeID)
+                if recipeInfo then
+                    local outputs = HironCraftScan.Utils.GetOutputItems(recipeInfo)
+                    matches[#matches + 1] = {
+                        crafterInfo = exact, itemID = outputs and outputs[1], recipeInfo = recipeInfo,
+                        position = linkStart, fromRecipeLink = true,
+                    }
+                else
+                    local ok, professionInfo = pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID, recipeID)
+                    local generic = ok and professionInfo and professionInfo.parentProfessionID
+                        and GenericCrafterForParentProfession(professionInfo.parentProfessionID,
+                            professionInfo.professionID)
+                    local key = generic and (generic.crafter .. ':' .. tostring(generic.profID))
+                    if generic and not seenProfession[key] then
+                        seenProfession[key] = true
+                        matches[#matches + 1] = {
+                            crafterInfo = generic, position = linkStart,
+                            fromRecipeLink = true, professionOnly = true,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    table.sort(matches, function(lhs, rhs) return lhs.position < rhs.position end)
     return matches
 end
 
@@ -935,9 +972,13 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
         local hasKeywords = HasMatch(message, config.inclusions)
         local itemMatches = GetMonitoredItemMatches(originalMessage)
         local genericFollowup = overrides and overrides.genericFollowup == true
+        local exactMatches = 0
+        for _, match in ipairs(itemMatches) do
+            if not match.professionOnly then exactMatches = exactMatches + 1 end
+        end
         if not hasKeywords and not genericFollowup
             and (HironCraftScan.DB.settings.scan_item_links_without_keywords == false
-                or #itemMatches == 0) then
+                or exactMatches == 0) then
             return nil
         end
 
@@ -2101,11 +2142,13 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
         options.deferItemBatch = true
         options.suppressBatchAlert = #responses > 0
         options.chatHistoryAlreadyStored = options.chatHistoryAlreadyStored or #responses > 0
-        local id = match.recipeInfo.recipeID
+        local id = match.recipeInfo and match.recipeInfo.recipeID or match.crafterInfo.profID
         if overrides and type(overrides.requestTokens) == 'table' then
             options.requestToken = overrides.requestTokens[id] or overrides.requestTokens[tostring(id)]
         end
-        local item = { GetItemLink = function() return match.itemLink end }
+        local itemLink = match.itemLink
+            or (match.itemID and HironCraftScan.Utils.GetReplyItemLink(match.itemID, nil))
+        local item = itemLink and { GetItemLink = function() return itemLink end } or nil
         local response = handleResponse(message, customer, match.crafterInfo,
             match.itemID, match.recipeInfo, item, options, event)
         if response then
@@ -2527,18 +2570,31 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if itemMatches and #itemMatches > 1 then
         -- Load every base-item link before creating/sending the group. This is
         -- the same cache boundary as the single-item path below.
-        local pending = #itemMatches
+        local function Continue()
+            if HironCraftScan.DB.customers[customer] then
+                RunRequestCallback(overrides, function()
+                    local responses = HandleItemBatch(message, customer, itemMatches, overrides, event)
+                    OfferDeferredQuickReply(customer, message,
+                        HironCraftScan.DB.customers[customer], overrides, responses)
+                end)
+            end
+        end
+        local pending = 0
         for _, match in ipairs(itemMatches) do
-            Item:CreateFromItemID(match.itemID):ContinueOnItemLoad(function()
-                pending = pending - 1
-                if pending == 0 and HironCraftScan.DB.customers[customer] then
-                    RunRequestCallback(overrides, function()
-                        local responses = HandleItemBatch(message, customer, itemMatches, overrides, event)
-                        OfferDeferredQuickReply(customer, message,
-                            HironCraftScan.DB.customers[customer], overrides, responses)
-                    end)
-                end
-            end)
+            if match.itemID then pending = pending + 1 end
+        end
+        if pending == 0 then
+            customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
+            Continue()
+            return false
+        end
+        for _, match in ipairs(itemMatches) do
+            if match.itemID then
+                Item:CreateFromItemID(match.itemID):ContinueOnItemLoad(function()
+                    pending = pending - 1
+                    if pending == 0 then Continue() end
+                end)
+            end
         end
         return false
     end
