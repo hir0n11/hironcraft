@@ -972,13 +972,12 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
         local hasKeywords = HasMatch(message, config.inclusions)
         local itemMatches = GetMonitoredItemMatches(originalMessage)
         local genericFollowup = overrides and overrides.genericFollowup == true
-        local exactMatches = 0
-        for _, match in ipairs(itemMatches) do
-            if not match.professionOnly then exactMatches = exactMatches + 1 end
-        end
+        -- A bare link is a request too: people often post just the recipe of
+        -- the gear they want, known to us or not. Crafter ads were filtered
+        -- out above.
         if not hasKeywords and not genericFollowup
             and (HironCraftScan.DB.settings.scan_item_links_without_keywords == false
-                or exactMatches == 0) then
+                or #itemMatches == 0) then
             return nil
         end
 

@@ -449,12 +449,25 @@ assert(response(101).greeting_sent and response(197).greeting_sent)
 reset()
 scan('LF ' .. recipeLink(101, 'Blacksmithing: Item 1001') .. ' ' .. a)
 assert(countRows()==1 and response(101), 'the same craft linked twice made two rows')
--- A lone unknown recipe still asks for its profession, and only with LF.
+-- A bare recipe link is a request too, known to us or not: people often post
+-- just the recipe of the gear they want.
 reset()
 scan(recipeLink(999, 'Tailoring: Unknown Robe'))
-assert(countRows()==0, 'a bare unknown recipe link became a request without LF')
-scan('LF ' .. recipeLink(999, 'Tailoring: Unknown Robe'))
-assert(countRows()==1 and response(197), 'an unknown recipe did not ask for its profession')
+assert(countRows()==1 and response(197), 'a bare unknown recipe link asked for nothing')
+reset()
+scan(recipeLink(101, 'Blacksmithing: Item 1001'))
+assert(countRows()==1 and response(101), 'a bare known recipe link asked for nothing')
+-- A crafter showing off what they make is not a customer.
+reset()
+scan('Can craft ' .. recipeLink(999, 'Tailoring: Unknown Robe'))
+scan('WTS ' .. recipeLink(999, 'Tailoring: Unknown Robe'))
+assert(countRows()==0, 'a crafter ad with a recipe link became a request')
+-- Without the setting for bare links, LF is still needed.
+reset()
+Scan.DB.settings.scan_item_links_without_keywords=false
+scan(recipeLink(999, 'Tailoring: Unknown Robe'))
+assert(countRows()==0, 'a bare link was taken with bare links turned off')
+Scan.DB.settings.scan_item_links_without_keywords=nil
 C_TradeSkillUI.GetProfessionInfoByRecipeID=previousProfessionByRecipe
 
 reset()

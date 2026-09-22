@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A bare recipe link is a request (0.4.11)
+
+- People often post just the recipe of the gear they want, without LF. A
+  bare recipe link now counts as a request like a bare item link, also when
+  none of the crafters knows that recipe (a profession row for a crafter of
+  its profession). It follows the same setting ("Scan item and recipe links
+  without keywords"); crafter ads and exclusions are still filtered out.
+
 ## Recipe links count like item links (0.4.10)
 
 - "LF crafter [Leatherworking: X] and [Inscription: Y]" made a row for the
