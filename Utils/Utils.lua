@@ -119,11 +119,20 @@ local throttleWatcher = nil
 local function WatchChatThrottle()
     if throttleWatcher or not CreateFrame then return end
 
+    local function Trim(text)
+        return type(text) == 'string' and text:gsub('^%s+', ''):gsub('%s+$', '') or nil
+    end
+
     throttleWatcher = CreateFrame('Frame')
+    -- The server says it swallowed the whisper either as a red error or as a
+    -- plain line in the chat frame, depending on where it was refused.
     throttleWatcher:RegisterEvent('UI_ERROR_MESSAGE')
-    throttleWatcher:SetScript('OnEvent', function(_, _, _, message)
-        local throttled = _G and _G.ERR_CHAT_THROTTLED
-        if type(message) == 'string' and type(throttled) == 'string' and message == throttled then
+    throttleWatcher:RegisterEvent('CHAT_MSG_SYSTEM')
+    throttleWatcher:SetScript('OnEvent', function(_, event, first, second)
+        local message = event == 'CHAT_MSG_SYSTEM' and first or second
+        local throttled = Trim(_G and _G.ERR_CHAT_THROTTLED)
+        message = Trim(message)
+        if message and throttled and message == throttled then
             HironCraftScan.Utils.NoteChatThrottled()
         end
     end)

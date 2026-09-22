@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Notice the chat limit wherever the server says it (0.4.7)
+
+- The greeting take-back watched only the red error message. When the server
+  refuses a whisper with a plain line in the chat frame instead, nothing
+  noticed: the row stayed marked as greeted while the customer heard
+  nothing. Both are watched now, and the text is compared without
+  surrounding spaces.
+
 ## A multi-item greeting says what goes where (0.4.6)
 
 - "LF shield & intel sword" was answered with "Send to Favu. You choose the

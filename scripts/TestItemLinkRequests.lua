@@ -19,7 +19,22 @@ local greetings = {
 }
 Scan.LOCAL = {GetText=function(_, key) return greetings[key] or key end}
 local function loadSource(path) return assert(loadfile(path))('HironCraft', Scan) end
-function CreateFrame() return {SetScript=noop, RegisterEvent=noop, UnregisterEvent=noop} end
+local createdFrames={}
+function CreateFrame()
+    local frame={events={},scripts={}}
+    function frame:SetScript(name,callback) self.scripts[name]=callback end
+    function frame:RegisterEvent(event) self.events[event]=true end
+    function frame:UnregisterEvent(event) self.events[event]=nil end
+    createdFrames[#createdFrames+1]=frame
+    return frame
+end
+local function frameForEvent(event)
+    for index=#createdFrames,1,-1 do
+        if createdFrames[index].events[event] and createdFrames[index].scripts.OnEvent then
+            return createdFrames[index]
+        end
+    end
+end
 function CreateFromMixins() return {} end
 EnumUtil = {MakeEnum=function(...) local e={}; for i,k in ipairs({...}) do e[k]=i end; return e end}
 StaticPopupDialogs, UISpecialFrames, UIPanelWindows = {}, {}, {}
@@ -764,6 +779,27 @@ end
 local throttleTimers={}
 local previousAfter=C_Timer.After
 C_Timer.After=function(delay,callback) throttleTimers[#throttleTimers+1]=callback end
+-- The server refuses either with a red error or with a line in the chat
+-- frame; both mean the whisper was swallowed.
+ERR_CHAT_THROTTLED='The number of messages that can be sent is limited, please wait to send another message.'
+local errorFrame=frameForEvent('UI_ERROR_MESSAGE')
+assert(errorFrame and errorFrame.events.CHAT_MSG_SYSTEM, 'system chat lines are not watched')
+errorFrame.scripts.OnEvent(errorFrame,'CHAT_MSG_SYSTEM',ERR_CHAT_THROTTLED)
+assert(not Scan.Utils.CanSendMessages(), 'a system line about the limit was ignored')
+assert(not response(101).greeting_sent, 'a swallowed greeting stayed marked as sent')
+clock=clock+10
+response(101).greeting_sent=true
+errorFrame.scripts.OnEvent(errorFrame,'UI_ERROR_MESSAGE',0,ERR_CHAT_THROTTLED)
+assert(not Scan.Utils.CanSendMessages(), 'the red error about the limit was ignored')
+clock=clock+10
+errorFrame.scripts.OnEvent(errorFrame,'CHAT_MSG_SYSTEM','You are now AFK.')
+assert(Scan.Utils.CanSendMessages(), 'an unrelated system line was taken for the limit')
+-- Greet again so the next refusal has something to take back.
+response(101).greeting_sent=false
+Scan.GreetCustomer('LeftButton', throttled)
+sentBeforeThrottle=#sent
+assert(response(101).greeting_sent, 'the row could not be greeted again')
+throttleTimers={}
 Scan.Utils.NoteChatThrottled()
 assert(not response(101).greeting_sent, 'a swallowed greeting stayed marked as sent')
 assert(#sent==sentBeforeThrottle, 'the undo resent the greeting by itself')
