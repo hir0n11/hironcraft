@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No order replies across factions, one "done" card per customer (0.4.8)
+
+- Crafting orders cross factions, whispers do not. An Alliance crafter that
+  made a Horde customer's order was offered "done, ty" (or a decline) it
+  could never send, next to the card on the Horde account that talked to
+  the customer. The customer's side is read from their race; the card is
+  not offered to a character of the other side. Races that choose their
+  side (Pandaren, Dracthyr, Earthen, Haranir) are not guessed.
+- Two finished orders of the same customer, or one result landing on two
+  rows, showed two "done" cards; one card now answers for the customer.
+
 ## Notice the chat limit wherever the server says it (0.4.7)
 
 - The greeting take-back watched only the red error message. When the server

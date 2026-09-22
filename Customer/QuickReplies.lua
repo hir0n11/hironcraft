@@ -777,6 +777,38 @@ local function ValidFaction(faction)
     return (faction == 'Alliance' or faction == 'Horde') and faction or nil
 end
 
+-- Crafting orders cross factions, whispers do not: a Horde customer can order
+-- from an Alliance crafter, who then cannot write back. The side follows from
+-- the race; races that choose their side (Pandaren, Dracthyr, Earthen,
+-- Haranir) are not guessed.
+local RACE_FACTIONS = {
+    Human = 'Alliance', Dwarf = 'Alliance', NightElf = 'Alliance', Gnome = 'Alliance',
+    Draenei = 'Alliance', Worgen = 'Alliance', VoidElf = 'Alliance',
+    LightforgedDraenei = 'Alliance', DarkIronDwarf = 'Alliance', KulTiran = 'Alliance',
+    Mechagnome = 'Alliance',
+    Orc = 'Horde', Scourge = 'Horde', Tauren = 'Horde', Troll = 'Horde', BloodElf = 'Horde',
+    Goblin = 'Horde', Nightborne = 'Horde', HighmountainTauren = 'Horde', MagharOrc = 'Horde',
+    ZandalariTroll = 'Horde', Vulpera = 'Horde',
+}
+
+local function CustomerFaction(customerInfo)
+    local guid = type(customerInfo) == 'table' and customerInfo.guid or nil
+    if type(guid) ~= 'string' or (issecretvalue and issecretvalue(guid))
+        or not guid:match('^Player%-') or type(GetPlayerInfoByGUID) ~= 'function' then
+        return nil
+    end
+    local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, guid)
+    if not ok or (issecretvalue and issecretvalue(race)) or type(race) ~= 'string' then return nil end
+    return RACE_FACTIONS[race]
+end
+
+-- False only when the customer is known to be on the other side.
+function QuickReplies:CanWhisperCustomer(customerInfo)
+    local customer = CustomerFaction(customerInfo)
+    local current = PlayerFaction()
+    return not customer or not current or customer == current
+end
+
 -- The character handling the conversation is not necessarily the crafter.
 -- Keep ownership on the individual request, not on the account/customer.
 -- Its side is kept too: a whisper cannot cross from Horde to Alliance, so
@@ -1080,6 +1112,11 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
 
     local ok, response = pcall(HironCraftScan.OrderToResponse, order)
     if not ok or type(response) ~= 'table' then
+        return nil
+    end
+    -- An order from the other faction was crafted here, but a whisper cannot
+    -- reach them from this character; the one who talked to them answers.
+    if not self:CanWhisperCustomer(customerInfo) then
         return nil
     end
     -- The character that talked to this customer may sit on another account,
@@ -1964,10 +2001,15 @@ function QuickReplies:OnOrderFulfillmentUpdated(order, entry, attempt)
     end
     for _, key in ipairs(rejectionKeys) do shownRejections[key] = gameOrderID or true end
 
+    -- One "done, ty" answers every order of that customer, so two orders
+    -- finishing together (or one result landing on two rows) show one card.
+    local statusOption = STATUS_OPTIONS[entry.status]
+    local perCustomer = statusOption and statusOption.oncePerCustomer
     for _, toast in ipairs(toastPool) do
         local old = toast.option
         if type(old) == 'table' and old.templateKey == option.templateKey
-            and old.customer == option.customer and old.responseID == option.responseID then
+            and old.customer == option.customer
+            and (perCustomer or old.responseID == option.responseID) then
             toast:Hide(); toast.option = nil
         end
     end

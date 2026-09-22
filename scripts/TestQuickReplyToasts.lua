@@ -500,9 +500,45 @@ local allianceDone={status='fulfilled',craftingOrderID=97004,crafterFullName='Se
 Scan.OrderFulfillment.GetStatus=function() return allianceDone end
 QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},allianceDone)
 assert(#visible('AwayBuyer')==1,'an Alliance crafter could not answer an Alliance customer')
-UnitFactionGroup=previousFaction
+Scan.DB.settings.status_replies_sent=nil
+dismissAll()
+-- Crafting orders cross factions, whispers do not: a Horde customer's order
+-- made by this Alliance crafter gets no card here, even on its own row.
 awayResponse.conversationFaction=nil;awaySecond.conversationFaction=nil
+local previousPlayerInfo=GetPlayerInfoByGUID
+local customerRace='Orc'
+GetPlayerInfoByGUID=function() return 'Warrior','WARRIOR','Orc',customerRace end
+local awayGuid=Scan.DB.customers.AwayBuyer.guid
+Scan.DB.customers.AwayBuyer.guid='Player-1305-0ABCDEF1'
+local hordeDone={status='fulfilled',craftingOrderID=97005,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return hordeDone end
+awayResponse.conversationCharacter='Seller-Realm';awaySecond.conversationCharacter='Seller-Realm'
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},hordeDone)
+assert(#visible('AwayBuyer')==0,'an Alliance character was offered to write to a Horde customer')
+-- A race that chooses its side is not guessed.
+customerRace='Pandaren'
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},hordeDone)
+assert(#visible('AwayBuyer')==1,'a customer of unknown side was held back')
+GetPlayerInfoByGUID=previousPlayerInfo
+Scan.DB.customers.AwayBuyer.guid=awayGuid
+awayResponse.conversationCharacter='Collector-OtherRealm';awaySecond.conversationCharacter='Collector-OtherRealm'
+UnitFactionGroup=previousFaction
 doneTemplate.from_crafter=nil
+Scan.DB.settings.status_replies_sent=nil
+dismissAll()
+-- One result on two rows of the same customer shows one "done" card.
+Scan.OrderFulfillment.GetStatus=function() return awayDone end
+awayResponse.conversationCharacter='Seller-Realm';awaySecond.conversationCharacter='Seller-Realm'
+local bothDone={status='fulfilled',craftingOrderID=97006,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+local previousSiblings=QuickReplies.HasUnfinishedSiblingOrders
+QuickReplies.HasUnfinishedSiblingOrders=function() return false end
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=101},bothDone)
+QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},bothDone)
+assert(#visible('AwayBuyer')==1,'one customer got two "done" cards')
+QuickReplies.HasUnfinishedSiblingOrders=previousSiblings
+awayResponse.conversationCharacter='Collector-OtherRealm';awaySecond.conversationCharacter='Collector-OtherRealm'
 Scan.DB.settings.status_replies_sent=nil
 dismissAll()
 -- One account that talks and crafts: the talking character is logged out
@@ -631,19 +667,16 @@ assert(batchCard and batchCard.option.templateKey=='COMPLETED_ORDER',
 assert(#visible('BatchBuyer')==1,'the batch offered more than one done reply')
 
 -- Two orders can finish in the same moment and each ask to announce itself.
--- One "your order is done" answers for both: the second card disappears when
--- the first is sent, and a click on one that slipped through sends nothing.
+-- One "your order is done" answers for both: one card for the customer.
 Scan.DB.settings.status_replies_sent=nil
 batchStatuses['101']=firstDone
 QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
 local batchCards=visible('BatchBuyer')
-assert(#batchCards==2,'the second finished order offered no card of its own')
+assert(#batchCards==1,'one customer got two done cards')
 local sentBeforeBatch=#sent
 click(batchCards[1])
 assert(#sent==sentBeforeBatch+1,'the done reply was not sent')
-assert(#visible('BatchBuyer')==0,'the second done reply stayed on screen')
-click(batchCards[2])
-assert(#sent==sentBeforeBatch+1,'the second done reply was sent as well')
+assert(#visible('BatchBuyer')==0,'the done reply stayed on screen')
 -- It is not offered again either, including after a reload.
 QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=101},firstDone)
 QuickReplies:OnOrderFulfillmentUpdated({customerName='BatchBuyer',responseID=102},secondDone)
