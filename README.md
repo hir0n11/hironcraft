@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Set the "answered" mark back by hand (0.4.9)
+
+- A customer who went quiet may or may not come back. Right click on the
+  second mark (customer answered) sets it back to a cross; the next message
+  from that customer checks it again, whichever of their requests the
+  message is about. Right click on a cross marks it answered by hand. Other
+  clicks on the mark act like a click on the row.
+
 ## No order replies across factions, one "done" card per customer (0.4.8)
 
 - Crafting orders cross factions, whispers do not. An Alliance crafter that

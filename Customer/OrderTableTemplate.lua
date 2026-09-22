@@ -297,6 +297,7 @@ function HironCraftScanCrafterTableCellInteractionMixin:Populate(rowData, dataIn
     else
         self.CustomerIcon:SetAtlas("common-icon-redx")
     end
+    if self.CustomerAnswer then self.CustomerAnswer.order = self.order end
 
     self:UpdateOrderStatus()
 
@@ -417,6 +418,43 @@ function HironCraftScanCraftingOrderStatusButtonMixin:OnEnter()
 end
 
 function HironCraftScanCraftingOrderStatusButtonMixin:OnLeave()
+    GameTooltip:Hide()
+end
+
+-- The second mark: the customer answered. A customer who went quiet may or
+-- may not come back; setting the mark back to a cross by hand makes their
+-- next message turn it green again, so a return is not missed.
+HironCraftScanCustomerAnswerButtonMixin = {}
+
+function HironCraftScanCustomerAnswerButtonMixin:OnClick(button)
+    if not self.order then return end
+    -- Only the right click belongs to the mark; the rest acts like the row.
+    if button ~= "RightButton" then
+        HironCraftScan.GreetCustomer(button, self.order)
+        return
+    end
+    local response = HironCraftScan.OrderToResponse(self.order)
+    if type(response) ~= 'table' then return end
+    HironCraftScan.RequestTracking.ToggleAnswered(response)
+    local cell = self:GetParent()
+    if cell and cell.Populate then cell:Populate({ order = self.order }) end
+    self:OnEnter()
+end
+
+function HironCraftScanCustomerAnswerButtonMixin:OnEnter()
+    local response = self.order and HironCraftScan.OrderToResponse(self.order)
+    if type(response) ~= 'table' then return end
+    GameTooltip:ClearLines()
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(L("Customer reply"), 1, 0.82, 0)
+    GameTooltip:AddLine(response.customer_answered and L("Customer reply received")
+        or L("Customer reply waiting"), 1, 1, 1, true)
+    GameTooltip:AddLine(response.customer_answered and L("Customer reply reset help")
+        or L("Customer reply mark help"), 1, 0.82, 0, true)
+    GameTooltip:Show()
+end
+
+function HironCraftScanCustomerAnswerButtonMixin:OnLeave()
     GameTooltip:Hide()
 end
 

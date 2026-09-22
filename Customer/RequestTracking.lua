@@ -123,7 +123,27 @@ function M.MarkReply(info, entry)
     -- Carry the exact request identities in synced history. Delayed replies
     -- must not check a newer row simply because it arrived before the packet.
     entry.replyContext = entry.replyContext or M.GetReplyContext(info)
-    return M.ApplyContext(info, entry.replyContext, true)
+    local matched = M.ApplyContext(info, entry.replyContext, true)
+    -- A row the crafter set back to waiting is waiting for exactly this: any
+    -- message from the customer, whichever request it is about.
+    for _, candidate in ipairs(Responses(info)) do
+        local response = candidate.response
+        if response.awaitingReturn then
+            response.awaitingReturn = nil
+            response.customer_answered = true
+            matched = true
+        end
+    end
+    return matched
+end
+
+-- The second mark by hand. A customer who went quiet may or may not come
+-- back: set back to waiting, their next message checks it again.
+function M.ToggleAnswered(response)
+    if type(response) ~= 'table' then return nil end
+    response.customer_answered = not response.customer_answered
+    response.awaitingReturn = not response.customer_answered or nil
+    return response.customer_answered
 end
 
 function M.IsActiveResponse(info, response)

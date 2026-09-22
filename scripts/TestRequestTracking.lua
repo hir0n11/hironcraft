@@ -68,4 +68,21 @@ mixedTimes.responses[1],mixedTimes.responses[2]=early,late
 M.GreetingSent(mixedTimes,{early},1000);M.GreetingSent(mixedTimes,{late},1029)
 assert(M.MarkReply(mixedTimes,{}))
 assert(early.greetingSentAt==1000 and late.greetingSentAt==1029, 'reply changed individual greeting times')
+-- A customer who went quiet: the crafter sets the second mark back to a
+-- cross, and any later message from them checks it again - also when the row
+-- is not part of the conversation's latest request.
+local quiet={responseID=301,requestToken='quiet-a',greeting_sent=true,customer_answered=true}
+local newer={responseID=302,requestToken='quiet-b'}
+local quietInfo={responses={[301]=quiet,[302]=newer}}
+M.GreetingSent(quietInfo,{quiet},1000)
+M.GreetingSent(quietInfo,{newer},1100)
+assert(M.ToggleAnswered(quiet)==false and not quiet.customer_answered and quiet.awaitingReturn,
+    'the mark was not set back to waiting')
+assert(M.MarkReply(quietInfo,{}))
+assert(quiet.customer_answered and not quiet.awaitingReturn,
+    'the customer came back but the row stayed a cross')
+-- And by hand the other way.
+M.ToggleAnswered(quiet)
+assert(M.ToggleAnswered(quiet)==true and quiet.customer_answered and not quiet.awaitingReturn,
+    'the mark could not be set back to answered')
 print('Request tracking tests passed (30-second boundary, group identity, latest greeted inquiry, linked replay, legacy groups).')

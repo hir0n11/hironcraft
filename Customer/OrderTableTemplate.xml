@@ -83,6 +83,18 @@
 				</Layers>
 				<HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
 			</Button>
+			<Button parentKey="CustomerAnswer" frameStrata="MEDIUM" mixin="HironCraftScanCustomerAnswerButtonMixin" registerForClicks="LeftButtonUp, RightButtonUp, MiddleButtonUp">
+				<Size x="14" y="14"/>
+				<Anchors>
+					<Anchor point="LEFT" relativePoint="LEFT" x="16" y="0"/>
+				</Anchors>
+				<Scripts>
+					<OnClick method="OnClick"/>
+					<OnEnter method="OnEnter"/>
+					<OnLeave method="OnLeave"/>
+				</Scripts>
+				<HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+			</Button>
 			<Button name="HironCraftScanChatPopOutButton" parentKey="Chat" frameStrata="MEDIUM" mixin="HironCraftScanChatPopOutButtonMixin" registerForClicks="LeftButtonUp, RightButtonUp">
 				<Size x="14" y="14"/>
 				<Anchors>
