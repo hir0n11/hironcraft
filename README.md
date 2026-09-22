@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A multi-item greeting says what goes where (0.4.6)
+
+- "LF shield & intel sword" was answered with "Send to Favu. You choose the
+  price..." and then "Sword Send to Favu.": the first message named no item.
+  When a request has several items and the greeting does not name its item,
+  it now opens with what this crafter makes: "Shield and Sword: Send to
+  Favu. You choose the price...". The same crafter's items are not repeated
+  one line each; another crafter still gets its own short line. A single
+  item, or a greeting that already names the item, is unchanged.
+- Short lines are joined per crafter too ("Wrist and Chest Send to Favu."),
+  and the greeting card shows exactly the text the click sends.
+
 ## A remote decline waits for its material list (0.4.5)
 
 - A decline made on another account sends its material list separately and

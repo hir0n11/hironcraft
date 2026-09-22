@@ -984,6 +984,27 @@ assert(countRows()==1 and Scan.DB.customers.SlowClass.responses['equipment:164:I
 assert(#timers==0 and #sent==0, 'a late class kept polling or sent chat')
 classByGUID['Slow-GUID']=nil
 
+-- "LF shield & sword": the greeting names no item, so with several items it
+-- opens with what this crafter makes, and the same crafter's items are not
+-- repeated one line each.
+reset()
+classByGUID['Buyer-GUID']='WARRIOR'
+scan('LF wrist and chest')
+assert(response('equipment:164:INVTYPE_WRIST') and response('equipment:164:INVTYPE_CHEST') and countRows()==2)
+Scan.GreetCustomer('LeftButton',order('equipment:164:INVTYPE_WRIST'))
+assert(#sent==1, 'the same crafter items were sent one line each')
+assert(sent[1].message:find('^Chest and Wrist: ') or sent[1].message:find('^Wrist and Chest: '),
+    'a multi-item greeting did not say which items go to the crafter: '..tostring(sent[1].message))
+-- The customer wrote first: one short line for both, not one per item.
+reset()
+scan('LF wrist and chest')
+response('equipment:164:INVTYPE_WRIST').destination_only_greeting=true
+response('equipment:164:INVTYPE_CHEST').destination_only_greeting=true
+Scan.GreetCustomer('LeftButton',order('equipment:164:INVTYPE_WRIST'))
+assert(#sent==1 and (sent[1].message=='Chest and Wrist Send to Smith.'
+    or sent[1].message=='Wrist and Chest Send to Smith.'), 'short lines were not joined: '..tostring(sent[1].message))
+classByGUID['Buyer-GUID']=nil
+
 -- Requests narrow down: "LF tailor" then "can you craft chest?" is one
 -- request that got more specific, not a second one.
 reset()

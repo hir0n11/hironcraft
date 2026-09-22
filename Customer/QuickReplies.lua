@@ -1590,8 +1590,10 @@ function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, respons
     end
     if not selected then return false end
 
-    local reply
-    if selected.destination_only_greeting == true
+    -- Exactly what the click will send, several items included.
+    local reply = HironCraftScan.BuildOrderGreetingText
+        and HironCraftScan.BuildOrderGreetingText({ customerName = customer, responseID = selected.responseID })
+    if not reply and selected.destination_only_greeting == true
         and HironCraftScan.BuildOrderDestinationMessage then
         reply = HironCraftScan.BuildOrderDestinationMessage(selected)
     end
