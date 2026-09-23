@@ -45,10 +45,14 @@ local function AppendPhrase(current, text)
     return current == '' and value or current .. ', ' .. value
 end
 
+local GLOBAL_FILTER_FIELDS = {
+    inclusions = 'Keywords', exclusions = 'Exclusions', generic_request_keywords = 'GenericRequests',
+}
+
 local function RefreshVisibleGlobalFilter(setting)
     local panel = _G.HironCraftScanGeneralConfigPanel
     local matching = panel and panel.Matching
-    local field = matching and (setting == 'inclusions' and matching.Keywords or matching.Exclusions)
+    local field = matching and matching[GLOBAL_FILTER_FIELDS[setting]]
     local editBox = field and field.Expression and field.Expression.EditBox
     if editBox and (not editBox.HasFocus or not editBox:HasFocus()) then
         editBox:SetText(HironCraftScan.DB.settings[setting] or '')
@@ -60,6 +64,19 @@ function Capture.SaveGlobalKeyword(text)
     if not updated then return false, reason end
     HironCraftScan.DB.settings.inclusions = updated
     RefreshVisibleGlobalFilter('inclusions')
+    HironCraftScan.Scanner.LoadConfig()
+    return true
+end
+
+-- "LF crafter"-like phrases: a request that names no profession yet.
+function Capture.SaveGenericKeyword(text)
+    local settings = HironCraftScan.DB.settings
+    local current = settings.generic_request_keywords
+    if current == nil then current = L(HironCraftScan.CONST.TEXT.GENERIC_REQUEST_KEYWORDS_DEFAULT) end
+    local updated, reason = AppendPhrase(current, text)
+    if not updated then return false, reason end
+    settings.generic_request_keywords = updated
+    RefreshVisibleGlobalFilter('generic_request_keywords')
     HironCraftScan.Scanner.LoadConfig()
     return true
 end
@@ -251,6 +268,10 @@ function Capture.PopulateSelectionMenu(rootDescription, frame, selectedText)
 
     rootDescription:CreateButton(L('Add to global scanning'), function()
         SetStatus(frame, Capture.SaveGlobalKeyword(selectedText))
+    end)
+
+    rootDescription:CreateButton(L('Add to generic craft requests'), function()
+        SetStatus(frame, Capture.SaveGenericKeyword(selectedText))
     end)
 
     local professions = rootDescription:CreateButton(L('Add to profession scanning'))

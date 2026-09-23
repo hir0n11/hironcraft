@@ -146,6 +146,65 @@ function M.ToggleAnswered(response)
     return response.customer_answered
 end
 
+-- The same by itself: a customer who has said nothing for a few minutes
+-- while nothing of theirs is on its way gets the cross back, so their next
+-- message stands out. Once the order has arrived (claimed, crafted or
+-- delivered) silence is expected and the mark stays.
+M.QuietSeconds = 3 * 60
+local ORDER_ARRIVED = { claimed = true, crafted = true, fulfilled = true }
+
+function M.LastCustomerMessageAt(info)
+    local last = nil
+    for _, entry in ipairs(type(info) == 'table' and type(info.chat_history) == 'table' and info.chat_history or {}) do
+        if type(entry) == 'table' and (entry.chatType == 'WHISPER' or entry.chatType == 'BN_WHISPER') then
+            local at = tonumber(entry.receivedAt)
+            if at and (not last or at > last) then last = at end
+        end
+    end
+    return last
+end
+
+function M.ResetQuietCustomers(now)
+    now = now or time()
+    local fulfillment = Scan.OrderFulfillment
+    local lastByCustomer, changed = {}, 0
+    for _, order in pairs(Scan.DB.listed_orders or {}) do
+        local info = type(order) == 'table' and Scan.DB.customers and Scan.DB.customers[order.customerName]
+        local response = info and info.responses and info.responses[order.responseID]
+        if type(response) == 'table' and response.customer_answered then
+            local ok, entry = true, nil
+            if fulfillment and fulfillment.GetStatus then ok, entry = pcall(fulfillment.GetStatus, fulfillment, order) end
+            local status = ok and type(entry) == 'table' and entry.status or nil
+            if not ORDER_ARRIVED[status] then
+                local last = lastByCustomer[order.customerName]
+                if last == nil then
+                    last = M.LastCustomerMessageAt(info) or false
+                    lastByCustomer[order.customerName] = last
+                end
+                -- Without a message of theirs on record there is no silence to measure.
+                if last and now - last >= M.QuietSeconds then
+                    response.customer_answered = false
+                    response.awaitingReturn = true
+                    changed = changed + 1
+                end
+            end
+        end
+    end
+    return changed
+end
+
+if Scan.Utils and Scan.Utils.onLoad then
+    Scan.Utils.onLoad(function()
+        if not (C_Timer and C_Timer.NewTicker) then return end
+        C_Timer.NewTicker(15, function()
+            if M.ResetQuietCustomers() > 0 and HironCraftScanCraftingOrderPage
+                and HironCraftScanCraftingOrderPage.ShowGeneric then
+                HironCraftScanCraftingOrderPage:ShowGeneric()
+            end
+        end)
+    end)
+end
+
 function M.IsActiveResponse(info, response)
     local context = M.GetReplyContext(info)
     return not context or response.inquiryID == context.id

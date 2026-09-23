@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Generic keys from chat, the answered mark resets after silence (0.4.15)
+
+- The chat text selection menu can add a phrase to "Generic craft requests"
+  (the "LF crafter" list) as well.
+- The second mark (customer answered) turns back into a cross by itself after
+  three minutes without a whisper from the customer, so their return stands
+  out; their next message checks it again. It stays while their order has
+  arrived (claimed, crafted or delivered); a declined order does not hold it.
+  Rows with no message of the customer on record are left alone.
+
 ## Quiet Manual Matching is Shift+click (0.4.14)
 
 - The chat menu does not pass right clicks on to its entries, so the quiet

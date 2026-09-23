@@ -143,13 +143,31 @@ local status = { SetText = function(self, value) self.text = value end,
 local frame = { Status = status }
 local root = NewMenu()
 assert(Capture.PopulateSelectionMenu(root, frame, 'chosen words'))
-assert(#root.entries == 4)
+assert(#root.entries == 5)
 assert(root.entries[1].label == 'Add to existing quick response')
 assert(root.entries[2].label == 'Add to global scanning')
-assert(root.entries[3].label == 'Add to profession scanning')
-assert(root.entries[4].label == 'Create new quick response for this keyword')
+assert(root.entries[3].label == 'Add to generic craft requests')
+assert(root.entries[4].label == 'Add to profession scanning')
+assert(root.entries[5].label == 'Create new quick response for this keyword')
 assert(#root.entries[1].child.entries >= 4, 'existing quick responses were not listed')
-assert(root.entries[3].child.entries[1].label == 'Favu - Blacksmithing')
+assert(root.entries[4].child.entries[1].label == 'Favu - Blacksmithing')
+
+-- Generic craft requests: a phrase that asks for a crafter without naming a
+-- profession yet.
+Scan.DB.settings.generic_request_keywords = nil
+Scan.CONST.TEXT.GENERIC_REQUEST_KEYWORDS_DEFAULT = 'DEFAULT_GENERIC'
+local previousText = Scan.LOCAL.GetText
+Scan.LOCAL.GetText = function(self, text)
+    if text == 'DEFAULT_GENERIC' then return 'LF crafter, LF craft' end
+    return previousText(self, text)
+end
+local reloadsBefore = reloads
+root.entries[3].click()
+assert(Scan.DB.settings.generic_request_keywords == 'LF crafter, LF craft, chosen words'
+    and reloads == reloadsBefore + 1, 'the phrase was not added to generic requests')
+ok, reason = Capture.SaveGenericKeyword('LF CRAFTER')
+assert(not ok and reason == 'duplicate_filter', 'a generic phrase was added twice')
+Scan.LOCAL.GetText = previousText
 
 local dialogKeywords
 Scan.Dialog = { Element = { Text = 1, EditBox = 2 }, Show = function(config)
@@ -194,4 +212,4 @@ save.click()
 assert(chatReads == 2 and shown == 2, 'clicked action did not open the source message')
 
 assert(SendChatMessage == nil and BNSendWhisper == nil, 'test unexpectedly gained a send API')
-print('Chat text selection tests passed (selection extraction, four-action menu, global/profession/quick keys, dialog prefill and click-only source).')
+print('Chat text selection tests passed (selection extraction, five-action menu, generic requests, global/profession/quick keys, dialog prefill and click-only source).')
