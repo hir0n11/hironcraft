@@ -1156,6 +1156,21 @@ assert(Scan.SendOrderGreeting(order(201),true))
 assert(sent[#sent].message==link(1201)..' Send to Smith.', 'replacement item repeated the full greeting')
 scan('need wrist')
 assert(not response(wristID) and countRows()==2, 'known item was downgraded to a generic slot')
+-- Once that item is delivered the slot is done for a while: "it is ur wrist
+-- :d" after the craft is talk about it, not a new request.
+local previousFulfillmentForSlot=Scan.OrderFulfillment
+local deliveredAt=now
+Scan.OrderFulfillment={Status={Fulfilled='fulfilled',Rejected='rejected',Failed='failed'},
+    GetStatus=function(_,listed)
+        if listed.responseID==201 then return {status='fulfilled',updatedAt=deliveredAt} end
+    end}
+scan('need wrist')
+assert(not response(wristID) and countRows()==2, 'a slot just delivered made a new row')
+-- An hour later it may be for another set.
+now=now+2*60*60
+scan('need wrist')
+assert(response(wristID) and countRows()==3, 'a delivered slot blocked requests for good')
+Scan.OrderFulfillment=previousFulfillmentForSlot
 reset(); classByGUID['Buyer-GUID']='WARRIOR'
 scan('need wrist and belt')
 assert(countRows()==2 and response(wristID) and response('equipment:164:INVTYPE_WAIST'),

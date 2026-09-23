@@ -1783,6 +1783,9 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
     return response
 end
 
+-- How long a delivered item answers for its equipment slot.
+local COVERED_SLOT_SECONDS = 60 * 60
+
 local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo, item, overrides, chatEvent)
     -- At this point, we have everything we need to generate a response to the message.
     local itemLink = item and item:GetItemLink() or nil
@@ -1835,6 +1838,15 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
                 local fulfillment = HironCraftScan.OrderFulfillment
                 local state = fulfillment and fulfillment.GetStatus and fulfillment:GetStatus(order)
                 local terminal = state and (state.status == 'fulfilled' or state.status == 'rejected' or state.status == 'failed')
+                -- "it is ur legs :d" right after the Martyr's Leggings were
+                -- delivered talks about them; the slot is done. Only for a
+                -- while: much later "LF legs" may well be for another set.
+                if old and state and state.status == 'fulfilled' and equipmentRequest and old.itemID
+                    and not (overrides and overrides.manualMatch)
+                    and time() - (tonumber(state.updatedAt) or 0) <= COVERED_SLOT_SECONDS
+                    and HironCraftScan.ClassMatching.MatchesItem(equipmentRequest, old.itemID) then
+                    return nil
+                end
                 if old and not terminal and order.responseID ~= responseID then
                     if not newIsSpecific and not (overrides and overrides.manualMatch)
                         and not IsProfessionOnly(old, order.responseID) and SameProfession(old)

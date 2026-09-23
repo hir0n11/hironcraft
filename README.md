@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A delivered item closes its slot for an hour (0.4.17)
+
+- After Martyr's Leggings were delivered, "it is ur legs :d" made a new
+  "Legs" row. An equipment slot (legs, wrist, ...) that an item delivered to
+  the same customer within the last hour fits no longer makes a row; later
+  "LF legs" may be for another set and works as before. Manual matching
+  is not affected.
+
 ## No automatic reset of the answered mark (0.4.16)
 
 - The automatic reset of the second mark after three minutes of silence from
