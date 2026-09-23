@@ -133,6 +133,76 @@ function Capture.ExtractSelectedText(editBox)
     return original:sub(prefixLength + 1, selectionEnd)
 end
 
+-- The word around a cursor position, as byte offsets for HighlightText.
+-- Letters, digits and apostrophes (Farstrider's) belong to a word; every
+-- byte of a multibyte character counts as a letter, so Cyrillic words are
+-- whole and a character is never cut in half.
+local function IsWordByte(byte)
+    return byte ~= nil and (byte >= 128 or (byte >= 48 and byte <= 57)
+        or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
+        or byte == 39 or byte == 95)
+end
+
+function Capture.WordBoundsAt(text, cursor)
+    if type(text) ~= 'string' or text == '' or type(cursor) ~= 'number' then return nil end
+    cursor = math.max(0, math.min(#text, math.floor(cursor)))
+    -- The cursor sits between two bytes; take the word on either side.
+    local index = cursor + 1
+    if not IsWordByte(text:byte(index)) then
+        if IsWordByte(text:byte(cursor)) then index = cursor else return nil end
+    end
+    local first, last = index, index
+    while first > 1 and IsWordByte(text:byte(first - 1)) do first = first - 1 end
+    while last < #text and IsWordByte(text:byte(last + 1)) do last = last + 1 end
+    -- A word ends on a letter, not on a quote: "'omw'" selects omw.
+    while first < last and text:byte(first) == 39 do first = first + 1 end
+    while last > first and text:byte(last) == 39 do last = last - 1 end
+    if text:byte(first) == 39 then return nil end
+    return first - 1, last
+end
+
+-- Double click selects a word, a third click the whole message, as in most
+-- editors; Shift+click then stretches the selection to the clicked word, for
+-- a phrase of several words. The game's edit boxes only select by dragging.
+local MULTI_CLICK_SECONDS = 0.4
+
+function Capture.HandleMultiClick(editBox, now, shift)
+    local previous = editBox.hironCraftLastClick
+    local cursor = editBox:GetCursorPosition()
+    local text = editBox:GetText()
+    local first, last
+
+    local anchor = editBox.hironCraftAnchor
+    if shift and anchor then
+        local wordFirst, wordLast = Capture.WordBoundsAt(text, cursor)
+        wordFirst, wordLast = wordFirst or cursor, wordLast or cursor
+        first, last = math.min(anchor.first, wordFirst), math.max(anchor.last, wordLast)
+        editBox.hironCraftLastClick = nil
+    else
+        local count = 1
+        if previous and now - previous.at <= MULTI_CLICK_SECONDS
+            and math.abs(cursor - previous.cursor) <= 1 then
+            count = previous.count + 1
+        end
+        editBox.hironCraftLastClick = { at = now, cursor = cursor, count = count }
+        if count == 2 then
+            first, last = Capture.WordBoundsAt(text, cursor)
+        elseif count >= 3 then
+            first, last = 0, type(text) == 'string' and #text or 0
+        end
+        editBox.hironCraftAnchor = first and { first = first, last = last } or nil
+    end
+    if not first then return nil end
+    local function Apply()
+        editBox:SetCursorPosition(last)
+        editBox:HighlightText(first, last)
+    end
+    Apply()
+    -- The game may still settle the click after this handler; apply again.
+    if C_Timer and C_Timer.After then C_Timer.After(0, Apply) end
+    return first, last
+end
+
 local function SetStatus(frame, ok, reason)
     local errors = {
         missing_text = L('Select a word or phrase first.'),
@@ -264,7 +334,9 @@ local function CreateEditor()
         end
     end)
     editBox:SetScript('OnMouseUp', function(self, button)
-        if button == 'RightButton' then
+        if button == 'LeftButton' then
+            Capture.HandleMultiClick(self, GetTime and GetTime() or 0, IsShiftKeyDown and IsShiftKeyDown())
+        elseif button == 'RightButton' then
             local selectedText = self.hironCraftSelectedText
             self.hironCraftSelectedText = nil
             Capture.OpenSelectionMenu(self, frame, selectedText)

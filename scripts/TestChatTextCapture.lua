@@ -71,6 +71,46 @@ assert(editBox.text == 'alpha beta gamma' and editBox.cursor == 10 and
 editBox.selectionStart, editBox.selectionEnd = 5, 5
 assert(Capture.ExtractSelectedText(editBox) == nil, 'an empty cursor became selected text')
 
+-- Double click selects a word, a third click everything, Shift+click
+-- stretches the selection over more words - as in most editors.
+local W = Capture.WordBoundsAt
+local text = "LF crafter Farstrider's Faulds, 'omw' привет мир"
+local function word(cursor) local a, b = W(text, cursor); return a and text:sub(a + 1, b) end
+assert(word(0) == 'LF' and word(2) == 'LF', 'the word at either edge was missed')
+assert(word(13) == "Farstrider's", 'an apostrophe inside a word split it')
+assert(word(33) == 'omw', 'quotes around a word were selected with it')
+assert(word(40) == 'привет', 'a Cyrillic word was not selected whole')
+assert(word(#text) == 'мир')
+assert(W(text, 31) == nil, 'punctuation between words was taken for a word')
+local box = { text = text, cursor = 0 }
+function box:GetText() return self.text end
+function box:GetCursorPosition() return self.cursor end
+function box:SetCursorPosition(value) self.cursor = value end
+function box:HighlightText(first, last) self.first, self.last = first, last end
+local previousTimer = C_Timer
+C_Timer = nil
+box.cursor = 14
+assert(Capture.HandleMultiClick(box, 10) == nil, 'a single click selected something')
+box.cursor = 14
+assert(Capture.HandleMultiClick(box, 10.2) == 11 and text:sub(box.first + 1, box.last) == "Farstrider's",
+    'a double click did not select the word')
+box.cursor = 26
+Capture.HandleMultiClick(box, 11, true)
+assert(text:sub(box.first + 1, box.last) == "Farstrider's Faulds", 'Shift+click did not extend the selection')
+box.cursor = 3
+Capture.HandleMultiClick(box, 12, true)
+assert(text:sub(box.first + 1, box.last) == "crafter Farstrider's", 'Shift+click did not extend backwards')
+-- Every click puts the cursor where the mouse is.
+box.cursor = 3; Capture.HandleMultiClick(box, 20)
+box.cursor = 3; Capture.HandleMultiClick(box, 20.1)
+box.cursor = 3; Capture.HandleMultiClick(box, 20.2)
+assert(box.first == 0 and box.last == #text, 'a triple click did not select everything')
+box.first = nil
+box.cursor = 3; Capture.HandleMultiClick(box, 30)
+box.cursor = 3; Capture.HandleMultiClick(box, 31)
+assert(box.first == nil, 'two slow clicks were taken for a double click')
+C_Timer = previousTimer
+
 local ok, reason = Capture.SaveGlobalKeyword(' lf ')
 assert(not ok and reason == 'duplicate_filter' and reloads == 0)
 ok, reason = Capture.SaveGlobalKeyword('unusual request')

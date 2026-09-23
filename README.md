@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Select words by clicking in "Save chat text" (0.4.12)
+
+- The chat text window selected only by dragging. Double-click now selects
+  a word (apostrophes such as "Farstrider's" stay inside it, Cyrillic words
+  stay whole), Shift+click stretches that selection to the clicked word for a
+  phrase of several words, and a triple click selects the whole message.
+  Right-click the selection as before.
+
 ## A bare recipe link is a request (0.4.11)
 
 - People often post just the recipe of the gear they want, without LF. A
