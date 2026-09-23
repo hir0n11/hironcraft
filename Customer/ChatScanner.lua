@@ -1757,7 +1757,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
     if fresh then
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
         local visualAlert, soundAlert = GenericAlertPreferences()
-        if visualAlert then
+        if visualAlert and not (overrides and overrides.suppressBatchAlert) then
             HironCraftScan.State.activeOrder = order
             FlashClientIcon()
             if not customerStartedInteraction and not (overrides and overrides.suppressGreetingBanner) then
@@ -2139,7 +2139,7 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
         local options = {}
         for key, value in pairs(overrides or {}) do options[key] = value end
         options.deferItemBatch = true
-        options.suppressBatchAlert = #responses > 0
+        options.suppressBatchAlert = overrides.suppressBatchAlert or #responses > 0
         options.chatHistoryAlreadyStored = options.chatHistoryAlreadyStored or #responses > 0
         local id = match.recipeInfo and match.recipeInfo.recipeID or match.crafterInfo.profID
         if overrides and type(overrides.requestTokens) == 'table' then
@@ -2541,7 +2541,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             for key, value in pairs(overrides) do options[key] = value end
             options.equipmentRequest = request
             options.deferItemBatch = true
-            options.suppressBatchAlert = #responses > 0
+            options.suppressBatchAlert = overrides.suppressBatchAlert or #responses > 0
             local crafter = GetCrafterForMessage(customer, message, options, customerGuid)
             if crafter then
                 local id = 'equipment:' .. crafter.profID .. ':' .. request.key

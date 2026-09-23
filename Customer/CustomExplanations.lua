@@ -435,6 +435,17 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             subMenu:CreateTitle(L("HironCraftScan"))
         end
 
+        -- Right click (or Shift+click) on an entry adds the row quietly: no
+        -- banner, sound or greeting card. The greeting is one click on the
+        -- row whenever the crafter wants it.
+        local function IsQuietPick(inputData)
+            return (type(inputData) == 'table' and inputData.buttonName == 'RightButton')
+                or (IsShiftKeyDown and IsShiftKeyDown()) or false
+        end
+        local function QuietTooltip(tooltip)
+            GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Manual match quiet help')))
+        end
+
         do
             subMenu:CreateDivider();
             local title = subMenu:CreateTitle(prefix .. L(LID.MANUAL_MATCHING_TITLE));
@@ -449,7 +460,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         do
             local generalGreeting = subMenu:CreateButton(
                 prefix .. L(LID.MANUAL_GENERAL_GREETING),
-                function()
+                function(_, inputData)
+                    local quiet = IsQuietPick(inputData)
                     local lineID = contextData.lineID
                     if issecretvalue and issecretvalue(lineID) then return end
                     if type(lineID) == 'string' then lineID = lineID:match('^%d+$') and tonumber(lineID) end
@@ -473,6 +485,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             forceGeneralRequest = true,
                             -- The crafter asked for this row again on purpose.
                             restartTerminalRequest = true,
+                            suppressBatchAlert = quiet or nil,
+                            suppressGreetingBanner = quiet or nil,
                             chatEntry = not message and {chatType='SYSTEM',
                                 message='[Manual matching] ' .. L('General crafting request')} or nil,
                         })
@@ -483,6 +497,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             generalGreeting:SetTooltip(function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip,
                     HironCraftScan.MakeTextWhite(L(LID.MANUAL_GENERAL_GREETING_DESC)))
+                QuietTooltip(tooltip)
             end)
         end
 
@@ -495,10 +510,11 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
             if ppConfig.scanning_enabled and not ppConfig.character_disabled then
                 local profName = HironCraftScan.Utils.ProfessionNameByID(ppID);
-                subMenu:CreateButton(
+                local matchButton = subMenu:CreateButton(
                     string.format(L(LID.MANUAL_MATCH), HironCraftScan.ColorizeCrafterName(char),
                         HironCraftScan.Utils.ColorizeProfessionName(ppID, profName)),
-                    function()
+                    function(_, inputData)
+                        local quiet = IsQuietPick(inputData)
                         -- Numeric hyperlink IDs can be strings; expired lines
                         -- still allow the explicitly chosen generic profession.
                         local lineID = contextData.lineID
@@ -522,6 +538,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             battleNet = isBattleNet,
                             manualMatch = true,
                             chatEntry = not message and {chatType='SYSTEM', message='[Manual matching] ' .. profName} or nil,
+                            suppressBatchAlert = quiet or nil,
+                            suppressGreetingBanner = quiet or nil,
                             forceCrafterInfo = {
                                 crafter = char,
                                 parentProfID = ppID,
@@ -531,6 +549,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             HironCraftScanCraftingOrderPage:ShowGeneric()
                         end
                     end);
+                if matchButton and matchButton.SetTooltip then matchButton:SetTooltip(QuietTooltip) end
             end
         end
 

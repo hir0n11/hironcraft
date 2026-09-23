@@ -530,6 +530,7 @@ L["Crafting order detected automatically"] = "Определено автома�
 L["Crafting order marked manually"] = "Отмечено вручную."
 L["Crafting order mark help"] = "|cffffd100ПКМ: отметить выполненным|r"
 L["Crafting order clear help"] = "|cffffd100ПКМ: очистить статус|r"
+L["Manual match quiet help"] = "|cffffd100ПКМ или Shift+клик: только добавить строку, без баннера и приветствия|r"
 L["Customer reply"] = "Ответ заказчика"
 L["Customer reply received"] = "Заказчик ответил."
 L["Customer reply waiting"] = "Ждём заказчика. Его следующее сообщение снова сделает отметку зелёной."

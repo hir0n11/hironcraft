@@ -521,6 +521,7 @@ HironCraftScan.L = {
     ['Crafting order marked manually'] = 'Marked manually.',
     ['Crafting order mark help'] = '|cffffd100Right click: Mark fulfilled|r',
     ['Crafting order clear help'] = '|cffffd100Right click: Clear status|r',
+    ['Manual match quiet help'] = '|cffffd100Right click or Shift+click: add the row quietly, without a banner or greeting|r',
     ['Customer reply'] = 'Customer reply',
     ['Customer reply received'] = 'The customer has answered.',
     ['Customer reply waiting'] = 'Waiting for the customer. Their next message turns this mark green again.',

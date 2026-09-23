@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Add a row from Manual Matching without a greeting (0.4.13)
+
+- Right click (or Shift+click) on an entry of Manual Matching in the chat
+  menu, including the general greeting, only adds the row: no banner, sound,
+  flash or greeting card, nothing sent. The greeting stays one click on the
+  row. A left click works as before.
+
 ## Select words by clicking in "Save chat text" (0.4.12)
 
 - The chat text window selected only by dragging. Double-click now selects

@@ -781,6 +781,32 @@ buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='NoQuick-Realm'})
 menuButton('Seller-Realm').click()
 assert(manualBanners==3 and #manualOffers==0 and #sent==1,'disabled quick replies changed manual matching')
 
+-- Right click (or Shift+click) on an entry only adds the row: no banner, no
+-- greeting card, nothing sent. The greeting stays one click on the row.
+Scan.QuickReplies.GetConfig=oldManualConfig
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='QuietBuyer-Realm',lineID='44'})
+local bannersBeforeQuiet,sentBeforeQuiet=manualBanners,#sent
+menuButton('Tailor-Realm').click(nil,{buttonName='RightButton'})
+local quietRow=Scan.DB.customers['QuietBuyer-Realm'] and Scan.DB.customers['QuietBuyer-Realm'].responses[197]
+assert(quietRow and not quietRow.greeting_sent,'a quiet pick added no row')
+assert(manualBanners==bannersBeforeQuiet and #manualOffers==0 and #sent==sentBeforeQuiet,
+    'a quiet pick raised a banner, a card or sent something')
+IsShiftKeyDown=function() return true end
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='ShiftBuyer-Realm',lineID='44'})
+menuButton('Seller-Realm').click(nil,{buttonName='LeftButton'})
+IsShiftKeyDown=nil
+assert(Scan.DB.customers['ShiftBuyer-Realm'].responses[164] and manualBanners==bannersBeforeQuiet,
+    'Shift+click was not quiet')
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='QuietGeneral-Realm',lineID='44'})
+menuButton(tostring(Scan.CONST.TEXT.MANUAL_GENERAL_GREETING)).click(nil,{buttonName='RightButton'})
+assert(Scan.DB.customers['QuietGeneral-Realm'].responses[Scan.Scanner.GENERAL_REQUEST_ID]
+    and manualBanners==bannersBeforeQuiet,'a quiet general request raised a banner')
+-- A left click still raises the banner as before.
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='LoudBuyer-Realm',lineID='44'})
+menuButton('Tailor-Realm').click(nil,{buttonName='LeftButton'})
+assert(manualBanners==bannersBeforeQuiet+1,'a left click lost its banner')
+Scan.QuickReplies.GetConfig=function() return {enabled=false} end
+
 -- "LF crafter" names no profession: the menu offers the general greeting, and
 -- the row it creates answers for every crafter rather than one of them.
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='GeneralBuyer-Realm',lineID='44'})
