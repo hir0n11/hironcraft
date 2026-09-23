@@ -25,6 +25,11 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Quiet Manual Matching is Shift+click (0.4.14)
+
+- The chat menu does not pass right clicks on to its entries, so the quiet
+  add from 0.4.13 is Shift+click only; the tooltip says so.
+
 ## Add a row from Manual Matching without a greeting (0.4.13)
 
 - Right click (or Shift+click) on an entry of Manual Matching in the chat

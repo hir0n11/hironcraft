@@ -435,12 +435,11 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             subMenu:CreateTitle(L("HironCraftScan"))
         end
 
-        -- Right click (or Shift+click) on an entry adds the row quietly: no
-        -- banner, sound or greeting card. The greeting is one click on the
-        -- row whenever the crafter wants it.
-        local function IsQuietPick(inputData)
-            return (type(inputData) == 'table' and inputData.buttonName == 'RightButton')
-                or (IsShiftKeyDown and IsShiftKeyDown()) or false
+        -- Shift+click on an entry adds the row quietly: no banner, sound or
+        -- greeting card. The greeting is one click on the row whenever the
+        -- crafter wants it. (The chat menu does not pass right clicks on.)
+        local function IsQuietPick()
+            return IsShiftKeyDown and IsShiftKeyDown() or false
         end
         local function QuietTooltip(tooltip)
             GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Manual match quiet help')))
@@ -460,8 +459,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         do
             local generalGreeting = subMenu:CreateButton(
                 prefix .. L(LID.MANUAL_GENERAL_GREETING),
-                function(_, inputData)
-                    local quiet = IsQuietPick(inputData)
+                function()
+                    local quiet = IsQuietPick()
                     local lineID = contextData.lineID
                     if issecretvalue and issecretvalue(lineID) then return end
                     if type(lineID) == 'string' then lineID = lineID:match('^%d+$') and tonumber(lineID) end
@@ -513,8 +512,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local matchButton = subMenu:CreateButton(
                     string.format(L(LID.MANUAL_MATCH), HironCraftScan.ColorizeCrafterName(char),
                         HironCraftScan.Utils.ColorizeProfessionName(ppID, profName)),
-                    function(_, inputData)
-                        local quiet = IsQuietPick(inputData)
+                    function()
+                        local quiet = IsQuietPick()
                         -- Numeric hyperlink IDs can be strings; expired lines
                         -- still allow the explicitly chosen generic profession.
                         local lineID = contextData.lineID
