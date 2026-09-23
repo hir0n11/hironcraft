@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No automatic reset of the answered mark (0.4.16)
+
+- The automatic reset of the second mark after three minutes of silence from
+  0.4.15 is removed; the mark changes only by the customer's messages or a
+  right click on it, as in 0.4.9.
+
 ## Generic keys from chat, the answered mark resets after silence (0.4.15)
 
 - The chat text selection menu can add a phrase to "Generic craft requests"

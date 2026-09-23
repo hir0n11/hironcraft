@@ -85,36 +85,4 @@ assert(quiet.customer_answered and not quiet.awaitingReturn,
 M.ToggleAnswered(quiet)
 assert(M.ToggleAnswered(quiet)==true and quiet.customer_answered and not quiet.awaitingReturn,
     'the mark could not be set back to answered')
--- Three minutes of silence give the cross back, until the order arrives.
-local statuses = {}
-Scan.OrderFulfillment = { GetStatus = function(_, order) return statuses[order.customerName] end }
-local function customer(name, lastWhisper, extra)
-    local row = { responseID = 1, requestToken = name, greeting_sent = true, customer_answered = true }
-    Scan.DB.customers[name] = { responses = { [1] = row }, chat_history = {
-        { chatType = 'WHISPER_INFORM', receivedAt = 5000 },
-        lastWhisper and { chatType = extra or 'WHISPER', receivedAt = lastWhisper } or nil,
-    } }
-    Scan.DB.listed_orders[name .. '-1'] = { customerName = name, responseID = 1 }
-    return row
-end
-Scan.DB = Scan.DB or {}
-Scan.DB.customers, Scan.DB.listed_orders = {}, {}
-local quietRow = customer('Quiet', 1000)
-local recentRow = customer('Recent', 1100)
-local craftingRow = customer('Crafting', 1000)
-statuses.Crafting = { status = 'claimed' }
-local declinedRow = customer('Declined', 1000)
-statuses.Declined = { status = 'rejected' }
-local bnetRow = customer('Friend', 1000, 'BN_WHISPER')
-local unknownRow = customer('NoWhisper', nil)
-assert(M.ResetQuietCustomers(1181) == 3, 'the wrong rows were reset')
-assert(not quietRow.customer_answered and quietRow.awaitingReturn, 'three quiet minutes kept the mark')
-assert(recentRow.customer_answered, 'a customer who wrote a minute ago lost the mark')
-assert(craftingRow.customer_answered, 'a customer whose order is being crafted lost the mark')
-assert(not declinedRow.customer_answered, 'a declined order kept the mark through the silence')
-assert(not bnetRow.customer_answered, 'a Battle.net whisper was not counted as their message')
-assert(unknownRow.customer_answered, 'a row without any message of theirs was reset')
--- The next message checks it again.
-assert(M.MarkReply(Scan.DB.customers.Quiet, {}) and quietRow.customer_answered)
-Scan.OrderFulfillment = nil
 print('Request tracking tests passed (30-second boundary, group identity, latest greeted inquiry, linked replay, legacy groups).')
