@@ -2363,6 +2363,40 @@ function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, i
     return true
 end
 
+-- The ignore list. A value of 1 (or true) is for good; a larger number is
+-- the time the ignore ends, after which the entry removes itself.
+function HironCraftScan.IsIgnored(customer)
+    local ignored = HironCraftScan.DB.settings.ignored
+    local value = type(customer) == 'string' and ignored and ignored[customer]
+    if not value then return false end
+    local expires = tonumber(value)
+    if expires and expires > 1 and time() >= expires then
+        ignored[customer] = nil
+        return false
+    end
+    return true
+end
+
+-- Seconds left on a timed ignore, nil for a permanent one or none.
+function HironCraftScan.IgnoreSecondsLeft(customer)
+    local ignored = HironCraftScan.DB.settings.ignored
+    local expires = type(customer) == 'string' and ignored and tonumber(ignored[customer])
+    if not expires or expires <= 1 then return nil end
+    return math.max(0, expires - time())
+end
+
+function HironCraftScan.SetIgnored(customer, seconds)
+    if type(customer) ~= 'string' or customer == '' then return end
+    local ignored = saved(HironCraftScan.DB.settings, 'ignored', {})
+    if seconds == false then
+        ignored[customer] = nil
+    elseif tonumber(seconds) and tonumber(seconds) > 0 then
+        ignored[customer] = time() + math.floor(tonumber(seconds))
+    else
+        ignored[customer] = 1
+    end
+end
+
 local function RunRequestCallback(options, callback)
     -- Item/class data may arrive after the linked-packet handler has returned.
     -- Keep that work remote so it cannot echo packets or claim a local owner.
@@ -2412,7 +2446,7 @@ local function PollWaitingForClass()
         local guid = type(entry) == 'table' and (entry.guid or (stored and stored.guid))
         if type(entry) ~= 'table' or type(entry.message) ~= 'string' or type(entry.customer) ~= 'string'
             or time() > (tonumber(entry.expires) or 0) or (entry.hadRow and not stored)
-            or (HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[entry.customer]) then
+            or HironCraftScan.IsIgnored(entry.customer) then
             -- Too late, or the crafter removed or ignored the customer meanwhile.
             waiting[key] = nil
         elseif matching and guid and matching.ResolveClass(guid) then
@@ -2463,8 +2497,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 
     if isBattleNet and customerInfo then customerInfo.guid = customerGuid end
 
-    local ignored = HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[customer]
-    if ignored then
+    if HironCraftScan.IsIgnored(customer) then
         return false
     end
     overrides = overrides or {}

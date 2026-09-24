@@ -815,8 +815,11 @@ loadSource('Customer/CustomExplanations.lua')
 Scan.CONST.TEXT.MANUAL_MATCH='Match %s %s'
 HironCraftScan_CustomExplanationsButtonMixin.Init({SetupMenu=noop})
 local buttons={}
-local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end,
-    CreateButton=function(_,label,click) buttons[#buttons+1]={label=label,click=click};return {SetTooltip=noop} end}
+local root={CreateDivider=noop,CreateTitle=function() return {SetTooltip=noop} end}
+function root:CreateButton(label,click)
+    buttons[#buttons+1]={label=label,click=click}
+    return {SetTooltip=noop,CreateButton=root.CreateButton,CreateDivider=noop,CreateTitle=root.CreateTitle}
+end
 local chatReads=0
 local manualOffers={}
 local manualBanners=0
@@ -905,6 +908,23 @@ assert(#sent==1,'the general greeting sent itself')
 assert(Scan.SendOrderGreeting({customerName='GeneralBuyer-Realm',
     responseID=Scan.Scanner.GENERAL_REQUEST_ID},true))
 assert(#sent==2 and generalRow.greeting_sent,'the general greeting could not be sent')
+-- Ignore for a while: the player's requests are skipped until it runs out,
+-- and the entry removes itself afterwards.
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Spammer',lineID='44'})
+menuButton('Ignore for 1 hour').click()
+local ignoredUntil=Scan.DB.settings.ignored.Spammer
+assert(ignoredUntil and ignoredUntil>now, 'a timed ignore stored no end time')
+scan('LF '..a,nil,'Spammer')
+assert(not Scan.DB.customers.Spammer, 'an ignored player made a request')
+buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Spammer',lineID='44'})
+assert(menuButton(tostring(Scan.CONST.TEXT.UNIGNORE)), 'an ignored player offered no way back')
+local savedNow=now
+now=now+2*60*60
+scan('LF '..a,nil,'Spammer')
+assert(Scan.DB.customers.Spammer and not Scan.DB.settings.ignored.Spammer,
+    'the ignore did not end after its time')
+now=savedNow
+Scan.DB.settings.ignored.Spammer=nil
 Scan.DB.characters['Seller-Realm'].parent_professions[164].visual_alert_enabled=nil
 Scan.DB.characters['Tailor-Realm'].parent_professions[197].visual_alert_enabled=nil
 HironCraftScanScannerMenu.TriggerAlert,Scan.QuickReplies.GetConfig=oldManualTrigger,oldManualConfig

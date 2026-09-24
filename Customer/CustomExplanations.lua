@@ -634,19 +634,44 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
         do
             subMenu:CreateDivider()
-            local ignored = HironCraftScan.DB.settings.ignored and HironCraftScan.DB.settings.ignored[target];
-            local title = subMenu:CreateButton(prefix .. L(ignored and LID.UNIGNORE or LID.IGNORE),
-                function()
-                    if ignored then
-                        HironCraftScan.DB.settings.ignored[target] = nil
-                    else
-                        HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'ignored', {})[target] = 1
+            local ignoredList = HironCraftScan.DB.settings.ignored
+            local isIgnored = HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(target)
+                or (ignoredList and ignoredList[target] and true or false)
+            local function SetIgnored(seconds)
+                if HironCraftScan.SetIgnored then return HironCraftScan.SetIgnored(target, seconds) end
+                local list = HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'ignored', {})
+                list[target] = seconds ~= false and 1 or nil
+            end
+            if isIgnored then
+                local left = HironCraftScan.IgnoreSecondsLeft and HironCraftScan.IgnoreSecondsLeft(target)
+                local title = subMenu:CreateButton(prefix .. L(LID.UNIGNORE), function()
+                    SetIgnored(false)
+                end)
+                title:SetTooltip(function(tooltip)
+                    GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.UNIGNORE_TOOLTIP)))
+                    if left then
+                        GameTooltip_AddNormalLine(tooltip, string.format(L('Ignore ends in %s'),
+                            SecondsToTime and SecondsToTime(left) or (math.ceil(left / 60) .. ' min')))
                     end
-                end);
-            title:SetTooltip(function(tooltip, elementDescription)
-                GameTooltip_AddNormalLine(tooltip,
-                    HironCraftScan.MakeTextWhite(L(ignored and LID.UNIGNORE_TOOLTIP or LID.IGNORE_TOOLTIP)));
-            end);
+                end)
+            else
+                -- A time-waster, or a customer whose LF spam should rest for
+                -- a while: ignore for a set time, or for good.
+                local ignoreMenu = subMenu:CreateButton(prefix .. L(LID.IGNORE))
+                ignoreMenu:SetTooltip(function(tooltip)
+                    GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.IGNORE_TOOLTIP)))
+                end)
+                for _, choice in ipairs({
+                    { label = 'Ignore for 1 hour', seconds = 60 * 60 },
+                    { label = 'Ignore for 1 day', seconds = 24 * 60 * 60 },
+                    { label = 'Ignore for 1 week', seconds = 7 * 24 * 60 * 60 },
+                    { label = 'Ignore permanently', seconds = nil },
+                }) do
+                    ignoreMenu:CreateButton(L(choice.label), function()
+                        SetIgnored(choice.seconds)
+                    end)
+                end
+            end
         end
     end
     Menu.ModifyMenu("MENU_UNIT_FRIEND", function(owner, rootDescription, contextData)

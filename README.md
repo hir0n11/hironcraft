@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Ignore a player for a while (0.4.24)
+
+- "HironCraftScan - Ignore" in the chat menu is a choice of durations: for 1
+  hour, 1 day, 1 week or permanently. A timed ignore ends by itself; while
+  it lasts, "Remove Ignore" shows how long is left. Existing ignores stay
+  permanent.
+
 ## Item names written as text are recognised (0.4.23)
 
 - A chat addon or a paste can turn a link into plain text, e.g. "LFC

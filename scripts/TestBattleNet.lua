@@ -110,7 +110,9 @@ assert(#sent==oneOrderAssignments+1
 find(buttons,'Support').click()
 assert(sent[4].customer==key and sent[4].message=='Ask Favu.',
     'custom substitution tag did not expand contextual tag')
-find(buttons,'HironCraftScan - IGNORE').click()
+-- Ignore is a submenu: for a while, or for good.
+assert(not find(buttons,'HironCraftScan - IGNORE').click, 'ignore is not a choice of durations')
+find(buttons,'Ignore permanently').click()
 assert(Scan.DB.settings.ignored[key]==1)
 buttons=menu('MENU_UNIT_BN_FRIEND',{accountInfo=friend,lineID=44})
 find(buttons,'HironCraftScan - UNIGNORE').click()
