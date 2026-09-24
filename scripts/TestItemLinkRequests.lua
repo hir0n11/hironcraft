@@ -504,6 +504,24 @@ assert(countRows()==1 and response(101), 'the same craft by name and by link mad
 recipes[101].name=nil
 reloadConfig()
 
+-- One machine, two sides: requests of the other faction stay in the data (so
+-- statuses still reach the account that talked) but are not listed or
+-- announced on a character that cannot whisper them.
+reset()
+scan('LF '..a,nil,'HordeBuyer')
+do
+    local previousSide=Scan.QuickReplies.IsOtherSide
+    Scan.QuickReplies.IsOtherSide=function(_,info) return info==Scan.DB.customers.HordeBuyer end
+    local hordeRow=order(101,'HordeBuyer')
+    assert(Scan.IsHiddenOtherSideOrder(hordeRow), 'the other side was not hidden')
+    assert(Scan.DB.listed_orders[Scan.OrderToOrderID(hordeRow)], 'hiding removed the row underneath')
+    assert(not Scan.IsHiddenOtherSideOrder(order(101)), 'a customer of this side was hidden')
+    Scan.DB.settings.hide_other_faction_orders=false
+    assert(not Scan.IsHiddenOtherSideOrder(hordeRow), 'the setting did not show the other side again')
+    Scan.DB.settings.hide_other_faction_orders=nil
+    Scan.QuickReplies.IsOtherSide=previousSide
+end
+
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this
 -- account knows gets its exact row, an unknown one a profession row.

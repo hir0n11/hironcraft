@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Other-faction orders are hidden (0.4.26)
+
+- Two linked accounts on one PC often sit on different sides (a Horde
+  collector next to Alliance crafters). The other side's requests arrived
+  through the link and were listed and announced on a character that cannot
+  whisper those customers. They are now hidden from the chat orders list and
+  raise no banner or sound there; they keep working underneath, so statuses,
+  crosses and "Done" still reach the account that talked. A character of
+  that side shows them again. The side comes from the customer's race, or
+  from the character that talked to them. Battle.net friends are never
+  hidden. Setting: "Hide orders from the other faction" (on by default).
+
 ## Typo recognition without real-word mistakes (0.4.25)
 
 - "Recognize typos" read any word one letter away from a keyword as a typo,

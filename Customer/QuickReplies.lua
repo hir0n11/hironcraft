@@ -810,6 +810,18 @@ function QuickReplies:CanWhisperCustomer(customerInfo)
     return not customer or not current or customer == current
 end
 
+-- A request this character cannot answer: the customer, or the character
+-- that talked to them, is on the other side. Races that pick their side are
+-- known through the talking character.
+function QuickReplies:IsOtherSide(customerInfo, response)
+    local current = PlayerFaction()
+    if not current then return false end
+    local customer = CustomerFaction(customerInfo)
+    if customer then return customer ~= current end
+    local talked = type(response) == 'table' and ValidFaction(response.conversationFaction) or nil
+    return talked ~= nil and talked ~= current
+end
+
 -- The character handling the conversation is not necessarily the crafter.
 -- Keep ownership on the individual request, not on the account/customer.
 -- Its side is kept too: a whisper cannot cross from Horde to Alliance, so
@@ -1117,7 +1129,8 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
     end
     -- An order from the other faction was crafted here, but a whisper cannot
     -- reach them from this character; the one who talked to them answers.
-    if not self:CanWhisperCustomer(customerInfo) then
+    local battleNet = HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(order.customerName)
+    if not battleNet and not self:CanWhisperCustomer(customerInfo) then
         return nil
     end
     -- The character that talked to this customer may sit on another account,

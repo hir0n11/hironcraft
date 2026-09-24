@@ -441,6 +441,25 @@ function HironCraftScanCraftingOrderPageMixin:UpdateAnalytics()
     self.BrowseFrame.AnalyticsTable:Refresh();
 end
 
+-- Two linked accounts on one machine often sit on different sides: a Horde
+-- collector next to Alliance crafters. The other side's requests arrive
+-- through the link and keep working underneath (statuses, crosses, "Done" go
+-- back to the account that talked), but this character cannot whisper those
+-- customers, so they are not listed or announced here. Logging in on a
+-- character of that side brings them back.
+function HironCraftScan.IsHiddenOtherSideOrder(order)
+    if HironCraftScan.DB.settings.hide_other_faction_orders == false then return false end
+    local quickReplies = HironCraftScan.QuickReplies
+    if not quickReplies or not quickReplies.IsOtherSide or type(order) ~= 'table' then return false end
+    -- A Battle.net friend is reachable from either side.
+    if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(order.customerName) then return false end
+    local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[order.customerName]
+    if type(customerInfo) ~= 'table' then return false end
+    local response = customerInfo.responses and customerInfo.responses[order.responseID]
+    local ok, other = pcall(quickReplies.IsOtherSide, quickReplies, customerInfo, response)
+    return ok and other == true
+end
+
 function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
     PurgeOldOrders()
     local scrollBox = self.BrowseFrame.OrderList.ScrollBox;
@@ -450,7 +469,9 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
 
     local orders = {}
     for _, order in pairs(HironCraftScan.DB.listed_orders) do
-        table.insert(orders, order)
+        if not HironCraftScan.IsHiddenOtherSideOrder(order) then
+            table.insert(orders, order)
+        end
     end
 
     SortItemsByComparator(orders, self, ApplySortOrder);

@@ -1833,6 +1833,9 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
     if fresh then
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
         local visualAlert, soundAlert = GenericAlertPreferences()
+        if HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order) then
+            visualAlert, soundAlert = false, false
+        end
         if visualAlert and not (overrides and overrides.suppressBatchAlert) then
             HironCraftScan.State.activeOrder = order
             FlashClientIcon()
@@ -2167,7 +2170,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
         local isAlertFiltered = (
             ppConfig.local_alerts_only and HironCraftScan.GetPlayerName(true) ~= crafterInfo.crafter
-        )
+        ) or (HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order))
         if ppConfig.visual_alert_enabled and not isAlertFiltered
             and not (overrides and overrides.suppressBatchAlert) then
             HironCraftScan.State.activeOrder = order

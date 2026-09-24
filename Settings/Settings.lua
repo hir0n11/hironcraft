@@ -368,6 +368,25 @@ HironCraftScan.Utils.onLoad(function()
     do
         local setting = Settings.RegisterProxySetting(
             category,
+            'HIRONCRAFT_SCAN_HIDE_OTHER_FACTION',
+            Settings.VarType.Boolean,
+            L('Hide orders from the other faction'),
+            true,
+            function() return HironCraftScan.DB.settings.hide_other_faction_orders ~= false end,
+            function(value)
+                HironCraftScan.DB.settings.hide_other_faction_orders = value
+                if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
+                    HironCraftScanCraftingOrderPage:ShowGeneric()
+                end
+            end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting,
+            L('Hide orders from the other faction tooltip'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
+    do
+        local setting = Settings.RegisterProxySetting(
+            category,
             'HIRONCRAFT_SCAN_BNET_WHISPERS',
             Settings.VarType.Boolean,
             L('Scan Battle.net whispers'),

@@ -520,6 +520,16 @@ assert(#visible('AwayBuyer')==0,'an Alliance character was offered to write to a
 customerRace='Pandaren'
 QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},hordeDone)
 assert(#visible('AwayBuyer')==1,'a customer of unknown side was held back')
+-- The same knowledge hides the other side's rows: by race, or through the
+-- character that talked to a customer whose race picks its own side.
+customerRace='Orc'
+assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'a Horde customer is not the other side')
+customerRace='Human'
+assert(not QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'an Alliance customer is the other side')
+customerRace='Pandaren'
+assert(not QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, {conversationFaction='Alliance'}))
+assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, {conversationFaction='Horde'}),
+    'a Pandaren talked to on the Horde side was not the other side')
 GetPlayerInfoByGUID=previousPlayerInfo
 Scan.DB.customers.AwayBuyer.guid=awayGuid
 awayResponse.conversationCharacter='Collector-OtherRealm';awaySecond.conversationCharacter='Collector-OtherRealm'
