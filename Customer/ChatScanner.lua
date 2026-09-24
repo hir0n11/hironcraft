@@ -979,7 +979,7 @@ local function GetMonitoredItemMatches(message, allowPlainNames)
     return matches
 end
 
-local function IsCrafterAdvertisement(message)
+local function IsCrafterAdvertisement(message, knownCustomer)
     if type(message) ~= 'string' then return false end
     -- Match the author's words, never item/profession names inside links.
     local text = (strlower or string.lower)(message)
@@ -1015,7 +1015,10 @@ local function IsCrafterAdvertisement(message)
     for _, pattern in ipairs(offers) do
         if text:find(pattern) then return true end
     end
-    -- "Can craft [item]?" can be a terse customer question.
+    -- "Can craft [item]?" can be a terse customer question. From a customer
+    -- already in a conversation it is one even without the "?", which they
+    -- often send as a separate line.
+    if knownCustomer then return false end
     return not question and (text:find('^can%s+craft%f[%A]') ~= nil
         or text:find('^can%s+recraft%f[%A]') ~= nil)
 end
@@ -1040,7 +1043,7 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
 
     if not overrides or (not overrides.forceCrafterInfo and not overrides.itemInfo) then
-        if IsCrafterAdvertisement(originalMessage) then return nil end
+        if IsCrafterAdvertisement(originalMessage, overrides and overrides.knownCustomer) then return nil end
         if HasMatch(message, config.exclusions) then
             return nil
         end
@@ -2567,8 +2570,12 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         FlashClientIcon()
     end
 
+    -- A whisper from someone we already have a request from is a customer
+    -- talking, not a crafter pitching.
+    overrides.knownCustomer = incomingWhisper and type(customerInfo) == 'table'
+        and type(customerInfo.responses) == 'table' and next(customerInfo.responses) ~= nil or nil
     if not overrides.forceCrafterInfo and not overrides.itemInfo
-        and IsCrafterAdvertisement(message) then
+        and IsCrafterAdvertisement(message, overrides.knownCustomer) then
         -- Do not create/reopen a request, switch the active order, or classify
         -- this line as a question. From a customer we already greeted, "send
         -- to Lavu" is their answer, not a sales pitch: it still counts as one.

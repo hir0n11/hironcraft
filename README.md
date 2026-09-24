@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## "can craft [item]" from a customer makes a row (0.4.27)
+
+- A customer in a conversation asked "can craft [Masterwork Sin'dorei Band]"
+  and sent the "?" as the next line. Without the question mark the line
+  looked like a crafter's pitch and no row was made. From someone this
+  account already has a request from, a short "can craft/recraft ..." is now
+  a question; clear ads ("I can craft", "WTS", "crafting services") are still
+  filtered from everyone, and a stranger's "can craft ..." is still an ad.
+
 ## Other-faction orders are hidden (0.4.26)
 
 - Two linked accounts on one PC often sit on different sides (a Horde

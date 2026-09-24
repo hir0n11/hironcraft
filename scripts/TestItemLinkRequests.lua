@@ -437,6 +437,17 @@ assert(countRows()==1 and #sent==1, 'the answer made a request or sent something
 Scan.OnMessage('CHAT_MSG_WHISPER','send to seller','Stranger','Stranger-GUID')
 assert(not Scan.DB.customers.Stranger, 'an ad from a stranger created a customer')
 
+-- "can craft [link]" without its "?" (sent as the next line) is a question
+-- from a customer already in a conversation, and makes the row.
+reset()
+scan(a)
+Scan.GreetCustomer('LeftButton', order(101))
+Scan.OnMessage('CHAT_MSG_WHISPER','can craft '..b,'Buyer','Buyer-GUID')
+assert(response(102), 'a customer asking "can craft [item]" got no row')
+-- From someone we never talked to it is still a crafter's pitch.
+Scan.OnMessage('CHAT_MSG_WHISPER','can craft '..b,'Pitcher','Pitcher-GUID')
+assert(not Scan.DB.customers.Pitcher, 'a stranger saying "can craft [item]" became a customer')
+
 -- Old default keywords that are everyday words ("no crest") are retired;
 -- a list the crafter edited stays as it is.
 Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords='Enchanter, Crest'
