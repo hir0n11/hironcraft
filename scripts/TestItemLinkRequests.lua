@@ -481,6 +481,29 @@ do
     Scan.OrderFulfillment=previousStatus
 end
 
+-- A link turned into plain text by a chat addon or a paste still names the
+-- craft: "[Silvermoon Agent's Deflectors |A:...|a]". In brackets it counts
+-- like a link; bare names only when the message asks for a craft.
+recipes[101].name="Silvermoon Agent's Deflectors"
+reloadConfig()
+reset()
+scan("LFC [Silvermoon Agent's Deflectors ||A:Professions-ChatIcon-Quality-Tier1:17:15::1||a]")
+assert(countRows()==1 and response(101), 'a pasted item name in brackets made no row')
+reset()
+scan("LF silvermoon agent's deflectors pls")
+assert(countRows()==1 and response(101), 'an item name after LF made no row')
+reset()
+scan("my Silvermoon Agent's Deflectors look great")
+assert(countRows()==0, 'talk about an item became a request')
+reset()
+scan("LF [Silvermoon Agent's Deflectorsxx]")
+assert(countRows()==0, 'part of a longer word was taken for the item')
+reset()
+scan("LF [Silvermoon Agent's Deflectors] " .. a)
+assert(countRows()==1 and response(101), 'the same craft by name and by link made two rows')
+recipes[101].name=nil
+reloadConfig()
+
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this
 -- account knows gets its exact row, an unknown one a profession row.

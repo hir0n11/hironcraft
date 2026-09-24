@@ -830,7 +830,42 @@ local function GenericCrafterForParentProfession(parentProfessionID, preferredPr
     return nil
 end
 
-local function GetMonitoredItemMatches(message)
+-- Names of the monitored crafts, longest first, built once per config load.
+-- A chat addon or a copy-paste can turn a link into plain text such as
+-- "[Silvermoon Agent's Deflectors |A:...|a]"; the name still says what is
+-- wanted.
+local function MonitoredNames()
+    if config.names then return config.names end
+    local names, seen = {}, {}
+    local function Add(name, recipeID, crafterInfo)
+        if type(name) ~= 'string' then return end
+        name = name:lower()
+        if #name < 6 or seen[name] then return end
+        seen[name] = true
+        names[#names + 1] = { name = name, recipeID = recipeID, crafterInfo = crafterInfo }
+    end
+    for recipeID, crafterInfo in pairs(config.recipes or {}) do
+        local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+        if ok and type(info) == 'table' then Add(info.name, recipeID, crafterInfo) end
+    end
+    local getName = C_Item and C_Item.GetItemNameByID
+    if getName then
+        for itemID, info in pairs(config.items or {}) do
+            local ok, name = pcall(getName, itemID)
+            if ok then Add(name, info.recipeID, config.recipes[info.recipeID]) end
+        end
+    end
+    table.sort(names, function(lhs, rhs) return #lhs.name > #rhs.name end)
+    config.names = names
+    return names
+end
+
+local function IsNameByte(byte)
+    return byte ~= nil and (byte >= 128 or (byte >= 48 and byte <= 57)
+        or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or byte == 39)
+end
+
+local function GetMonitoredItemMatches(message, allowPlainNames)
     local lower = message:lower()
     local matches, seen = {}, {}
     local position = 1
@@ -859,6 +894,47 @@ local function GetMonitoredItemMatches(message)
                         crafterInfo = crafterInfo, itemID = itemID, recipeInfo = recipeInfo,
                         itemLink = message:sub(first, last), position = first,
                     }
+                end
+            end
+        end
+    end
+
+    -- Plain names. Inside [brackets] a name is a pasted link and counts like
+    -- one; anywhere else only when the message asks for a craft (LF...).
+    local plain = lower:gsub('|h[^|]*|h.-|h', ' '):gsub('|+a:[^|]*|+a', ' ')
+        :gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|cn[%w_]+:', ''):gsub('|r', '')
+    if plain:find('[', 1, true) or allowPlainNames then
+        local function Take(entry, position)
+            if seen[entry.recipeID] then return end
+            local crafterInfo = entry.crafterInfo
+            if not crafterInfo or not IsScanningEnabled(crafterInfo) then return end
+            local parent = ParentProfessionConfig(crafterInfo)
+            if HasMatch(lower, ParseStringList(parent.exclusions or '')) then return end
+            local recipeInfo = C_TradeSkillUI.GetRecipeInfo(entry.recipeID)
+            if not recipeInfo then return end
+            local outputs = HironCraftScan.Utils.GetOutputItems(recipeInfo)
+            seen[entry.recipeID] = true
+            matches[#matches + 1] = {
+                crafterInfo = crafterInfo, itemID = outputs and outputs[1], recipeInfo = recipeInfo,
+                position = position, fromPlainName = true,
+            }
+        end
+        local names = MonitoredNames()
+        for position, segment in plain:gmatch('()%[([^%]]*)%]') do
+            segment = segment:gsub('^%s+', '')
+            for _, entry in ipairs(names) do
+                if segment:sub(1, #entry.name) == entry.name
+                    and not IsNameByte(segment:byte(#entry.name + 1)) then
+                    Take(entry, position)
+                    break
+                end
+            end
+        end
+        if allowPlainNames then
+            for _, entry in ipairs(names) do
+                local first, last = plain:find(entry.name, 1, true)
+                if first and not IsNameByte(plain:byte(first - 1)) and not IsNameByte(plain:byte(last + 1)) then
+                    Take(entry, first)
                 end
             end
         end
@@ -970,8 +1046,8 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
         end
 
         local hasKeywords = HasMatch(message, config.inclusions)
-        local itemMatches = GetMonitoredItemMatches(originalMessage)
         local genericFollowup = overrides and overrides.genericFollowup == true
+        local itemMatches = GetMonitoredItemMatches(originalMessage, hasKeywords or genericFollowup)
         -- A bare link is a request too: people often post just the recipe of
         -- the gear they want, known to us or not. Crafter ads were filtered
         -- out above.

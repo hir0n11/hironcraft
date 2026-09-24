@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Item names written as text are recognised (0.4.23)
+
+- A chat addon or a paste can turn a link into plain text, e.g. "LFC
+  [Silvermoon Agent's Deflectors |A:...|a]"; only links were recognised.
+  The name of a monitored craft in [brackets] now counts like a link. A bare
+  name (no brackets) counts when the message asks for a craft (LF and other
+  keywords), so talk about an item does not become a request. Names must
+  match whole words; a name and a link of the same craft are one request.
+
 ## The label turns white behind the fill (0.4.22)
 
 - While the craft progress fills the action button, the part of the label
