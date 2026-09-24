@@ -371,8 +371,8 @@ HironCraftScan.Utils.onLoad(function()
             'HIRONCRAFT_SCAN_HIDE_OTHER_FACTION',
             Settings.VarType.Boolean,
             L('Hide orders from the other faction'),
-            true,
-            function() return HironCraftScan.DB.settings.hide_other_faction_orders ~= false end,
+            false,
+            function() return HironCraftScan.DB.settings.hide_other_faction_orders == true end,
             function(value)
                 HironCraftScan.DB.settings.hide_other_faction_orders = value
                 if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then

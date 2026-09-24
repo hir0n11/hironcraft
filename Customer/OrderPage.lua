@@ -448,7 +448,7 @@ end
 -- customers, so they are not listed or announced here. Logging in on a
 -- character of that side brings them back.
 function HironCraftScan.IsHiddenOtherSideOrder(order)
-    if HironCraftScan.DB.settings.hide_other_faction_orders == false then return false end
+    if HironCraftScan.DB.settings.hide_other_faction_orders ~= true then return false end
     local quickReplies = HironCraftScan.QuickReplies
     if not quickReplies or not quickReplies.IsOtherSide or type(order) ~= 'table' then return false end
     -- A Battle.net friend is reachable from either side.

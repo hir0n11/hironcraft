@@ -1565,6 +1565,16 @@ function OrderFulfillment:CreateOrderRowForCraftingOrder(orderInfo, craftingOrde
     if orderInfo.npcCustomerName then return nil end
     if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer) then return nil end
 
+    -- The row is there to answer the customer. A customer of the other faction
+    -- (crafting orders cross sides, whispers do not) cannot be answered from
+    -- here; the account that talked to them gets the result as a notice.
+    local quickReplies = HironCraftScan.QuickReplies
+    if quickReplies and quickReplies.IsOtherSide then
+        local ok, other = pcall(quickReplies.IsOtherSide, quickReplies,
+            { guid = PlayerGUID(orderInfo.customerGuid) }, nil)
+        if ok and other then return nil end
+    end
+
     local personal = Enum and Enum.CraftingOrderType and Enum.CraftingOrderType.Personal
     if personal ~= nil and orderInfo.orderType ~= nil and orderInfo.orderType ~= personal then
         return nil

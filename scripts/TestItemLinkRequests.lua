@@ -530,6 +530,8 @@ do
     local previousSide=Scan.QuickReplies.IsOtherSide
     Scan.QuickReplies.IsOtherSide=function(_,info) return info==Scan.DB.customers.HordeBuyer end
     local hordeRow=order(101,'HordeBuyer')
+    assert(not Scan.IsHiddenOtherSideOrder(hordeRow), 'the other side was hidden without the setting')
+    Scan.DB.settings.hide_other_faction_orders=true
     assert(Scan.IsHiddenOtherSideOrder(hordeRow), 'the other side was not hidden')
     assert(Scan.DB.listed_orders[Scan.OrderToOrderID(hordeRow)], 'hiding removed the row underneath')
     assert(not Scan.IsHiddenOtherSideOrder(order(101)), 'a customer of this side was hidden')

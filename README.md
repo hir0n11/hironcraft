@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Orders stay where they appeared, as in CraftScan (0.4.30)
+
+- As in the original CraftScan, an order only reaches another account
+  through "Proxy Orders" (send) and "Receive Proxied Orders" (receive).
+  With receiving off, an order stays on the account whose chat it appeared
+  in. Hiding other-faction orders (0.4.26) is now off by default and
+  remains a setting.
+- A crafting order from a customer of the other faction no longer creates a
+  row on the crafter: that character cannot whisper them. The result still
+  reaches the account that talked to them as a notice.
+
 ## The other faction is recognised for every race (0.4.29)
 
 - Races that pick their side (Pandaren, Dracthyr, Earthen) share one race

@@ -114,6 +114,22 @@ for _,row in pairs(Scan.DB.listed_orders) do
     if row.customerName=='Silent-Realm' then rows=rows+1 end
 end
 assert(rows==1,'a second decline made a second row')
+-- A customer of the other faction cannot be whispered from here: no row of
+-- their own, but the result is still recorded for the account that talked.
+Scan.QuickReplies={IsOtherSide=function(_,info) return info.guid=='Player-1-0FAC0001' end}
+local otherSide={orderID=907,customerName='Horde-Realm',customerGuid='Player-1-0FAC0001',spellID=123,
+    itemID=321,orderType=2,parentProfessionID=164,reagents={{itemID=11,quantity=1,slotIndex=1,source=1}}}
+F:RecordRejection(otherSide,907,'missing_customer_reagents')
+for _,row in pairs(Scan.DB.listed_orders) do
+    assert(row.customerName~='Horde-Realm','an other-faction customer was given a row here')
+end
+local otherNotice
+for _,notice in pairs(F:GetCompletionNotices()) do
+    if tostring(notice.orderID)=='907' then otherNotice=notice end
+end
+assert(otherNotice and otherNotice.status=='rejected','the other-faction result was not recorded')
+Scan.QuickReplies=nil
+
 -- A patron order is not a conversation and gets no row.
 local patron={orderID=905,customerName='Patron-Realm',npcCustomerName='Patron',spellID=123,
     itemID=321,orderType=4,parentProfessionID=164,reagents={}}
