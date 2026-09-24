@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Typo recognition without real-word mistakes (0.4.25)
+
+- "Recognize typos" read any word one letter away from a keyword as a typo,
+  so real words triggered replies and slots: help/helm, stuff/staff,
+  crest/chest, send/sent, king/ring, boost/boots, danger/dagger. A typo now
+  keeps its first letter; in words under six letters only dropped, doubled,
+  extra or swapped letters count (staf, charr, writs), not a changed one;
+  and a list of common English words is never read as a typo. Long words
+  still allow a changed letter (qualiti), words of ten letters or more two
+  edits.
+
 ## Ignore a player for a while (0.4.24)
 
 - "HironCraftScan - Ignore" in the chat menu is a choice of durations: for 1

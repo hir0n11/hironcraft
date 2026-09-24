@@ -190,7 +190,7 @@ end
 
 local function MatchMisspelledAliases(remaining,matches,replace)
     if not TypoToleranceEnabled() then return end
-    local fuzzy=Scan.Utils and Scan.Utils.FuzzyWordDistance
+    local fuzzy=Scan.Utils and Scan.Utils.TypoDistance
     if not fuzzy then return end
 
     local corrections={}

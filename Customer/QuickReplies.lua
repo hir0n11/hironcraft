@@ -455,11 +455,12 @@ end
 
 -- Four letters is the shortest word a typo can still be read through
 -- ("charr" for "char"). Below that a single edit turns one real word into
--- another, so those keep requiring an exact match.
+-- another, so those keep requiring an exact match. The rules for what counts
+-- as a typo live in Utils.TypoDistance.
 local MIN_TYPO_LENGTH = 4
 
-local function FuzzyWordDistance(lhs, rhs)
-    return HironCraftScan.Utils.FuzzyWordDistance(lhs, rhs, MIN_TYPO_LENGTH)
+local function FuzzyWordDistance(typed, keyword)
+    return HironCraftScan.Utils.TypoDistance(typed, keyword, MIN_TYPO_LENGTH)
 end
 
 local function KeywordScore(message, keyword, allowTypos, exactWords)
