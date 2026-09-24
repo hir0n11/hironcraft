@@ -183,7 +183,7 @@ function CO:GetClassicOrderColumns(width, compact, hideReward)
     if width >= 480 then right("conc", 52) end
     if not compact and width >= 760 then right("cost", 74) end
     if compact and width >= 760 then right("reagents", 100) end
-    local nameX = compact and 64 or 82
+    local nameX = compact and 58 or 82
     columns.name = { x = nameX, w = math.max(40, cursor - nameX) }
     return columns
 end

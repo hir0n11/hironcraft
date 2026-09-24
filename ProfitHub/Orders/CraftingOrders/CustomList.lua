@@ -19,8 +19,13 @@ CL.ICON_SIZE = 40
 CL.SMALL_ICON = 20
 CL.GAP = 6
 
-CL.ROW_H_COMPACT = 36
-CL.ICON_COMPACT = 26
+-- Compact rows carry two lines of text (item, then customer) on a 4px grid:
+-- 12px item name, 10px customer, 3px padding above and below.
+CL.ROW_H_COMPACT = 32
+CL.ICON_COMPACT = 24
+CL.CHECK_COMPACT = 20
+CL.ACTION_COMPACT_W = 66
+CL.ACTION_COMPACT_H = 22
 
 -- Blizzard can emit several list/data events for one server response. Waiting
 -- for a short quiet window prevents the custom list from repainting between
@@ -353,6 +358,9 @@ function CL:RebuildHeader(h)
         btn:SetPoint("LEFT", h, "LEFT", col.x, 0)
         btn:SetSize(col.w, 24)
         btn._label:SetWidth(col.w)
+        -- Headers align like their values: numbers on the right.
+        btn._rightAligned = key == "profit"
+        btn._label:SetJustifyH(btn._rightAligned and "RIGHT" or "LEFT")
         btn._label:SetText(col.label)
         btn._label:SetTextColor(1, 0.82, 0.2)
         btn._arrow:Hide()
@@ -387,7 +395,11 @@ local function UpdateHeaderArrows(header)
     for key, btn in pairs(header.cols) do
         if CL._sortColumn == key then
             btn._arrow:ClearAllPoints()
-            btn._arrow:SetPoint("LEFT", btn._label, "LEFT", (btn._label:GetStringWidth() or 0) + 4, 0)
+            if btn._rightAligned then
+                btn._arrow:SetPoint("RIGHT", btn._label, "RIGHT", -((btn._label:GetStringWidth() or 0) + 4), 0)
+            else
+                btn._arrow:SetPoint("LEFT", btn._label, "LEFT", (btn._label:GetStringWidth() or 0) + 4, 0)
+            end
             btn._arrow:SetAtlas("uitools-icon-chevron-down")
             btn._arrow:SetRotation(CL._sortDir == "asc" and math.pi or 0)
             btn._arrow:Show()
@@ -505,8 +517,9 @@ function CL:CreateRow(parent, index)
     row.profitBtn:SetPoint("TOPLEFT", row, "TOPLEFT", COLS.profit.x, -10)
     row.profitBtn:SetSize(COLS.profit.w, 18)
 
-    row.profit = MakeText(row.profitBtn, 13, "LEFT")
-    row.profit:SetPoint("LEFT")
+    -- Money reads by its last digits: right-aligned, so the column lines up.
+    row.profit = MakeText(row.profitBtn, 13, "RIGHT")
+    row.profit:SetPoint("RIGHT")
     row.profit:SetWidth(COLS.profit.w)
 
     row.action = CreateFrame("Button", nil, row, "UIPanelButtonTemplate,BackdropTemplate")
@@ -932,18 +945,18 @@ function CL:ApplyRowLayout(row)
     if row._layoutColumns == columns and row._layoutCompact == compact then return end
     row._layoutColumns, row._layoutCompact = columns, compact
     row:SetHeight(self:RowHeight())
+    local check = compact and self.CHECK_COMPACT or 24
+    row.checkbox:SetSize(check, check)
     row.iconBtn:SetSize(compact and self.ICON_COMPACT or self.ICON_SIZE, compact and self.ICON_COMPACT or self.ICON_SIZE)
     row.iconBtn:ClearAllPoints()
     row.iconBtn:SetPoint("LEFT", row.checkbox, "RIGHT", 4, 0)
     row.qualityBadge:SetSize(compact and 14 or 18, compact and 14 or 18)
-    row.name:ClearAllPoints()
-    row.name:SetPoint("LEFT", row, "LEFT", columns.name.x, compact and 0 or 16)
+    row.name:SetFont(FONT, compact and 12 or 13, "")
+    row.customer:SetFont(FONT, compact and 10 or 11, "")
     row.name:SetWidth(columns.name.w)
-
-    row.customer:SetShown(not compact)
-    row.customer:ClearAllPoints()
-    row.customer:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
     row.customer:SetWidth(columns.name.w)
+    row.customer:Show()
+    self:PlaceNameLines(row)
 
     local function place(frame, key, height)
         local col = columns[key]
@@ -956,10 +969,18 @@ function CL:ApplyRowLayout(row)
     place(row.cost, "cost", 18)
     place(row.profitBtn, "profit", 18)
     row.profit:SetWidth(columns.profit and columns.profit.w or 1)
-    place(row.concBtn, "conc", 24)
+    place(row.concBtn, "conc", compact and 20 or 24)
     place(row.rewardBar, "reward", compact and self.SMALL_ICON or self.SMALL_ICON * 2 + 2)
     place(row.action, "action", compact and 26 or 28)
-    row.action.text:SetWidth(columns.action.w - 8)
+    if compact and columns.action then
+        -- The same button repeats on every row: keep it light, and let the
+        -- item and the profit carry the row. Right edge stays on the column.
+        local width = math.min(columns.action.w, self.ACTION_COMPACT_W)
+        row.action:ClearAllPoints()
+        row.action:SetPoint("RIGHT", row, "LEFT", columns.action.x + columns.action.w, 0)
+        row.action:SetSize(width, self.ACTION_COMPACT_H)
+    end
+    row.action.text:SetWidth(row.action:GetWidth() - 8)
     row.reward:Hide()
     if compact then
         place(row.reagentsBar, "reagents", self.SMALL_ICON)
@@ -968,6 +989,28 @@ function CL:ApplyRowLayout(row)
         row.reagentsBar:ClearAllPoints()
         row.reagentsBar:SetPoint("TOPLEFT", row.customer, "BOTTOMLEFT", 0, -4)
         row.reagentsBar:SetSize(columns.name.w, self.SMALL_ICON)
+    end
+end
+
+-- Item name and customer. Compact rows stack them around the middle of the
+-- row; with no customer the name sits centred instead of floating high.
+function CL:PlaceNameLines(row)
+    local columns = self:ActiveCols()
+    local x = columns.name.x
+    local hasCustomer = (row.customer:GetText() or "") ~= ""
+    row.name:ClearAllPoints()
+    row.customer:ClearAllPoints()
+    if self:IsCompact() then
+        if hasCustomer then
+            row.name:SetPoint("BOTTOMLEFT", row, "LEFT", x, 1)
+            row.customer:SetPoint("TOPLEFT", row, "LEFT", x, -1)
+        else
+            row.name:SetPoint("LEFT", row, "LEFT", x, 0)
+            row.customer:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -1)
+        end
+    else
+        row.name:SetPoint("LEFT", row, "LEFT", x, 16)
+        row.customer:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
     end
 end
 
@@ -982,8 +1025,10 @@ function CL:FitIconBar(bar, icons, maxRows, title)
             icon:Hide()
         end
     end
-    local left = bar.isReagentBar and 8 or 0
-    local gap = bar.isReagentBar and 10 or 6
+    -- The quality badge sticks out 4px up-left of a reagent icon: leave it
+    -- that much room, and no more, so four reagents fit a compact column.
+    local left = bar.isReagentBar and 4 or 0
+    local gap = bar.isReagentBar and 6 or 4
     local step = self.SMALL_ICON + gap
     local columns = math.max(1, math.floor((bar:GetWidth() - left + gap) / step))
     local capacity = columns * maxRows
@@ -1093,6 +1138,7 @@ function CL:PopulateRow(row, order)
     row.icon:SetTexture(icon)
     row.name:SetText((recipeInfo and recipeInfo.name) or ("Recipe " .. tostring(spellID)))
     row.customer:SetText(order.customerName or order.npcCustomerName or "")
+    self:PlaceNameLines(row)
 
     row.iconBtn._spellID = spellID
     row.iconBtn._itemID = order.itemID

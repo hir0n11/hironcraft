@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Compact order rows show the customer (0.4.19)
+
+- Compact rows of the crafting order list are 32px instead of 36 and carry
+  two lines: the item name (12px) and under it the customer or patron
+  (10px, muted). Without a customer the name is centred.
+- The action button repeated on every row is lighter (66x22, right edge on
+  its column), the check box and icon are smaller, the concentration badge
+  is 20px high, and reagent icons sit closer (four fit the column).
+- Profit values and their header are right-aligned so the amounts line up.
+
 ## "send to Lavu" counts as an answer; no "crest"/"stone" defaults (0.4.18)
 
 - A customer's "send to Lavu" looks like a crafter's ad and only went into

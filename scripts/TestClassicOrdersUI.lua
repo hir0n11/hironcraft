@@ -442,7 +442,7 @@ for _, icon in ipairs(icons) do
         count = count + 1
         local ix, _, iw = bounds(icon)
         assert(ix + iw <= mx, 'overflow label overlaps a reagent icon')
-        if previousRight then assert(ix - previousRight >= 10, 'reagent quantities/badges have no breathing room') end
+        if previousRight then assert(ix - previousRight >= 6, 'reagent quantities/badges have no breathing room') end
         previousRight = ix + iw
     end
 end
@@ -472,6 +472,30 @@ CO.RunRowButtonAction = function() rowCalls = rowCalls + 1 end
 CO.SetActiveRowButton = function() focusCalls = focusCalls + 1 end
 for i=1,50 do CL:PopulateRow(row, {orderID=42, spellID=1234, customerName='Buyer'}) end
 assert(row.action.actionEnabled == true, 'available action was drawn as unavailable')
+-- Compact rows show who the order is for, under the item, inside the row;
+-- the repeated action button is small and keeps the right edge; money is
+-- right-aligned like its header.
+CL:SetCompact(true); CL:ResizeList(container)
+CL:PopulateRow(row, {orderID=42, spellID=1234, customerName='Buyer'})
+do
+    local rx, ry, rw, rh = bounds(row)
+    local nx, ny, _, nh = bounds(row.name)
+    local cx, cy, _, ch = bounds(row.customer)
+    assert(row.customer:IsShown() and row.customer:GetText() == 'Buyer', 'compact rows hide the customer')
+    assert(nx == cx and cy >= ny + nh - 2, 'the customer is not under the item name')
+    assert(ny >= ry - 3 and cy + ch <= ry + rh + 3, 'the two text lines do not fit the compact row')
+    assert(rh == CL.ROW_H_COMPACT and rh <= 32, 'compact rows are not compact')
+    local ax, _, aw, ah = bounds(row.action)
+    local col = CL:ActiveCols().action
+    assert(aw <= CL.ACTION_COMPACT_W and ah == CL.ACTION_COMPACT_H, 'the action button is still full size')
+    assert(math.abs((ax + aw) - (rx + col.x + col.w)) < 0.5, 'the action button left its column edge')
+    assert(row.profit.justify == 'RIGHT' and container.header.cols.profit._label.justify == 'RIGHT',
+        'money is not right-aligned')
+    -- Without a customer the item name sits in the middle.
+    CL:PopulateRow(row, {orderID=43, spellID=1234})
+    local _, ny2, _, nh2 = bounds(row.name)
+    assert(math.abs((ny2 + nh2 / 2) - (ry + rh / 2)) <= 1, 'a lone item name floats off-centre')
+end
 row.action:Click()
 assert(rowCalls == 1, 'row action did not dispatch exactly once')
 row.scripts.OnEnter(row)
