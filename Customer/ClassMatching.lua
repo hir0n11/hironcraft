@@ -339,13 +339,18 @@ function M.GetContext(message, guid, sharedClass)
             else needsArmor=true end
         end
     end
+    local named = {}
     for word in message:gmatch('[^%s%p]+') do
         if explicitArmor[word] then armor = explicitArmor[word] end
-        if explicitProfessions[word] then profession = explicitProfessions[word] end
+        if explicitProfessions[word] then
+            profession = explicitProfessions[word]
+            named[profession] = true
+        end
     end
     for word in remaining:gmatch('%S+') do if explicitWords[word] then bypass=true end end
     if profession then
-        return {parentProfID=profession, explicitProfession=true, slots=slots,
+        -- Every profession named, for a list such as "bs/tailor/jc".
+        return {parentProfID=profession, explicitProfession=true, slots=slots, professions=named,
             weapons=next(requestedWeapons) and requestedWeapons or nil}
     end
     if bypass then return nil end

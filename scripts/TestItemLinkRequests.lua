@@ -549,6 +549,36 @@ HironCraftScanComm.applying_remote_state=false
 assert(Scan.DB.customers.SharedBuyer and Scan.DB.customers.SharedBuyer.faction=='Horde',
     'the side told by the linked account was lost')
 
+-- "lf bs/tailor" names two professions: a row for each, answered together.
+reset()
+scan('lf bs/tailor')
+assert(countRows()==2 and response(164) and response(197), 'a list of professions made one row')
+assert(response(164).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
+assert(#shared==1, 'one message was shared as two requests')
+Scan.GreetCustomer('LeftButton', order(164))
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+    'the professions were not answered together: '..tostring(sent[2] and sent[2].message))
+-- Commas, "&" and a question mark separate words like spaces do.
+reset()
+scan('LF bs, tailor?')
+assert(countRows()==2, 'a comma or a question mark hid a profession')
+-- The screenshot's message: "tailor" and "jc" are also words that name a
+-- profession for equipment; with no slot they must not narrow to one.
+reset()
+scan('lf bs/tailor/jc')
+assert(countRows()==2 and response(164) and response(197), '"lf bs/tailor/jc" did not make a row per profession')
+reset()
+scan('LF tailoring')
+assert(countRows()==1 and response(197), 'a profession named in full lost its row')
+-- One profession stays one row.
+reset()
+scan('LF bs/blacksmith')
+assert(countRows()==1 and response(164), 'two words for one profession made two rows')
+-- A keyword inside another word still does not count.
+reset()
+scan('LF absolutely nothing')
+assert(countRows()==0, 'a keyword inside a word was matched')
+
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this
 -- account knows gets its exact row, an unknown one a profession row.

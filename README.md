@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A list of professions makes a row for each (0.4.31)
+
+- "lf bs/tailor/jc" made one row. Profession words such as "tailor" and
+  "jc" also serve equipment requests ("lw wrist") and narrowed the request
+  to the last one named. Without a slot or weapon they now count like any
+  keyword, and a message naming several professions makes one row per
+  profession (one crafter each, in the order written), answered by one
+  greeting. Words separated by "/", ",", "&", "+", ";" or followed by
+  "?", "!", ".", ":" are recognised without permissive matching; a keyword
+  inside another word still is not.
+
 ## Orders stay where they appeared, as in CraftScan (0.4.30)
 
 - As in the original CraftScan, an order only reaches another account

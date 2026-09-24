@@ -115,11 +115,18 @@ local function SplitResponse(raw_response)
 end
 HironCraftScan.Utils.SplitResponse = SplitResponse
 
+-- Lists are written with more than spaces: "lf bs/tailor/jc", "bs,lw",
+-- "need jc?". These characters separate words as a space does.
+local WORD_BEFORE = { [' '] = true, ['/'] = true, [','] = true, ['&'] = true, ['+'] = true,
+    [';'] = true, ['('] = true }
+local WORD_AFTER = { [' '] = true, ['|'] = true, ['/'] = true, [','] = true, ['&'] = true,
+    ['+'] = true, [';'] = true, [')'] = true, ['?'] = true, ['!'] = true, ['.'] = true, [':'] = true }
+
 local function DelimitedHasMatchCheck(b, e, message)
     return b
         and e
-        and (b == 1 or message:sub(b - 1, b - 1) == ' ' or (b > 2 and message:sub(b - 2, b - 1) == '|r'))
-        and (e == #message or message:sub(e + 1, e + 1) == ' ' or message:sub(e + 1, e + 1) == '|')
+        and (b == 1 or WORD_BEFORE[message:sub(b - 1, b - 1)] or (b > 2 and message:sub(b - 2, b - 1) == '|r'))
+        and (e == #message or WORD_AFTER[message:sub(e + 1, e + 1)])
 end
 
 local function PermissiveHasMatchCheck(b, e, message)
@@ -1196,9 +1203,34 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
                 bestMatch = { crafter = crafterInfo.crafter, profID = profID,
                     equipmentRequests=equipmentRequests, classPending=armorWaitsForClass }
             end -- Keep looking for other crafters with keywords that match something specific.
+            if profID > 0 then return nil, nil, nil, { crafter = crafterInfo.crafter, profID = profID } end
         end
     end
 
+    -- "lf bs/tailor/jc" names several professions: one row each, answered
+    -- together. Only plain profession keywords count, one crafter per
+    -- profession (the first in the usual order), in the order written.
+    local professionMatches, seenProfession = {}, {}
+    local function KeywordPosition(tokens)
+        local first
+        for token in pairs(tokens) do
+            local b, e = string.find(message, token, 1, true)
+            while b do
+                if HasMatchCheck(b, e, message) then
+                    if not first or b < first then first = b end
+                    break
+                end
+                b, e = string.find(message, token, e + 1, true)
+            end
+        end
+        return first
+    end
+
+    -- A profession named without any slot or weapon ("lf tailor", "bs/jc")
+    -- is a keyword like any other: every profession it names counts.
+    local professionOnly = armorContext and armorContext.explicitProfession
+        and not next(armorContext.slots or {}) and not armorContext.weapons
+    local keywordMode = not armorContext or professionOnly
     for _, crafterInfo in ipairs(config.prof_keywords) do
         local equipmentProfession = false
         for _, request in ipairs(equipmentRequests or {}) do
@@ -1208,16 +1240,32 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             end
         end
         if
-            (equipmentProfession or (armorContext and (not equipmentRequests or #equipmentRequests==0)
-                    and crafterInfo.parentProfID == armorContext.parentProfID)
-                or (not armorContext and HasMatch(message, crafterInfo.keywords)))
+            (equipmentProfession
+                or (keywordMode and (HasMatch(message, crafterInfo.keywords)
+                    or (professionOnly and armorContext.professions
+                        and armorContext.professions[crafterInfo.parentProfID])))
+                or (armorContext and not professionOnly and (not equipmentRequests or #equipmentRequests==0)
+                    and crafterInfo.parentProfID == armorContext.parentProfID))
             and not HasMatch(message, crafterInfo.exclusions)
         then
-            local crafterInfo, itemID, recipeInfo = FindBestCrafter(crafterInfo)
-            if crafterInfo then
-                return crafterInfo, itemID, recipeInfo
+            local byKeyword = keywordMode and not equipmentProfession
+            local found, itemID, recipeInfo, candidate = FindBestCrafter(crafterInfo)
+            if found then
+                return found, itemID, recipeInfo
+            end
+            if byKeyword and candidate and not seenProfession[crafterInfo.parentProfID] then
+                seenProfession[crafterInfo.parentProfID] = true
+                professionMatches[#professionMatches + 1] = {
+                    crafterInfo = candidate, professionOnly = true,
+                    position = KeywordPosition(crafterInfo.keywords) or math.huge,
+                }
             end
         end
+    end
+
+    if #professionMatches > 1 and not (overrides and (overrides.forceCrafterInfo or overrides.equipmentRequest)) then
+        table.sort(professionMatches, function(lhs, rhs) return lhs.position < rhs.position end)
+        return professionMatches[1].crafterInfo, nil, nil, professionMatches
     end
 
     if not bestMatch and overrides and overrides.forceCrafterInfo then
