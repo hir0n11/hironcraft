@@ -778,6 +778,10 @@ for _, scale in ipairs({.65, 1, 1.3}) do
     assert(px == ax + 4 and px + pw == ax + aw - 4 and py + ph == ay + ah - 4,
         'craft progress escaped the button interior')
     assert(py == ay + 4, 'craft progress is a thin line instead of filling the button')
+    -- Where the fill has passed, the label is drawn white over the gold.
+    assert(progress.clipText:GetText() == row.action.text:GetText()
+        and math.abs(progress.clip:GetWidth() - pw * .5) < 0.5,
+        'the label does not change colour where the fill has passed')
 end
 CO:HideRowProgressVisual(row.action)
 page:SetScale(1)

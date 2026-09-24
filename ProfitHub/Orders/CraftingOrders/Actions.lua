@@ -66,6 +66,17 @@ function CO:EnsureRowProgressOverlay()
     bar:SetValue(0)
     bar:EnableMouse(false)
 
+    -- Where the fill has passed, the label turns white: gold text on a gold
+    -- wash loses its contrast. A copy of the label inside a frame clipped to
+    -- the filled width draws over the original there.
+    bar.clip = CreateFrame("Frame", nil, bar)
+    bar.clip:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    bar.clip:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+    bar.clip:SetWidth(1)
+    if bar.clip.SetClipsChildren then bar.clip:SetClipsChildren(true) end
+    bar.clipText = bar.clip:CreateFontString(nil, "OVERLAY")
+    bar.clipText:SetTextColor(1, 1, 1)
+
     local texture = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
     if texture and texture.SetDrawLayer then
         texture:SetDrawLayer("OVERLAY", 7)
@@ -125,8 +136,29 @@ function CO:ShowRowProgressVisual(btn, value)
     if self:PositionRowProgressOverlay(btn) then
         bar.ahuiOrderButton = btn
         bar:SetValue(value)
+        self:SyncProgressLabel(bar, btn, value)
         bar:Show()
     end
+end
+
+function CO:SyncProgressLabel(bar, btn, value)
+    local copy, clip = bar.clipText, bar.clip
+    if not copy or not clip then return end
+    local label = btn.text or btn.label or (btn.GetFontString and btn:GetFontString())
+    local text = label and label.GetText and label:GetText()
+    if type(text) ~= "string" or text == "" then
+        clip:Hide()
+        return
+    end
+    local font, size, flags = label.GetFont and label:GetFont()
+    if font then copy:SetFont(font, size or 11, flags or "") end
+    copy:ClearAllPoints()
+    copy:SetPoint("CENTER", label, "CENTER", 0, 0)
+    copy:SetText(text)
+    copy:SetTextColor(1, 1, 1)
+    local width = bar.GetWidth and bar:GetWidth() or 0
+    clip:SetWidth(math.max(1, width * (tonumber(value) or 0)))
+    clip:Show()
 end
 
 function CO:HideRowProgressVisual(btn)

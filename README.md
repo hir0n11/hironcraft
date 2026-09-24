@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The label turns white behind the fill (0.4.22)
+
+- While the craft progress fills the action button, the part of the label
+  the fill has passed is drawn white, the rest stays gold: gold text on the
+  gold wash lost its contrast.
+
 ## Craft progress fills the button (0.4.21)
 
 - The thin line at the bottom of the action button during a craft is
