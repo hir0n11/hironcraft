@@ -54,20 +54,17 @@ function CO:EnsureRowProgressOverlay()
         return self.rowProgressOverlay
     end
 
-    local bar = CreateFrame("StatusBar", nil, UIParent, "BackdropTemplate")
+    -- The whole button fills from left to right with a translucent wash, so
+    -- the progress reads at a glance and the label stays legible through it.
+    local bar = CreateFrame("StatusBar", nil, UIParent)
     bar.ahuiCraftingOrdersOwned = true
     bar:SetFrameStrata("TOOLTIP")
     bar:SetFrameLevel(10000)
-    bar:SetHeight(4)
     bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    bar:SetStatusBarColor(0.95, 0.78, 0.35, 1)
+    bar:SetStatusBarColor(1.00, 0.85, 0.40, 0.28)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     bar:EnableMouse(false)
-    if bar.SetBackdrop then
-        bar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-        bar:SetBackdropColor(0, 0, 0, 0.45)
-    end
 
     local texture = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
     if texture and texture.SetDrawLayer then
@@ -95,17 +92,15 @@ function CO:PositionRowProgressOverlay(btn)
         -- the profession window is scaled. Keep the fill inside its border.
         bar:SetParent(btn)
         bar:SetScale(1)
-        bar:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 4, 4)
+        bar:SetPoint("TOPLEFT", btn, "TOPLEFT", 4, -4)
         bar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 4)
-        bar:SetHeight(3)
         bar:SetFrameStrata(btn:GetFrameStrata())
         bar:SetFrameLevel(btn:GetFrameLevel() + 8)
     else
         bar:SetParent(UIParent)
         bar:SetScale(1)
-        bar:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1, 1)
+        bar:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         bar:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-        bar:SetHeight(4)
         bar:SetFrameStrata("TOOLTIP")
         bar:SetFrameLevel(10000)
     end

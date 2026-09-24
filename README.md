@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Craft progress fills the button (0.4.21)
+
+- The thin line at the bottom of the action button during a craft is
+  replaced by a translucent gold fill of the whole button from left to
+  right. It sits over the label, so it is translucent to keep "Crafting"
+  readable.
+
 ## Rows in progress are highlighted (0.4.20)
 
 - In the chat orders window a row whose customer answered (second mark) and

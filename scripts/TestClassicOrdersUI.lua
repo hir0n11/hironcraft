@@ -777,6 +777,7 @@ for _, scale in ipairs({.65, 1, 1.3}) do
     local ax, ay, aw, ah = bounds(row.action)
     assert(px == ax + 4 and px + pw == ax + aw - 4 and py + ph == ay + ah - 4,
         'craft progress escaped the button interior')
+    assert(py == ay + 4, 'craft progress is a thin line instead of filling the button')
 end
 CO:HideRowProgressVisual(row.action)
 page:SetScale(1)
