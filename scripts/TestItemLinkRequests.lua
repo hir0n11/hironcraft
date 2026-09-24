@@ -424,6 +424,30 @@ assert(#sent==3 and opened==3, 'already answered rows must open chat, not resend
 scan(a .. a .. b .. c)
 assert(countRows()==3 and #sent==3)
 
+-- "send to Lavu" looks like a crafter's pitch, but from a customer we greeted
+-- it is their answer: the second mark is set, and no request is made of it.
+reset()
+scan(a)
+Scan.GreetCustomer('LeftButton', order(101))
+assert(response(101).greeting_sent and not response(101).customer_answered)
+Scan.OnMessage('CHAT_MSG_WHISPER','send to seller','Buyer','Buyer-GUID')
+assert(response(101).customer_answered, 'a customer answering "send to <crafter>" got no second mark')
+assert(countRows()==1 and #sent==1, 'the answer made a request or sent something')
+-- A stranger saying the same is still an ad and leaves nothing behind.
+Scan.OnMessage('CHAT_MSG_WHISPER','send to seller','Stranger','Stranger-GUID')
+assert(not Scan.DB.customers.Stranger, 'an ad from a stranger created a customer')
+
+-- Old default keywords that are everyday words ("no crest") are retired;
+-- a list the crafter edited stays as it is.
+Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords='Enchanter, Crest'
+Scan.DB.characters['Tailor-Realm'].parent_professions[197].keywords='Tailor, Crest'
+assert(Scan.Scanner.RetireOldDefaultKeywords()==1)
+assert(Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords==nil
+    and Scan.DB.characters['Tailor-Realm'].parent_professions[197].keywords=='Tailor, Crest')
+Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords='bs,blacksmith'
+Scan.DB.characters['Tailor-Realm'].parent_professions[197].keywords='tailor'
+reloadConfig()
+
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this
 -- account knows gets its exact row, an unknown one a profession row.

@@ -92,10 +92,10 @@ HironCraftScan.L = {
     [LID.GLOBAL_EXCLUSION_DEFAULT] = 'LFW, WTS, LF work',
     [LID.DEFAULT_KEYWORDS_BLACKSMITHING] = 'BS, Blacksmith, Armorsmith, Weaponsmith',
     [LID.DEFAULT_KEYWORDS_LEATHERWORKING] = 'LW, Leatherworking, Leatherworker',
-    [LID.DEFAULT_KEYWORDS_ALCHEMY] = 'Alc, Alchemist, Stone',
+    [LID.DEFAULT_KEYWORDS_ALCHEMY] = 'Alc, Alchemist',
     [LID.DEFAULT_KEYWORDS_TAILORING] = 'Tailor',
     [LID.DEFAULT_KEYWORDS_ENGINEERING] = 'Engineer, Eng',
-    [LID.DEFAULT_KEYWORDS_ENCHANTING] = 'Enchanter, Crest',
+    [LID.DEFAULT_KEYWORDS_ENCHANTING] = 'Enchanter',
     [LID.DEFAULT_KEYWORDS_JEWELCRAFTING] = 'JC, Jewelcrafter',
     [LID.DEFAULT_KEYWORDS_INSCRIPTION] = 'Inscription, Inscriptionist, Scribe',
     -- Release notes

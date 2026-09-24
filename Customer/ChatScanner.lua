@@ -2437,33 +2437,38 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
+    -- A whisper from a customer we already talk to: keep it, mark them as
+    -- having answered, and let the linked account know.
+    local function RecordCustomerWhisper()
+        local chat_history = saved(customerInfo, 'chat_history', {})
+        local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
+        if HironCraftScan.QuickReplies then
+            entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
+        end
+        HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, entry)
+        HironCraftScan.RequestTracking.MarkReply(customerInfo, entry)
+        if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
+            HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)
+        end
+
+        HironCraftScanCraftingOrderPage:ShowGeneric()
+        FlashClientIcon()
+    end
+
     if not overrides.forceCrafterInfo and not overrides.itemInfo
         and IsCrafterAdvertisement(message) then
-        -- Retain existing local history, but do not create/reopen a request,
-        -- switch the active order, or classify this sales pitch as a question.
-        if incomingWhisper and customerInfo then
-            HironCraftScan.Utils.AppendUniqueChatHistory(
-                saved(customerInfo, 'chat_history', {}), overrides.chatEntry)
-            HironCraftScanCraftingOrderPage:ShowGeneric()
+        -- Do not create/reopen a request, switch the active order, or classify
+        -- this line as a question. From a customer we already greeted, "send
+        -- to Lavu" is their answer, not a sales pitch: it still counts as one.
+        if incomingWhisper and customerInfo and not overrides.classRetry then
+            RecordCustomerWhisper()
         end
         return false
     end
 
     if (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER') and not overrides.classRetry then
         if customerInfo then
-            local chat_history = saved(customerInfo, 'chat_history', {})
-            local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
-            if HironCraftScan.QuickReplies then
-                entry.conversationOwners = HironCraftScan.QuickReplies:RememberCustomerConversation(customerInfo)
-            end
-            HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, entry)
-            HironCraftScan.RequestTracking.MarkReply(customerInfo, entry)
-            if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
-                HironCraftScanComm:ShareCustomerChat(customer, customerGuid or customerInfo.guid, entry, true)
-            end
-
-            HironCraftScanCraftingOrderPage:ShowGeneric()
-            FlashClientIcon()
+            RecordCustomerWhisper()
 
             -- Follow-up questions stay in the current conversation. Only a
             -- message that independently matches the craft scanner continues
@@ -2754,7 +2759,46 @@ local function UpdateScannerEventRegistry(...)
     end
 end
 
+-- Default profession keywords that turned out to be everyday words: "no
+-- crest" made an Enchanting request, "stone" an Alchemy one. A crafter who
+-- kept exactly an old default list gets the new one; edited lists stay.
+local RETIRED_DEFAULT_KEYWORDS = {
+    ['Alc, Alchemist, Stone'] = true,
+    ['Enchanter, Crest'] = true,
+    ['Алх, Алхимик, Камень'] = true,
+    ['Чародей, Гребень'] = true,
+    ['Alc, Alchemist, Stein'] = true,
+    ['Verzauberer, Wappen'] = true,
+    ['Alq, Alquimista, Piedra'] = true,
+    ['Encantador, Blason'] = true,
+    ['Alch, Alchimiste, Pierre'] = true,
+    ['Enchanteur, Ecu'] = true,
+    ['Alc, Alchimista, Pietra'] = true,
+    ['Incantatore, Crest'] = true,
+    ['Alc, Alquimista, Pedra'] = true,
+    ['Encantador, Brasão'] = true,
+    ['炼金, 炼金师, 石头'] = true,
+    ['附魔师, 徽记'] = true,
+    ['기본 키워드 - 연금술: 연, 연금술사, 돌'] = true,
+    ['기본 키워드 - 마법부여: 마법부여사, 문장'] = true,
+}
+
+function HironCraftScan.Scanner.RetireOldDefaultKeywords()
+    local changed = 0
+    for _, character in pairs(HironCraftScan.DB.characters or {}) do
+        for _, parent in pairs(type(character) == 'table' and character.parent_professions or {}) do
+            if type(parent) == 'table' and type(parent.keywords) == 'string'
+                and RETIRED_DEFAULT_KEYWORDS[parent.keywords] then
+                parent.keywords = nil
+                changed = changed + 1
+            end
+        end
+    end
+    return changed
+end
+
 HironCraftScan.Utils.onLoad(function()
+    HironCraftScan.Scanner.RetireOldDefaultKeywords()
     HironCraftScan.Scanner.LoadConfig()
 
     frame:SetScript('OnEvent', OnMessage_)

@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## "send to Lavu" counts as an answer; no "crest"/"stone" defaults (0.4.18)
+
+- A customer's "send to Lavu" looks like a crafter's ad and only went into
+  the chat history: the second mark never appeared. From a customer this
+  account already talks to it now counts as their answer (marked, shared
+  with the linked account); it still creates no request, and the same line
+  from a stranger is still ignored as an ad.
+- The default Enchanting keyword "Crest" and Alchemy keyword "Stone" (and
+  their translations) were everyday words: "no crest" made an Enchanting
+  request. They are removed. A crafter who kept exactly the old default list
+  gets the new one; edited lists are left alone. Profession keywords are set
+  per crafter on their profession page (Keywords).
+
 ## A delivered item closes its slot for an hour (0.4.17)
 
 - After Martyr's Leggings were delivered, "it is ur legs :d" made a new
