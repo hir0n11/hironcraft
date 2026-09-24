@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Rows in progress are highlighted (0.4.20)
+
+- In the chat orders window a row whose customer answered (second mark) and
+  whose order is not delivered yet (no final third mark) carries a soft
+  yellow wash under the hover highlight. It follows the marks: a delivered
+  order, or the second mark set back to a cross, clears it.
+
 ## Compact order rows show the customer (0.4.19)
 
 - Compact rows of the crafting order list are 32px instead of 36 and carry

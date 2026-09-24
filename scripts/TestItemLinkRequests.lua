@@ -448,6 +448,39 @@ Scan.DB.characters['Seller-Realm'].parent_professions[164].keywords='bs,blacksmi
 Scan.DB.characters['Tailor-Realm'].parent_professions[197].keywords='tailor'
 reloadConfig()
 
+-- Rows in progress - the customer answered, the order is not delivered - carry
+-- a soft yellow wash; nothing else does.
+reset()
+scan(a)
+do
+    local previousStatus=Scan.OrderFulfillment
+    local status=nil
+    Scan.OrderFulfillment={GetStatus=function() return status end}
+    local textures=0
+    local rowFrame=setmetatable({order=order(101)},{__index=HironCraftScanCrafterOrderListElementMixin})
+    function rowFrame:CreateTexture()
+        textures=textures+1
+        local t={shown=true}
+        function t:SetAllPoints() end
+        function t:SetColorTexture(...) self.color={...} end
+        function t:SetShown(v) self.shown=v end
+        return t
+    end
+    rowFrame:UpdateProgressHighlight()
+    assert(textures==0 and not Scan.IsOrderInProgress(order(101)), 'a row nobody answered was highlighted')
+    response(101).customer_answered=true
+    rowFrame:UpdateProgressHighlight()
+    assert(rowFrame.ProgressTexture.shown and rowFrame.ProgressTexture.color[1]==1
+        and rowFrame.ProgressTexture.color[4]<=0.15, 'an answered row was not softly highlighted')
+    status={status='claimed'}
+    rowFrame:UpdateProgressHighlight()
+    assert(rowFrame.ProgressTexture.shown, 'an order being crafted lost its highlight')
+    status={status='fulfilled'}
+    rowFrame:UpdateProgressHighlight()
+    assert(not rowFrame.ProgressTexture.shown and textures==1, 'a delivered order stayed highlighted')
+    Scan.OrderFulfillment=previousStatus
+end
+
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this
 -- account knows gets its exact row, an unknown one a profession row.

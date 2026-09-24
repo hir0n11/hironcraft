@@ -275,6 +275,13 @@ HironCraftScanCrafterTableCellInteractionMixin = CreateFromMixins(TableBuilderCe
 function HironCraftScanCrafterTableCellInteractionMixin:UpdateOrderStatus()
     self.OrderStatus.order = self.order
     self.OrderStatus:Refresh()
+    -- The row's "in progress" wash follows the same marks.
+    local row = self.GetParent and self:GetParent()
+    local order = self.order
+    if row and row.UpdateProgressHighlight and type(row.order) == 'table' and type(order) == 'table'
+        and row.order.customerName == order.customerName and row.order.responseID == order.responseID then
+        row:UpdateProgressHighlight()
+    end
 end
 
 function HironCraftScanCrafterTableCellInteractionMixin:Populate(rowData, dataIndex)

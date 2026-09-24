@@ -40,6 +40,7 @@ function HironCraftScanCrafterOrderListElementMixin:Init(elementData)
     -- self.browseType = elementData.browseType;
     self.pageFrame = elementData.pageFrame;
     self.contextMenu = elementData.contextMenu;
+    self:UpdateProgressHighlight()
 end
 
 local function removeOrder(orders, order, orderID)
@@ -137,6 +138,33 @@ end
 
 function HironCraftScanCrafterOrderListElementMixin:OnClick(button)
     HironCraftScan.GreetCustomer(button, self.order)
+end
+
+-- A conversation under way: the customer answered (second mark) and the
+-- order is not delivered yet (no final third mark). These are the rows that
+-- still need something from the crafter, so they carry a soft yellow wash.
+function HironCraftScan.IsOrderInProgress(order)
+    local response = order and HironCraftScan.OrderToResponse(order)
+    if type(response) ~= 'table' or not response.customer_answered then return false end
+    local fulfillment = HironCraftScan.OrderFulfillment
+    local ok, entry = true, nil
+    if fulfillment and fulfillment.GetStatus then ok, entry = pcall(fulfillment.GetStatus, fulfillment, order) end
+    local status = ok and type(entry) == 'table' and entry.status or nil
+    return status ~= 'fulfilled'
+end
+
+local PROGRESS_COLOR = { 1.00, 0.82, 0.20, 0.10 }
+
+function HironCraftScanCrafterOrderListElementMixin:UpdateProgressHighlight()
+    local inProgress = HironCraftScan.IsOrderInProgress(self.order)
+    if not self.ProgressTexture then
+        if not inProgress then return end
+        -- Under the hover highlight, so hovering still shows on top of it.
+        self.ProgressTexture = self:CreateTexture(nil, 'BACKGROUND', nil, -1)
+        self.ProgressTexture:SetAllPoints()
+        self.ProgressTexture:SetColorTexture(unpack(PROGRESS_COLOR))
+    end
+    self.ProgressTexture:SetShown(inProgress)
 end
 
 local chatTooltip = HironCraftScan.Utils.ChatHistoryTooltip:new();
