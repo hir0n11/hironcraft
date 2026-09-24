@@ -1806,7 +1806,7 @@ end
 local lastShown = {}
 function QuickReplies:OnWhisper(customer, message, customerInfo)
     if HironCraftScan.Scanner and HironCraftScan.Scanner.IsCrafterAdvertisement
-        and HironCraftScan.Scanner.IsCrafterAdvertisement(message) then return end
+        and HironCraftScan.Scanner.IsCrafterAdvertisement(message, true) then return end
     local config = EnsureConfig()
     if not config.enabled then
         return

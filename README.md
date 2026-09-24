@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A whispered "can craft [item]" is always a question (0.4.28)
+
+- Whispered to the crafter, a short "can craft/recraft [item]" without a
+  question mark is a customer's question from anyone, not only from a known
+  customer; crafters pitch that way in trade chat. Clear whisper spam
+  ("send order to X, commission ...", "I can craft", "WTS") is still
+  filtered.
+
 ## "can craft [item]" from a customer makes a row (0.4.27)
 
 - A customer in a conversation asked "can craft [Masterwork Sin'dorei Band]"

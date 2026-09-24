@@ -168,7 +168,10 @@ do
     for _, message in ipairs(offers) do
         reset()
         assert(isAd(message) and not match(message), 'crafter offer accepted: '..message)
-        for _, event in ipairs({'CHAT_MSG_CHANNEL','CHAT_MSG_WHISPER','CHAT_MSG_BN_WHISPER'}) do
+        -- "Can craft [item]" whispered to us is a customer's question.
+        local events = message:find('^Can craft') and {'CHAT_MSG_CHANNEL'}
+            or {'CHAT_MSG_CHANNEL','CHAT_MSG_WHISPER','CHAT_MSG_BN_WHISPER'}
+        for _, event in ipairs(events) do
             Scan.OnMessage(event,message,'Advertiser','Other-GUID')
         end
         flushTimers()
@@ -437,16 +440,19 @@ assert(countRows()==1 and #sent==1, 'the answer made a request or sent something
 Scan.OnMessage('CHAT_MSG_WHISPER','send to seller','Stranger','Stranger-GUID')
 assert(not Scan.DB.customers.Stranger, 'an ad from a stranger created a customer')
 
--- "can craft [link]" without its "?" (sent as the next line) is a question
--- from a customer already in a conversation, and makes the row.
+-- "can craft [link]" whispered without its "?" (sent as the next line) is a
+-- customer's question and makes the row, from anyone.
 reset()
 scan(a)
 Scan.GreetCustomer('LeftButton', order(101))
 Scan.OnMessage('CHAT_MSG_WHISPER','can craft '..b,'Buyer','Buyer-GUID')
 assert(response(102), 'a customer asking "can craft [item]" got no row')
--- From someone we never talked to it is still a crafter's pitch.
-Scan.OnMessage('CHAT_MSG_WHISPER','can craft '..b,'Pitcher','Pitcher-GUID')
-assert(not Scan.DB.customers.Pitcher, 'a stranger saying "can craft [item]" became a customer')
+Scan.OnMessage('CHAT_MSG_WHISPER','can craft '..b,'Newcomer','Newcomer-GUID')
+assert(Scan.DB.customers.Newcomer and Scan.DB.customers.Newcomer.responses[102],
+    'a first whisper "can craft [item]" got no row')
+-- In trade chat the same words are a crafter's pitch.
+scan('Can craft '..b,nil,'Pitcher')
+assert(not Scan.DB.customers.Pitcher, 'a "can craft [item]" pitch in trade became a customer')
 
 -- Old default keywords that are everyday words ("no crest") are retired;
 -- a list the crafter edited stays as it is.
