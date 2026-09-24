@@ -792,15 +792,55 @@ local RACE_FACTIONS = {
     ZandalariTroll = 'Horde', Vulpera = 'Horde',
 }
 
-local function CustomerFaction(customerInfo)
-    local guid = type(customerInfo) == 'table' and customerInfo.guid or nil
-    if type(guid) ~= 'string' or (issecretvalue and issecretvalue(guid))
-        or not guid:match('^Player%-') or type(GetPlayerInfoByGUID) ~= 'function' then
-        return nil
+local function Secret(value)
+    return issecretvalue and issecretvalue(value)
+end
+
+-- Races that pick a side share one race name, but each side has its own race
+-- ID (Pandaren 25/26, Dracthyr 52/70, Earthen 85/84), and the game tells the
+-- faction of a race ID.
+local function FactionOfRaceID(raceID)
+    if type(raceID) ~= 'number' or Secret(raceID)
+        or not (C_CreatureInfo and C_CreatureInfo.GetFactionInfo) then return nil end
+    local ok, info = pcall(C_CreatureInfo.GetFactionInfo, raceID)
+    return ok and type(info) == 'table' and not Secret(info.groupTag) and ValidFaction(info.groupTag) or nil
+end
+
+local function LookUpFaction(guid)
+    if type(guid) ~= 'string' or Secret(guid) or not guid:match('^Player%-') then return nil end
+    if C_PlayerInfo and C_PlayerInfo.GetRace and PlayerLocation and PlayerLocation.CreateFromGUID then
+        local ok, raceID = pcall(function() return C_PlayerInfo.GetRace(PlayerLocation:CreateFromGUID(guid)) end)
+        local faction = ok and FactionOfRaceID(raceID)
+        if faction then return faction end
     end
+    if type(GetPlayerInfoByGUID) ~= 'function' then return nil end
     local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, guid)
-    if not ok or (issecretvalue and issecretvalue(race)) or type(race) ~= 'string' then return nil end
+    if not ok or Secret(race) or type(race) ~= 'string' then return nil end
     return RACE_FACTIONS[race]
+end
+
+-- The customer's side, remembered once known: the client forgets players it
+-- no longer sees, and a linked account may have told us.
+local function CustomerFaction(customerInfo)
+    if type(customerInfo) ~= 'table' then return nil end
+    local faction = LookUpFaction(customerInfo.guid)
+    if faction then
+        customerInfo.faction = faction
+        return faction
+    end
+    return ValidFaction(customerInfo.faction)
+end
+
+function QuickReplies:CustomerFaction(customerInfo)
+    return CustomerFaction(customerInfo)
+end
+
+-- Someone who whispered this character is on its side (or on Battle.net).
+function QuickReplies:RememberWhisperFaction(customerInfo)
+    local current = PlayerFaction()
+    if type(customerInfo) == 'table' and current and not LookUpFaction(customerInfo.guid) then
+        customerInfo.faction = current
+    end
 end
 
 -- False only when the customer is known to be on the other side.

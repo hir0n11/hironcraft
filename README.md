@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The other faction is recognised for every race (0.4.29)
+
+- Races that pick their side (Pandaren, Dracthyr, Earthen) share one race
+  name, so 0.4.26 could not tell their faction and such customers still
+  showed on both sides. The side now comes from the race ID, which differs
+  per faction, and is remembered on the customer. A customer who whispered
+  this character is on its side, and the linked account passes the side it
+  knows along with each shared request.
+
 ## A whispered "can craft [item]" is always a question (0.4.28)
 
 - Whispered to the crafter, a short "can craft/recraft [item]" without a

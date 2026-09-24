@@ -518,6 +518,7 @@ QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102}
 assert(#visible('AwayBuyer')==0,'an Alliance character was offered to write to a Horde customer')
 -- A race that chooses its side is not guessed.
 customerRace='Pandaren'
+Scan.DB.customers.AwayBuyer.faction=nil
 QuickReplies:OnOrderFulfillmentUpdated({customerName='AwayBuyer',responseID=102},hordeDone)
 assert(#visible('AwayBuyer')==1,'a customer of unknown side was held back')
 -- The same knowledge hides the other side's rows: by race, or through the
@@ -527,9 +528,22 @@ assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'a H
 customerRace='Human'
 assert(not QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'an Alliance customer is the other side')
 customerRace='Pandaren'
+Scan.DB.customers.AwayBuyer.faction=nil
 assert(not QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, {conversationFaction='Alliance'}))
 assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, {conversationFaction='Horde'}),
     'a Pandaren talked to on the Horde side was not the other side')
+-- A Horde Pandaren has a race ID of its own, and the game names its side.
+C_PlayerInfo={GetRace=function() return 26 end}
+PlayerLocation={CreateFromGUID=function(_, guid) return {guid=guid} end}
+C_CreatureInfo={GetFactionInfo=function(id) return ({[25]={groupTag='Alliance'},[26]={groupTag='Horde'}})[id] end}
+assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'a Horde Pandaren was not the other side')
+assert(Scan.DB.customers.AwayBuyer.faction=='Horde', 'the side was not remembered')
+-- Remembered once the client no longer knows the player.
+C_PlayerInfo=nil
+customerRace=nil
+assert(QuickReplies:IsOtherSide(Scan.DB.customers.AwayBuyer, awayResponse), 'the remembered side was lost')
+PlayerLocation,C_CreatureInfo=nil,nil
+Scan.DB.customers.AwayBuyer.faction=nil
 GetPlayerInfoByGUID=previousPlayerInfo
 Scan.DB.customers.AwayBuyer.guid=awayGuid
 awayResponse.conversationCharacter='Collector-OtherRealm';awaySecond.conversationCharacter='Collector-OtherRealm'

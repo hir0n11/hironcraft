@@ -808,6 +808,10 @@ function HironCraftScanComm:ShareCustomerOrder(
         customerGuid = customerGuid,
         lastChatFrameMessage = HironCraftScan.Utils.DeepCopy(lastChatFrameMessage),
         customerClass = HironCraftScan.ClassMatching and HironCraftScan.ClassMatching.ResolveClass(customerGuid),
+        -- The side this account knows the customer is on; the other account
+        -- may not be able to tell (a race that picks its side, not cached).
+        customerFaction = HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.CustomerFaction
+            and HironCraftScan.QuickReplies:CustomerFaction(HironCraftScan.DB.customers[customer]),
         requestToken = requestToken,
         restartTerminalRequest = restartTerminalRequest == true,
         requestTokens = requestTokens,
@@ -936,6 +940,8 @@ local function ReceiveShareCustomerOrder(sender, data, senderID)
             requestTokens = data.requestTokens,
             restartTerminalRequest = data.restartTerminalRequest == true,
             customerClass = data.customerClass,
+            customerFaction = (data.customerFaction == 'Alliance' or data.customerFaction == 'Horde')
+                and data.customerFaction or nil,
             conversationOwners = data.lastChatFrameMessage and data.lastChatFrameMessage.conversationOwners,
             chatEntry = data.lastChatFrameMessage and HironCraftScan.Utils.DeepCopy(data.lastChatFrameMessage),
         }

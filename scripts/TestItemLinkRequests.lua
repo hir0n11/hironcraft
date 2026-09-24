@@ -538,6 +538,14 @@ do
     Scan.DB.settings.hide_other_faction_orders=nil
     Scan.QuickReplies.IsOtherSide=previousSide
 end
+-- The linked account tells the customer's side along with the request, so a
+-- race that picks its side is known here too.
+reset()
+HironCraftScanComm.applying_remote_state=true
+Scan.OnMessage('CHAT_MSG_CHANNEL','LF '..a,'SharedBuyer','Shared-GUID',{customerFaction='Horde'})
+HironCraftScanComm.applying_remote_state=false
+assert(Scan.DB.customers.SharedBuyer and Scan.DB.customers.SharedBuyer.faction=='Horde',
+    'the side told by the linked account was lost')
 
 -- Recipe links count like item links: "LF crafter [Leatherworking: X] and
 -- [Inscription: Y]" is two requests, not the first one only. A recipe this

@@ -2553,9 +2553,26 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
+    -- The customer's side: what the linked account told us, or ours when they
+    -- whispered us (a whisper does not cross sides; Battle.net is apart).
+    local function RememberCustomerFaction(info)
+        if type(info) ~= 'table' then return end
+        local shared = overrides.customerFaction
+        if (shared == 'Alliance' or shared == 'Horde') and not info.faction then info.faction = shared end
+        if (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_WHISPER_INFORM')
+            and not overrides.remoteRequest and HironCraftScan.QuickReplies
+            and HironCraftScan.QuickReplies.RememberWhisperFaction then
+            HironCraftScan.QuickReplies:RememberWhisperFaction(info)
+        end
+        if HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.CustomerFaction then
+            HironCraftScan.QuickReplies:CustomerFaction(info)
+        end
+    end
+
     -- A whisper from a customer we already talk to: keep it, mark them as
     -- having answered, and let the linked account know.
     local function RecordCustomerWhisper()
+        RememberCustomerFaction(customerInfo)
         local chat_history = saved(customerInfo, 'chat_history', {})
         local entry = overrides and overrides.chatEntry or MakeChatHistoryEntryDefault(customer, message, event)
         if HironCraftScan.QuickReplies then
@@ -2655,6 +2672,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         elseif overrides.forceGeneralRequest or IsGenericRequest(message) then
             customerInfo = customerInfo or saved(HironCraftScan.DB.customers, customer, {})
             customerInfo.guid = customerGuid or customerInfo.guid
+            RememberCustomerFaction(customerInfo)
             local response = HandleGeneralRequest(
                 message, customer, customerInfo, overrides, event)
             OfferDeferredQuickReply(
@@ -2667,6 +2685,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
 
     local customerInfo = saved(HironCraftScan.DB.customers, customer, {})
     customerInfo.guid = customerGuid or customerInfo.guid
+    RememberCustomerFaction(customerInfo)
 
     if crafterInfo.equipmentRequests and #crafterInfo.equipmentRequests > 0 then
         local responses, tokens = {}, {}
