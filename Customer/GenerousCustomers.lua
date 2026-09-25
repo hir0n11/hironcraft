@@ -87,6 +87,7 @@ function M.RecordTip(name, tipCopper, orderID)
         if entry.orders[id] then return false end
         entry.orders[id] = true
     end
+    local before = Mark(entry)
     entry.count = (tonumber(entry.count) or 0) + 1
     entry.total = (tonumber(entry.total) or 0) + tipCopper
     entry.max = math.max(tonumber(entry.max) or 0, tipCopper)
@@ -98,7 +99,8 @@ function M.RecordTip(name, tipCopper, orderID)
         and (tonumber(entry.max) or 0) < M.ThresholdCopper() then
         entry.mark = 'stingy'
     end
-    return true
+    -- Second result: whether the coin in front of the name changed.
+    return true, Mark(entry) ~= before
 end
 
 -- By hand: 'generous', 'stingy' or 'none'. true/false mean generous / none.

@@ -12,10 +12,11 @@ local G = Scan.Generous
 local GOLD = 10000
 
 -- In between: counted, not marked.
-G.RecordTip('Middle-Realm', 4999 * GOLD, 1)
-assert(G.MarkOf('Middle') == nil, 'a 4,999 gold tip got a mark')
+local counted, changed = G.RecordTip('Middle-Realm', 4999 * GOLD, 1)
+assert(counted and not changed and G.MarkOf('Middle') == nil, 'a 4,999 gold tip got a mark')
 -- 5,000 and more: generous, whatever the realm or the case of the name.
-G.RecordTip('Big-Realm', 5000 * GOLD, 2)
+counted, changed = G.RecordTip('Big-Realm', 5000 * GOLD, 2)
+assert(changed, 'a new mark was not reported, so the list would not redraw')
 assert(G.IsGenerous('Big') and G.IsGenerous('big-otherrealm') and G.IsGenerous('BIG'),
     'a 5,000 gold tip did not mark')
 -- Under 999: stingy; no tip at all is stingy too.

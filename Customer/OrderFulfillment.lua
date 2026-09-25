@@ -1396,7 +1396,11 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
     -- A delivered order with a generous tip marks its customer, here and on
     -- every linked account the notice reaches.
     if notice.status == self.Status.Fulfilled and notice.tipAmount and HironCraftScan.Generous then
-        HironCraftScan.Generous.RecordTip(notice.customerName, notice.tipAmount, notice.orderID)
+        local _, markChanged = HironCraftScan.Generous.RecordTip(notice.customerName, notice.tipAmount, notice.orderID)
+        -- Show the coin now, not at the list's next redraw.
+        if markChanged and HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
+            HironCraftScanCraftingOrderPage:ShowGeneric()
+        end
     end
 
     local notices = EnsureCompletionStorage()

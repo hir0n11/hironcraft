@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A new tip mark shows at once (0.4.35)
+
+- The coin in front of a customer's name was set when the order was
+  delivered, but the chat orders table redrew the name only at its next
+  update. It now redraws as soon as a mark appears or changes.
+
 ## Recipe shopping tooltip error (0.4.34)
 
 - Hovering an entry of the recipe shopping list raised a Lua error: the
