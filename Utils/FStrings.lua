@@ -24,7 +24,7 @@ HironCraftScan.Utils.IsAsciiWord = IsAsciiWord
 -- are still not typos: "help" is not "helm", "stuff" is not "staff", "boost"
 -- is not "boots", "danger" is not "dagger".
 local COMMON_WORDS = {
-    ['about'] = true, ['after'] = true, ['again'] = true, ['also'] = true, ['back'] = true, ['bank'] = true,
+    ['about'] = true, ['cap'] = true, ['caps'] = true, ['after'] = true, ['again'] = true, ['also'] = true, ['back'] = true, ['bank'] = true,
     ['bars'] = true, ['base'] = true, ['bash'] = true, ['beat'] = true, ['been'] = true, ['beer'] = true, ['bell'] = true, 
     ['bent'] = true, ['best'] = true, ['bets'] = true, ['bill'] = true, ['bind'] = true, ['bird'] = true, ['bite'] = true, ['blue'] = true,
     ['body'] = true, ['bold'] = true, ['bolt'] = true, ['bone'] = true, ['book'] = true, ['boost'] = true, ['boosts'] = true, 

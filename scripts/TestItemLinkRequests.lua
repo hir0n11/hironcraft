@@ -570,6 +570,14 @@ assert(countRows()==2 and response(164) and response(197), '"lf bs/tailor/jc" di
 reset()
 scan('LF tailoring')
 assert(countRows()==1 and response(197), 'a profession named in full lost its row')
+-- "a tailor who can craft me a smith tool": the second profession names the
+-- item, not another crafter to ask.
+reset()
+scan('LF tailor that can craft me bs tool for a low price!')
+assert(countRows()==1 and response(197) and not response(164), 'a tool of a profession became a second request')
+reset()
+scan('LF tailor, need a tool for bs')
+assert(countRows()==1 and response(197), '"tool for <profession>" became a second request')
 -- One profession stays one row.
 reset()
 scan('LF bs/blacksmith')
@@ -1487,6 +1495,15 @@ Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Buyer','Buyer-GU
 assert(response('equipment:755:INVTYPE_FINGER'),'the ring in a follow-up whisper made no row')
 assert(response('equipment:164:INVTYPE_WRIST'),'the wrist in a follow-up whisper made no row')
 assert(#sent==0,'a follow-up whisper sent something by itself')
+-- Small talk in that conversation is not read through typos: "writs" alone
+-- makes no row, "LF writs" does.
+reset()
+Scan.QuickReplies.HasUnfinishedOrders=function(_,customer) return customer=='Buyer' end
+classByGUID['Buyer-GUID']='WARRIOR'
+Scan.OnMessage('CHAT_MSG_WHISPER','writs','Buyer','Buyer-GUID')
+assert(not response('equipment:164:INVTYPE_WRIST'), 'a typo in small talk made a row')
+Scan.OnMessage('CHAT_MSG_WHISPER','LF writs','Buyer','Buyer-GUID')
+assert(response('equipment:164:INVTYPE_WRIST'), 'a typo after LF lost its row')
 -- Outside a conversation with something open, the same words are no request.
 reset()
 Scan.QuickReplies.HasUnfinishedOrders=function() return false end

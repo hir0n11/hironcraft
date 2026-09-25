@@ -1032,6 +1032,38 @@ local function IsCrafterAdvertisement(message, whisper)
 end
 HironCraftScan.Scanner.IsCrafterAdvertisement = IsCrafterAdvertisement
 
+-- Professions a message names as the kind of item, not as a crafter: the
+-- word right before "tool"/"gear"/"accessory" ("alchemy tool", "jc tools",
+-- "alchemy profession tool"), or right after "tool for".
+local TOOL_WORDS = { tool = true, tools = true, gear = true, accessory = true, accessories = true,
+    equipment = true, ['инструмент'] = true, ['инструменты'] = true }
+
+local function DescribedProfessions(message)
+    local words = {}
+    for word in message:lower():gmatch('[%w\128-\255]+') do words[#words + 1] = word end
+    local described = {}
+    local function Profession(word)
+        if not word then return nil end
+        local id = HironCraftScan.ClassMatching and HironCraftScan.ClassMatching.ProfessionOfWord(word)
+        if id then return id end
+        for _, crafterInfo in ipairs(config.prof_keywords) do
+            if crafterInfo.keywords[word] then return crafterInfo.parentProfID end
+        end
+    end
+    for index, word in ipairs(words) do
+        if TOOL_WORDS[word] then
+            local before = Profession(words[index - 1])
+                or (words[index - 1] == 'profession' and Profession(words[index - 2]))
+            if before then described[before] = true end
+            if words[index + 1] == 'for' then
+                local after = Profession(words[index + 2])
+                if after then described[after] = true end
+            end
+        end
+    end
+    return described
+end
+
 local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     local originalMessage = message
     message = string.lower(message)
@@ -1149,7 +1181,8 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
         local existing = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
         armorContext = HironCraftScan.ClassMatching.GetContext(originalMessage,
             customerGuid or (existing and existing.guid),
-            HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass)
+            HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass,
+            { noTypos = overrides and overrides.genericFollowup and not HasMatch(message, config.inclusions) })
     end
     local equipmentRequests = HironCraftScan.ClassMatching
         and HironCraftScan.ClassMatching.GetRequests(armorContext) or nil
@@ -1256,7 +1289,7 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             if byKeyword and candidate and not seenProfession[crafterInfo.parentProfID] then
                 seenProfession[crafterInfo.parentProfID] = true
                 professionMatches[#professionMatches + 1] = {
-                    crafterInfo = candidate, professionOnly = true,
+                    crafterInfo = candidate, professionOnly = true, parentProfID = crafterInfo.parentProfID,
                     position = KeywordPosition(crafterInfo.keywords) or math.huge,
                 }
             end
@@ -1264,8 +1297,17 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
 
     if #professionMatches > 1 and not (overrides and (overrides.forceCrafterInfo or overrides.equipmentRequest)) then
-        table.sort(professionMatches, function(lhs, rhs) return lhs.position < rhs.position end)
-        return professionMatches[1].crafterInfo, nil, nil, professionMatches
+        -- "alchemy tool", "tool for alchemy": the profession names the item,
+        -- not another crafter to ask.
+        local describes = DescribedProfessions(message)
+        local asked = {}
+        for _, match in ipairs(professionMatches) do
+            if not describes[match.parentProfID] then asked[#asked + 1] = match end
+        end
+        if #asked == 0 then asked = professionMatches end
+        table.sort(asked, function(lhs, rhs) return lhs.position < rhs.position end)
+        if #asked == 1 then return asked[1].crafterInfo end
+        return asked[1].crafterInfo, nil, nil, asked
     end
 
     if not bestMatch and overrides and overrides.forceCrafterInfo then

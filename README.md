@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Fewer wrong rows from tools and small talk (0.4.37)
+
+- "LF Inscriptor that can craft me alchemy tool" made an Alchemy row next to
+  the Inscription one. A profession named right before "tool", "tools",
+  "gear", "accessory" (or after "tool for") names the item, not another
+  crafter, and no longer makes a row of its own in a list of professions.
+- "caps" in a running conversation became a cloak (read as "capes"). Slot
+  typos are only recognised when the message itself asks for a craft (LF,
+  need ...); small talk needs the exact slot word. "cap" and "caps" are
+  never read as typos.
+
 ## A quiet Manual Matching row counts as greeted (0.4.36)
 
 - A row added by Shift+click in Manual Matching is one the crafter already

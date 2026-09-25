@@ -148,6 +148,13 @@ assert(contains(requests('need waist','WARRIOR'),'INVTYPE_WAIST'),'an exact alia
 assert(not contains(requests('need waist','WARRIOR'),'INVTYPE_WRIST'),'an exact alias was read as a typo')
 assert(not M.GetContext('need wristwatch',nil,'WARRIOR'),'a longer word became a typo')
 assert(not contains(requests('need ring','WARRIOR'),'INVTYPE_WRIST'),'a short word was guessed at')
+-- "caps" is a word (caps lock), not "capes".
+assert(not contains(requests('need caps','WARRIOR'),'INVTYPE_CLOAK'),'"caps" was read as capes')
+-- In small talk only exact slot words count, no typos.
+local chat=M.GetContext('writs',nil,'WARRIOR',{noTypos=true})
+assert(not chat or not contains(M.GetRequests(chat),'INVTYPE_WRIST'),'a typo was guessed in small talk')
+assert(contains(M.GetRequests(M.GetContext('wrist',nil,'WARRIOR',{noTypos=true})),'INVTYPE_WRIST'),
+    'an exact slot word was lost in small talk')
 -- The switch turns it off again.
 Scan.DB.settings.quick_replies.typo_tolerance=false
 assert(not contains(requests('need writs','WARRIOR'),'INVTYPE_WRIST'),'the switch did not turn typos off')

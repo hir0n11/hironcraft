@@ -86,6 +86,11 @@ ProfessionWords(333, 'enchanter enchanting enchant ench enchants чантер ч
 ProfessionWords(202, 'engineer engineering engi инженер инженера')
 ProfessionWords(773, 'inscription inscriber scribe начертатель')
 ProfessionWords(171, 'alchemy alchemist алхимик')
+-- The profession a word names ("alchemy", "jc"), or nil.
+function M.ProfessionOfWord(word)
+    return type(word) == 'string' and explicitProfessions[word:lower()] or nil
+end
+
 local classCache = {}
 local slotLabels = {
     INVTYPE_WRIST='Wrist', INVTYPE_HEAD='Head', INVTYPE_NECK='Neck', INVTYPE_SHOULDER='Shoulders',
@@ -230,7 +235,7 @@ local function MatchMisspelledAliases(remaining,matches,replace)
     if changed and replace then replace(remaining) end
 end
 
-local function MatchAliases(message)
+local function MatchAliases(message, noTypos)
     local signature={}
     for _,definition in ipairs(aliasDefinitions) do signature[#signature+1]=M.GetSynonyms(definition.key) end
     signature=table.concat(signature,'\31')
@@ -297,7 +302,9 @@ local function MatchAliases(message)
             start,finish=remaining:find(pattern,1,true)
         end
     end
-    MatchMisspelledAliases(remaining,matches,function(replacement) remaining=replacement end)
+    if not noTypos then
+        MatchMisspelledAliases(remaining,matches,function(replacement) remaining=replacement end)
+    end
     return matches,remaining
 end
 
@@ -320,13 +327,16 @@ function M.ResolveClass(guid, sharedClass)
     if not IsSecret(guid) and type(guid) == 'string' then return classCache[guid] end
 end
 
-function M.GetContext(message, guid, sharedClass)
+-- options.noTypos: exact aliases only. A short line in a running
+-- conversation ("caps", "ok") is small talk far more often than a
+-- misspelled slot.
+function M.GetContext(message, guid, sharedClass, options)
     if IsSecret(message) or type(message) ~= 'string' then return nil end
     message = (strlower or string.lower)(message)
     -- Links are authoritative, including an unmonitored item/recipe link.
     if message:find('|hitem:', 1, true) or message:find('|henchant:', 1, true)
         or message:find('|hrecipe:', 1, true) then return nil end
-    local matched,remaining=MatchAliases(message)
+    local matched,remaining=MatchAliases(message, options and options.noTypos)
     local slots, armor, profession, bypass, requestedWeapons = {}, nil, nil, false, {}
     local needsArmor,fixedProfession=false,nil
     for key in pairs(matched) do
