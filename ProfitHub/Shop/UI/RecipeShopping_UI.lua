@@ -53,7 +53,7 @@ local function EntryTooltip(row)
     local entry = row.entry
     if not entry or not GameTooltip then return end
     GameTooltip:SetOwner(row, "ANCHOR_LEFT")
-    GameTooltip:SetText(entry.name, 1, 0.82, 0, true)
+    GameTooltip:SetText(entry.name, 1, 0.82, 0, 1, true)
     if entry.kind == "recipe_item" then
         GameTooltip:AddLine(T("PG_RECIPE_ITEM_TOOLTIP", "Buy the recipe-learning item."), 1, 1, 1, true)
     else

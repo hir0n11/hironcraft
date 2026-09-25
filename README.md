@@ -25,6 +25,11 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Recipe shopping tooltip error (0.4.34)
+
+- Hovering an entry of the recipe shopping list raised a Lua error: the
+  tooltip title passed its wrap flag where the game expects the alpha.
+
 ## Stingy customers are marked too (0.4.33)
 
 - A delivered order with a tip under 999 gold (no tip included) marks its
