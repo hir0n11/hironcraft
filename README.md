@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Generous customers are marked (0.4.32)
+
+- A delivered crafting order with a tip of 5,000 gold or more (the tip as
+  set by the customer, before the cut) marks its customer with a gold coin
+  in front of the name in the chat orders table and in the crafting order
+  rows. The mark travels to linked accounts with the order result.
+- "Mark as generous customer" / "Unmark generous customer" in the chat
+  menu sets it by hand; its tooltip shows the largest tip, the total and
+  the number of orders. An unmark by hand is not undone by later tips.
+- Marks are kept by name without realm. Alts are not linked: the game does
+  not tell which characters share an account.
+
 ## A list of professions makes a row for each (0.4.31)
 
 - "lf bs/tailor/jc" made one row. Profession words such as "tailor" and

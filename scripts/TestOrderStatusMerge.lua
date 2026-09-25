@@ -649,3 +649,20 @@ local elsewhereStatus = CraftScan.OrderFulfillment:GetStatus(elsewhereRow)
 assert(not (elsewhereStatus and elsewhereStatus.status == "rejected"),
     "another crafter's decline landed on this row")
 print('Neighbouring recipe tests passed (only row with the crafter, two rows, another crafter).')
+
+-- A delivered order with a generous tip marks its customer, locally and on
+-- every account the notice reaches.
+assert(loadfile('Customer/GenerousCustomers.lua'))('HironCraft', CraftScan)
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9990, customerName = "Tipper-Realm", spellID = 1, itemID = 2,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = now, status = "fulfilled", tipAmount = 6000 * 10000,
+})
+assert(CraftScan.Generous.IsGenerous("Tipper"), 'a 6,000 gold tip in a notice did not mark the customer')
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9991, customerName = "Decliner-Realm", spellID = 1, itemID = 2,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = now, status = "rejected", tipAmount = 9000 * 10000,
+})
+assert(not CraftScan.Generous.IsGenerous("Decliner"), 'a declined order marked its customer')
+print('Generous tip notices passed.')

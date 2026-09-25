@@ -1,5 +1,6 @@
 local PT = HironCraftProfit
 if not PT then return end
+local AddonScan = select(2, ...)
 PT.CraftingOrders = PT.CraftingOrders or {}
 local CO = PT.CraftingOrders
 
@@ -1137,7 +1138,10 @@ function CL:PopulateRow(row, order)
     local icon = recipeInfo and recipeInfo.icon or (spellID and GetSpellTexture and GetSpellTexture(spellID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
     row.icon:SetTexture(icon)
     row.name:SetText((recipeInfo and recipeInfo.name) or ("Recipe " .. tostring(spellID)))
-    row.customer:SetText(order.customerName or order.npcCustomerName or "")
+    local customerText = order.customerName or order.npcCustomerName or ""
+    local generous = type(AddonScan) == "table" and AddonScan.Generous
+    if generous and order.customerName then customerText = generous.Decorate(order.customerName, customerText) end
+    row.customer:SetText(customerText)
     self:PlaceNameLines(row)
 
     row.iconBtn._spellID = spellID

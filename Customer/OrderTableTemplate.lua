@@ -251,7 +251,9 @@ HironCraftScanCrafterTableCellCustomerNameMixin = CreateFromMixins(TableBuilderC
 function HironCraftScanCrafterTableCellCustomerNameMixin:Populate(rowData, dataIndex)
     local order = rowData.order
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
-    HironCraftScanTableCellTextMixin.SetText(self, HironCraftScan.ColorizePlayerName(order.customerName, customerInfo.guid))
+    local name = HironCraftScan.ColorizePlayerName(order.customerName, customerInfo.guid)
+    if HironCraftScan.Generous then name = HironCraftScan.Generous.Decorate(order.customerName, name) end
+    HironCraftScanTableCellTextMixin.SetText(self, name)
 end
 
 HironCraftScanCrafterTableCellCrafterNameMixin = CreateFromMixins(TableBuilderCellMixin);

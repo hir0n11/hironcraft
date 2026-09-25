@@ -208,6 +208,7 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID, beforeCraft)
         parentProfessionID = tonumber(orderInfo.parentProfessionID) or CurrentParentProfessionID(),
         orderType = orderInfo.orderType,
         npcCustomerName = orderInfo.npcCustomerName,
+        tipAmount = tonumber(orderInfo.tipAmount),
         capturedAt = time(),
         reagentAudit = audit,
     }
@@ -538,6 +539,9 @@ local function SanitizeCompletionNotice(notice)
         clean.requestTime = notice.requestTime
     end
     clean.clockOffset = ValidClockOffset(notice.clockOffset)
+    if type(notice.tipAmount) == 'number' and notice.tipAmount >= 0 then
+        clean.tipAmount = math.floor(notice.tipAmount)
+    end
 
     clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
     return clean
@@ -1389,6 +1393,11 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
     if not notice then
         return false
     end
+    -- A delivered order with a generous tip marks its customer, here and on
+    -- every linked account the notice reaches.
+    if notice.status == self.Status.Fulfilled and notice.tipAmount and HironCraftScan.Generous then
+        HironCraftScan.Generous.RecordTip(notice.customerName, notice.tipAmount, notice.orderID)
+    end
 
     local notices = EnsureCompletionStorage()
     local key = CompletionNoticeKey(notice)
@@ -1500,6 +1509,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status, detai
         status = status or self.Status.Fulfilled,
         requestToken = orderInfo.requestToken,
         requestTime = tonumber(orderInfo.requestTime),
+        tipAmount = tonumber(orderInfo.tipAmount),
         reagentAudit = CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID),
     }
 
