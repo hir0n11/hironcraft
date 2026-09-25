@@ -444,6 +444,15 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         local function QuietTooltip(tooltip)
             GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Manual match quiet help')))
         end
+        -- A quiet row is one the crafter already answered in chat: it gets its
+        -- first mark and becomes the conversation the next reply belongs to.
+        local function MarkQuietRowGreeted(response)
+            local info = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
+            if type(response) ~= 'table' or type(info) ~= 'table' or not response.greeting_sent then return end
+            if HironCraftScan.RequestTracking and HironCraftScan.RequestTracking.GreetingSent then
+                HironCraftScan.RequestTracking.GreetingSent(info, { response })
+            end
+        end
 
         do
             subMenu:CreateDivider();
@@ -486,9 +495,15 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             restartTerminalRequest = true,
                             suppressBatchAlert = quiet or nil,
                             suppressGreetingBanner = quiet or nil,
+                            greeted = quiet or nil,
                             chatEntry = not message and {chatType='SYSTEM',
                                 message='[Manual matching] ' .. L('General crafting request')} or nil,
                         })
+                    if quiet then
+                        local info = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
+                        MarkQuietRowGreeted(info and info.responses
+                            and info.responses[HironCraftScan.Scanner.GENERAL_REQUEST_ID])
+                    end
                     if response ~= nil then
                         HironCraftScanCraftingOrderPage:ShowGeneric()
                     end
@@ -539,11 +554,13 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             chatEntry = not message and {chatType='SYSTEM', message='[Manual matching] ' .. profName} or nil,
                             suppressBatchAlert = quiet or nil,
                             suppressGreetingBanner = quiet or nil,
+                            greeted = quiet or nil,
                             forceCrafterInfo = {
                                 crafter = char,
                                 parentProfID = ppID,
                             }
                         });
+                        if quiet then MarkQuietRowGreeted(response) end
                         if type(response) == 'table' then
                             HironCraftScanCraftingOrderPage:ShowGeneric()
                         end

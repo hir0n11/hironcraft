@@ -948,7 +948,10 @@ IsShiftKeyDown=function() return true end
 menuButton('Tailor-Realm').click(nil,{buttonName='LeftButton'})
 IsShiftKeyDown=nil
 local quietRow=Scan.DB.customers['QuietBuyer-Realm'] and Scan.DB.customers['QuietBuyer-Realm'].responses[197]
-assert(quietRow and not quietRow.greeting_sent,'a quiet pick added no row')
+assert(quietRow and quietRow.greeting_sent,'a quiet row did not get its first mark')
+-- The next message of the customer answers this row.
+Scan.RequestTracking.MarkReply(Scan.DB.customers['QuietBuyer-Realm'],{})
+assert(quietRow.customer_answered,'a reply to a quiet row got no second mark')
 assert(manualBanners==bannersBeforeQuiet and #manualOffers==0 and #sent==sentBeforeQuiet,
     'a quiet pick raised a banner, a card or sent something')
 IsShiftKeyDown=function() return true end

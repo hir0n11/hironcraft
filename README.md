@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A quiet Manual Matching row counts as greeted (0.4.36)
+
+- A row added by Shift+click in Manual Matching is one the crafter already
+  answered in chat: it gets its first mark (greeting sent), becomes the
+  conversation the next reply of the customer belongs to (second mark), and
+  offers no greeting of its own.
+
 ## A new tip mark shows at once (0.4.35)
 
 - The coin in front of a customer's name was set when the order was
