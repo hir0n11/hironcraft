@@ -551,7 +551,8 @@ assert(stamped and stamped.clockOffset == 0, "a new status does not say how its 
 GetServerTime = nil
 print('Clock tests passed (slow crafter clock, genuinely old decline, stamped records).')
 
--- A result that fits none of the customer's rows says why, once, and keeps it.
+-- A result that fits none of the customer's rows keeps why, once, without a
+-- word in chat: usually it is just another order of the same customer.
 local printed = {}
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) printed[#printed + 1] = text end }
 now = 6000
@@ -569,23 +570,24 @@ local foreign = {
     updatedAt = 5995, status = "rejected",
 }
 CraftScan.OrderFulfillment:ApplyRemoteCompletion(foreign)
-assert(#printed == 1 and printed[1]:find("5151", 1, true) and printed[1]:find("7777", 1, true),
-    "an unmatched result did not say why")
+assert(#printed == 0, "an unmatched result was announced in chat")
 local mismatchLog = CraftScan.DB.settings.notice_mismatch_log
-assert(mismatchLog and mismatchLog[1].customerName == "Mismatch" and #mismatchLog[1].reasons == 1,
+assert(mismatchLog and mismatchLog[1].customerName == "Mismatch" and #mismatchLog[1].reasons == 1
+    and mismatchLog[1].reasons[1]:find("5151", 1, true) and mismatchLog[1].reasons[1]:find("7777", 1, true),
     "the reason was not kept")
+local logged = #mismatchLog
 local again = {}
 for key, value in pairs(foreign) do again[key] = value end
 again.updatedAt = 5996
 CraftScan.OrderFulfillment:ApplyRemoteCompletion(again)
-assert(#printed == 1, "the same order was explained twice")
+assert(#mismatchLog == logged, "the same order was explained twice")
 -- A result for a customer this account never talked to is normal and silent.
 CraftScan.OrderFulfillment:ApplyRemoteCompletion({
     orderID = 9951, customerName = "Stranger", spellID = 1, itemID = 2,
     crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
     updatedAt = 5995, status = "rejected",
 })
-assert(#printed == 1, "a customer without a row was reported")
+assert(#mismatchLog == logged and #printed == 0, "a customer without a row was reported")
 DEFAULT_CHAT_FRAME = nil
 print('Unmatched result diagnosis passed.')
 

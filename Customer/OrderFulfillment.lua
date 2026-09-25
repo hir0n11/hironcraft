@@ -706,8 +706,10 @@ local function ExplainNoticeMismatch(notice, order)
 end
 
 -- A result from another account that fits none of this customer's rows shows
--- no mark at all, and nothing tells why. Say it once in chat and keep it in
--- SavedVariables (settings.notice_mismatch_log), so it can be fixed.
+-- no mark at all, and nothing tells why. Keep why in SavedVariables
+-- (settings.notice_mismatch_log), so a missing mark can be traced. Nothing is
+-- said in chat: most such results are simply another order of the same
+-- customer (another profession, another crafter), not a fault.
 local NOTICE_DIAGNOSIS_MAX_AGE = 30 * 60
 local MAX_MISMATCH_LOG = 20
 local diagnosedNotices = {}
@@ -737,13 +739,6 @@ local function DiagnoseUnmatchedNotice(notice, key)
         orderID = notice.orderID, reasons = reasons,
     })
     for index = #log, MAX_MISMATCH_LOG + 1, -1 do log[index] = nil end
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            '|cffffd200HironCraft:|r %s для %s не привязан к строке: %s',
-            notice.status == OrderFulfillment.Status.Rejected and 'отказ' or 'результат',
-            tostring(notice.customerName), table.concat(reasons, '; ')))
-    end
 end
 
 OrderFulfillment.ExplainNoticeMismatch = ExplainNoticeMismatch

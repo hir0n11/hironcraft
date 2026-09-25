@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No chat line for a result of another order (0.4.38)
+
+- "result for X is not tied to a row" appeared in chat whenever a customer
+  who talked to this account also had a different order done by the linked
+  crafter (another profession or crafter). That is normal, not a fault. The
+  reason is still kept in `settings.notice_mismatch_log` for tracing a
+  missing mark, without a word in chat.
+
 ## Fewer wrong rows from tools and small talk (0.4.37)
 
 - "LF Inscriptor that can craft me alchemy tool" made an Alchemy row next to
