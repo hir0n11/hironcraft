@@ -633,19 +633,27 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         if HironCraftScan.Generous and not isBattleNet then
-            local generous = HironCraftScan.Generous
-            local marked = generous.IsGenerous(target)
-            local button = subMenu:CreateButton(prefix .. L(marked and 'Unmark generous customer'
-                or 'Mark as generous customer'), function()
-                generous.SetManual(target, not marked)
+            local tips = HironCraftScan.Generous
+            local mark = tips.MarkOf(target)
+            local function Set(value)
+                tips.SetManual(target, value)
                 if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
                     HironCraftScanCraftingOrderPage:ShowGeneric()
                 end
-            end)
-            button:SetTooltip(function(tooltip)
+            end
+            local function Tooltip(tooltip)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(
-                    generous.Describe(target) or L('Generous customer tooltip')))
-            end)
+                    tips.Describe(target) or L('Customer tips tooltip')))
+            end
+            for _, choice in ipairs({
+                { mark = 'generous', set = 'Mark as generous customer', clear = 'Unmark generous customer' },
+                { mark = 'stingy', set = 'Mark as stingy customer', clear = 'Unmark stingy customer' },
+            }) do
+                local marked = mark == choice.mark
+                local button = subMenu:CreateButton(prefix .. L(marked and choice.clear or choice.set),
+                    function() Set(marked and 'none' or choice.mark) end)
+                button:SetTooltip(Tooltip)
+            end
         end
 
         do

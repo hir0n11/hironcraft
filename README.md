@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stingy customers are marked too (0.4.33)
+
+- A delivered order with a tip under 999 gold (no tip included) marks its
+  customer stingy: a copper coin in front of the name. Generosity wins: a
+  generous customer does not become stingy through one small tip, and a
+  5,000+ tip lifts a stingy one.
+- The chat menu can mark or unmark either by hand; a mark set or cleared
+  by hand is not changed by later tips. Tips of every delivered order now
+  count toward the numbers in the tooltip.
+
 ## Generous customers are marked (0.4.32)
 
 - A delivered crafting order with a tip of 5,000 gold or more (the tip as

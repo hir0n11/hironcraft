@@ -1,16 +1,23 @@
 local Scan = select(2, ...)
 
--- Customers who tip well. A crafting order that is delivered with a tip of
--- 5,000 gold or more marks its customer (the tip as the customer set it; the
--- cut taken on delivery does not matter). The crafter can also mark or unmark
--- a customer by hand. Marks are kept by character name without realm, the
--- way order rows and crafting orders name the same player differently.
+-- How customers tip. A delivered crafting order with a tip of 5,000 gold or
+-- more marks its customer generous (a gold coin); one under 999 gold marks
+-- them stingy (a copper coin). The tip is the one the customer set; the cut
+-- taken on delivery does not matter. Generosity wins: one small tip does not
+-- make a generous customer stingy, one big tip lifts a stingy one. The
+-- crafter can set or clear either mark by hand, and that decision sticks.
+-- Marks are kept by character name without realm, the way order rows and
+-- crafting orders name the same player differently.
 local M = {}
 Scan.Generous = M
 
 M.DefaultThresholdGold = 5000
+M.DefaultStingyGold = 999
 local COPPER_PER_GOLD = 10000
-local ICON = '|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:0:0|t'
+local ICONS = {
+    generous = '|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:0:0|t',
+    stingy = '|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:0:0|t',
+}
 
 local function Key(name)
     if type(name) ~= 'string' or name == '' or (issecretvalue and issecretvalue(name)) then return nil end
@@ -26,34 +33,54 @@ function M.ThresholdCopper()
     return math.max(1, gold) * COPPER_PER_GOLD
 end
 
-function M.Get(name)
+function M.StingyCopper()
+    local gold = tonumber(Scan.DB.settings.stingy_tip_gold) or M.DefaultStingyGold
+    return math.max(0, gold) * COPPER_PER_GOLD
+end
+
+local function Entry(name)
     local key = Key(name)
-    local entry = key and Scan.DB.settings.generous_customers and Scan.DB.settings.generous_customers[key]
-    if type(entry) ~= 'table' or entry.removed then return nil end
-    return entry
+    local store = key and Scan.DB.settings.generous_customers
+    local entry = store and store[key]
+    return type(entry) == 'table' and entry or nil
 end
 
-function M.IsGenerous(name)
-    return M.Get(name) ~= nil
+-- The mark that shows: a decision by hand first, then what the tips say.
+-- 0.4.32 stored manual = true / removed = true for the generous mark only.
+local function Mark(entry)
+    if not entry then return nil end
+    local manual = entry.manual
+    if manual == true then manual = 'generous' end
+    if entry.removed and manual == nil then manual = 'none' end
+    if manual == 'generous' or manual == 'stingy' then return manual end
+    if manual == 'none' then return nil end
+    if entry.mark then return entry.mark end
+    if (tonumber(entry.max) or 0) >= M.ThresholdCopper() then return 'generous' end
+    return nil
 end
 
--- A delivered order. Counts toward the tooltip numbers for a marked customer,
--- and marks one whose tip reaches the threshold. The same order is counted
--- once, however often its result is seen again.
+function M.Get(name)
+    local entry = Entry(name)
+    return Mark(entry) and entry or nil
+end
+
+function M.MarkOf(name)
+    return Mark(Entry(name))
+end
+
+function M.IsGenerous(name) return M.MarkOf(name) == 'generous' end
+function M.IsStingy(name) return M.MarkOf(name) == 'stingy' end
+
+-- A delivered order. Every tip counts toward the numbers; the tip decides
+-- the automatic mark. The same order is counted once, however often its
+-- result is seen again (a linked account, a replay).
 function M.RecordTip(name, tipCopper, orderID)
     local key = Key(name)
-    tipCopper = tonumber(tipCopper) or 0
-    if not key or tipCopper <= 0 then return false end
+    tipCopper = tonumber(tipCopper)
+    if not key or not tipCopper or tipCopper < 0 then return false end
     local store = Store()
-    local entry = store[key]
-    local reaches = tipCopper >= M.ThresholdCopper()
-    if not entry and not reaches then return false end
-    if type(entry) ~= 'table' then
-        entry = { orders = {} }
-        store[key] = entry
-    end
-    -- A customer the crafter unmarked by hand stays unmarked.
-    if entry.removed then return false end
+    local entry = type(store[key]) == 'table' and store[key] or { orders = {} }
+    store[key] = entry
     entry.orders = type(entry.orders) == 'table' and entry.orders or {}
     if orderID ~= nil then
         local id = tostring(orderID)
@@ -65,32 +92,36 @@ function M.RecordTip(name, tipCopper, orderID)
     entry.max = math.max(tonumber(entry.max) or 0, tipCopper)
     entry.at = time()
     entry.name = entry.name or name
+    if tipCopper >= M.ThresholdCopper() then
+        entry.mark = 'generous'
+    elseif tipCopper < M.StingyCopper() and entry.mark ~= 'generous'
+        and (tonumber(entry.max) or 0) < M.ThresholdCopper() then
+        entry.mark = 'stingy'
+    end
     return true
 end
 
-function M.SetManual(name, generous)
+-- By hand: 'generous', 'stingy' or 'none'. true/false mean generous / none.
+function M.SetManual(name, mark)
     local key = Key(name)
     if not key then return end
+    if mark == true then mark = 'generous' elseif mark == false or mark == nil then mark = 'none' end
     local store = Store()
     local entry = type(store[key]) == 'table' and store[key] or { orders = {} }
     store[key] = entry
     entry.name = entry.name or name
-    if generous then
-        entry.removed = nil
-        entry.manual = true
-    else
-        entry.removed = true
-        entry.manual = nil
-    end
+    entry.removed = nil
+    entry.manual = mark
 end
 
-function M.Icon()
-    return ICON
+function M.Icon(mark)
+    return ICONS[mark or 'generous']
 end
 
--- The name as shown in a list, with the mark in front when it applies.
+-- The name as shown in a list, with the mark in front when there is one.
 function M.Decorate(name, text)
-    if M.IsGenerous(name) then return ICON .. ' ' .. (text or name) end
+    local icon = ICONS[M.MarkOf(name) or '']
+    if icon then return icon .. ' ' .. (text or name) end
     return text or name
 end
 
@@ -102,12 +133,17 @@ end
 
 -- One line for a tooltip, or nil.
 function M.Describe(name)
-    local entry = M.Get(name)
-    if not entry then return nil end
+    local entry = Entry(name)
+    local mark = Mark(entry)
+    if not entry or (not mark and (tonumber(entry.count) or 0) == 0) then return nil end
     local L = Scan.LOCAL and function(key) return Scan.LOCAL:GetText(key) end or function(key) return key end
+    local title = mark == 'generous' and L('Generous customer')
+        or mark == 'stingy' and L('Stingy customer') or L('Customer tips')
+    local manual = entry.manual == 'generous' or entry.manual == 'stingy' or entry.manual == true
     if (tonumber(entry.count) or 0) > 0 then
-        return string.format(L('Generous customer: max tip %s, total %s, orders %d'),
+        return string.format(L('%s: max tip %s, total %s, orders %d'), title,
             Gold(entry.max), Gold(entry.total), tonumber(entry.count) or 0)
+            .. (manual and (' ' .. L('(marked by hand)')) or '')
     end
-    return L('Generous customer (marked by hand)')
+    return title .. ' ' .. L('(marked by hand)')
 end
