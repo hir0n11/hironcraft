@@ -17,13 +17,15 @@ local GOLD = 10000
 
 local frame = nil
 local chunks, report = nil, nil
+-- Resourcefulness on crafting orders, for the fourth tab.
+local returns = nil
 local loadToken = 0
 local rebuildPending = false
 local namesPending = false
 -- What was typed in the search box, lower case; '' shows everything.
 local searchText = ''
 
-local TAB_ITEMS, TAB_CUSTOMERS, TAB_TIME = 1, 2, 3
+local TAB_ITEMS, TAB_CUSTOMERS, TAB_TIME, TAB_RETURNS = 1, 2, 3, 4
 
 local PRESETS = {
     { value = 'today', label = 'Today' },
@@ -66,6 +68,7 @@ local function View()
     -- The "without a mark" filter is gone: such customers count as silver.
     if view.tier == 'none' then view.tier = nil end
     view.sort[TAB_CUSTOMERS] = view.sort[TAB_CUSTOMERS] or { key = 'orders', desc = true }
+    view.sort[TAB_RETURNS] = view.sort[TAB_RETURNS] or { key = 'value', desc = true }
     return view
 end
 
@@ -194,6 +197,23 @@ local CUSTOMER_COLUMNS = {
     { key = 'conversion', label = 'Conversion', width = 76, text = function(row) return Percent(row.conversion) end },
     { key = 'lastOrder', label = 'Last order', width = 110,
         text = function(row) return row.lastOrder and date('%d.%m.%Y %H:%M', row.lastOrder) or '|cff808080-|r' end },
+}
+
+local RETURN_COLUMNS = {
+    { key = 'name', label = 'Reagent', fill = true, align = 'LEFT',
+        text = function(row) return (Subject(row)) end,
+        value = function(row) return select(2, Subject(row)):lower() end },
+    { key = 'profession', label = 'Profession', width = 110, align = 'LEFT',
+        text = function(row) return ColoredProfession(row.ppID) end,
+        value = function(row) return (ProfessionName(row.ppID) or ''):lower() end },
+    { key = 'procs', label = 'Returns', width = 70, tip = 'Returns tooltip' },
+    { key = 'quantity', label = 'Quantity', width = 70 },
+    { key = 'customerQuantity', label = 'From customer', width = 96, tip = 'Customer mats tooltip' },
+    { key = 'ownQuantity', label = 'Own', width = 60, tip = 'Own mats tooltip' },
+    { key = 'unitPrice', label = 'Price each', width = 92, text = function(row) return Gold(row.unitPrice) end },
+    { key = 'value', label = 'Worth', width = 104, text = function(row) return Gold(row.value) end },
+    { key = 'lastAt', label = 'Last', width = 96,
+        text = function(row) return row.lastAt and date('%d.%m %H:%M', row.lastAt) or '|cff808080-|r' end },
 }
 
 local function CellText(column, row)
@@ -438,9 +458,9 @@ local function TileNumber(value)
     return BreakUpLargeNumbers and BreakUpLargeNumbers(value or 0) or tostring(value or 0)
 end
 
-local function CreateTiles(parent, x, y)
+local function CreateTiles(parent, x, y, groups)
     local tiles = {}
-    for groupIndex, group in ipairs(TILE_GROUPS) do
+    for groupIndex, group in ipairs(groups or TILE_GROUPS) do
         if groupIndex > 1 then x = x + GROUP_GAP - TILE_GAP end
         for _, info in ipairs(group.tiles) do
             local tile = CreateFrame('Frame', nil, parent)
@@ -479,6 +499,20 @@ local function CreateTiles(parent, x, y)
     return tiles
 end
 
+-- The resourcefulness tab: how often it comes, and what it brought.
+local RETURN_TILE_GROUPS = {
+    { color = { 0.45, 0.85, 0.55 }, tiles = {
+        { key = 'crafts', label = 'Order crafts', tip = 'Order crafts tooltip' },
+        { key = 'procs', label = 'With returns', tip = 'With returns tooltip' },
+        { key = 'chance', label = 'Chance', tip = 'Return chance tooltip' },
+    } },
+    { color = { 1.00, 0.78, 0.25 }, tiles = {
+        { key = 'value', label = 'Returned worth', tip = 'Returned worth tooltip', width = 110 },
+        { key = 'customerValue', label = 'Customer mats', tip = 'Customer mats tooltip', width = 110 },
+        { key = 'ownValue', label = 'Own mats', tip = 'Own mats tooltip', width = 110 },
+    } },
+}
+
 -- Green from half the greetings crafted, yellow from a quarter, else red.
 local function ConversionColor(value)
     if not value then return 0.5, 0.5, 0.5 end
@@ -511,6 +545,17 @@ local function UpdateSummary()
         Count('generous', tiers.generous), Count('regular', tiers.regular), Count('stingy', tiers.stingy),
         L('Marked overall:'),
         Count('generous', all.generous), Count('regular', all.regular), Count('stingy', all.stingy)))
+end
+
+local function UpdateReturnTiles()
+    local totals = returns and returns.totals or {}
+    local tiles = frame.ReturnTiles
+    tiles.crafts.value:SetText(returns and TileNumber(totals.crafts) or '')
+    tiles.procs.value:SetText(returns and TileNumber(totals.procs) or '')
+    tiles.chance.value:SetText(returns and Percent(totals.chance) or '')
+    tiles.value.value:SetText(returns and Gold(totals.value) or '')
+    tiles.customerValue.value:SetText(returns and Gold(totals.customerValue) or '')
+    tiles.ownValue.value:SetText(returns and Gold(totals.ownValue) or '')
 end
 
 local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
@@ -568,15 +613,26 @@ local function CustomerRows()
     return rows
 end
 
+local function ReturnRows()
+    local rows = {}
+    for _, row in ipairs(returns and returns.rows or {}) do
+        if Matches(select(2, Subject(row))) or tostring(row.itemID) == searchText then rows[#rows + 1] = row end
+    end
+    return rows
+end
+
 local function Render()
     if not frame or not report then return end
     namesPending = false
     frame.Items:SetRows(ItemRows())
     frame.Customers:SetRows(CustomerRows())
+    frame.Returns:SetRows(ReturnRows())
     UpdateSummary()
+    UpdateReturnTiles()
     UpdateCharts()
     local tab = View().tab
     local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #frame.Customers.rows == 0)
+        or (tab == TAB_RETURNS and #frame.Returns.rows == 0)
     SetStatus(empty and L('No analytics data for the period') or nil)
     local last = Scan.AnalyticsSync and Scan.AnalyticsSync.LastSync()
     frame.SyncText:SetText(last and string.format(L('Last exchange: %s'), date('%d.%m %H:%M', last)) or '')
@@ -585,6 +641,7 @@ end
 function W.Rebuild()
     if not frame or not chunks then return end
     report = Scan.AnalyticsReport.Build(chunks, Filters(), Context())
+    returns = Scan.AnalyticsReport.BuildReturns(chunks, Filters())
     Render()
 end
 
@@ -617,11 +674,12 @@ end
 
 function W.Release()
     loadToken = loadToken + 1
-    chunks, report = nil, nil
+    chunks, report, returns = nil, nil, nil
     if Scan.AnalyticsLog then Scan.AnalyticsLog.ReleaseCache() end
     if frame then
         frame.Items:SetRows({})
         frame.Customers:SetRows({})
+        frame.Returns:SetRows({})
     end
 end
 
@@ -648,6 +706,14 @@ local function SelectTab(index)
     frame.Items.frame:SetShown(index == TAB_ITEMS)
     frame.Customers.frame:SetShown(index == TAB_CUSTOMERS)
     frame.Charts:SetShown(index == TAB_TIME)
+    frame.Returns.frame:SetShown(index == TAB_RETURNS)
+    -- Resourcefulness has figures of its own, and no side or coin to filter.
+    local onReturns = index == TAB_RETURNS
+    for _, tile in pairs(frame.Tiles) do tile:SetShown(not onReturns) end
+    for _, tile in pairs(frame.ReturnTiles) do tile:SetShown(onReturns) end
+    frame.Tiers:SetShown(not onReturns)
+    frame.SideDropdown:SetShown(not onReturns)
+    frame.TierDropdown:SetShown(not onReturns)
     if report then Render() end
 end
 
@@ -662,7 +728,16 @@ local function ExportCSV()
     if not report then return end
     local lines = {}
     local tab = View().tab
-    if tab == TAB_CUSTOMERS then
+    if tab == TAB_RETURNS then
+        lines[1] = 'reagent,item_id,profession,returns,quantity,customer_quantity,own_quantity,unit_price_gold,worth_gold,customer_worth_gold,own_worth_gold,unpriced_quantity'
+        for _, row in ipairs(frame.Returns.rows or {}) do
+            local _, name = Subject(row)
+            lines[#lines + 1] = table.concat({ CSV(name), row.itemID, CSV(ProfessionName(row.ppID) or ''),
+                row.procs, row.quantity, row.customerQuantity, row.ownQuantity,
+                row.unitPrice and string.format('%.2f', row.unitPrice / GOLD) or '', PlainGold(row.value),
+                PlainGold(row.customerValue), PlainGold(row.ownValue), row.unpriced }, ',')
+        end
+    elseif tab == TAB_CUSTOMERS then
         lines[1] = 'customer,tier,orders,tips_gold,average_tip_gold,largest_tip_gold,declined,greetings,conversion,last_order'
         for _, row in ipairs(frame.Customers.rows or {}) do
             lines[#lines + 1] = table.concat({ CSV(row.name), row.mark or 'none', row.orders, PlainGold(row.tips),
@@ -843,9 +918,21 @@ local function Create()
     local tier = Dropdown(frame, 176, Entries(TIERS),
         function() return View().tier end, function(value) View().tier = value FilterChanged() end)
     tier:SetPoint('LEFT', side, 'RIGHT', 8, 0)
+    frame.SideDropdown, frame.TierDropdown = side, tier
 
     -- Row 2: what the period comes to, and the buttons.
     frame.Tiles = CreateTiles(frame, 16, -60)
+    frame.ReturnTiles = CreateTiles(frame, 16, -60, RETURN_TILE_GROUPS)
+    frame.ReturnTiles.chance:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
+        GameTooltip_SetTitle(GameTooltip, L('Chance'))
+        GameTooltip_AddNormalLine(GameTooltip, L('Return chance tooltip'))
+        for _, profession in ipairs(returns and returns.professions or {}) do
+            GameTooltip:AddDoubleLine(ColoredProfession(profession.ppID),
+                string.format('%s  (%d / %d)', Percent(profession.chance), profession.procs, profession.crafts), 1, 1, 1, 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
     frame.Tiers = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -108)
     frame.Tiers:SetJustifyH('LEFT')
@@ -921,6 +1008,16 @@ local function Create()
             GameTooltip:Show()
         end
     end)
+    frame.Returns = CreateTable(frame.Inset, RETURN_COLUMNS, TAB_RETURNS, function(row, data)
+        GameTooltip:SetOwner(row, 'ANCHOR_RIGHT')
+        GameTooltip:SetItemByID(data.itemID)
+        GameTooltip:AddLine(' ')
+        GameTooltip:AddLine(L('Worth at the price of the moment it came back'), 0.8, 0.8, 0.8, true)
+        if data.unpriced > 0 then
+            GameTooltip:AddLine(string.format(L('Without a price: %d'), data.unpriced), 1, 0.5, 0.4)
+        end
+        GameTooltip:Show()
+    end)
     frame.Customers = CreateTable(frame.Inset, CUSTOMER_COLUMNS, TAB_CUSTOMERS, function(row, data)
         local text = Scan.Generous and Scan.Generous.Describe(data.name)
         if text then
@@ -956,7 +1053,7 @@ local function Create()
 
     -- Tabs under the window, as in Journalator.
     frame.Tabs = {}
-    for index, label in ipairs({ 'Items', 'Customers', 'By time' }) do
+    for index, label in ipairs({ 'Items', 'Customers', 'By time', 'Resource returns' }) do
         local tab = CreateFrame('Button', FRAME_NAME .. 'Tab' .. index, frame, 'PanelTabButtonTemplate')
         tab:SetID(index)
         tab:SetText(L(label))

@@ -19,6 +19,9 @@ local Scan = select(2, ...)
 --   i  item;  r  recipe;  p  profession;  s  slot;  lb  slot label
 --   x  crafter;  g  general request;  o  crafting order;  st  'f' / 'r'
 --   tip  tip in copper;  to  the replacing token;  man  marked by hand
+--   c (kind) a craft for a crafting order (op its craft operation), with rs: the reagents
+--      resourcefulness returned, each { i item, n count, v price per unit
+--      when it happened, s price source a/t/p, c 1 when the customer's }
 local M = {}
 Scan.AnalyticsLog = M
 
@@ -520,6 +523,77 @@ function M.Startup()
     end
 end
 
+-- What a reagent is worth now: Auctionator, else TSM, else ProfitHub's own
+-- scans. Returns the price per unit in copper and where it came from.
+local function ReagentPrice(itemID)
+    local function Try(source, fn)
+        local ok, price = pcall(fn)
+        price = ok and tonumber(price) or nil
+        if price and price > 0 then return math.floor(price + 0.5), source end
+        return nil
+    end
+    local price, source = nil, nil
+    local auctionator = Auctionator and Auctionator.API and Auctionator.API.v1
+    if auctionator and auctionator.GetAuctionPriceByItemID then
+        price, source = Try('a', function() return auctionator.GetAuctionPriceByItemID('HironCraft', itemID) end)
+    end
+    if not price and TSM_API and TSM_API.GetCustomPriceValue then
+        price, source = Try('t', function() return TSM_API.GetCustomPriceValue('DBMarket', 'i:' .. itemID) end)
+    end
+    local prices = HironCraftProfit and HironCraftProfit.Prices
+    if not price and prices and prices.GetPrice then
+        price, source = Try('p', function() return prices:GetPrice(itemID, 'phMarket') end)
+    end
+    return price, source
+end
+M.ReagentPrice = ReagentPrice
+
+local function RecipeProfession(recipeID)
+    if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillLineForRecipe and recipeID then
+        local ok, skillLine, _, parent = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+        if ok and (tonumber(parent) or tonumber(skillLine)) then return tonumber(parent) or tonumber(skillLine) end
+    end
+    local info = C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
+    return info and tonumber(info.professionID) or nil
+end
+
+-- A craft finished. Only crafts for a crafting order are kept: each counts
+-- for the chance of resourcefulness, and the reagents it returned are kept
+-- with their price at that moment and whether the customer supplied them.
+local countedOperations = {}
+function M.CraftResult(data)
+    if type(data) ~= 'table' or not M.IsEnabled() then return end
+    local order = C_CraftingOrders and C_CraftingOrders.GetClaimedOrder and C_CraftingOrders.GetClaimedOrder()
+    if type(order) ~= 'table' or order.orderID == nil then return end
+    local operation = tonumber(data.operationID)
+    if operation and operation ~= 0 then
+        if countedOperations[operation] then return end
+        countedOperations[operation] = true
+    end
+    local customerSource = Enum and Enum.CraftingOrderReagentSource and Enum.CraftingOrderReagentSource.Customer or 1
+    local fromCustomer = {}
+    for _, reagent in ipairs(type(order.reagents) == 'table' and order.reagents or {}) do
+        local info = type(reagent) == 'table' and reagent.reagentInfo
+        local itemID = info and info.reagent and info.reagent.itemID
+        if itemID and reagent.source == customerSource then fromCustomer[itemID] = true end
+    end
+    local returned = nil
+    for _, entry in ipairs(type(data.resourcesReturned) == 'table' and data.resourcesReturned or {}) do
+        -- Reagents that are currencies have no auction price: left out.
+        local itemID = tonumber(entry.reagent and entry.reagent.itemID or entry.itemID)
+        local count = tonumber(entry.quantity)
+        if itemID and count and count > 0 then
+            local price, source = ReagentPrice(itemID)
+            returned = returned or {}
+            returned[#returned + 1] = { i = itemID, n = count, v = price, s = source,
+                c = fromCustomer[itemID] and 1 or nil }
+        end
+    end
+    local crafter = Scan.GetPlayerName and Scan.GetPlayerName(true) or nil
+    return M.Record({ k = 'c', o = order.orderID, op = operation ~= 0 and operation or nil,
+        r = tonumber(order.spellID), p = RecipeProfession(order.spellID), x = crafter, rs = returned })
+end
+
 -- Whispers and crafting orders count as load, whoever started them.
 if CreateFrame then
     local watcher = CreateFrame('Frame')
@@ -531,7 +605,10 @@ if CreateFrame then
     }) do
         pcall(watcher.RegisterEvent, watcher, event)
     end
-    watcher:SetScript('OnEvent', function() M.NoteActivity() end)
+    watcher:SetScript('OnEvent', function(_, event, ...)
+        M.NoteActivity()
+        if event == 'TRADE_SKILL_ITEM_CRAFTED_RESULT' then pcall(M.CraftResult, ...) end
+    end)
 end
 
 if Scan.Utils and Scan.Utils.onLoad then

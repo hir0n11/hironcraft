@@ -391,3 +391,44 @@ end
 assert(reported, 'the result of the exchange was not reported: ' .. table.concat(said, ' | '))
 DEFAULT_CHAT_FRAME, C_Timer = nil, nil
 print('Analytics exchange report passed.')
+
+-- Resourcefulness on crafting orders: reagents back, whose they were, their
+-- price then (Auctionator, else TSM), the chance per profession.
+Scan.DB = newDB()
+Scan.GetPlayerName = function() return 'Smith-Realm' end
+local claimed = { orderID = 77, spellID = 500, reagents = {
+    { reagentInfo = { reagent = { itemID = 9001 }, quantity = 5 }, source = 1 },
+    { reagentInfo = { reagent = { itemID = 9002 }, quantity = 0 }, source = 2 },
+} }
+C_CraftingOrders = { GetClaimedOrder = function() return claimed end }
+C_TradeSkillUI = { GetTradeSkillLineForRecipe = function() return 2907, 'Midnight Blacksmithing', 164 end }
+Auctionator = { API = { v1 = { GetAuctionPriceByItemID = function(_, itemID) return itemID == 9001 and 10000 or nil end } } }
+TSM_API = { GetCustomPriceValue = function(_, key) return key == 'i:9002' and 5000 or nil end }
+Log.CraftResult({ operationID = 1, resourcesReturned = {
+    { reagent = { itemID = 9001 }, quantity = 2 },
+    { reagent = { itemID = 9002 }, quantity = 3 },
+    { reagent = { itemID = 9003 }, quantity = 1 },
+    { reagent = { currencyID = 3000 }, quantity = 1 },
+} })
+Log.CraftResult({ operationID = 1, resourcesReturned = { { reagent = { itemID = 9001 }, quantity = 2 } } })
+Log.CraftResult({ operationID = 2 })
+claimed = nil
+Log.CraftResult({ operationID = 3, resourcesReturned = { { reagent = { itemID = 9001 }, quantity = 9 } } })
+local returned = Report.BuildReturns(all(), {})
+assert(returned.totals.crafts == 2 and returned.totals.procs == 1 and returned.totals.chance == 0.5,
+    'order crafts or the chance are off (a repeat or a craft without an order was counted?)')
+local byID = {}
+for _, entry in ipairs(returned.rows) do byID[entry.itemID] = entry end
+assert(byID[9001] and byID[9001].customerQuantity == 2 and byID[9001].customerValue == 20000 and byID[9001].ppID == 164,
+    "the customer's reagent is off")
+assert(byID[9002] and byID[9002].ownQuantity == 3 and byID[9002].value == 15000, 'the own reagent or its TSM price is off')
+assert(byID[9003] and byID[9003].unpriced == 1 and byID[9003].value == 0 and not byID[3000], 'unpriced or currency returns are off')
+assert(returned.totals.value == 35000 and returned.totals.customerValue == 20000 and returned.totals.ownValue == 15000)
+assert(returned.professions[1].ppID == 164 and returned.professions[1].chance == 0.5)
+assert(Report.BuildReturns(all(), { ppID = 202 }).totals.crafts == 0, 'the profession filter let blacksmithing through')
+assert(Report.BuildReturns(all(), { crafter = 'Other-Realm' }).totals.crafts == 0, 'the crafter filter is off')
+-- The price is the one of that moment: a later price does not change it.
+Auctionator.API.v1.GetAuctionPriceByItemID = function() return 99999 end
+assert(Report.BuildReturns(all(), {}).totals.customerValue == 20000, 'the worth followed today\'s price')
+C_CraftingOrders, C_TradeSkillUI, Auctionator, TSM_API = nil, nil, nil, nil
+print('Analytics resource returns passed.')

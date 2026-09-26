@@ -362,6 +362,80 @@ function M.Build(chunks, filters, context)
     return report
 end
 
+-- Resourcefulness on crafting orders: per reagent (and profession) how often
+-- and how much came back and what it was worth then, split by whose it was;
+-- and the chance, overall and per profession. filters: from, to, ppID,
+-- crafter.
+function M.BuildReturns(chunks, filters)
+    filters = filters or {}
+    local from, to = filters.from or 0, filters.to or math.huge
+    local rows, byProfession, seen = {}, {}, {}
+    local totals = { crafts = 0, procs = 0, quantity = 0, value = 0, customerValue = 0, ownValue = 0, unpriced = 0 }
+    for _, events in ipairs(chunks or {}) do
+        for _, event in ipairs(events) do
+            if event.k == 'c' and event.t >= from and event.t <= to
+                and (not filters.ppID or event.p == filters.ppID)
+                and (not filters.crafter or SameCrafter(filters.crafter, event.x)) then
+                -- The same craft once, also when it came twice through an exchange.
+                local key = tostring(event.o) .. ':' .. tostring(event.op or event.t) .. ':' .. tostring(event.x)
+                if not seen[key] then
+                    seen[key] = true
+                    local profession = event.p or 0
+                    byProfession[profession] = byProfession[profession] or { ppID = event.p, crafts = 0, procs = 0 }
+                    byProfession[profession].crafts = byProfession[profession].crafts + 1
+                    totals.crafts = totals.crafts + 1
+                    local returned = type(event.rs) == 'table' and #event.rs > 0
+                    if returned then
+                        byProfession[profession].procs = byProfession[profession].procs + 1
+                        totals.procs = totals.procs + 1
+                        for _, reagent in ipairs(event.rs) do
+                            local rowKey = tostring(reagent.i) .. ':' .. tostring(event.p)
+                            local row = rows[rowKey]
+                            if not row then
+                                row = { key = rowKey, kind = 'item', itemID = reagent.i, ppID = event.p, procs = 0,
+                                    quantity = 0, customerQuantity = 0, ownQuantity = 0, value = 0,
+                                    customerValue = 0, ownValue = 0, priced = 0, unpriced = 0 }
+                                rows[rowKey] = row
+                            end
+                            local count = tonumber(reagent.n) or 0
+                            local value = reagent.v and reagent.v * count or 0
+                            row.procs = row.procs + 1
+                            row.quantity = row.quantity + count
+                            row.value = row.value + value
+                            if reagent.v then row.priced = row.priced + count else row.unpriced = row.unpriced + count end
+                            if reagent.c then
+                                row.customerQuantity = row.customerQuantity + count
+                                row.customerValue = row.customerValue + value
+                                totals.customerValue = totals.customerValue + value
+                            else
+                                row.ownQuantity = row.ownQuantity + count
+                                row.ownValue = row.ownValue + value
+                                totals.ownValue = totals.ownValue + value
+                            end
+                            if not row.lastAt or event.t > row.lastAt then row.lastAt = event.t end
+                            totals.quantity = totals.quantity + count
+                            totals.value = totals.value + value
+                            if not reagent.v then totals.unpriced = totals.unpriced + count end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local list, professions = {}, {}
+    for _, row in pairs(rows) do
+        row.unitPrice = row.priced > 0 and row.value / row.priced or nil
+        list[#list + 1] = row
+    end
+    for _, profession in pairs(byProfession) do
+        profession.chance = profession.crafts > 0 and profession.procs / profession.crafts or nil
+        professions[#professions + 1] = profession
+    end
+    table.sort(professions, function(lhs, rhs) return lhs.crafts > rhs.crafts end)
+    totals.chance = totals.crafts > 0 and totals.procs / totals.crafts or nil
+    return { rows = list, totals = totals, professions = professions }
+end
+
 -- Period presets: from, to.
 function M.Range(preset, now)
     now = now or time()

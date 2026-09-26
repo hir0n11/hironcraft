@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Resource returns (0.4.48)
+
+- A fourth tab in the analytics window, "Resource returns": the reagents
+  resourcefulness gave back on crafting-order crafts, per reagent and
+  profession - how often, how many, the price each and the worth - with the
+  period, profession and crafter filters, search and CSV export.
+- The worth is counted at the price of the moment each came back:
+  Auctionator, else TSM, else ProfitHub's own scans. Reagents without any
+  price are counted but left out of the worth; currencies are left out.
+- Returns from the customer's reagents (yours to keep) and from your own
+  (a saving) are summed apart, and the chance - order crafts with a return
+  out of all order crafts - is shown overall and, on hover, per
+  profession.
+- Recorded on the crafting account from now on and shared with linked
+  accounts through the analytics exchange.
+
 ## Fit windows to the screen (0.4.47)
 
 - A new setting, "Fit windows to the screen" (on by default, Settings -

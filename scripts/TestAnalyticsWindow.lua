@@ -140,6 +140,9 @@ Log.Request('Slot-Realm', { requestToken = 't2', parentProfID = 197, time = now 
     equipmentRequest = { key = 'INVTYPE_WRIST', label = 'Wrist' } })
 Log.Mention('Chatty-Realm', 4004)
 Scan.Generous.RecordTip('Buyer', 6000 * 10000, 1)
+Log.Record({ k = 'c', o = 1, r = 1, p = 197, x = 'Tailor-Realm', t = now - 30,
+    rs = { { i = 7001, n = 2, v = 30000, s = 'a', c = 1 } } })
+Log.Record({ k = 'c', o = 2, r = 1, p = 197, x = 'Tailor-Realm', t = now - 20 })
 
 -- Opening it loads, counts and fills every tab.
 Scan.AnalyticsWindow.Toggle()
@@ -230,6 +233,19 @@ for tab, header in ipairs({ 'item,item_id', 'customer,tier', 'period,requests' }
         'CSV of tab ' .. tab .. ' is off')
 end
 assert(dumped:find('00:00,', 1, true), 'the time CSV has no hours')
+
+-- The resource returns tab: its own tiles, no side or coin filter.
+frame.Tabs[4].scripts.OnClick(frame.Tabs[4])
+assert(#frame.Returns.rows == 1 and frame.Returns.rows[1].itemID == 7001, 'the returns table is off')
+assert(frame.ReturnTiles.chance.value:GetText() == '50%' and frame.ReturnTiles.crafts.value:GetText() == '2',
+    'the returns tiles are off')
+assert(not frame.SideDropdown:IsShown() and not frame.TierDropdown:IsShown() and not frame.Tiers:IsShown()
+    and frame.ReturnTiles.value:IsShown() and not frame.Tiles.requests:IsShown(), 'the returns tab shows the wrong controls')
+dumped = nil
+frame.ExportButton.scripts.OnClick(frame.ExportButton)
+assert(dumped and dumped:find('^reagent,item_id') and dumped:find('7001', 1, true), 'the returns CSV is off')
+frame.Tabs[1].scripts.OnClick(frame.Tabs[1])
+assert(frame.SideDropdown:IsShown() and frame.Tiles.requests:IsShown(), 'leaving the returns tab left its controls')
 
 -- Closing lets the data go.
 Scan.AnalyticsWindow.Toggle()
