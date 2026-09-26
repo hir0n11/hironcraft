@@ -25,6 +25,10 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: the last hour (0.4.55)
+
+- The analytics period list starts with "Last hour".
+
 ## Shop: posting as before, one request at a time (0.4.54)
 
 - 0.4.53 made posting slower and lost posts: its queue could send several

@@ -444,6 +444,7 @@ function M.Range(preset, now)
     now = now or time()
     local today = date('*t', now)
     local midnight = time({ year = today.year, month = today.month, day = today.day, hour = 0 })
+    if preset == '1h' then return now - 60 * 60, now end
     if preset == 'today' then return midnight, now end
     if preset == 'yesterday' then return midnight - DAY, midnight - 1 end
     if preset == '7d' then return midnight - 6 * DAY, now end

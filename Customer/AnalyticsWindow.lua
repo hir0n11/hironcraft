@@ -28,6 +28,7 @@ local searchText = ''
 local TAB_ITEMS, TAB_CUSTOMERS, TAB_TIME, TAB_RETURNS = 1, 2, 3, 4
 
 local PRESETS = {
+    { value = '1h', label = 'Last hour' },
     { value = 'today', label = 'Today' },
     { value = 'yesterday', label = 'Yesterday' },
     { value = '7d', label = 'Last 7 days' },

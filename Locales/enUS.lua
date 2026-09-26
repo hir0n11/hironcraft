@@ -542,6 +542,7 @@ HironCraftScan.L = {
     ['(marked by hand)'] = '(marked by hand)',
     ['Hold stingy greetings'] = 'Pause stingy',
     ['Hold stingy greetings tooltip'] = 'While checked, customers with the copper coin (tips under 999 gold) are not offered a greeting: their requests are listed without the banner, the greeting card or the sound. A click on the row greets them as usual. Stays on over /reload and relogs until unchecked; applies to this account only.',
+    ['Last hour'] = 'Last hour',
     ['With returns tooltip'] = 'Order crafts on which resourcefulness gave reagents back, whosever they were.',
     ['Reagents returned'] = 'Returned',
     ['Reagents returned tooltip'] = 'How many of the customers\' reagents came back to you.',

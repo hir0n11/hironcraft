@@ -288,6 +288,8 @@ assert(not Report.ParseDate('31.13.2026') and not Report.ParseDate('abc'))
 local today = Report.Range('today')
 assert(os.date('%H:%M', today) == '00:00' and select(2, Report.Range('today')) == now)
 assert(Report.Range('all') == 0)
+local hourFrom, hourTo = Report.Range('1h')
+assert(hourTo == now and hourFrom == now - 3600, 'the last hour is off')
 print('Analytics dates passed.')
 
 -- The first login with the journal takes in what is still kept elsewhere.
