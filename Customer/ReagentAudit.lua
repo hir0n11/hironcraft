@@ -75,6 +75,17 @@ local function IsCustomer(entry)
     return true
 end
 
+-- Items the customer supplied in an order: everything in order.reagents
+-- except what the crafter provides (or no one does).
+function Audit.CustomerItems(order)
+    local items = {}
+    for _, entry in ipairs(type(order) == 'table' and type(order.reagents) == 'table' and order.reagents or {}) do
+        local id = Number(Read(entry, 'itemID'))
+        if id and IsCustomer(entry) then items[id] = true end
+    end
+    return items
+end
+
 -- Bounded, plain SavedVariables/linked-account payload. Unknown values stay
 -- unknown, not zero; incoming peers cannot inject hyperlinks or executable UI.
 function Audit.Sanitize(snapshot)

@@ -363,9 +363,9 @@ function M.Build(chunks, filters, context)
 end
 
 -- Resourcefulness on crafting orders: per reagent (and profession) how often
--- and how much came back and what it was worth then, split by whose it was;
--- and the chance, overall and per profession. filters: from, to, ppID,
--- crafter.
+-- and how much of the customer's reagents came back and what it was worth
+-- then; and the chance, overall and per profession. filters: from, to,
+-- ppID, crafter.
 function M.BuildReturns(chunks, filters)
     filters = filters or {}
     local from, to = filters.from or 0, filters.to or math.huge
@@ -384,11 +384,14 @@ function M.BuildReturns(chunks, filters)
                     byProfession[profession] = byProfession[profession] or { ppID = event.p, crafts = 0, procs = 0 }
                     byProfession[profession].crafts = byProfession[profession].crafts + 1
                     totals.crafts = totals.crafts + 1
-                    local returned = type(event.rs) == 'table' and #event.rs > 0
+                    local returned = event.pr or (type(event.rs) == 'table' and #event.rs > 0)
                     if returned then
                         byProfession[profession].procs = byProfession[profession].procs + 1
                         totals.procs = totals.procs + 1
-                        for _, reagent in ipairs(event.rs) do
+                    end
+                    -- Only what came back from the customer's reagents.
+                    for _, reagent in ipairs(type(event.rs) == 'table' and event.rs or {}) do
+                        if reagent.c then
                             local rowKey = tostring(reagent.i) .. ':' .. tostring(event.p)
                             local row = rows[rowKey]
                             if not row then

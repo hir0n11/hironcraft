@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Resource returns: the customer's reagents only (0.4.49)
+
+- The customer's reagents that came back were recorded as the crafter's:
+  the order lists them with source "any" as well as "customer", and only
+  the latter was checked. The rule of the reagent audit is used now (all but
+  the crafter's), and only the customer's reagents are counted - the
+  crafter's own are left out, so the "from customer" and "own" columns and
+  tiles are gone. The chance still counts every resourcefulness return.
+- Summary tiles are as wide as their names and never wrap, and there is
+  room between the filters and the tiles.
+
 ## Resource returns (0.4.48)
 
 - A fourth tab in the analytics window, "Resource returns": the reagents

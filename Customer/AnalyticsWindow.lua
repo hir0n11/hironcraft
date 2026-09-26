@@ -208,8 +208,6 @@ local RETURN_COLUMNS = {
         value = function(row) return (ProfessionName(row.ppID) or ''):lower() end },
     { key = 'procs', label = 'Returns', width = 70, tip = 'Returns tooltip' },
     { key = 'quantity', label = 'Quantity', width = 70 },
-    { key = 'customerQuantity', label = 'From customer', width = 96, tip = 'Customer mats tooltip' },
-    { key = 'ownQuantity', label = 'Own', width = 60, tip = 'Own mats tooltip' },
     { key = 'unitPrice', label = 'Price each', width = 92, text = function(row) return Gold(row.unitPrice) end },
     { key = 'value', label = 'Worth', width = 104, text = function(row) return Gold(row.value) end },
     { key = 'lastAt', label = 'Last', width = 96,
@@ -464,7 +462,6 @@ local function CreateTiles(parent, x, y, groups)
         if groupIndex > 1 then x = x + GROUP_GAP - TILE_GAP end
         for _, info in ipairs(group.tiles) do
             local tile = CreateFrame('Frame', nil, parent)
-            tile:SetSize(info.width or TILE_WIDTH, TILE_HEIGHT)
             tile:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
             tile.background = tile:CreateTexture(nil, 'BACKGROUND')
             tile.background:SetAllPoints()
@@ -479,7 +476,12 @@ local function CreateTiles(parent, x, y, groups)
             tile.label:SetPoint('RIGHT', -4, 0)
             tile.label:SetJustifyH('LEFT')
             tile.label:SetTextColor(0.75, 0.75, 0.75)
+            tile.label:SetWordWrap(false)
             tile.label:SetText(L(info.label))
+            -- As wide as its name needs, one line.
+            local measure = tile.label.GetUnboundedStringWidth or tile.label.GetStringWidth
+            local width = math.max(info.width or TILE_WIDTH, math.ceil((measure(tile.label) or 0) + 16))
+            tile:SetSize(width, TILE_HEIGHT)
             tile.value = tile:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightLarge')
             tile.value:SetPoint('BOTTOMLEFT', 8, 5)
             tile.value:SetPoint('RIGHT', -4, 0)
@@ -493,7 +495,7 @@ local function CreateTiles(parent, x, y, groups)
             end)
             tile:SetScript('OnLeave', function() GameTooltip:Hide() end)
             tiles[info.key] = tile
-            x = x + (info.width or TILE_WIDTH) + TILE_GAP
+            x = x + width + TILE_GAP
         end
     end
     return tiles
@@ -507,9 +509,8 @@ local RETURN_TILE_GROUPS = {
         { key = 'chance', label = 'Chance', tip = 'Return chance tooltip' },
     } },
     { color = { 1.00, 0.78, 0.25 }, tiles = {
+        { key = 'quantity', label = 'Reagents returned', tip = 'Reagents returned tooltip' },
         { key = 'value', label = 'Returned worth', tip = 'Returned worth tooltip', width = 110 },
-        { key = 'customerValue', label = 'Customer mats', tip = 'Customer mats tooltip', width = 110 },
-        { key = 'ownValue', label = 'Own mats', tip = 'Own mats tooltip', width = 110 },
     } },
 }
 
@@ -553,9 +554,8 @@ local function UpdateReturnTiles()
     tiles.crafts.value:SetText(returns and TileNumber(totals.crafts) or '')
     tiles.procs.value:SetText(returns and TileNumber(totals.procs) or '')
     tiles.chance.value:SetText(returns and Percent(totals.chance) or '')
+    tiles.quantity.value:SetText(returns and TileNumber(totals.quantity) or '')
     tiles.value.value:SetText(returns and Gold(totals.value) or '')
-    tiles.customerValue.value:SetText(returns and Gold(totals.customerValue) or '')
-    tiles.ownValue.value:SetText(returns and Gold(totals.ownValue) or '')
 end
 
 local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
@@ -729,13 +729,12 @@ local function ExportCSV()
     local lines = {}
     local tab = View().tab
     if tab == TAB_RETURNS then
-        lines[1] = 'reagent,item_id,profession,returns,quantity,customer_quantity,own_quantity,unit_price_gold,worth_gold,customer_worth_gold,own_worth_gold,unpriced_quantity'
+        lines[1] = 'reagent,item_id,profession,returns,quantity,unit_price_gold,worth_gold,unpriced_quantity'
         for _, row in ipairs(frame.Returns.rows or {}) do
             local _, name = Subject(row)
             lines[#lines + 1] = table.concat({ CSV(name), row.itemID, CSV(ProfessionName(row.ppID) or ''),
-                row.procs, row.quantity, row.customerQuantity, row.ownQuantity,
-                row.unitPrice and string.format('%.2f', row.unitPrice / GOLD) or '', PlainGold(row.value),
-                PlainGold(row.customerValue), PlainGold(row.ownValue), row.unpriced }, ',')
+                row.procs, row.quantity, row.unitPrice and string.format('%.2f', row.unitPrice / GOLD) or '',
+                PlainGold(row.value), row.unpriced }, ',')
         end
     elseif tab == TAB_CUSTOMERS then
         lines[1] = 'customer,tier,orders,tips_gold,average_tip_gold,largest_tip_gold,declined,greetings,conversion,last_order'
@@ -838,7 +837,7 @@ local function Create()
     table.insert(UISpecialFrames, FRAME_NAME)
 
     frame.Inset:ClearAllPoints()
-    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -134)
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -142)
     frame.Inset:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -8, 8)
 
     local view = View()
@@ -921,8 +920,8 @@ local function Create()
     frame.SideDropdown, frame.TierDropdown = side, tier
 
     -- Row 2: what the period comes to, and the buttons.
-    frame.Tiles = CreateTiles(frame, 16, -60)
-    frame.ReturnTiles = CreateTiles(frame, 16, -60, RETURN_TILE_GROUPS)
+    frame.Tiles = CreateTiles(frame, 16, -68)
+    frame.ReturnTiles = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
     frame.ReturnTiles.chance:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
         GameTooltip_SetTitle(GameTooltip, L('Chance'))
@@ -934,12 +933,12 @@ local function Create()
         GameTooltip:Show()
     end)
     frame.Tiers = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -108)
+    frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -116)
     frame.Tiers:SetJustifyH('LEFT')
 
     local export = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     export:SetSize(110, 22)
-    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -60)
+    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -68)
     export:SetText(L('Export CSV'))
     export:SetScript('OnClick', ExportCSV)
     frame.ExportButton = export

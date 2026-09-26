@@ -19,9 +19,10 @@ local Scan = select(2, ...)
 --   i  item;  r  recipe;  p  profession;  s  slot;  lb  slot label
 --   x  crafter;  g  general request;  o  crafting order;  st  'f' / 'r'
 --   tip  tip in copper;  to  the replacing token;  man  marked by hand
---   c (kind) a craft for a crafting order (op its craft operation), with rs: the reagents
---      resourcefulness returned, each { i item, n count, v price per unit
---      when it happened, s price source a/t/p, c 1 when the customer's }
+--   c (kind) a craft for a crafting order (op its craft operation, pr 1 when
+--      resourcefulness returned anything), with rs: the customer's reagents
+--      it returned, each { i item, n count, v price per unit when it
+--      happened, s price source a/t/p, c 1 }
 local M = {}
 Scan.AnalyticsLog = M
 
@@ -558,8 +559,9 @@ local function RecipeProfession(recipeID)
 end
 
 -- A craft finished. Only crafts for a crafting order are kept: each counts
--- for the chance of resourcefulness, and the reagents it returned are kept
--- with their price at that moment and whether the customer supplied them.
+-- for the chance of resourcefulness, and the customer's reagents it returned
+-- are kept with their price at that moment (the crafter's own are not
+-- counted).
 local countedOperations = {}
 function M.CraftResult(data)
     if type(data) ~= 'table' or not M.IsEnabled() then return end
@@ -570,28 +572,24 @@ function M.CraftResult(data)
         if countedOperations[operation] then return end
         countedOperations[operation] = true
     end
-    local customerSource = Enum and Enum.CraftingOrderReagentSource and Enum.CraftingOrderReagentSource.Customer or 1
-    local fromCustomer = {}
-    for _, reagent in ipairs(type(order.reagents) == 'table' and order.reagents or {}) do
-        local info = type(reagent) == 'table' and reagent.reagentInfo
-        local itemID = info and info.reagent and info.reagent.itemID
-        if itemID and reagent.source == customerSource then fromCustomer[itemID] = true end
-    end
-    local returned = nil
+    local audit = Scan.ReagentAudit
+    local fromCustomer = audit and audit.CustomerItems and audit.CustomerItems(order) or {}
+    local returned, any = nil, false
     for _, entry in ipairs(type(data.resourcesReturned) == 'table' and data.resourcesReturned or {}) do
         -- Reagents that are currencies have no auction price: left out.
         local itemID = tonumber(entry.reagent and entry.reagent.itemID or entry.itemID)
         local count = tonumber(entry.quantity)
-        if itemID and count and count > 0 then
+        if count and count > 0 then any = true end
+        if itemID and count and count > 0 and fromCustomer[itemID] then
             local price, source = ReagentPrice(itemID)
             returned = returned or {}
-            returned[#returned + 1] = { i = itemID, n = count, v = price, s = source,
-                c = fromCustomer[itemID] and 1 or nil }
+            returned[#returned + 1] = { i = itemID, n = count, v = price, s = source, c = 1 }
         end
     end
     local crafter = Scan.GetPlayerName and Scan.GetPlayerName(true) or nil
     return M.Record({ k = 'c', o = order.orderID, op = operation ~= 0 and operation or nil,
-        r = tonumber(order.spellID), p = RecipeProfession(order.spellID), x = crafter, rs = returned })
+        r = tonumber(order.spellID), p = RecipeProfession(order.spellID), x = crafter,
+        pr = any and 1 or nil, rs = returned })
 end
 
 -- Whispers and crafting orders count as load, whoever started them.

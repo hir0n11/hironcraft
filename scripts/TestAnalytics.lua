@@ -26,6 +26,7 @@ local function load(path) assert(loadfile(path))('HironCraft', Scan) end
 load('Customer/AnalyticsLog.lua')
 load('Customer/AnalyticsReport.lua')
 load('Customer/AnalyticsSync.lua')
+load('Customer/ReagentAudit.lua')
 local Log, Report, Sync = Scan.AnalyticsLog, Scan.AnalyticsReport, Scan.AnalyticsSync
 Log.synchronous = true
 
@@ -392,13 +393,17 @@ assert(reported, 'the result of the exchange was not reported: ' .. table.concat
 DEFAULT_CHAT_FRAME, C_Timer = nil, nil
 print('Analytics exchange report passed.')
 
--- Resourcefulness on crafting orders: reagents back, whose they were, their
--- price then (Auctionator, else TSM), the chance per profession.
+-- Resourcefulness on crafting orders: the customer's reagents that came back,
+-- their price then (Auctionator, else TSM), the chance per profession. The
+-- crafter's own reagents count for the chance only.
 Scan.DB = newDB()
 Scan.GetPlayerName = function() return 'Smith-Realm' end
+-- As the server lists them: the customer's reagents with source "any" (0)
+-- or customer, the crafter's with source crafter (2).
 local claimed = { orderID = 77, spellID = 500, reagents = {
-    { reagentInfo = { reagent = { itemID = 9001 }, quantity = 5 }, source = 1 },
+    { reagentInfo = { reagent = { itemID = 9001 }, quantity = 5 }, source = 0 },
     { reagentInfo = { reagent = { itemID = 9002 }, quantity = 0 }, source = 2 },
+    { reagentInfo = { reagent = { itemID = 9003 }, quantity = 1 }, source = 1 },
 } }
 C_CraftingOrders = { GetClaimedOrder = function() return claimed end }
 C_TradeSkillUI = { GetTradeSkillLineForRecipe = function() return 2907, 'Midnight Blacksmithing', 164 end }
@@ -419,16 +424,22 @@ assert(returned.totals.crafts == 2 and returned.totals.procs == 1 and returned.t
     'order crafts or the chance are off (a repeat or a craft without an order was counted?)')
 local byID = {}
 for _, entry in ipairs(returned.rows) do byID[entry.itemID] = entry end
-assert(byID[9001] and byID[9001].customerQuantity == 2 and byID[9001].customerValue == 20000 and byID[9001].ppID == 164,
+assert(byID[9001] and byID[9001].quantity == 2 and byID[9001].value == 20000 and byID[9001].ppID == 164,
     "the customer's reagent is off")
-assert(byID[9002] and byID[9002].ownQuantity == 3 and byID[9002].value == 15000, 'the own reagent or its TSM price is off')
+assert(not byID[9002], "the crafter's own reagent was counted")
 assert(byID[9003] and byID[9003].unpriced == 1 and byID[9003].value == 0 and not byID[3000], 'unpriced or currency returns are off')
-assert(returned.totals.value == 35000 and returned.totals.customerValue == 20000 and returned.totals.ownValue == 15000)
+assert(returned.totals.value == 20000 and returned.totals.quantity == 3)
+-- A craft that gave back only the crafter's own reagents still counts for the chance.
+claimed = { orderID = 78, spellID = 500, reagents = {
+    { reagentInfo = { reagent = { itemID = 9002 }, quantity = 0 }, source = 2 } } }
+Log.CraftResult({ operationID = 4, resourcesReturned = { { reagent = { itemID = 9002 }, quantity = 1 } } })
+assert(Report.BuildReturns(all(), {}).totals.procs == 2, 'a return of own reagents was left out of the chance')
+claimed = nil
 assert(returned.professions[1].ppID == 164 and returned.professions[1].chance == 0.5)
 assert(Report.BuildReturns(all(), { ppID = 202 }).totals.crafts == 0, 'the profession filter let blacksmithing through')
 assert(Report.BuildReturns(all(), { crafter = 'Other-Realm' }).totals.crafts == 0, 'the crafter filter is off')
 -- The price is the one of that moment: a later price does not change it.
 Auctionator.API.v1.GetAuctionPriceByItemID = function() return 99999 end
-assert(Report.BuildReturns(all(), {}).totals.customerValue == 20000, 'the worth followed today\'s price')
+assert(Report.BuildReturns(all(), {}).totals.value == 20000, 'the worth followed today\'s price')
 C_CraftingOrders, C_TradeSkillUI, Auctionator, TSM_API = nil, nil, nil, nil
 print('Analytics resource returns passed.')
