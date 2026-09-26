@@ -2450,11 +2450,6 @@ function HironCraftScanComm:Transmit(data, operation, target, onSent)
 
     local priority = PriorityForOperation(operation)
     local prefix = PrefixForOperation(operation)
-    -- Order traffic is load: analytics waits for a quiet period.
-    if priority == 'ALERT' and operation ~= HironCraftScanComm.Operations.Ping
-        and HironCraftScan.AnalyticsLog then
-        HironCraftScan.AnalyticsLog.NoteActivity()
-    end
     if priority == 'ALERT' then
         -- Critical order updates are small. Serialize them immediately so the
         -- addon queues the whisper in the same frame as the fulfillment event;
@@ -2591,10 +2586,6 @@ local function ReceiveDeserialized(msg, sender)
             and HironCraftScan.AnalyticsSync.Handles(msg.operation)
         then
             HironCraftScan.AnalyticsSync.Receive(msg.operation, sender, msg.data, msg.senderID)
-        end
-        if ALERT_OPERATIONS[msg.operation] and msg.operation ~= HironCraftScanComm.Operations.Ping
-            and HironCraftScan.AnalyticsLog then
-            HironCraftScan.AnalyticsLog.NoteActivity()
         end
     end
 end

@@ -27,7 +27,7 @@ local M = {}
 Scan.AnalyticsLog = M
 
 M.STORE_LIMIT = 2000
-M.QUIET_SECONDS = 10 * 60
+M.QUIET_SECONDS = 3 * 60
 local MENTION_REPEAT_SECONDS = 15
 local UNKNOWN_ITEMS_LIMIT = 3000
 
@@ -64,8 +64,11 @@ function M.Seq()
     return root and root.seq or 0
 end
 
--- Load: anything the player does with customers or orders. Linked accounts
--- exchange analytics only once both have been quiet for a while.
+-- Load: what the player does - greetings, whispers they type, crafting and
+-- claiming or delivering orders, combat. What arrives by itself (requests
+-- in chat, incoming whispers, results from linked accounts) is not load:
+-- the player may be away, which is the best time to exchange. Linked
+-- accounts exchange analytics only once both have been quiet for a while.
 local lastActivity = Clock()
 
 function M.NoteActivity()
@@ -173,7 +176,8 @@ end
 
 function M.Record(event)
     if not M.IsEnabled() or type(event) ~= 'table' then return nil end
-    if event.k ~= 'm' then M.NoteActivity() end
+    -- A greeting sent or an order crafted here: the player is at work.
+    if event.k == 'g' or event.k == 'c' then M.NoteActivity() end
     return Append(event)
 end
 
@@ -592,12 +596,11 @@ function M.CraftResult(data)
         pr = any and 1 or nil, rs = returned })
 end
 
--- Whispers and crafting orders count as load, whoever started them.
+-- Whispers the player types, crafting and orders count as load.
 if CreateFrame then
     local watcher = CreateFrame('Frame')
     for _, event in ipairs({
-        'CHAT_MSG_WHISPER', 'CHAT_MSG_WHISPER_INFORM', 'CHAT_MSG_BN_WHISPER',
-        'CHAT_MSG_BN_WHISPER_INFORM', 'CRAFTINGORDERS_CLAIMED_ORDER_ADDED',
+        'CHAT_MSG_WHISPER_INFORM', 'CHAT_MSG_BN_WHISPER_INFORM', 'CRAFTINGORDERS_CLAIMED_ORDER_ADDED',
         'CRAFTINGORDERS_CLAIMED_ORDER_UPDATED', 'CRAFTINGORDERS_FULFILL_ORDER_RESPONSE',
         'TRADE_SKILL_ITEM_CRAFTED_RESULT', 'PLAYER_REGEN_DISABLED',
     }) do

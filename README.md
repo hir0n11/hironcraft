@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics exchange after 3 quiet minutes (0.4.50)
+
+- Linked accounts exchange analytics once both have been quiet for 3
+  minutes instead of 10, and try every 5 minutes instead of 15.
+- Only what the player does counts as work: greetings, whispers they type,
+  crafting, claiming and delivering orders, combat. Requests and whispers
+  that come in, results from linked accounts and the order traffic between
+  accounts no longer hold the exchange back, so stepping away from the
+  computer is enough.
+
 ## Resource returns: the customer's reagents only (0.4.49)
 
 - The customer's reagents that came back were recorded as the crafter's:

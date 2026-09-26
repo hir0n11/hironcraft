@@ -1,8 +1,9 @@
 local Scan = select(2, ...)
 
 -- Linked accounts share their analytics so each one shows the whole picture,
--- but only while both are quiet: no requests, greetings, whispers or crafting
--- for AnalyticsLog.QUIET_SECONDS, and not in combat. The receiver pulls the
+-- but only while both are quiet: no greetings, typed whispers, crafting or
+-- order work for AnalyticsLog.QUIET_SECONDS (requests and whispers that come
+-- in do not count), and not in combat. The receiver pulls the
 -- sender's own events in small batches on a channel of their own and stops
 -- as soon as either side gets busy; the next quiet period carries on from
 -- where it stopped.
@@ -17,7 +18,7 @@ local M = {}
 Scan.AnalyticsSync = M
 
 M.BATCH = 150
-M.OFFER_INTERVAL = 15 * 60
+M.OFFER_INTERVAL = 5 * 60
 M.ANSWER_SECONDS = 30
 -- The first version that exchanges analytics.
 M.FIRST_VERSION = '0.4.41'

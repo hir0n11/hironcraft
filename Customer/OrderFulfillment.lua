@@ -1313,7 +1313,6 @@ function OrderFulfillment:SetStatus(order, status, options)
 
     -- Analytics: which crafting order answered this request row.
     if HironCraftScan.AnalyticsLog then
-        HironCraftScan.AnalyticsLog.NoteActivity()
         if (status == self.Status.Fulfilled or status == self.Status.Rejected) and entry.requestToken
             and not (current and current.status == status and current.craftingOrderID == craftingOrderID) then
             HironCraftScan.AnalyticsLog.Link(entry.requestToken, craftingOrderID, status, options.automatic == false)

@@ -265,6 +265,19 @@ as(dbB, function()
     end
 end)
 assert(results > 0, 'an analytics-only account got no order results')
+-- Requests, mentions and results coming in while the player is away do not
+-- hold the exchange back; a greeting or an order craft does.
+clock = clock + Log.QUIET_SECONDS + 1
+as(dbA, function()
+    Log.Request('Away-Realm', { requestToken = 'away1', itemID = 1001, time = now })
+    Log.Mention('Away-Realm', 1001)
+    Log.Link('away1', 55, 'fulfilled')
+    Log.Outcome({ orderID = 55, status = 'fulfilled', customerName = 'Away', updatedAt = now }, 'notice')
+end)
+assert(Log.IsQuiet(), 'things arriving by themselves made the player busy')
+as(dbA, function() Log.Greeting('Away-Realm', { requestToken = 'away1' }) end)
+assert(not Log.IsQuiet(), 'a greeting did not count as work')
+assert(Log.QUIET_SECONDS == 180 and Sync.OFFER_INTERVAL <= 5 * 60)
 print('Analytics exchange passed (quiet only, batches, both ways, no echo, busy peer, exchange now, order results).')
 
 -- Dates for the window.
