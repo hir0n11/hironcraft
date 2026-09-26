@@ -40,7 +40,6 @@ local TIERS = {
     { value = 'generous', label = 'Generous customers', coin = 'generous' },
     { value = 'regular', label = 'Regular customers', coin = 'regular' },
     { value = 'stingy', label = 'Stingy customers', coin = 'stingy' },
-    { value = 'none', label = 'Customers without a mark' },
 }
 
 local SIDES = {
@@ -64,6 +63,8 @@ local function View()
     view.sort = type(view.sort) == 'table' and view.sort or {}
     -- Most ordered first, until a header is clicked.
     view.sort[TAB_ITEMS] = view.sort[TAB_ITEMS] or { key = 'orders', desc = true }
+    -- The "without a mark" filter is gone: such customers count as silver.
+    if view.tier == 'none' then view.tier = nil end
     view.sort[TAB_CUSTOMERS] = view.sort[TAB_CUSTOMERS] or { key = 'orders', desc = true }
     return view
 end
@@ -232,12 +233,17 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
         header.text:SetJustifyH(column.align or 'RIGHT')
         header:SetHighlightTexture('Interface\\Buttons\\UI-Listbox-Highlight2', 'ADD')
         header:GetHighlightTexture():SetAlpha(0.3)
+        -- First click sorts, the second turns the order round, the third
+        -- goes back to the usual order (most orders first).
         header:SetScript('OnClick', function()
             local sort = View().sort[tabIndex]
-            if sort and sort.key == column.key then
+            if sort and sort.key == column.key and (sort.step or 1) >= 2 then
+                View().sort[tabIndex] = nil
+            elseif sort and sort.key == column.key then
                 sort.desc = not sort.desc
+                sort.step = 2
             else
-                View().sort[tabIndex] = { key = column.key, desc = column.align ~= 'LEFT' }
+                View().sort[tabIndex] = { key = column.key, desc = column.align ~= 'LEFT', step = 1 }
             end
             tbl:Refresh()
         end)
@@ -500,10 +506,9 @@ local function UpdateSummary()
     local function Count(mark, count)
         return Coin(mark) .. ' |cffffffff' .. TileNumber(count) .. '|r'
     end
-    frame.Tiers:SetText(string.format('|cffffd100%s|r   %s     %s     %s     |cff9d9d9d%s|r          |cff9d9d9d%s|r   %s     %s     %s',
+    frame.Tiers:SetText(string.format('|cffffd100%s|r   %s     %s     %s          |cff9d9d9d%s|r   %s     %s     %s',
         L('Customers in the period:'),
         Count('generous', tiers.generous), Count('regular', tiers.regular), Count('stingy', tiers.stingy),
-        string.format(L('no mark %s'), TileNumber(tiers.none)),
         L('Marked overall:'),
         Count('generous', all.generous), Count('regular', all.regular), Count('stingy', all.stingy)))
 end

@@ -165,6 +165,20 @@ function M.Build(chunks, filters, context)
         if not requests[token] then Add(token) end
     end
 
+    -- The coin, where a customer with delivered orders and none on record
+    -- (orders from before tips were kept) counts as silver.
+    local ordered = {}
+    for _, order in pairs(orders) do
+        local who = order.st == 'f' and BaseKey(order.c)
+        if who then ordered[who] = true end
+    end
+    local function MarkOf(name)
+        local mark = markOf(name)
+        if mark then return mark end
+        local who = BaseKey(name)
+        return who and ordered[who] and 'regular' or 'none'
+    end
+
     local function PassesCommon(ppID, crafters, customer, side)
         if filters.ppID and ppID ~= filters.ppID then return false end
         if filters.crafter then
@@ -174,7 +188,7 @@ function M.Build(chunks, filters, context)
             end
             if not match then return false end
         end
-        if filters.tier and (markOf(customer) or 'none') ~= filters.tier then return false end
+        if filters.tier and MarkOf(customer) ~= filters.tier then return false end
         if filters.side and side ~= filters.side then return false end
         return true
     end
@@ -295,7 +309,7 @@ function M.Build(chunks, filters, context)
                         if not person.lastOrder or order.t > person.lastOrder then person.lastOrder = order.t end
                         if not tierSeen[person.key] then
                             tierSeen[person.key] = true
-                            local mark = markOf(order.c) or 'none'
+                            local mark = MarkOf(order.c)
                             report.tiers[mark] = (report.tiers[mark] or 0) + 1
                         end
                     end
@@ -337,7 +351,7 @@ function M.Build(chunks, filters, context)
     for _, person in pairs(customers) do
         person.conversion = person.greetings > 0 and person.crafted / person.greetings or nil
         person.averageTip = person.tipped > 0 and person.tips / person.tipped or nil
-        person.mark = markOf(person.name) or 'none'
+        person.mark = MarkOf(person.name)
         if not filters.tier or person.mark == filters.tier then
             report.customers[#report.customers + 1] = person
         end

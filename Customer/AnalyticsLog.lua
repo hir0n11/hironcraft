@@ -479,6 +479,47 @@ function M.OwnSince(from, limit, skip)
     return batch, last, more
 end
 
+-- Customers with a delivered order whose tip was never recorded: the order
+-- journal and this journal's open store.
+function M.UntippedCustomers()
+    local names = {}
+    local notices = Scan.DB.settings and Scan.DB.settings.order_completion_notices
+    for _, notice in pairs(type(notices) == 'table' and notices or {}) do
+        if type(notice) == 'table' and notice.status == 'fulfilled' and notice.tipAmount == nil
+            and type(notice.customerName) == 'string' then
+            names[#names + 1] = notice.customerName
+        end
+    end
+    local root = M.Root()
+    for _, event in ipairs(root and root.open.events or {}) do
+        if event.k == 'd' and event.st == 'f' and event.tip == nil and type(event.c) == 'string' then
+            names[#names + 1] = event.c
+        end
+    end
+    return names
+end
+
+-- Gathering is on by default. The old chat counter was opt-in, and an
+-- account switched off back then kept its greetings out of the combined
+-- picture unnoticed: it is switched on once. Unticked by hand after that, it
+-- stays off.
+function M.Startup()
+    local analytics = Scan.DB and Scan.DB.analytics
+    if type(analytics) ~= 'table' then return end
+    if analytics.default_on ~= 1 then
+        analytics.enabled = nil
+        analytics.default_on = 1
+    end
+    if M.IsEnabled() and M.Root() then
+        pcall(M.Backfill)
+        if analytics.untipped_silver ~= 1 and Scan.Generous and Scan.Generous.MarkUntipped then
+            analytics.untipped_silver = 1
+            pcall(Scan.Generous.MarkUntipped, M.UntippedCustomers())
+        end
+        pcall(M.Maintain)
+    end
+end
+
 -- Whispers and crafting orders count as load, whoever started them.
 if CreateFrame then
     local watcher = CreateFrame('Frame')
@@ -494,10 +535,5 @@ if CreateFrame then
 end
 
 if Scan.Utils and Scan.Utils.onLoad then
-    Scan.Utils.onLoad(function()
-        if M.IsEnabled() and M.Root() then
-            pcall(M.Backfill)
-            pcall(M.Maintain)
-        end
-    end)
+    Scan.Utils.onLoad(function() pcall(M.Startup) end)
 end

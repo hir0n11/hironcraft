@@ -182,6 +182,16 @@ assert(#frame.Customers.rows == 1 and frame.Customers.rows[1].key == 'buyer', 't
 view.tier = nil
 Scan.AnalyticsWindow.Rebuild()
 for _, tab in ipairs(frame.Tabs) do tab.scripts.OnClick(tab) end
+-- Sorting: down, up, then back to the usual order.
+local tipHeader = frame.Items.headers[#frame.Items.headers]
+tipHeader.scripts.OnClick(tipHeader)
+assert(view.sort[1].key == 'averageTip' and view.sort[1].desc, 'the first click did not sort')
+tipHeader.scripts.OnClick(tipHeader)
+assert(view.sort[1].key == 'averageTip' and not view.sort[1].desc, 'the second click did not turn the order')
+tipHeader.scripts.OnClick(tipHeader)
+Scan.AnalyticsWindow.Rebuild()
+assert(view.sort[1].key == 'orders' and view.sort[1].desc and not view.sort[1].step,
+    'the third click did not go back to the usual order')
 for _, header in ipairs(frame.Items.headers) do header.scripts.OnClick(header) end
 for _, header in ipairs(frame.Customers.headers) do header.scripts.OnClick(header) end
 

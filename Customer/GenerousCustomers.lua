@@ -128,6 +128,22 @@ function M.RecordTip(name, tipCopper, orderID)
     return true, Mark(entry) ~= before
 end
 
+-- Customers with delivered orders from before tips were kept (0.4.32) have
+-- no entry and no coin. They paid something, just not on record: silver. An
+-- automatic mark, so the next tip moves it as usual.
+function M.MarkUntipped(names)
+    local store = Store()
+    local marked = 0
+    for _, name in ipairs(names or {}) do
+        local key = Key(name)
+        if key and store[key] == nil then
+            store[key] = { orders = {}, count = 0, mark = 'regular', name = name, at = time() }
+            marked = marked + 1
+        end
+    end
+    return marked
+end
+
 -- By hand: 'generous', 'stingy' or 'none'. true/false mean generous / none.
 function M.SetManual(name, mark)
     local key = Key(name)
@@ -173,5 +189,5 @@ function M.Describe(name)
             Gold(entry.max), Gold(entry.total), tonumber(entry.count) or 0)
             .. (manual and (' ' .. L('(marked by hand)')) or '')
     end
-    return title .. ' ' .. L('(marked by hand)')
+    return manual and (title .. ' ' .. L('(marked by hand)')) or title
 end

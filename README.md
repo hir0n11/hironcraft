@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics on by default, a third click unsorts, silver for the untipped (0.4.46)
+
+- "Gather analytics" is switched on once on every account, also where it
+  was switched off in the old opt-in analytics: such an account kept its
+  greetings out of the combined picture without anyone noticing. Unticking
+  it afterwards stays.
+- Column headers in the analytics tables: the first click sorts, the second
+  turns the order round, the third goes back to the usual order (most orders
+  first).
+- Customers whose delivered orders came before tips were recorded (0.4.32)
+  had no coin at all. They get a silver coin once, as an automatic mark the
+  next tip moves as usual; in the analytics any customer with delivered
+  orders and no coin counts as silver. "No mark" is gone from the summary and
+  from the coin filter.
+
 ## Linked accounts say their version (0.4.45)
 
 - Every message between linked accounts carries the sender's HironCraft

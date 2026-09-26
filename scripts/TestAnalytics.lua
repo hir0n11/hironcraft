@@ -112,6 +112,12 @@ local marks = { buyer = 'generous', slot = 'stingy', direct = 'regular' }
 report = build(nil, marks)
 assert(report.tiers.generous == 1 and report.tiers.stingy == 1 and report.tiers.regular == 1,
     'customers per tier are off')
+-- A customer with delivered orders and no coin (from before tips were kept)
+-- counts as silver.
+report = build(nil, { buyer = 'generous', slot = 'stingy' })
+assert(report.tiers.regular == 1 and report.tiers.none == 0, 'an untipped customer was not counted as silver')
+assert(build({ tier = 'regular' }, { buyer = 'generous', slot = 'stingy' }).totals.orders == 1,
+    'the silver filter missed an untipped customer')
 report = build({ tier = 'generous' }, marks)
 assert(report.totals.orders == 1 and #report.customers == 1, 'the tier filter let others through')
 
@@ -290,6 +296,35 @@ local own = 0
 for _, event in ipairs(Scan.DB.analytics.open.events) do if event.q then own = own + 1 end end
 assert(own == 4, 'a received result was taken in as our own: ' .. own)
 print('Analytics backfill passed.')
+
+-- Switched off in the old opt-in days: on once, then a later untick stays.
+Scan.DB = newDB()
+Scan.DB.analytics.enabled = false
+Log.Startup()
+assert(Log.IsEnabled() and Scan.DB.analytics.default_on == 1, 'gathering was not switched on by default')
+Log.SetEnabled(false)
+Log.Startup()
+assert(not Log.IsEnabled(), 'an untick by hand did not stay')
+print('Analytics default on passed.')
+
+-- Once: silver for customers whose delivered orders carry no tip.
+Scan.DB = newDB()
+Scan.DB.analytics.default_on = 1
+Scan.DB.settings.order_completion_notices = {
+    a = { orderID = 1, status = 'fulfilled', customerName = 'Early-Realm', updatedAt = now },
+    b = { orderID = 2, status = 'fulfilled', customerName = 'Tipped-Realm', tipAmount = 100, updatedAt = now },
+    c = { orderID = 3, status = 'rejected', customerName = 'Refused-Realm', updatedAt = now },
+}
+local marked = {}
+Scan.Generous = { MarkUntipped = function(names) for _, name in ipairs(names) do marked[name] = true end end }
+Log.Startup()
+assert(marked['Early-Realm'] and not marked['Tipped-Realm'] and not marked['Refused-Realm'],
+    'the wrong customers were marked silver')
+marked = {}
+Log.Startup()
+assert(not next(marked), 'the silver marking ran twice')
+Scan.Generous = nil
+print('Analytics untipped silver passed.')
 
 -- The same request seen by two linked accounts is one conversation: the
 -- crafter's PC and the collector see the same chat line.

@@ -87,4 +87,15 @@ G.SetHoldingStingy(false)
 assert(not G.IsGreetingHeld('Cheap') and Scan.DB.settings.hold_stingy_greetings == nil,
     'the pause did not switch off')
 
+-- Orders from before tips were kept: silver, automatic, moved by the next tip.
+assert(G.MarkUntipped({ 'Early-Realm', 'Early-Other', 'Big' }) == 1, 'untipped customers were not marked once')
+assert(G.MarkOf('Early') == 'regular' and not G.Describe('Early'):find('by hand', 1, true),
+    'an untipped customer is not silver, or looks marked by hand')
+assert(G.MarkOf('Big') == nil, 'a customer with a record (unmarked by hand) was overwritten')
+G.RecordTip('Early', 6000 * GOLD, 20)
+assert(G.IsGenerous('Early'), 'a big tip did not move an untipped customer to gold')
+G.MarkUntipped({ 'Later' })
+G.RecordTip('Later', 100 * GOLD, 21)
+assert(G.IsStingy('Later'), 'a small tip did not move an untipped customer to copper')
+
 print('Customer tip tests passed (generous 5,000+, stingy under 999, regular in between, generosity wins, repeats, by hand, older data, pause).')
