@@ -1842,6 +1842,27 @@ local function GenericAlertPreferences()
     return visual, sound
 end
 
+-- The banner's text for a request: the customer, what they asked for and the
+-- crafter who makes it.
+function HironCraftScan.OrderBannerText(customer, customerInfo, response)
+    local name = HironCraftScan.ColorizePlayerName(customer, customerInfo and customerInfo.guid)
+    if response.generic_request then
+        return string.format('%s\n%s (%s)', name, L('General crafting request'), L('All crafters'))
+    end
+    return string.format('%s\n%s (%s)', name,
+        response.itemLink or response.equipmentLabel
+            or HironCraftScan.Utils.ColorizeProfessionName(response.parentProfID, response.professionName),
+        HironCraftScan.ColorizeCrafterName(response.crafterName))
+end
+
+-- Stingy customers are on hold (the orders window switch): their requests
+-- come in quietly. A row the crafter adds by hand is announced as asked.
+local function IsGreetingHeld(customer, overrides)
+    if overrides and overrides.manualMatch then return false end
+    local tips = HironCraftScan.Generous
+    return tips and tips.IsGreetingHeld and tips.IsGreetingHeld(customer) or false
+end
+
 local function HandleGeneralRequest(message, customer, customerInfo, overrides, chatEvent)
     local responses = saved(customerInfo, 'responses', {})
     local response = saved(responses, GENERAL_REQUEST_ID, {})
@@ -1927,7 +1948,8 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
     if fresh then
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
         local visualAlert, soundAlert = GenericAlertPreferences()
-        if HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order) then
+        if (HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order))
+            or IsGreetingHeld(customer, overrides) then
             visualAlert, soundAlert = false, false
         end
         if visualAlert and not (overrides and overrides.suppressBatchAlert) then
@@ -1935,10 +1957,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
             FlashClientIcon()
             if not customerStartedInteraction and not (overrides and overrides.suppressGreetingBanner) then
                 HironCraftScanScannerMenu:TriggerAlert(
-                    string.format('%s\n%s (%s)',
-                        HironCraftScan.ColorizePlayerName(customer, customerInfo.guid),
-                        L('General crafting request'), L('All crafters')),
-                    order)
+                    HironCraftScan.OrderBannerText(customer, customerInfo, response), order)
                 if not HironCraftScanCraftingOrderPage:IsShown() then
                     HironCraftScanScannerMenu:TriggerPulseLock('scanned')
                 end
@@ -2265,6 +2284,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         local isAlertFiltered = (
             ppConfig.local_alerts_only and HironCraftScan.GetPlayerName(true) ~= crafterInfo.crafter
         ) or (HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order))
+            or IsGreetingHeld(customer, overrides)
         if ppConfig.visual_alert_enabled and not isAlertFiltered
             and not (overrides and overrides.suppressBatchAlert) then
             HironCraftScan.State.activeOrder = order
@@ -2273,18 +2293,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
             if not customerStartedInteraction and not (overrides and overrides.suppressGreetingBanner) then
                 HironCraftScanScannerMenu:TriggerAlert(
-                    string.format(
-                        '%s\n%s (%s)',
-                        HironCraftScan.ColorizePlayerName(customer, customerInfo.guid),
-                        itemLink or response.equipmentLabel
-                            or HironCraftScan.Utils.ColorizeProfessionName(
-                                profInfo.parentProfessionID,
-                                profInfo.parentProfessionName
-                            ),
-                        HironCraftScan.ColorizeCrafterName(crafter)
-                    ),
-                    order
-                )
+                    HironCraftScan.OrderBannerText(customer, customerInfo, response), order)
 
                 if not HironCraftScanCraftingOrderPage:IsShown() then
                     HironCraftScanScannerMenu:TriggerPulseLock('scanned')
@@ -2378,6 +2387,7 @@ local function OfferDeferredQuickReply(customer, message, customerInfo, override
     end
 
     if #responses > 0 then
+        if IsGreetingHeld(customer, overrides) then return end
         if HironCraftScan.QuickReplies.ShowOrderGreeting then
             HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
         end

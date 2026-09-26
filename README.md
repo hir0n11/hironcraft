@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Pause stingy customers; a swallowed greeting comes back as the banner (0.4.39)
+
+- The orders window has a "Pause stingy" checkbox next to Busy Mode. While
+  it is checked, requests from customers with the copper coin are listed
+  without the banner, the greeting card or the sound; a click on the row
+  still greets them. It stays on over /reload and relogs until unchecked
+  (`settings.hold_stingy_greetings`, per account). A stingy request already
+  waiting for the banner is skipped once the pause is on.
+- A greeting the server swallowed (message rate limit) came back as a quick
+  reply card even when it had been sent from the banner. It now comes back
+  the way it was sent: the banner for the banner or the order list, the
+  card for the card.
+
 ## No chat line for a result of another order (0.4.38)
 
 - "result for X is not tied to a row" appeared in chat whenever a customer

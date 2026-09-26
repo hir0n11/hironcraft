@@ -59,4 +59,14 @@ Scan.DB.settings.generous_customers.auto = { max = 6000 * GOLD, count = 1, order
 assert(G.IsGenerous('Legacy') and G.MarkOf('Gone') == nil and G.IsGenerous('Auto'),
     '0.4.32 marks changed meaning')
 
-print('Customer tip tests passed (generous 5,000+, stingy under 999, generosity wins, repeats, by hand, 0.4.32 data).')
+-- The pause for stingy customers holds their greetings only, only while on.
+assert(not G.IsHoldingStingy() and not G.IsGreetingHeld('Cheap'), 'the pause is on by default')
+G.SetHoldingStingy(true)
+assert(G.IsHoldingStingy() and Scan.DB.settings.hold_stingy_greetings == true, 'the pause is not kept')
+assert(G.IsGreetingHeld('Cheap-Realm') and not G.IsGreetingHeld('Friendly')
+    and not G.IsGreetingHeld('Middle'), 'the pause held the wrong customers')
+G.SetHoldingStingy(false)
+assert(not G.IsGreetingHeld('Cheap') and Scan.DB.settings.hold_stingy_greetings == nil,
+    'the pause did not switch off')
+
+print('Customer tip tests passed (generous 5,000+, stingy under 999, generosity wins, repeats, by hand, 0.4.32 data, pause).')

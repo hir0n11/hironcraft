@@ -1522,7 +1522,7 @@ local function SendOption(toast, option)
         if HironCraftScan.SendOrderGreeting({
             customerName = option.customer,
             responseID = option.responseID,
-        }, true) == false then
+        }, true, 'card') == false then
             return
         end
         -- The normal row-click path refreshes the table after greeting. The

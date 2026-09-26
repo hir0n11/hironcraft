@@ -133,7 +133,9 @@ function Scan.BuildOrderGreetingText(order)
     return ok and messages and table.concat(messages, ' ') or nil
 end
 
-function Scan.SendOrderGreeting(order, userInitiated)
+-- source: 'card' when sent from a quick reply card; otherwise the banner or
+-- the order list. A greeting the server swallows is offered again the same way.
+function Scan.SendOrderGreeting(order, userInitiated, source)
     if userInitiated ~= true then return false end
     local messages, pending = BuildGreeting(order)
     if not messages then return false end
@@ -154,6 +156,7 @@ function Scan.SendOrderGreeting(order, userInitiated)
     lastGreeting = {
         customer = order.customerName,
         responses = pending,
+        source = source,
         at = (GetTime and GetTime()) or (time and time()) or 0,
     }
     return true
@@ -161,9 +164,9 @@ end
 
 -- The server can swallow a whisper it considers too fast, and it says so a
 -- moment later. The greeting was already marked as sent, which leaves the row
--- looking answered while the customer heard nothing. Take it back and put the
--- greeting card up again once the server lets us speak, so it is one click
--- away instead of something to remember. Nothing is ever sent by a timer.
+-- looking answered while the customer heard nothing. Take it back and offer
+-- it again once the server lets us speak, so it is one click away instead of
+-- something to remember. Nothing is ever sent by a timer.
 local THROTTLE_UNDO_WINDOW = 2
 local THROTTLE_RETRY_DELAY = 6
 local THROTTLE_RETRY_ATTEMPTS = 3
@@ -190,7 +193,17 @@ local function OfferGreetingAgain(recent, attempt)
         return
     end
 
-    if Scan.QuickReplies and Scan.QuickReplies.ShowOrderGreeting then
+    -- A greeting sent from the banner or the order list comes back as the
+    -- banner, one sent from a quick reply card as the card.
+    local menu = HironCraftScanScannerMenu
+    if recent.source ~= 'card' and menu and menu.TriggerAlert and Scan.OrderBannerText then
+        menu:TriggerAlert(Scan.OrderBannerText(recent.customer, customerInfo, pending[1]),
+            { customerName = recent.customer, responseID = pending[1].responseID })
+        if menu.TriggerPulseLock and HironCraftScanCraftingOrderPage
+            and HironCraftScanCraftingOrderPage.IsShown and not HironCraftScanCraftingOrderPage:IsShown() then
+            menu:TriggerPulseLock('scanned')
+        end
+    elseif Scan.QuickReplies and Scan.QuickReplies.ShowOrderGreeting then
         Scan.QuickReplies:ShowOrderGreeting(recent.customer, '', customerInfo, pending)
     end
 end

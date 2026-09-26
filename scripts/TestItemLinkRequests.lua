@@ -108,6 +108,7 @@ Scan.Utils.onLoad = noop
 loadSource('Utils/FStrings.lua')
 loadSource('Customer/ChatHistory.lua')
 loadSource('Customer/RequestTracking.lua')
+loadSource('Customer/GenerousCustomers.lua')
 loadSource('Customer/ClassMatching.lua')
 loadSource('Customer/ChatScanner.lua')
 loadSource('Customer/OrderGreetings.lua')
@@ -294,6 +295,65 @@ do
     assert(menu:GetQueuedAlertCount()==0,'an answered request stayed in the queue')
     key()
     assert(not banner:GetOrder(),'an answered request came back on the banner')
+    -- Stingy customers on pause come in quietly: a row, no banner.
+    fresh()
+    Scan.Generous.SetManual('Buyer','stingy')
+    Scan.Generous.SetHoldingStingy(true)
+    scan('LF '..a)
+    assert(countRows()==1 and not banner:GetOrder(),'a stingy customer on pause got a banner')
+    scan('LF '..a,nil,'Second')
+    assert(banner:GetOrder() and banner:GetOrder().customerName=='Second','the pause held another customer')
+    Scan.GreetCustomer('LeftButton',order(101))
+    assert(#sent==1 and sent[1].customer=='Buyer','a click on the row did not greet a customer on pause')
+    -- A stingy request already waiting its turn is skipped once the pause is on.
+    fresh()
+    Scan.Generous.SetHoldingStingy(false)
+    scan('LF '..a,nil,'Second')
+    scan('LF '..a)
+    assert(menu:GetQueuedAlertCount()==1)
+    Scan.Generous.SetHoldingStingy(true)
+    key()
+    assert(not banner:GetOrder(),'a waiting stingy request got the banner during the pause')
+    -- Switched off, they are announced again.
+    fresh()
+    Scan.Generous.SetHoldingStingy(false)
+    scan('LF '..a)
+    assert(banner:GetOrder() and banner:GetOrder().customerName=='Buyer','the pause outlived being switched off')
+    Scan.Generous.SetManual('Buyer','none')
+    -- A greeting the server swallowed comes back as the banner it was sent from.
+    fresh()
+    local realAfter,realGetTime=C_Timer.After,GetTime
+    -- Its own clock, ending before the fixed GetTime() the rest of the file
+    -- uses, so the server back-off is over for them.
+    local later,clock={},0
+    C_Timer.After=function(_,callback) later[#later+1]=callback end
+    GetTime=function() return clock end
+    local cards=0
+    local realCard=Scan.QuickReplies.ShowOrderGreeting
+    Scan.QuickReplies.ShowOrderGreeting=function() cards=cards+1; return true end
+    scan('LF '..a)
+    key()
+    assert(#sent==1 and not banner:GetOrder())
+    Scan.Utils.NoteChatThrottled()
+    clock=clock+10
+    for _, callback in ipairs(later) do callback() end
+    assert(banner:GetOrder() and banner:GetOrder().customerName=='Buyer' and cards==0,
+        'a swallowed banner greeting came back as a quick reply card')
+    key()
+    assert(#sent==2 and response(101).greeting_sent,'the banner offered again did not greet')
+    -- One sent from the quick reply card comes back as the card.
+    fresh()
+    later={}
+    clock=clock+10
+    scan('LF '..a)
+    banner:Hide()
+    assert(Scan.SendOrderGreeting(order(101),true,'card'))
+    Scan.Utils.NoteChatThrottled()
+    clock=clock+10
+    for _, callback in ipairs(later) do callback() end
+    assert(cards==1 and not banner:GetOrder(),'a swallowed card greeting did not come back as the card')
+    clock=clock+10
+    C_Timer.After,GetTime,Scan.QuickReplies.ShowOrderGreeting=realAfter,realGetTime,realCard
     fresh();scan('LF '..a);key('MiddleButton')
     assert(#sent==0 and opened==1,'visible banner could not open chat without sending')
     fresh();scan('LF '..a);key('RightButton')
@@ -872,6 +932,18 @@ assert(#sent==1 and sent[1].message=='Profession 164 Send to Seller.',
     'follow-up profession request did not use the compact destination reply')
 assert(response(164).greeting_sent and not response(164).destination_only_greeting,
     'compact destination reply did not finish greeting state')
+-- A stingy customer on pause gets the row but no greeting card.
+reset()
+scan('LF bs')
+Scan.Generous.SetManual('Buyer','stingy')
+Scan.Generous.SetHoldingStingy(true)
+offered=0
+now=1200
+Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist?','Buyer','Buyer-GUID')
+assert(offered==0 and countRows()==1 and not response(164).greeting_sent,
+    'a stingy customer on pause was offered the greeting card')
+Scan.Generous.SetHoldingStingy(false)
+Scan.Generous.SetManual('Buyer','none')
 Scan.OrderFulfillment=previousFulfillment
 Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.DB.settings.inclusions=previousInclusions

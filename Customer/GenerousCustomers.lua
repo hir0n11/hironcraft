@@ -71,6 +71,22 @@ end
 function M.IsGenerous(name) return M.MarkOf(name) == 'generous' end
 function M.IsStingy(name) return M.MarkOf(name) == 'stingy' end
 
+-- A pause for stingy customers, switched from the orders window. While it is
+-- on, their requests still get a row, but nothing offers the greeting: no
+-- banner, no card, no sound. A click on the row greets them as usual. It
+-- lasts until switched off, over /reload and relogs.
+function M.IsHoldingStingy()
+    return Scan.DB.settings.hold_stingy_greetings == true
+end
+
+function M.SetHoldingStingy(on)
+    Scan.DB.settings.hold_stingy_greetings = on and true or nil
+end
+
+function M.IsGreetingHeld(name)
+    return M.IsHoldingStingy() and M.IsStingy(name)
+end
+
 -- A delivered order. Every tip counts toward the numbers; the tip decides
 -- the automatic mark. The same order is counted once, however often its
 -- result is seen again (a linked account, a replay).

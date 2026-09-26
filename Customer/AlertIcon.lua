@@ -160,10 +160,12 @@ local function RemoveQueued(order)
 end
 
 -- A queued request is still worth a banner only while it is the same,
--- unanswered request it was when it arrived.
+-- unanswered request it was when it arrived, and its customer is not on hold.
 local function StillWaiting(item)
     local response = HironCraftScan.OrderToResponse(item.order)
+    local tips = HironCraftScan.Generous
     return response ~= nil
+        and not (tips and tips.IsGreetingHeld and tips.IsGreetingHeld(item.order.customerName))
         and response.requestToken == item.requestToken
         and (item.requestToken ~= nil or response.time == item.requestTime)
         and not response.greeting_sent

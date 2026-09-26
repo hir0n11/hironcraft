@@ -2214,6 +2214,43 @@ function HironCraftScan_BusyCheckButtonMixin:OnLeave()
     GameTooltip:Hide();
 end
 
+-- Pause for customers with the copper coin: their requests come in without a
+-- banner or a greeting card until this is switched off.
+HironCraftScan_HoldStingyCheckButtonMixin = {}
+
+function HironCraftScan_HoldStingyCheckButtonMixin:Init()
+    local tips = HironCraftScan.Generous
+    self.Text:SetText((tips and tips.Icon('stingy') .. ' ' or '') .. L('Hold stingy greetings'))
+    -- Just left of Busy Mode, whatever the label's length.
+    local busy = self:GetParent().BusyCheckButton
+    if busy then
+        self:ClearAllPoints()
+        self:SetPoint('BOTTOMLEFT', busy, 'BOTTOMLEFT', -(self:GetWidth() + self.Text:GetStringWidth() + 16), 0)
+    end
+    self:OnShow()
+end
+
+function HironCraftScan_HoldStingyCheckButtonMixin:OnShow()
+    local tips = HironCraftScan.Generous
+    self:SetChecked(tips and tips.IsHoldingStingy() or false)
+end
+
+function HironCraftScan_HoldStingyCheckButtonMixin:OnClick()
+    HironCraftScan.Generous.SetHoldingStingy(self:GetChecked())
+end
+
+function HironCraftScan_HoldStingyCheckButtonMixin:OnEnter()
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+    GameTooltip_SetTitle(GameTooltip, L('Hold stingy greetings'));
+    GameTooltip_AddNormalLine(GameTooltip, HironCraftScan.MakeTextWhite(L('Hold stingy greetings tooltip')));
+    GameTooltip:SetMinimumWidth(350);
+    GameTooltip:Show();
+end
+
+function HironCraftScan_HoldStingyCheckButtonMixin:OnLeave()
+    GameTooltip:Hide();
+end
+
 local openChatOrdersFrame = nil
 function HironCraftScan.UpdateShowChatOrdersTab()
     if openChatOrdersFrame then
@@ -2235,6 +2272,7 @@ HironCraftScan.Utils.onLoad(function()
 
     frame.BrowseFrame.AddonToggleButton:SetButtonText();
     frame.BrowseFrame.CustomExplanationsButton:Init();
+    frame.BrowseFrame.HoldStingyCheckButton:Init();
 
     frame.BrowseFrame.LeftPanel.LinkedAccountList:Init();
 
