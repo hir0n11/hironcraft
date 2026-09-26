@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics window fixes (0.4.42)
+
+- Rows of items with a profession showed no numbers, and hovering them
+  showed the tooltip of whatever item that line had shown before. Colouring
+  the profession name failed (a hex string where Midnight wants a colour),
+  which stopped the row half-way; the same failure left the profession
+  filter empty. The colour is fixed, and a row now takes its data first and
+  draws every cell on its own, so one bad cell cannot blank it.
+- The date boxes show only when "Own dates" is chosen, at the end of the
+  filter row.
+- The item table lists only items someone asked you for, was greeted about,
+  ordered or had declined; items only seen in chat are left out and an item
+  appears as its first data comes in. Their mentions still count.
+
 ## Analytics in a window of its own (0.4.41)
 
 - The analytics table under the order list is replaced by an "Analytics"

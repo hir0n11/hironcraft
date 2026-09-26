@@ -41,11 +41,15 @@ local function Mock(kind)
     function methods:SetupMenu(fn) self.menu = fn end
     function methods:SetDataProvider(provider)
         self.provider = provider
+        self.inited = {}
         local init = initializers[self]
         for _, data in ipairs(provider.list) do
+            -- Frames are reused: this one showed another row before.
             local row = Mock('Row')
             row.Stripe = Mock('Texture')
+            row.data = { kind = 'item', itemID = 999999 }
             init(row, data)
+            self.inited[#self.inited + 1] = { row = row, data = data }
         end
     end
     function methods:GetID() return self.id end
@@ -103,7 +107,8 @@ local Scan = {
     DB = { analytics = {}, settings = { my_uuid = 'me' }, realm = { linked_accounts = {} }, characters = { ['Tailor-Realm'] = {} } },
     Utils = {
         Contains = function() return false end,
-        ColorizeText = function(text) return text end,
+        -- As in Midnight when a colour is passed wrongly: it raises an error.
+        ColorizeProfessionName = function() error('bad argument #2 to WrapTextInColor') end,
         DumpCopyableText = function(text) dumped = text end,
         saved = function(parent, key, default)
             if parent[key] == nil then parent[key] = default end
@@ -138,7 +143,15 @@ Scan.AnalyticsWindow.Toggle()
 local frame = _G.HironCraftAnalyticsFrame
 assert(frame and Scan.AnalyticsWindow.IsShown(), 'the window did not open')
 local items = frame.Items.rows
-assert(#items == 3, 'item rows: ' .. #items)
+assert(#items == 2, 'item rows (only those with data): ' .. #items)
+for _, row in ipairs(items) do assert(row.kind ~= 'item' or row.itemID ~= 4004, 'a chat-only item was listed') end
+-- A cell that fails leaves the rest of the row and its hover intact.
+for _, entry in ipairs(frame.Items.scrollBox.inited) do
+    assert(entry.row.data == entry.data.row, 'a row kept the item it showed before')
+    assert(entry.row.cells[#entry.row.cells].text ~= nil, 'a failing cell blanked the row')
+end
+-- Own dates are hidden until chosen.
+assert(not frame.FromBox:IsShown() and not frame.ToBox:IsShown(), 'date boxes shown for a preset period')
 local summary = frame.Summary:GetText()
 assert(summary:find('Greetings', 1, true) or summary:find('%s', 1, true) == nil, 'no summary')
 local found = false
@@ -155,7 +168,7 @@ Scan.AnalyticsWindow.Rebuild()
 assert(#frame.Items.rows == 0, 'the Alliance filter kept Horde conversations')
 view.side = 'H'
 Scan.AnalyticsWindow.Rebuild()
-assert(#frame.Items.rows == 3, 'the Horde filter lost its rows')
+assert(#frame.Items.rows == 2, 'the Horde filter lost its rows')
 view.side = nil
 view.tier = 'generous'
 Scan.AnalyticsWindow.Rebuild()
@@ -170,6 +183,7 @@ for _, header in ipairs(frame.Customers.headers) do header.scripts.OnClick(heade
 frame.FromBox:SetText('19.09.2026')
 frame.FromBox.scripts.OnEnterPressed(frame.FromBox)
 assert(view.preset == 'custom' and os.date('%d.%m', view.from) == '19.09', 'a typed date was not used')
+assert(frame.FromBox:IsShown() and frame.ToBox:IsShown(), 'date boxes hidden for own dates')
 frame.ToBox:SetText('nonsense')
 frame.ToBox.scripts.OnEnterPressed(frame.ToBox)
 assert(view.preset == 'custom', 'a wrong date broke the period')

@@ -111,8 +111,8 @@ end
 local function ColoredProfession(ppID)
     local name = ProfessionName(ppID)
     if not name then return '|cff808080-|r' end
-    local hex = Scan.CONST.PROFESSION_COLORS and Scan.CONST.PROFESSION_COLORS[ppID]
-    return hex and Scan.Utils.ColorizeText(name, hex) or name
+    local ok, colored = pcall(Scan.Utils.ColorizeProfessionName, ppID, name)
+    return ok and colored or name
 end
 
 local function Coin(mark)
@@ -260,6 +260,11 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
     local view = CreateScrollBoxListLinearView()
     view:SetElementExtent(ROW_HEIGHT)
     view:SetElementInitializer('HironCraftAnalyticsRowTemplate', function(row, data)
+        -- First: a hover must never show the item this frame showed before.
+        row.data = data.row
+        row:SetScript('OnEnter', function(self) if onEnter then onEnter(self, self.data) end end)
+        row:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        row.Stripe:SetShown(data.index % 2 == 0)
         row.cells = row.cells or {}
         for index, column in ipairs(columns) do
             local cell = row.cells[index]
@@ -272,12 +277,9 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
             cell:SetPoint('LEFT', row, 'LEFT', column.x - 4, 0)
             cell:SetWidth(column.w)
             cell:SetJustifyH(column.align or 'RIGHT')
-            cell:SetText(CellText(column, data.row))
+            local ok, text = pcall(CellText, column, data.row)
+            cell:SetText(ok and text or '?')
         end
-        row.Stripe:SetShown(data.index % 2 == 0)
-        row.data = data.row
-        row:SetScript('OnEnter', function(self) if onEnter then onEnter(self, self.data) end end)
-        row:SetScript('OnLeave', function() GameTooltip:Hide() end)
     end)
     ScrollUtil.InitScrollBoxListWithScrollBar(tbl.scrollBox, tbl.scrollBar, view)
 
@@ -450,15 +452,27 @@ local function SetStatus(text)
     frame.Status:SetShown(text ~= nil and text ~= '')
 end
 
+-- Items only seen in chat are left out: a row appears once someone asked
+-- you for it or ordered it, and fills in as more comes.
+local function ItemRows()
+    local rows = {}
+    for _, row in ipairs(report.rows) do
+        if row.requests > 0 or row.greetings > 0 or row.orders > 0 or row.declined > 0 then
+            rows[#rows + 1] = row
+        end
+    end
+    return rows
+end
+
 local function Render()
     if not frame or not report then return end
     namesPending = false
-    frame.Items:SetRows(report.rows)
+    frame.Items:SetRows(ItemRows())
     frame.Customers:SetRows(report.customers)
     UpdateSummary()
     UpdateCharts()
     local tab = View().tab
-    local empty = (tab == TAB_ITEMS and #report.rows == 0) or (tab == TAB_CUSTOMERS and #report.customers == 0)
+    local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #report.customers == 0)
     SetStatus(empty and L('No analytics data for the period') or nil)
     local last = Scan.AnalyticsSync and Scan.AnalyticsSync.LastSync()
     frame.SyncText:SetText(last and string.format(L('Last exchange: %s'), date('%d.%m %H:%M', last)) or '')
@@ -511,6 +525,8 @@ local function UpdateDateBoxes()
     local from, to = CurrentRange()
     frame.FromBox:SetText(from and from > 0 and Scan.AnalyticsReport.FormatDate(from) or '')
     frame.ToBox:SetText(Scan.AnalyticsReport.FormatDate(to))
+    local custom = View().preset == 'custom'
+    for _, element in ipairs(frame.DateElements) do element:SetShown(custom) end
     -- A typed date switches the period to own dates; show that.
     if frame.Period and frame.Period.GenerateMenu then frame.Period:GenerateMenu() end
 end
@@ -658,10 +674,12 @@ local function Create()
     period:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -32)
     frame.Period = period
 
+    frame.DateElements = {}
     local function DateBox(label, anchor, endOfDay)
         local text = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
         text:SetPoint('LEFT', anchor, 'RIGHT', 12, 0)
         text:SetText(L(label))
+        table.insert(frame.DateElements, text)
         local box = CreateFrame('EditBox', nil, frame, 'InputBoxTemplate')
         box:SetSize(78, 20)
         box:SetAutoFocus(false)
@@ -688,14 +706,13 @@ local function Create()
             GameTooltip:Show()
         end)
         box:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        table.insert(frame.DateElements, box)
         return box
     end
-    frame.FromBox = DateBox('From', period, false)
-    frame.ToBox = DateBox('To', frame.FromBox, true)
 
     local profession = Dropdown(frame, 150, ProfessionEntries,
         function() return View().ppID end, function(value) View().ppID = value FilterChanged() end)
-    profession:SetPoint('LEFT', frame.ToBox, 'RIGHT', 16, 0)
+    profession:SetPoint('LEFT', period, 'RIGHT', 8, 0)
     local crafter = Dropdown(frame, 150, CrafterEntries,
         function() return View().crafter end, function(value) View().crafter = value FilterChanged() end)
     crafter:SetPoint('LEFT', profession, 'RIGHT', 8, 0)
@@ -711,6 +728,9 @@ local function Create()
     local tier = Dropdown(frame, 190, Entries(TIERS),
         function() return View().tier end, function(value) View().tier = value FilterChanged() end)
     tier:SetPoint('LEFT', side, 'RIGHT', 8, 0)
+    -- Own dates, shown only when that period is chosen.
+    frame.FromBox = DateBox('From', tier, false)
+    frame.ToBox = DateBox('To', frame.FromBox, true)
 
     -- Row 2: what the period comes to, and the buttons.
     frame.Summary = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')

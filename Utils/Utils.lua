@@ -35,9 +35,10 @@ function HironCraftScan.Utils.DeepCopy(original)
     return DeepCopy_(original)
 end
 
+-- hex is AARRGGBB. CreateColor takes numbers, not a hex string.
 function HironCraftScan.Utils.ColorizeText(text, hex)
     if hex then
-        return CreateColor(hex):WrapTextInColorCode(text)
+        return HironCraftScan.Utils.ColorFromHex(hex):WrapTextInColorCode(text)
     end
     return text
 end
