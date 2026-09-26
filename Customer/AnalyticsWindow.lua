@@ -452,17 +452,27 @@ local TILE_GROUPS = {
     } },
 }
 local TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GROUP_GAP = 74, 40, 4, 12
+-- The export and exchange buttons at the right end of the tile row.
+local TILE_ROW_RESERVED = 14 + 110 + 6 + 150 + 4
+local TILE_FONT, TILE_FONT_SMALL = 'GameFontHighlightLarge', 'GameFontHighlight'
 
 local function TileNumber(value)
     return BreakUpLargeNumbers and BreakUpLargeNumbers(value or 0) or tostring(value or 0)
 end
 
+-- A line's whole width, however narrow its frame.
+local function TextWidth(fontString)
+    local measure = fontString.GetUnboundedStringWidth or fontString.GetStringWidth
+    return measure(fontString) or 0
+end
+
+-- Returns the tiles by key and in their order along the row.
 local function CreateTiles(parent, x, y, groups)
-    local tiles = {}
+    local tiles, order = {}, { x = x, y = y }
     for groupIndex, group in ipairs(groups or TILE_GROUPS) do
-        if groupIndex > 1 then x = x + GROUP_GAP - TILE_GAP end
-        for _, info in ipairs(group.tiles) do
+        for index, info in ipairs(group.tiles) do
             local tile = CreateFrame('Frame', nil, parent)
+            tile.gap = (groupIndex > 1 and index == 1) and GROUP_GAP or TILE_GAP
             tile:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
             tile.background = tile:CreateTexture(nil, 'BACKGROUND')
             tile.background:SetAllPoints()
@@ -479,14 +489,16 @@ local function CreateTiles(parent, x, y, groups)
             tile.label:SetTextColor(0.75, 0.75, 0.75)
             tile.label:SetWordWrap(false)
             tile.label:SetText(L(info.label))
-            -- As wide as its name needs, one line.
-            local measure = tile.label.GetUnboundedStringWidth or tile.label.GetStringWidth
-            local width = math.max(info.width or TILE_WIDTH, math.ceil((measure(tile.label) or 0) + 16))
+            -- At least as wide as its name needs, one line.
+            tile.minWidth = math.max(info.width or TILE_WIDTH, math.ceil(TextWidth(tile.label) + 16))
+            local width = tile.minWidth
             tile:SetSize(width, TILE_HEIGHT)
-            tile.value = tile:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightLarge')
+            tile.value = tile:CreateFontString(nil, 'OVERLAY', TILE_FONT)
             tile.value:SetPoint('BOTTOMLEFT', 8, 5)
             tile.value:SetPoint('RIGHT', -4, 0)
             tile.value:SetJustifyH('LEFT')
+            -- A figure too long for the tile would wrap and climb over the name.
+            tile.value:SetWordWrap(false)
             tile:EnableMouse(true)
             tile:SetScript('OnEnter', function(self)
                 GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
@@ -496,10 +508,37 @@ local function CreateTiles(parent, x, y, groups)
             end)
             tile:SetScript('OnLeave', function() GameTooltip:Hide() end)
             tiles[info.key] = tile
+            order[#order + 1] = tile
             x = x + width + TILE_GAP
         end
+        x = x + GROUP_GAP - TILE_GAP
     end
-    return tiles
+    return tiles, order
+end
+
+-- Each tile widens to its figure (a big sum of tips), the ones after it move
+-- along; should the row then run into the buttons on the right, the figures
+-- that needed more room take a smaller font instead.
+local function LayoutTiles(order)
+    local limit = frame:GetWidth() - TILE_ROW_RESERVED
+    local function Place(shrink)
+        local x = order.x
+        for index, tile in ipairs(order) do
+            tile.value:SetFontObject(TILE_FONT)
+            local need = math.ceil(TextWidth(tile.value) + 14)
+            if shrink and need > tile.minWidth then
+                tile.value:SetFontObject(TILE_FONT_SMALL)
+                need = math.ceil(TextWidth(tile.value) + 14)
+            end
+            if index > 1 then x = x + tile.gap end
+            local width = math.max(tile.minWidth, need)
+            tile:SetWidth(width)
+            tile:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, order.y)
+            x = x + width
+        end
+        return x
+    end
+    if Place(false) > limit then Place(true) end
 end
 
 -- The resourcefulness tab: how often it comes, and what it brought.
@@ -533,6 +572,7 @@ local function UpdateSummary()
     tiles.conversion.value:SetTextColor(ConversionColor(totals.conversion))
     tiles.tips.value:SetText(report and Gold(totals.tips) or '')
     tiles.averageTip.value:SetText(report and Gold(totals.averageTip) or '')
+    LayoutTiles(frame.TileOrder)
     if not report then
         frame.Tiers:SetText('')
         return
@@ -557,6 +597,7 @@ local function UpdateReturnTiles()
     tiles.chance.value:SetText(returns and Percent(totals.chance) or '')
     tiles.quantity.value:SetText(returns and TileNumber(totals.quantity) or '')
     tiles.value.value:SetText(returns and Gold(totals.value) or '')
+    LayoutTiles(frame.ReturnTileOrder)
 end
 
 local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
@@ -926,8 +967,8 @@ local function Create()
     frame.SideDropdown, frame.TierDropdown = side, tier
 
     -- Row 2: what the period comes to, and the buttons.
-    frame.Tiles = CreateTiles(frame, 16, -68)
-    frame.ReturnTiles = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
+    frame.Tiles, frame.TileOrder = CreateTiles(frame, 16, -68)
+    frame.ReturnTiles, frame.ReturnTileOrder = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
     frame.ReturnTiles.chance:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
         GameTooltip_SetTitle(GameTooltip, L('Chance'))

@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: long figures stay on their tile (0.4.56)
+
+- A figure too long for its summary tile (a big sum of tips) wrapped onto a
+  second line and climbed over the tile's name. It now stays on one line and
+  the tile widens to it, the tiles after it moving along; should the row
+  then reach the buttons on the right, that figure takes a smaller font.
+
 ## Analytics: the last hour (0.4.55)
 
 - The analytics period list starts with "Last hour".

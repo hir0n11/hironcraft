@@ -13,6 +13,7 @@ assert(loadfile('Libs/LibSerialize.lua'))()
 assert(loadfile('Libs/LibDeflate.lua'))()
 
 local initializers = {}
+charWidth = 5
 local texts = {}
 local function Mock(kind)
     local object = { kind = kind, scripts = {}, shown = true, text = nil, width = 800, height = 300 }
@@ -33,6 +34,14 @@ local function Mock(kind)
     function methods:SetText(text) self.text = text; texts[#texts + 1] = text end
     function methods:GetText() return self.text end
     function methods:GetStringWidth() return 50 end
+    -- Wide enough for a tile: letters of charWidth, a coin of 18.
+    function methods:GetUnboundedStringWidth()
+        local text = tostring(self.text or '')
+        local _, icons = text:gsub('|T.-|t', '')
+        local plain = text:gsub('|T.-|t', ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        return #plain * charWidth + icons * 18
+    end
+    function methods:SetFontObject(font) self.font = font end
     function methods:CreateFontString() return Mock('FontString') end
     function methods:CreateTexture() return Mock('Texture') end
     function methods:GetHighlightTexture() return Mock('Texture') end
@@ -52,7 +61,7 @@ local function Mock(kind)
             self.inited[#self.inited + 1] = { row = row, data = data }
         end
     end
-    function methods:SetPoint(_, relative) self.anchor = relative end
+    function methods:SetPoint(_, relative, _, x) self.anchor, self.x = relative, x end
     function methods:GetID() return self.id end
     function methods:SetID(id) self.id = id end
     -- WoW methods are capitalised; any other missing key is a plain field.
@@ -163,6 +172,27 @@ assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.val
     and frame.Tiles.crafted.value:GetText() == '1' and frame.Tiles.conversion.value:GetText() == '100%'
     and frame.Tiles.orders.value:GetText() == '1', 'the summary tiles are off')
 assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
+-- A figure wider than its tile widens it, not climbing over the name; the
+-- tiles after it move along, and when the row runs into the buttons the
+-- widened ones take the smaller font.
+local function CheckTiles(small)
+    local order = frame.TileOrder
+    for index, tile in ipairs(order) do
+        assert(tile.width >= tile.value:GetUnboundedStringWidth() + 12, 'a figure is wider than its tile')
+        local font = small and small[tile] and 'GameFontHighlight' or 'GameFontHighlightLarge'
+        assert(tile.value.font == font, 'the tile font is ' .. tostring(tile.value.font))
+        local before = order[index - 1]
+        assert(not before or tile.x >= before.x + before.width + 4, 'tiles overlap')
+    end
+end
+CheckTiles()
+charWidth = 30
+Scan.AnalyticsWindow.Rebuild()
+assert(frame.Tiles.tips.width > 104, 'a long sum of tips did not widen its tile')
+CheckTiles({ [frame.Tiles.tips] = true, [frame.Tiles.averageTip] = true, [frame.Tiles.conversion] = true })
+charWidth = 5
+Scan.AnalyticsWindow.Rebuild()
+CheckTiles()
 local found = false
 for _, text in ipairs(texts) do
     if type(text) == 'string' and text:find('Item 1001', 1, true) then found = true end
