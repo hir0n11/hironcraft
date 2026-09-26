@@ -34,11 +34,14 @@ end
 
 local CustomExplanations = {}
 
--- Estimating the chat name menu's height: rows of about MENU_ROW_HEIGHT, the
--- game's own entries and our short ones taking MENU_FIXED_ROWS.
+-- Estimating the chat name menu's height: rows of about MENU_ROW_HEIGHT; the
+-- game's own entries and our short ones take MENU_FIXED_ROWS, ours alone
+-- (the collapsed HironCraftScan submenu) MENU_OWN_ROWS. A menu over
+-- MENU_SCREEN_SHARE of the screen's height is unwieldy even when it fits.
 local MENU_ROW_HEIGHT = 20
 local MENU_FIXED_ROWS = 22
-local MENU_MARGIN = 40
+local MENU_OWN_ROWS = 8
+local MENU_SCREEN_SHARE = 0.6
 HironCraftScan.CustomExplanations = CustomExplanations
 
 -- A customer can have several unfinished requests at once. Keep a manual
@@ -442,20 +445,21 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         -- On a short game window (a laptop with two clients side by side) the
-        -- menu runs off the screen: fold its long lists into submenus, the
-        -- explanations first, then the manual matching. Only with "Fit
-        -- windows to the screen" on.
+        -- menu grows past most of the screen: fold its long lists into
+        -- submenus, the explanations first, then the manual matching - also
+        -- inside the collapsed HironCraftScan submenu. Only with "Fit windows
+        -- to the screen" on.
         local crafterRows = HironCraftScan.GetSortedCrafters();
         local foldMatching, foldExplanations = false, false
-        if not collapsed and HironCraftScan.Utils.FitsScreen and HironCraftScan.Utils.FitsScreen() then
+        if HironCraftScan.Utils.FitsScreen and HironCraftScan.Utils.FitsScreen() then
             local matches, explanations = 0, 0
             for _, crafterInfo in ipairs(crafterRows) do
                 local ppConfig = HironCraftScan.DB.characters[crafterInfo.name].parent_professions[crafterInfo.parentProfessionID]
                 if ppConfig.scanning_enabled and not ppConfig.character_disabled then matches = matches + 1 end
             end
             for _ in pairs(HironCraftScan.DB.settings.explanations or {}) do explanations = explanations + 1 end
-            local available = (UIParent and UIParent.GetHeight and UIParent:GetHeight() or 768) - MENU_MARGIN
-            local rows = MENU_FIXED_ROWS + 2 + matches + 1 + explanations
+            local available = (UIParent and UIParent.GetHeight and UIParent:GetHeight() or 768) * MENU_SCREEN_SHARE
+            local rows = (collapsed and MENU_OWN_ROWS or MENU_FIXED_ROWS) + 2 + matches + 1 + explanations
             if rows * MENU_ROW_HEIGHT > available and explanations > 0 then
                 foldExplanations = true
                 rows = rows - explanations

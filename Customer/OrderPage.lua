@@ -1783,7 +1783,19 @@ HironCraftScan.Utils.onLoad(function()
     -- checkFit: Blizzard scales the window down to fit whenever it opens and
     -- whenever the game window changes size. The profession buttons hang
     -- below it, hence the extra height.
+    -- The XML spans the window over the whole screen until the panel manager
+    -- places it, and the first fit after logging in measured that: the
+    -- screen, so the window was not scaled and came up too wide. It has its
+    -- real size from the start, and the manager is told it too.
+    local width = frame.GetDesiredPageWidth and frame:GetDesiredPageWidth() or 1105
+    local height = 658
+    if frame.SetSize then
+        frame:ClearAllPoints()
+        frame:SetSize(width, height)
+        frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+    end
     UIPanelWindows["HironCraftScanCraftingOrderPage"] = { area = "doublewide", pushable = 1, whileDead = 1,
+        width = width, height = height,
         checkFit = HironCraftScan.Utils.FitsScreen() and 1 or 0, checkFitExtraWidth = 20, checkFitExtraHeight = 50 }
 
     frame.BrowseFrame.AddonToggleButton:SetButtonText();

@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Fitting: the first opening, and a compact name menu (0.4.51)
+
+- The orders window still came up too wide the first time it opened after
+  logging in or /reload. Until the panel manager places it, the XML spans
+  it over the whole screen, and that is what the first fit measured. The
+  window gets its real size at load and the manager is told it.
+- The chat name menu folds its long lists once it would take more than
+  about 60% of the screen's height, not only when it would not fit at all;
+  and with "Collapse chat context menu" on, the HironCraftScan submenu folds
+  its custom explanations and manual matching the same way.
+
 ## Analytics exchange after 3 quiet minutes (0.4.50)
 
 - Linked accounts exchange analytics once both have been quiet for 3

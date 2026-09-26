@@ -1873,19 +1873,27 @@ do
         menus.MENU_UNIT_FRIEND(nil, root, { chatTarget = 'Fold-Realm' })
         return root
     end
-    local tall = Open(1200)
+    local tall = Open(1500)
     assert(Find(tall, 'Answer 1') and Find(tall, 'Match'), 'a tall screen folded the menu')
-    local medium = Open(700)
+    local medium = Open(1000)
     local folded = Find(medium, 'Custom Explanations')
     assert(folded and not folded.title and #folded.children == 12 and not Find(medium, 'Answer 1'),
         'the explanations were not folded on a shorter screen')
     assert(Find(medium, 'Match'), 'the manual matching was folded while the menu fit')
-    local short = Open(450)
+    local short = Open(700)
     local matching = Find(short, 'MANUAL_MATCHING_TITLE')
     assert(matching and not matching.title and Find(matching, 'Match') and not Find(short, 'Match'),
         'the manual matching was not folded on a short screen')
+    -- The collapsed HironCraftScan submenu folds its lists the same way.
+    Scan.DB.settings.collapse_chat_context = true
+    local collapsedRoot = Open(700)
+    local own = Find(collapsedRoot, 'HironCraftScan')
+    local ownExplanations = own and Find(own, 'Custom Explanations')
+    assert(ownExplanations and not ownExplanations.title and #ownExplanations.children == 12
+        and not Find(own, 'Answer 1'), 'the collapsed submenu kept its long lists')
+    Scan.DB.settings.collapse_chat_context = nil
     Scan.DB.settings.fit_to_screen = false
-    assert(Find(Open(450), 'Answer 1'), 'the menu folded with fitting switched off')
+    assert(Find(Open(700), 'Answer 1'), 'the menu folded with fitting switched off')
     Scan.DB.settings.fit_to_screen = nil
     UIParent, Scan.DB.settings.explanations = savedParent, savedExplanations
     Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName = savedCrafter, savedProfession
