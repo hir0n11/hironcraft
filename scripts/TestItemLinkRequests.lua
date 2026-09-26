@@ -1835,3 +1835,60 @@ assert(info.responses[101].battleNetCharacters['nextbuyer-realm']
     and not info.responses[101].battleNetCharacters['friendbuyer-realm'], 'new request kept the old buyer snapshot')
 assert(not info.responses[101].greeting_sent and #bnetSent==beforeRestart, 'new friend request sent or consumed a greeting')
 print('Battle.net scanner tests passed (filters, unique rows, history, manual replies, transport, ID reuse, friends, secrets, opt-out, isolation).')
+
+-- On a short game window the chat name menu folds its long lists into
+-- submenus: the explanations first, then the manual matching.
+do
+    local function Node(label)
+        local node = { label = label, children = {} }
+        function node:CreateButton(text)
+            local child = Node(text)
+            self.children[#self.children + 1] = child
+            return child
+        end
+        function node:CreateTitle(text)
+            local child = { label = text, title = true, SetTooltip = noop }
+            self.children[#self.children + 1] = child
+            return child
+        end
+        node.CreateDivider, node.SetTooltip, node.CreateRadio = noop, noop, noop
+        return node
+    end
+    local function Find(node, text)
+        for _, child in ipairs(node.children) do
+            if tostring(child.label):find(text, 1, true) then return child end
+        end
+    end
+    local savedParent, savedExplanations = UIParent, Scan.DB.settings.explanations
+    local savedCrafter, savedProfession = Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName
+    local savedProfessionName = Scan.Utils.ProfessionNameByID
+    Scan.ColorizeCrafterName = function(name) return name end
+    Scan.Utils.ColorizeProfessionName = function(_, name) return name end
+    Scan.Utils.ProfessionNameByID = function(id) return tostring(id) end
+    Scan.DB.settings.explanations = {}
+    for index = 1, 12 do Scan.DB.settings.explanations['Answer ' .. index] = 'Text ' .. index end
+    local function Open(height)
+        UIParent = { GetHeight = function() return height end }
+        local root = Node('root')
+        menus.MENU_UNIT_FRIEND(nil, root, { chatTarget = 'Fold-Realm' })
+        return root
+    end
+    local tall = Open(1200)
+    assert(Find(tall, 'Answer 1') and Find(tall, 'Match'), 'a tall screen folded the menu')
+    local medium = Open(700)
+    local folded = Find(medium, 'Custom Explanations')
+    assert(folded and not folded.title and #folded.children == 12 and not Find(medium, 'Answer 1'),
+        'the explanations were not folded on a shorter screen')
+    assert(Find(medium, 'Match'), 'the manual matching was folded while the menu fit')
+    local short = Open(450)
+    local matching = Find(short, 'MANUAL_MATCHING_TITLE')
+    assert(matching and not matching.title and Find(matching, 'Match') and not Find(short, 'Match'),
+        'the manual matching was not folded on a short screen')
+    Scan.DB.settings.fit_to_screen = false
+    assert(Find(Open(450), 'Answer 1'), 'the menu folded with fitting switched off')
+    Scan.DB.settings.fit_to_screen = nil
+    UIParent, Scan.DB.settings.explanations = savedParent, savedExplanations
+    Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName = savedCrafter, savedProfession
+    Scan.Utils.ProfessionNameByID = savedProfessionName
+end
+print('Chat menu fitting passed (tall, shorter, short, switched off).')

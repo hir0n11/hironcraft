@@ -758,6 +758,19 @@ end
 
 -- The analytics window, in place of the table that used to sit under the
 -- order list.
+-- The fit-to-screen setting was switched: apply it to the open windows.
+function HironCraftScan.ApplyFitToScreen()
+    local page = HironCraftScanCraftingOrderPage
+    local on = HironCraftScan.Utils.FitsScreen()
+    if page and SetUIPanelAttribute then
+        SetUIPanelAttribute(page, 'checkFit', on and 1 or 0)
+        if page:IsShown() then HironCraftScan.Utils.FitFrame(page, 20, 50) end
+    end
+    if HironCraftScan.AnalyticsWindow and HironCraftScan.AnalyticsWindow.Refit then
+        HironCraftScan.AnalyticsWindow.Refit()
+    end
+end
+
 HironCraftScan_OpenAnalyticsButtonMixin = {}
 
 function HironCraftScan_OpenAnalyticsButtonMixin:OnLoad()
@@ -1767,7 +1780,11 @@ HironCraftScan.Utils.onLoad(function()
 
     HironCraftScan.Frames.OrdersPage = frame
     table.insert(UISpecialFrames, "HironCraftScanCraftingOrderPage"); -- Make 'esc' close the frame
-    UIPanelWindows["HironCraftScanCraftingOrderPage"] = { area = "doublewide", pushable = 1, whileDead = 1 }
+    -- checkFit: Blizzard scales the window down to fit whenever it opens and
+    -- whenever the game window changes size. The profession buttons hang
+    -- below it, hence the extra height.
+    UIPanelWindows["HironCraftScanCraftingOrderPage"] = { area = "doublewide", pushable = 1, whileDead = 1,
+        checkFit = HironCraftScan.Utils.FitsScreen() and 1 or 0, checkFitExtraWidth = 20, checkFitExtraHeight = 50 }
 
     frame.BrowseFrame.AddonToggleButton:SetButtonText();
     frame.BrowseFrame.CustomExplanationsButton:Init();

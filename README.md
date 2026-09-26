@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Fit windows to the screen (0.4.47)
+
+- A new setting, "Fit windows to the screen" (on by default, Settings -
+  HironCraft), for small game windows such as two clients side by side on
+  a laptop:
+  - the orders window is scaled down to fit whenever it opens and whenever
+    the game window changes size (it used to fit only after a resize, not
+    after logging in); the analytics window does the same;
+  - the chat name menu folds its long lists into submenus when it would run
+    off the screen: the custom explanations first, then the manual
+    matching. On a tall screen it stays as it was.
+- Switched off, windows keep their full size and the menu stays flat.
+
 ## Analytics on by default, a third click unsorts, silver for the untipped (0.4.46)
 
 - "Gather analytics" is switched on once on every account, also where it

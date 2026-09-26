@@ -43,6 +43,26 @@ function HironCraftScan.Utils.ColorizeText(text, hex)
     return text
 end
 
+-- "Fit windows to the screen" (on unless switched off): the orders and
+-- analytics windows are scaled down when the game window is smaller than
+-- they are, and the chat name menu folds its long lists into submenus when it
+-- would run off the screen.
+function HironCraftScan.Utils.FitsScreen()
+    local settings = HironCraftScan.DB and HironCraftScan.DB.settings
+    return not settings or settings.fit_to_screen ~= false
+end
+
+-- Scale a free-standing window down to the game window, or back to 1.
+function HironCraftScan.Utils.FitFrame(frame, extraWidth, extraHeight)
+    if not frame then return end
+    if HironCraftScan.Utils.FitsScreen() and FrameUtil and FrameUtil.UpdateScaleForFitSpecific then
+        FrameUtil.UpdateScaleForFitSpecific(frame, frame:GetWidth() + (extraWidth or 20),
+            frame:GetHeight() + (extraHeight or 20))
+    else
+        frame:SetScale(1)
+    end
+end
+
 function HironCraftScan.Utils.IsCurrentExpansion(profID)
     -- ExpansionUpdateTag
     return profID > 2905 -- Lowest Midnight profID is 2906, alchemy

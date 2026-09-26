@@ -976,6 +976,8 @@ local function Create()
     PanelTemplates_SetNumTabs(frame, #frame.Tabs)
 
     frame:SetScript('OnShow', function()
+        -- Smaller than the game window when it has to be (tabs hang below).
+        if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
         gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
         UpdateDateBoxes()
         SelectTab(View().tab or TAB_ITEMS)
@@ -983,12 +985,17 @@ local function Create()
     end)
     frame:SetScript('OnHide', function() W.Release() end)
     frame:SetScript('OnEvent', function(_, event)
+        if (event == 'DISPLAY_SIZE_CHANGED' or event == 'UI_SCALE_CHANGED') and frame:IsShown() then
+            if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
+        end
         if event == 'GET_ITEM_INFO_RECEIVED' and namesPending and report then
             namesPending = false
             C_Timer.After(0.3, function() if frame:IsShown() and report then Render() end end)
         end
     end)
     frame:RegisterEvent('GET_ITEM_INFO_RECEIVED')
+    frame:RegisterEvent('DISPLAY_SIZE_CHANGED')
+    frame:RegisterEvent('UI_SCALE_CHANGED')
     frame:Hide()
 
     Scan.AnalyticsLog.OnChange(function() ScheduleRebuild(10) end)
@@ -1001,6 +1008,11 @@ function W.Toggle()
     else
         frame:Show()
     end
+end
+
+-- The fit-to-screen setting changed.
+function W.Refit()
+    if frame then if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end end
 end
 
 function W.IsShown()

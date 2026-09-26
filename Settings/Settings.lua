@@ -454,6 +454,22 @@ HironCraftScan.Utils.onLoad(function()
             Settings.CreateCheckbox(category, setting, L(LID.COLLAPSE_CHAT_CONTEXT_TOOLTIP))
         initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
     end
+    do
+        local setting = Settings.RegisterProxySetting(
+            category,
+            'HIRONCRAFT_SCAN_FIT_TO_SCREEN',
+            Settings.VarType.Boolean,
+            L('Fit windows to the screen'),
+            true,
+            function() return HironCraftScan.DB.settings.fit_to_screen ~= false end,
+            function(value)
+                HironCraftScan.DB.settings.fit_to_screen = value and true or false
+                if HironCraftScan.ApplyFitToScreen then HironCraftScan.ApplyFitToScreen() end
+            end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting, L('Fit windows to the screen tooltip'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
     Settings.RegisterAddOnCategory(category)
 end)
 

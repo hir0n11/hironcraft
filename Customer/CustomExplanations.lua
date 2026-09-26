@@ -33,6 +33,12 @@ local function ExplanationTextValidator(_, text)
 end
 
 local CustomExplanations = {}
+
+-- Estimating the chat name menu's height: rows of about MENU_ROW_HEIGHT, the
+-- game's own entries and our short ones taking MENU_FIXED_ROWS.
+local MENU_ROW_HEIGHT = 20
+local MENU_FIXED_ROWS = 22
+local MENU_MARGIN = 40
 HironCraftScan.CustomExplanations = CustomExplanations
 
 -- A customer can have several unfinished requests at once. Keep a manual
@@ -435,6 +441,28 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             subMenu:CreateTitle(L("HironCraftScan"))
         end
 
+        -- On a short game window (a laptop with two clients side by side) the
+        -- menu runs off the screen: fold its long lists into submenus, the
+        -- explanations first, then the manual matching. Only with "Fit
+        -- windows to the screen" on.
+        local crafterRows = HironCraftScan.GetSortedCrafters();
+        local foldMatching, foldExplanations = false, false
+        if not collapsed and HironCraftScan.Utils.FitsScreen and HironCraftScan.Utils.FitsScreen() then
+            local matches, explanations = 0, 0
+            for _, crafterInfo in ipairs(crafterRows) do
+                local ppConfig = HironCraftScan.DB.characters[crafterInfo.name].parent_professions[crafterInfo.parentProfessionID]
+                if ppConfig.scanning_enabled and not ppConfig.character_disabled then matches = matches + 1 end
+            end
+            for _ in pairs(HironCraftScan.DB.settings.explanations or {}) do explanations = explanations + 1 end
+            local available = (UIParent and UIParent.GetHeight and UIParent:GetHeight() or 768) - MENU_MARGIN
+            local rows = MENU_FIXED_ROWS + 2 + matches + 1 + explanations
+            if rows * MENU_ROW_HEIGHT > available and explanations > 0 then
+                foldExplanations = true
+                rows = rows - explanations
+            end
+            if rows * MENU_ROW_HEIGHT > available then foldMatching = true end
+        end
+
         -- Shift+click on an entry adds the row quietly: no banner, sound or
         -- greeting card. The greeting is one click on the row whenever the
         -- crafter wants it. (The chat menu does not pass right clicks on.)
@@ -456,9 +484,16 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             if HironCraftScan.AnalyticsLog then HironCraftScan.AnalyticsLog.Greeting(target, response) end
         end
 
+        local matchMenu = subMenu
         do
             subMenu:CreateDivider();
-            local title = subMenu:CreateTitle(prefix .. L(LID.MANUAL_MATCHING_TITLE));
+            local title
+            if foldMatching then
+                title = subMenu:CreateButton(prefix .. L(LID.MANUAL_MATCHING_TITLE))
+                matchMenu = title
+            else
+                title = subMenu:CreateTitle(prefix .. L(LID.MANUAL_MATCHING_TITLE));
+            end
             title:SetTooltip(function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.MANUAL_MATCHING_DESC)));
             end);
@@ -468,8 +503,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         -- scanner would have offered on its own. Its text lives in
         -- Settings - Customer Greetings, next to the phrases that trigger it.
         do
-            local generalGreeting = subMenu:CreateButton(
-                prefix .. L(LID.MANUAL_GENERAL_GREETING),
+            local generalGreeting = matchMenu:CreateButton(
+                (foldMatching and '' or prefix) .. L(LID.MANUAL_GENERAL_GREETING),
                 function()
                     local quiet = IsQuietPick()
                     local lineID = contextData.lineID
@@ -517,7 +552,6 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end)
         end
 
-        local crafterRows = HironCraftScan.GetSortedCrafters();
         for _, crafterInfo in ipairs(crafterRows) do
             local char = crafterInfo.name;
             local charConfig = HironCraftScan.DB.characters[char];
@@ -526,7 +560,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
             if ppConfig.scanning_enabled and not ppConfig.character_disabled then
                 local profName = HironCraftScan.Utils.ProfessionNameByID(ppID);
-                local matchButton = subMenu:CreateButton(
+                local matchButton = matchMenu:CreateButton(
                     string.format(L(LID.MANUAL_MATCH), HironCraftScan.ColorizeCrafterName(char),
                         HironCraftScan.Utils.ColorizeProfessionName(ppID, profName)),
                     function()
@@ -636,12 +670,17 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
         if next(HironCraftScan.DB.settings.explanations) then
             subMenu:CreateDivider();
-            subMenu:CreateTitle(prefix .. L("Custom Explanations"));
+            local explanationMenu = subMenu
+            if foldExplanations then
+                explanationMenu = subMenu:CreateButton(prefix .. L("Custom Explanations"))
+            else
+                subMenu:CreateTitle(prefix .. L("Custom Explanations"));
+            end
             local explanations = CreateUIExplanations();
             for _, entry in ipairs(explanations) do
                 local label = entry.label;
                 local text = entry.text;
-                local button = subMenu:CreateButton(label, function()
+                local button = explanationMenu:CreateButton(label, function()
                     CustomExplanations:Send(text, target)
                 end);
 
