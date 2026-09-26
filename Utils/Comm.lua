@@ -2641,6 +2641,17 @@ function HironCraftScanComm:FreshTarget(accountID)
     return FreshTargetForAccount(accountID)
 end
 
+-- The linked account's character: the one just heard from, or whichever
+-- answers a ping.
+function HironCraftScanComm:ReachAccount(accountID, callback)
+    local target = FreshTargetForAccount(accountID)
+    if target then
+        callback(target)
+        return
+    end
+    SendPing(accountID, function(_, sender) callback(sender) end)
+end
+
 function HironCraftScanComm:LinkState(sourceID)
     if not remoteTargets or remoteTargets[sourceID] == nil then
         return nil

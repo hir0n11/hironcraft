@@ -20,6 +20,8 @@ local chunks, report = nil, nil
 local loadToken = 0
 local rebuildPending = false
 local namesPending = false
+-- What was typed in the search box, lower case; '' shows everything.
+local searchText = ''
 
 local TAB_ITEMS, TAB_CUSTOMERS, TAB_TIME = 1, 2, 3
 
@@ -533,14 +535,30 @@ local function SetStatus(text)
     frame.Status:SetShown(text ~= nil and text ~= '')
 end
 
+local function Matches(text)
+    return searchText == '' or (text and text:lower():find(searchText, 1, true) ~= nil)
+end
+
 -- Items only seen in chat are left out: a row appears once someone asked
--- you for it or ordered it, and fills in as more comes.
+-- you for it or ordered it, and fills in as more comes. A search looks at
+-- every item, chat-only ones included, so any item can be checked.
 local function ItemRows()
     local rows = {}
     for _, row in ipairs(report.rows) do
-        if row.requests > 0 or row.greetings > 0 or row.orders > 0 or row.declined > 0 then
+        local hasData = row.requests > 0 or row.greetings > 0 or row.orders > 0 or row.declined > 0
+        if searchText == '' then
+            if hasData then rows[#rows + 1] = row end
+        elseif Matches(select(2, Subject(row))) or (row.itemID and tostring(row.itemID) == searchText) then
             rows[#rows + 1] = row
         end
+    end
+    return rows
+end
+
+local function CustomerRows()
+    local rows = {}
+    for _, row in ipairs(report.customers) do
+        if Matches(row.name) then rows[#rows + 1] = row end
     end
     return rows
 end
@@ -549,11 +567,11 @@ local function Render()
     if not frame or not report then return end
     namesPending = false
     frame.Items:SetRows(ItemRows())
-    frame.Customers:SetRows(report.customers)
+    frame.Customers:SetRows(CustomerRows())
     UpdateSummary()
     UpdateCharts()
     local tab = View().tab
-    local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #report.customers == 0)
+    local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #frame.Customers.rows == 0)
     SetStatus(empty and L('No analytics data for the period') or nil)
     local last = Scan.AnalyticsSync and Scan.AnalyticsSync.LastSync()
     frame.SyncText:SetText(last and string.format(L('Last exchange: %s'), date('%d.%m %H:%M', last)) or '')
@@ -740,7 +758,7 @@ local function Create()
     table.insert(UISpecialFrames, FRAME_NAME)
 
     frame.Inset:ClearAllPoints()
-    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -128)
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -134)
     frame.Inset:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -8, 8)
 
     local view = View()
@@ -829,7 +847,7 @@ local function Create()
 
     local export = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     export:SetSize(110, 22)
-    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -64)
+    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -60)
     export:SetText(L('Export CSV'))
     export:SetScript('OnClick', ExportCSV)
     frame.ExportButton = export
@@ -846,16 +864,42 @@ local function Create()
         GameTooltip:SetOwner(self, 'ANCHOR_TOP')
         GameTooltip_SetTitle(GameTooltip, L('Exchange now'))
         GameTooltip_AddNormalLine(GameTooltip, L('Exchange now tooltip'))
+        local status = Scan.AnalyticsSync and Scan.AnalyticsSync.Status() or {}
+        if #status > 0 then GameTooltip:AddLine(' ') end
+        for _, account in ipairs(status) do
+            GameTooltip:AddDoubleLine(account.name,
+                account.at and date('%d.%m %H:%M', account.at) or L('never exchanged'), 1, 1, 1, 0.7, 0.7, 0.7)
+        end
         GameTooltip:Show()
     end)
     sync:SetScript('OnLeave', function() GameTooltip:Hide() end)
 
+    -- Search by name: items on the item tab, customers on the customer tab.
+    local search = CreateFrame('EditBox', nil, frame, 'SearchBoxTemplate')
+    search:SetSize(258, 20)
+    search:SetPoint('TOPRIGHT', export, 'BOTTOMRIGHT', 0, -4)
+    search:SetAutoFocus(false)
+    if search.Instructions then search.Instructions:SetText(L('Search by name')) end
+    local searchPending = false
+    search:HookScript('OnTextChanged', function(self)
+        local text = (self:GetText() or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
+        if text == searchText then return end
+        searchText = text
+        if searchPending then return end
+        searchPending = true
+        C_Timer.After(0.25, function()
+            searchPending = false
+            if frame:IsShown() and report then Render() end
+        end)
+    end)
+    frame.Search = search
+
     frame.SyncText = frame:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    frame.SyncText:SetPoint('TOPRIGHT', export, 'BOTTOMRIGHT', 0, -6)
+    frame.SyncText:SetPoint('TOPRIGHT', search, 'BOTTOMRIGHT', 0, -8)
 
     local gather = CreateFrame('CheckButton', nil, frame, 'UICheckButtonTemplate')
     gather:SetSize(22, 22)
-    gather:SetPoint('TOPLEFT', sync, 'BOTTOMLEFT', -4, -2)
+    gather:SetPoint('TOPLEFT', search, 'BOTTOMLEFT', -8, -1)
     gather.text = gather:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     gather.text:SetPoint('LEFT', gather, 'RIGHT', 2, 0)
     gather.text:SetText(L('Gather Analytics'))

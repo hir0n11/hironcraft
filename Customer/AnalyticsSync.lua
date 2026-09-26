@@ -10,11 +10,15 @@ local Scan = select(2, ...)
 --   offer  {seq}        "I have events up to seq"         (sent when quiet)
 --   pull   {from}       "send yours after from"           (sent when quiet)
 --   events {events, last, more}                           (answer to a pull)
+--
+-- "Exchange now" skips the wait and says in chat how it went, so an account
+-- that does not answer (an older HironCraft there) does not go unnoticed.
 local M = {}
 Scan.AnalyticsSync = M
 
 M.BATCH = 150
 M.OFFER_INTERVAL = 15 * 60
+M.ANSWER_SECONDS = 30
 local TICK_SECONDS = 60
 
 M.Operations = {
@@ -24,10 +28,16 @@ M.Operations = {
 }
 
 local lastOfferAt = {}
+-- Exchanges started by hand: accountID -> { answered, received }.
+local sessions = {}
 
 local function Log() return Scan.AnalyticsLog end
 
 local function Comm() return HironCraftScanComm end
+
+local function L(key)
+    return Scan.LOCAL and Scan.LOCAL:GetText(key) or key
+end
 
 local function Accounts()
     return Scan.DB and Scan.DB.realm and Scan.DB.realm.linked_accounts or {}
@@ -48,6 +58,29 @@ end
 local function Ready(force)
     local log = Log()
     return log and log.IsEnabled() and (force or log.IsQuiet())
+end
+
+local function Name(accountID)
+    local account = Accounts()[accountID]
+    return type(account) == 'table' and (account.nickname or account.last_active_char) or tostring(accountID)
+end
+
+local function Say(text)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage('|cffffd200HironCraft:|r ' .. text)
+    end
+end
+
+-- A linked account's character, known or found by a ping.
+local function Reach(accountID, callback)
+    local comm = Comm()
+    if not comm then return end
+    if comm.ReachAccount then
+        comm:ReachAccount(accountID, callback)
+    elseif comm.FreshTarget then
+        local target = comm:FreshTarget(accountID)
+        if target then callback(target) end
+    end
 end
 
 function M.Handles(operation)
@@ -75,15 +108,48 @@ function M.Tick(force)
     end
 end
 
--- "Exchange now" in the window: skips the wait for a quiet period.
+-- "Exchange now" in the window: does not wait for a quiet period, finds the
+-- linked accounts' characters, and reports in chat.
 function M.SyncNow()
-    M.Tick(true)
+    if not Log().IsEnabled() then return end
+    local names = {}
+    for accountID, account in pairs(Accounts()) do
+        if MayShare(account) then
+            local session = { answered = false, received = 0 }
+            sessions[accountID] = session
+            names[#names + 1] = Name(accountID)
+            Reach(accountID, function(target) Offer(accountID, target, true) end)
+            if C_Timer and C_Timer.After then
+                C_Timer.After(M.ANSWER_SECONDS, function()
+                    if sessions[accountID] == session and not session.answered then
+                        sessions[accountID] = nil
+                        Say(string.format(L('Analytics exchange: %s did not answer'), Name(accountID)))
+                    end
+                end)
+            end
+        end
+    end
+    if #names == 0 then
+        Say(L('Analytics exchange: no linked accounts'))
+    else
+        table.sort(names)
+        Say(string.format(L('Analytics exchange started: %s'), table.concat(names, ', ')))
+    end
+end
+
+local function Finish(accountID, received)
+    local session = sessions[accountID]
+    if not session then return end
+    sessions[accountID] = nil
+    Say(string.format(L('Analytics exchange: %d new events from %s'), received, Name(accountID)))
 end
 
 function M.Receive(operation, sender, data, senderID)
     local account = Accounts()[senderID]
     if not MayShare(account) or type(data) ~= 'table' then return end
     local force = data.force == true
+    local session = sessions[senderID]
+    if session then session.answered = true end
 
     if operation == M.Operations.Offer then
         if not Ready(force) then return end
@@ -91,7 +157,13 @@ function M.Receive(operation, sender, data, senderID)
         local got = tonumber(account.analytics_received) or 0
         -- Their journal started over (a reset); take it from the start.
         if have < got then got = 0 end
-        if have > got then Send(M.Operations.Pull, { from = got, force = force or nil }, sender) end
+        if have > got then
+            Send(M.Operations.Pull, { from = got, force = force or nil }, sender)
+        else
+            -- Nothing new over there: we are up to date with them.
+            account.analytics_synced_at = time()
+            if data.reply then Finish(senderID, 0) end
+        end
         if not data.reply then Offer(senderID, sender, force, true) end
     elseif operation == M.Operations.Pull then
         if not Ready(force) then return end
@@ -105,8 +177,11 @@ function M.Receive(operation, sender, data, senderID)
         local merged = Log().Merge(data.events, senderID)
         account.analytics_received = tonumber(data.last) or account.analytics_received
         account.analytics_synced_at = time()
+        if session then session.received = session.received + merged end
         if data.more and Ready(force) then
             Send(M.Operations.Pull, { from = account.analytics_received, force = force or nil }, sender)
+        elseif session then
+            Finish(senderID, session.received)
         end
         return merged
     end
@@ -120,6 +195,18 @@ function M.LastSync()
         if at and (not latest or at > latest) then latest = at end
     end
     return latest
+end
+
+-- Each linked account and when analytics was last exchanged with it.
+function M.Status()
+    local list = {}
+    for accountID, account in pairs(Accounts()) do
+        if MayShare(account) then
+            list[#list + 1] = { name = Name(accountID), at = tonumber(account.analytics_synced_at) }
+        end
+    end
+    table.sort(list, function(lhs, rhs) return lhs.name < rhs.name end)
+    return list
 end
 
 if C_Timer and C_Timer.NewTicker then

@@ -11,6 +11,8 @@ local M = {}
 Scan.AnalyticsReport = M
 
 local MENTION_SAME_SECONDS = 60
+-- Two linked accounts see the same chat line a moment apart.
+local SAME_REQUEST_SECONDS = 180
 local DAY = 24 * 60 * 60
 
 local function BaseKey(name)
@@ -114,28 +116,53 @@ function M.Build(chunks, filters, context)
         return orders[tostring(orderID) .. ':f'] or orders[tostring(orderID) .. ':r']
     end
 
-    -- The last row of a conversation.
-    local function Final(token)
-        local seen = 0
-        while replacedBy[token] and seen < 20 do
-            token = replacedBy[token]
-            seen = seen + 1
+    -- The rows of one conversation: a row and the rows that replaced it, and
+    -- the same request seen by two linked accounts (the same customer asking
+    -- for the same thing within a few minutes, recorded on each).
+    local parent = {}
+    local function Find(token)
+        local root, guard = token, 0
+        while parent[root] and guard < 50 do
+            root = parent[root]
+            guard = guard + 1
         end
-        return token
+        if root ~= token then parent[token] = root end
+        return root
+    end
+    local function Union(lhs, rhs)
+        local a, b = Find(lhs), Find(rhs)
+        if a ~= b then parent[a] = b end
+    end
+    for old, new in pairs(replacedBy) do Union(old, new) end
+    local sameAsked = {}
+    for _, request in pairs(requests) do
+        local who = BaseKey(request.c)
+        if who then
+            local key = who .. '|' .. (Subject(request))
+            sameAsked[key] = sameAsked[key] or {}
+            table.insert(sameAsked[key], request)
+        end
+    end
+    for _, list in pairs(sameAsked) do
+        table.sort(list, function(lhs, rhs) return lhs.t < rhs.t end)
+        for index = 2, #list do
+            local previous, current = list[index - 1], list[index]
+            if (previous.m or 'own') ~= (current.m or 'own')
+                and current.t - previous.t <= SAME_REQUEST_SECONDS then
+                Union(current.id, previous.id)
+            end
+        end
     end
 
-    local members = {}
-    for token in pairs(requests) do
-        local final = Final(token)
-        members[final] = members[final] or {}
-        table.insert(members[final], token)
+    local groups = {}
+    local function Add(token)
+        local root = Find(token)
+        groups[root] = groups[root] or {}
+        table.insert(groups[root], token)
     end
+    for token in pairs(requests) do Add(token) end
     for token in pairs(greeted) do
-        local final = Final(token)
-        if not requests[token] then
-            members[final] = members[final] or {}
-            table.insert(members[final], token)
-        end
+        if not requests[token] then Add(token) end
     end
 
     local function PassesCommon(ppID, crafters, customer, side)
@@ -175,27 +202,27 @@ function M.Build(chunks, filters, context)
     -- Orders that belong to a conversation take its side and subject.
     local orderConversation = {}
 
-    for final, tokens in pairs(members) do
-        local request = requests[final]
-        local first = nil
+    for _, tokens in pairs(groups) do
+        -- The first request starts it; the latest is the most precise.
+        local first, request, greeting = nil, nil, nil
         for _, token in ipairs(tokens) do
             local candidate = requests[token]
             if candidate and (not first or candidate.t < first.t) then first = candidate end
+            if candidate and (not request or candidate.t > request.t) then request = candidate end
+            local greetedAt = greeted[token]
+            if greetedAt and (not greeting or greetedAt.t < greeting.t) then greeting = greetedAt end
         end
-        request = request or first
-        local greeting = nil
+        -- The order it ended in: a delivered one over a declined one.
+        local order, link = nil, nil
         for _, token in ipairs(tokens) do
-            local candidate = greeted[token]
-            if candidate and (not greeting or candidate.t < greeting.t) then greeting = candidate end
-        end
-        local link = links[final]
-        local order = link and OrderOf(link.o) or (tokenOrders[final] and orders[tokenOrders[final]])
-        if not link then
-            for _, token in ipairs(tokens) do
-                if not link and links[token] then
-                    link = links[token]
-                    order = OrderOf(link.o)
-                end
+            local candidateLink = links[token]
+            local candidateOrder = candidateLink and OrderOf(candidateLink.o)
+                or (tokenOrders[token] and orders[tokenOrders[token]])
+            if candidateOrder and (not order or (candidateOrder.st == 'f' and order.st ~= 'f')) then
+                order = candidateOrder
+            end
+            if candidateLink and (not link or (candidateLink.st == 'f' and link.st ~= 'f')) then
+                link = candidateLink
             end
         end
         local crafted = (order and order.st == 'f') or (not order and link and link.st == 'f')

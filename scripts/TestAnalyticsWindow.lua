@@ -69,6 +69,7 @@ function CreateFrame(kind, name, parent, template)
     local frame = Mock(kind)
     frame.shown = kind ~= 'Frame' or name == nil
     if template == 'ButtonFrameTemplate' then frame.Inset = Mock('Frame'); frame.shown = true end
+    if template == 'SearchBoxTemplate' then frame.Instructions = Mock('FontString') end
     if name then _G[name] = frame end
     return frame
 end
@@ -93,6 +94,7 @@ C_Item = {
 C_Spell = { GetSpellName = function(id) return 'Recipe ' .. id end }
 C_TradeSkillUI = { GetProfessionInfoBySkillLineID = function(id) return { professionName = 'Prof ' .. id } end }
 C_Timer = { After = function(_, fn) end }
+local function Soon(fn) local saved = C_Timer.After; C_Timer.After = function(_, f) f() end; fn(); C_Timer.After = saved end
 ScrollBoxConstants = { RetainScrollPosition = true }
 function CreateDataProvider(list) return { list = list } end
 function CreateScrollBoxListLinearView()
@@ -182,6 +184,20 @@ Scan.AnalyticsWindow.Rebuild()
 for _, tab in ipairs(frame.Tabs) do tab.scripts.OnClick(tab) end
 for _, header in ipairs(frame.Items.headers) do header.scripts.OnClick(header) end
 for _, header in ipairs(frame.Customers.headers) do header.scripts.OnClick(header) end
+
+-- Search by name: any item, chat-only ones included; customers on their tab.
+local function Type(text)
+    frame.Search:SetText(text)
+    Soon(function() frame.Search.scripts.OnTextChanged(frame.Search) end)
+end
+Type('Item 1001')
+assert(#frame.Items.rows == 1 and frame.Items.rows[1].itemID == 1001, 'the search did not find the item')
+Type('4004')
+assert(#frame.Items.rows == 1 and frame.Items.rows[1].itemID == 4004, 'the search did not find a chat-only item')
+Type('BUYER')
+assert(#frame.Customers.rows == 1 and frame.Customers.rows[1].key == 'buyer', 'the customer search is off')
+Type('')
+assert(#frame.Items.rows == 2 and #frame.Customers.rows == 2, 'clearing the search did not bring the rows back')
 
 -- Own dates typed in the boxes.
 frame.FromBox:SetText('19.09.2026')

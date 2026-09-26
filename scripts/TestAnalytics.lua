@@ -290,3 +290,44 @@ local own = 0
 for _, event in ipairs(Scan.DB.analytics.open.events) do if event.q then own = own + 1 end end
 assert(own == 4, 'a received result was taken in as our own: ' .. own)
 print('Analytics backfill passed.')
+
+-- The same request seen by two linked accounts is one conversation: the
+-- crafter's PC and the collector see the same chat line.
+Scan.DB = newDB()
+Log.Request('Twice-Realm', { requestToken = 'pc1', itemID = 6006, parentProfID = 164, time = now })
+Log.Merge({
+    { k = 'r', t = now + 20, id = 'lap1', c = 'Twice-Realm', i = 6006, p = 164, f = 'A' },
+    { k = 'g', t = now + 40, id = 'lap1', c = 'Twice-Realm', f = 'A' },
+    { k = 'l', t = now + 900, id = 'lap1', o = 900, st = 'f' },
+}, 'laptop')
+Log.Outcome({ orderID = 900, status = 'fulfilled', customerName = 'Twice', itemID = 6006,
+    parentProfessionID = 164, updatedAt = now + 900 })
+report = build()
+assert(report.totals.requests == 1 and report.totals.greetings == 1 and report.totals.crafted == 1,
+    'one request seen by two accounts was counted twice or lost its greeting')
+-- The same account seeing it asked again an hour later: a new request.
+Log.Request('Twice-Realm', { requestToken = 'pc2', itemID = 6006, parentProfID = 164, time = now + 3600 })
+assert(build().totals.requests == 2, 'a later request was merged into the old one')
+print('Analytics cross-account requests passed.')
+
+-- "Exchange now" says in chat how it went.
+local said, timers = {}, {}
+DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) said[#said + 1] = text end }
+C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+as(dbA, function() Sync.SyncNow() end)
+outbox = {}
+for _, fn in ipairs(timers) do as(dbA, fn) end
+assert(said[#said]:find('did not answer', 1, true), 'a silent account was not reported')
+said, timers = {}, {}
+as(dbB, function() Log.Request('Bee-Realm', { requestToken = 'b9', itemID = 1001, time = now }) end)
+as(dbA, function() Sync.SyncNow() end)
+deliver()
+for _, fn in ipairs(timers) do as(dbA, fn) end
+local reported = false
+for _, line in ipairs(said) do
+    assert(not line:find('did not answer', 1, true), 'an account that answered was reported silent')
+    if line:find('1 new events from other', 1, true) then reported = true end
+end
+assert(reported, 'the result of the exchange was not reported: ' .. table.concat(said, ' | '))
+DEFAULT_CHAT_FRAME, C_Timer = nil, nil
+print('Analytics exchange report passed.')

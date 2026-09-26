@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: exchange you can see, one request per conversation, search (0.4.44)
+
+- "Exchange now" finds the linked accounts (pinging them when the link is
+  stale) and says in chat how it went: how many new events came from each,
+  or that an account did not answer, which usually means an older
+  HironCraft there. The button's tooltip lists when each account was last
+  exchanged with. An exchange with nothing new counts as done.
+- The crafter's PC and a collector see the same chat line and each record
+  the request. The same customer asking for the same thing on two linked
+  accounts within three minutes is now one conversation, greeted and
+  crafted if either side was.
+- A search box under the buttons filters the item table by name (and the
+  customer table by customer). While searching, items only seen in chat
+  are included too, so any item can be checked.
+
 ## Analytics summary as tiles (0.4.43)
 
 - The three lines of figures at the top of the analytics window are tiles
