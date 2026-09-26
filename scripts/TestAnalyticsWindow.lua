@@ -52,6 +52,7 @@ local function Mock(kind)
             self.inited[#self.inited + 1] = { row = row, data = data }
         end
     end
+    function methods:SetPoint(_, relative) self.anchor = relative end
     function methods:GetID() return self.id end
     function methods:SetID(id) self.id = id end
     -- WoW methods are capitalised; any other missing key is a plain field.
@@ -152,8 +153,11 @@ for _, entry in ipairs(frame.Items.scrollBox.inited) do
 end
 -- Own dates are hidden until chosen.
 assert(not frame.FromBox:IsShown() and not frame.ToBox:IsShown(), 'date boxes shown for a preset period')
-local summary = frame.Summary:GetText()
-assert(summary:find('Greetings', 1, true) or summary:find('%s', 1, true) == nil, 'no summary')
+assert(frame.Profession.anchor == frame.Period, 'the filters did not close the gap of the hidden dates')
+assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.value:GetText() == '1'
+    and frame.Tiles.crafted.value:GetText() == '1' and frame.Tiles.conversion.value:GetText() == '100%'
+    and frame.Tiles.orders.value:GetText() == '1', 'the summary tiles are off')
+assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
 local found = false
 for _, text in ipairs(texts) do
     if type(text) == 'string' and text:find('Item 1001', 1, true) then found = true end
@@ -184,6 +188,7 @@ frame.FromBox:SetText('19.09.2026')
 frame.FromBox.scripts.OnEnterPressed(frame.FromBox)
 assert(view.preset == 'custom' and os.date('%d.%m', view.from) == '19.09', 'a typed date was not used')
 assert(frame.FromBox:IsShown() and frame.ToBox:IsShown(), 'date boxes hidden for own dates')
+assert(frame.Profession.anchor == frame.ToBox, 'the filters did not move over for the dates')
 frame.ToBox:SetText('nonsense')
 frame.ToBox.scripts.OnEnterPressed(frame.ToBox)
 assert(view.preset == 'custom', 'a wrong date broke the period')

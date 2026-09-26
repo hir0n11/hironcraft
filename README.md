@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics summary as tiles (0.4.43)
+
+- The three lines of figures at the top of the analytics window are tiles
+  now, one figure each with its name above it, in three groups: from request
+  to craft (requests, greetings, crafted, conversion - green, yellow or red),
+  orders (delivered, declined, tips, average tip) and chat (mentions). Each
+  tile explains itself on hover. Customers per coin are one line below.
+- The own-dates boxes appear right after the period list; the other
+  filters move over while they are shown.
+
 ## Analytics window fixes (0.4.42)
 
 - Rows of items with a profession showed no numbers, and hovering them

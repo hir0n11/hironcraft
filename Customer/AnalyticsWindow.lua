@@ -405,24 +405,105 @@ local function AllTimeTiers()
     return counts
 end
 
+-- The summary: one tile per figure, in three groups - the way from request
+-- to craft, the orders, the chat - and a line of customers per coin.
+local TILE_GROUPS = {
+    { color = { 0.35, 0.65, 1.00 }, tiles = {
+        { key = 'requests', label = 'Requests', tip = 'Requests tooltip' },
+        { key = 'greetings', label = 'Greetings', tip = 'Greetings tooltip' },
+        { key = 'crafted', label = 'Crafted', tip = 'Crafted tooltip' },
+        { key = 'conversion', label = 'Conversion', tip = 'Conversion tooltip' },
+    } },
+    { color = { 1.00, 0.78, 0.25 }, tiles = {
+        { key = 'orders', label = 'Orders delivered', tip = 'All orders tooltip' },
+        { key = 'declined', label = 'Declined', tip = 'Declined tooltip' },
+        { key = 'tips', label = 'Tips total', tip = 'Tips tooltip', width = 104 },
+        { key = 'averageTip', label = 'Average tip', tip = 'Average tip tooltip', width = 86 },
+    } },
+    { color = { 0.62, 0.62, 0.62 }, tiles = {
+        { key = 'mentions', label = 'Mentions', tip = 'Mentions tooltip' },
+    } },
+}
+local TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GROUP_GAP = 74, 40, 4, 12
+
+local function TileNumber(value)
+    return BreakUpLargeNumbers and BreakUpLargeNumbers(value or 0) or tostring(value or 0)
+end
+
+local function CreateTiles(parent, x, y)
+    local tiles = {}
+    for groupIndex, group in ipairs(TILE_GROUPS) do
+        if groupIndex > 1 then x = x + GROUP_GAP - TILE_GAP end
+        for _, info in ipairs(group.tiles) do
+            local tile = CreateFrame('Frame', nil, parent)
+            tile:SetSize(info.width or TILE_WIDTH, TILE_HEIGHT)
+            tile:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
+            tile.background = tile:CreateTexture(nil, 'BACKGROUND')
+            tile.background:SetAllPoints()
+            tile.background:SetColorTexture(1, 1, 1, 0.05)
+            tile.accent = tile:CreateTexture(nil, 'BORDER')
+            tile.accent:SetPoint('TOPLEFT')
+            tile.accent:SetPoint('BOTTOMLEFT')
+            tile.accent:SetWidth(2)
+            tile.accent:SetColorTexture(group.color[1], group.color[2], group.color[3], 0.9)
+            tile.label = tile:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+            tile.label:SetPoint('TOPLEFT', 8, -5)
+            tile.label:SetPoint('RIGHT', -4, 0)
+            tile.label:SetJustifyH('LEFT')
+            tile.label:SetTextColor(0.75, 0.75, 0.75)
+            tile.label:SetText(L(info.label))
+            tile.value = tile:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightLarge')
+            tile.value:SetPoint('BOTTOMLEFT', 8, 5)
+            tile.value:SetPoint('RIGHT', -4, 0)
+            tile.value:SetJustifyH('LEFT')
+            tile:EnableMouse(true)
+            tile:SetScript('OnEnter', function(self)
+                GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
+                GameTooltip_SetTitle(GameTooltip, L(info.label))
+                GameTooltip_AddNormalLine(GameTooltip, L(info.tip))
+                GameTooltip:Show()
+            end)
+            tile:SetScript('OnLeave', function() GameTooltip:Hide() end)
+            tiles[info.key] = tile
+            x = x + (info.width or TILE_WIDTH) + TILE_GAP
+        end
+    end
+    return tiles
+end
+
+-- Green from half the greetings crafted, yellow from a quarter, else red.
+local function ConversionColor(value)
+    if not value then return 0.5, 0.5, 0.5 end
+    if value >= 0.5 then return 0.35, 1, 0.35 end
+    if value >= 0.25 then return 1, 0.82, 0 end
+    return 1, 0.45, 0.35
+end
+
 local function UpdateSummary()
+    local totals = report and report.totals or {}
+    local tiles = frame.Tiles
+    for _, key in ipairs({ 'requests', 'greetings', 'crafted', 'orders', 'declined', 'mentions' }) do
+        tiles[key].value:SetText(report and TileNumber(totals[key]) or '')
+    end
+    tiles.conversion.value:SetText(report and Percent(totals.conversion) or '')
+    tiles.conversion.value:SetTextColor(ConversionColor(totals.conversion))
+    tiles.tips.value:SetText(report and Gold(totals.tips) or '')
+    tiles.averageTip.value:SetText(report and Gold(totals.averageTip) or '')
     if not report then
-        frame.Summary:SetText('')
+        frame.Tiers:SetText('')
         return
     end
-    local totals = report.totals
     local all = AllTimeTiers()
     local tiers = report.tiers
-    frame.Summary:SetText(table.concat({
-        string.format(L('Analytics summary'), Number(totals.greetings), Number(totals.crafted),
-            Percent(totals.conversion), Number(totals.requests), Number(totals.mentions)),
-        string.format(L('Analytics orders'), Number(totals.orders), Number(totals.declined),
-            Gold(totals.tips), Gold(totals.averageTip)),
-        string.format(L('Analytics tiers'),
-            Coin('generous'), tiers.generous or 0, Coin('regular'), tiers.regular or 0,
-            Coin('stingy'), tiers.stingy or 0, tiers.none or 0,
-            Coin('generous'), all.generous, Coin('regular'), all.regular, Coin('stingy'), all.stingy),
-    }, '\n'))
+    local function Count(mark, count)
+        return Coin(mark) .. ' |cffffffff' .. TileNumber(count) .. '|r'
+    end
+    frame.Tiers:SetText(string.format('|cffffd100%s|r   %s     %s     %s     |cff9d9d9d%s|r          |cff9d9d9d%s|r   %s     %s     %s',
+        L('Customers in the period:'),
+        Count('generous', tiers.generous), Count('regular', tiers.regular), Count('stingy', tiers.stingy),
+        string.format(L('no mark %s'), TileNumber(tiers.none)),
+        L('Marked overall:'),
+        Count('generous', all.generous), Count('regular', all.regular), Count('stingy', all.stingy)))
 end
 
 local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
@@ -527,6 +608,13 @@ local function UpdateDateBoxes()
     frame.ToBox:SetText(Scan.AnalyticsReport.FormatDate(to))
     local custom = View().preset == 'custom'
     for _, element in ipairs(frame.DateElements) do element:SetShown(custom) end
+    -- Own dates sit right after the period; the other filters make room.
+    frame.Profession:ClearAllPoints()
+    if custom then
+        frame.Profession:SetPoint('LEFT', frame.ToBox, 'RIGHT', 14, 0)
+    else
+        frame.Profession:SetPoint('LEFT', frame.Period, 'RIGHT', 8, 0)
+    end
     -- A typed date switches the period to own dates; show that.
     if frame.Period and frame.Period.GenerateMenu then frame.Period:GenerateMenu() end
 end
@@ -652,7 +740,7 @@ local function Create()
     table.insert(UISpecialFrames, FRAME_NAME)
 
     frame.Inset:ClearAllPoints()
-    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -124)
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -128)
     frame.Inset:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -8, 8)
 
     local view = View()
@@ -710,9 +798,13 @@ local function Create()
         return box
     end
 
+    frame.FromBox = DateBox('From', period, false)
+    frame.ToBox = DateBox('To', frame.FromBox, true)
+
     local profession = Dropdown(frame, 150, ProfessionEntries,
         function() return View().ppID end, function(value) View().ppID = value FilterChanged() end)
     profession:SetPoint('LEFT', period, 'RIGHT', 8, 0)
+    frame.Profession = profession
     local crafter = Dropdown(frame, 150, CrafterEntries,
         function() return View().crafter end, function(value) View().crafter = value FilterChanged() end)
     crafter:SetPoint('LEFT', profession, 'RIGHT', 8, 0)
@@ -725,20 +817,15 @@ local function Create()
         GameTooltip:Show()
     end)
     side:SetScript('OnLeave', function() GameTooltip:Hide() end)
-    local tier = Dropdown(frame, 190, Entries(TIERS),
+    local tier = Dropdown(frame, 176, Entries(TIERS),
         function() return View().tier end, function(value) View().tier = value FilterChanged() end)
     tier:SetPoint('LEFT', side, 'RIGHT', 8, 0)
-    -- Own dates, shown only when that period is chosen.
-    frame.FromBox = DateBox('From', tier, false)
-    frame.ToBox = DateBox('To', frame.FromBox, true)
 
     -- Row 2: what the period comes to, and the buttons.
-    frame.Summary = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    frame.Summary:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -66)
-    frame.Summary:SetPoint('RIGHT', frame, 'RIGHT', -330, 0)
-    frame.Summary:SetJustifyH('LEFT')
-    frame.Summary:SetJustifyV('TOP')
-    frame.Summary:SetSpacing(4)
+    frame.Tiles = CreateTiles(frame, 16, -60)
+    frame.Tiers = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -108)
+    frame.Tiers:SetJustifyH('LEFT')
 
     local export = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     export:SetSize(110, 22)
