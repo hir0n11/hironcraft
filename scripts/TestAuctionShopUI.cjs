@@ -66,10 +66,11 @@ check(
   "empty Shop page cannot be opened",
 );
 
-const landingSelections = core.match(/S:SetShopTab\("buy"\)/g) || [];
+const landingSelections = core.match(/S:SetShopTab\(LandingShopTab\(\)\)/g) || [];
 check(
-  landingSelections.length >= 2,
-  "Shop is not selected from both Auction House open events",
+  landingSelections.length >= 2 &&
+    core.includes('return (type(rows) == "table" and #rows > 0) and "buy" or "sell"'),
+  "Shop does not land on Buy with a list and on Sell without one from both Auction House open events",
 );
 check(
   !core.includes('if HasShoppingSession() then\n                        S:ShowWindow()'),

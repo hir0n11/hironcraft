@@ -317,6 +317,15 @@ function S:RefreshSellList()
         end
     end
 
+    -- Nothing chosen yet: the first item of the list is, with its prices.
+    if not self.sell.selected then
+        local order = (self.GetSellDisplayOrder and self:GetSellDisplayOrder()) or self.sell.items or {}
+        if order[1] then
+            self:SelectSellItem(order[1])
+            return
+        end
+    end
+
     if self.RefreshSellUI then
         self:RefreshSellUI()
     end
@@ -439,6 +448,62 @@ function S:SelectSellItem(entry)
     self:DoSellSearch(entry)
 end
 
+-- Prices already read: per item, for PRICE_CACHE_SECONDS. The next item's
+-- are asked for while the player is on the current one, so posting does not
+-- wait for a search each time.
+local PRICE_CACHE_SECONDS = 60
+-- A press of the post key while prices are still coming or the auction house
+-- is catching up is kept this long and done as soon as both are ready.
+local QUEUED_POST_SECONDS = 5
+
+local function Now()
+    return (GetTime and GetTime()) or 0
+end
+
+local function SameItemKey(a, b)
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    return a.itemID == b.itemID and (a.itemLevel or 0) == (b.itemLevel or 0)
+        and (a.itemSuffix or 0) == (b.itemSuffix or 0)
+        and (a.battlePetSpeciesID or 0) == (b.battlePetSpeciesID or 0)
+end
+
+local function PriceKey(isCommodity, itemID, itemKey)
+    if not isCommodity and type(itemKey) == "table" then
+        return "i:" .. tostring(itemKey.itemID) .. ":" .. tostring(itemKey.itemLevel or 0) .. ":"
+            .. tostring(itemKey.itemSuffix or 0) .. ":" .. tostring(itemKey.battlePetSpeciesID or 0)
+    end
+    return "c:" .. tostring(itemID)
+end
+
+local function PriceCache()
+    S.sell.priceCache = S.sell.priceCache or {}
+    return S.sell.priceCache
+end
+
+-- The auction house key of an item in the bags.
+local function SellItemKey(entry)
+    if not entry or not C_AuctionHouse then return nil end
+    if not entry.isCommodity and entry.bag and entry.slot
+        and ItemLocation and ItemLocation.CreateFromBagAndSlot then
+        local loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
+        if loc and loc:IsValid() then
+            local okGet, key = pcall(C_AuctionHouse.GetItemKeyFromItem, loc)
+            if okGet and key then return key end
+            local ilvl
+            if C_Item and C_Item.GetCurrentItemLevel then
+                local okLvl, lvl = pcall(C_Item.GetCurrentItemLevel, loc)
+                if okLvl then ilvl = lvl end
+            end
+            if ilvl and ilvl > 0 then
+                local okMk, k = pcall(C_AuctionHouse.MakeItemKey, entry.itemID, ilvl)
+                if okMk and k then return k end
+            end
+        end
+    end
+    local okKey, key = pcall(C_AuctionHouse.MakeItemKey, entry.itemID)
+    return okKey and key or nil
+end
+
 local function BuildSellSorts()
     if not Enum or not Enum.AuctionHouseSortOrder then
         return nil
@@ -452,33 +517,8 @@ function S:DoSellSearch(entry)
     if not SellAHReady() then return end
     if not self.isAuctionHouseOpen then return end
 
-    local itemKey
-    if not entry.isCommodity and entry.bag and entry.slot
-        and ItemLocation and ItemLocation.CreateFromBagAndSlot then
-        local loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
-        if loc and loc:IsValid() then
-            local okGet, key = pcall(C_AuctionHouse.GetItemKeyFromItem, loc)
-            if okGet and key then itemKey = key end
-
-            if not itemKey then
-                local ilvl
-                if C_Item and C_Item.GetCurrentItemLevel then
-                    local okLvl, lvl = pcall(C_Item.GetCurrentItemLevel, loc)
-                    if okLvl then ilvl = lvl end
-                end
-                if ilvl and ilvl > 0 then
-                    local okMk, k = pcall(C_AuctionHouse.MakeItemKey, entry.itemID, ilvl)
-                    if okMk and k then itemKey = k end
-                end
-            end
-        end
-    end
-
-    if not itemKey then
-        local okKey, key = pcall(C_AuctionHouse.MakeItemKey, entry.itemID)
-        if not okKey or not key then return end
-        itemKey = key
-    end
+    local itemKey = SellItemKey(entry)
+    if not itemKey then return end
 
     self.sell.scan = {
         itemID = entry.itemID,
@@ -491,11 +531,51 @@ function S:DoSellSearch(entry)
         skipped = {},
     }
 
+    -- Read a moment ago (usually asked for ahead of time): no new search.
+    local priceKey = PriceKey(entry.isCommodity, entry.itemID, itemKey)
+    local cached = PriceCache()[priceKey]
+    if cached and Now() - cached.at <= PRICE_CACHE_SECONDS then
+        self:ApplySellResults(self.sell.scan, cached.tiers, cached.totalQty, entry.isCommodity and true or false)
+        self:PrefetchNextSell()
+        self:PumpSell()
+        return
+    end
+
     if self.RefreshSellUI then
         self:RefreshSellUI()
     end
 
+    -- Its prices were asked for ahead of time and are on the way: they will
+    -- do. Not asked yet: this search replaces the one ahead of time.
+    local ahead = self._sellPrefetch
+    if ahead and ahead.key == priceKey then
+        if ahead.sent then return end
+        self._sellPrefetch = nil
+    end
+
     self:QueueSellSearch(itemKey, BuildSellSorts())
+end
+
+-- The next item in the list gets its prices asked for now, so they are there
+-- when the current one is posted.
+function S:PrefetchNextSell()
+    local current = self.sell.selected
+    if not current or not self.isAuctionHouseOpen then return end
+    local order = (self.GetSellDisplayOrder and self:GetSellDisplayOrder()) or self.sell.items or {}
+    local nextEntry
+    for i, e in ipairs(order) do
+        if e.key == current.key then nextEntry = order[i + 1] break end
+    end
+    if not nextEntry then return end
+    local itemKey = SellItemKey(nextEntry)
+    if not itemKey then return end
+    local key = PriceKey(nextEntry.isCommodity, nextEntry.itemID, itemKey)
+    local cached = PriceCache()[key]
+    if cached and Now() - cached.at <= PRICE_CACHE_SECONDS then return end
+    local pending = self._sellPrefetch
+    if pending and pending.key == key then return end
+    self._sellPrefetch = { key = key, itemID = nextEntry.itemID, itemKey = itemKey,
+        isCommodity = nextEntry.isCommodity and true or false }
 end
 
 function S:QueueSellSearch(itemKey, sorts)
@@ -503,13 +583,52 @@ function S:QueueSellSearch(itemKey, sorts)
     self:ProcessSellScanQueue()
 end
 
-function S:ProcessSellScanQueue()
-    local q = self._pendingSellScan
-    if not q then return end
+-- One queue for the auction house's few requests at a time: a post the
+-- player asked for first, then the prices of the chosen item, then the next
+-- item's prices. Runs again whenever the auction house is ready.
+function S:PumpSell()
     if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then return end
-    if not self:IsSellAHThrottleReady() then return end
-    self._pendingSellScan = nil
-    pcall(C_AuctionHouse.SendSearchQuery, q.itemKey, q.sorts, true)
+    for _ = 1, 3 do
+        if not self:IsSellAHThrottleReady() then return end
+        if not self:TryQueuedPost() then
+            local q = self._pendingSellScan
+            local p = self._sellPrefetch
+            if q then
+                self._pendingSellScan = nil
+                pcall(C_AuctionHouse.SendSearchQuery, q.itemKey, q.sorts, true)
+            elseif p and not p.sent then
+                p.sent = true
+                p.sentAt = Now()
+                pcall(C_AuctionHouse.SendSearchQuery, p.itemKey, BuildSellSorts(), true)
+            else
+                return
+            end
+        end
+    end
+end
+
+function S:ProcessSellScanQueue()
+    self:PumpSell()
+end
+
+-- The post key was pressed while the prices were coming or the auction house
+-- was busy: post now if it is still the same item and everything is ready.
+function S:TryQueuedPost()
+    local queued = self.sell.postQueued
+    if not queued then return false end
+    local selected = self.sell.selected
+    if not selected or selected.key ~= queued.key or Now() - queued.at > QUEUED_POST_SECONDS
+        or self.shopTab ~= "sell" or not self.isAuctionHouseOpen then
+        self.sell.postQueued = nil
+        return false
+    end
+    if not self:IsSellScanReady() or not self:IsSellAHThrottleReady() then return false end
+    self.sell.postQueued = nil
+    if self:PostSellItem() then
+        self._lastSellPostTime = Now()
+        return true
+    end
+    return false
 end
 
 local function AddTier(tiers, index, price, qty, owned, auctionID, ownerName)
@@ -555,24 +674,15 @@ function ComputeSellReference(tiers, totalQty)
     return ref and ref.price or nil, skipped, i
 end
 
-function S:OnSellSearchResults(isCommodity, idOrKey)
-    local scan = self.sell.scan
-    if not scan or not scan.pending then return end
-
-    scan.isCommodity = isCommodity
-    if self.sell.selected and self.sell.selected.itemID == scan.itemID then
-        self.sell.selected.isCommodity = isCommodity
-    end
-
+-- The current auctions of one item, cheapest first.
+local function ReadSellResults(isCommodity, itemID, itemKey)
     local tiers = {}
     local index = {}
     local totalQty = 0
-
     if isCommodity then
-        if scan.itemID ~= idOrKey then return end
-        local num = C_AuctionHouse.GetNumCommoditySearchResults(scan.itemID) or 0
+        local num = C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
         for i = 1, num do
-            local ok, r = pcall(C_AuctionHouse.GetCommoditySearchResultInfo, scan.itemID, i)
+            local ok, r = pcall(C_AuctionHouse.GetCommoditySearchResultInfo, itemID, i)
             if ok and r and r.unitPrice then
                 local owned = r.containsOwnerItem
                 AddTier(tiers, index, r.unitPrice, r.quantity or 1, owned, nil)
@@ -580,10 +690,9 @@ function S:OnSellSearchResults(isCommodity, idOrKey)
             end
         end
     else
-        if not scan.itemKey then return end
-        local num = C_AuctionHouse.GetNumItemSearchResults(scan.itemKey) or 0
+        local num = C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
         for i = 1, num do
-            local ok, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, scan.itemKey, i)
+            local ok, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, itemKey, i)
             if ok and r then
                 local unit = r.buyoutAmount or r.bidAmount
                 local stack = (r.itemKey and r.quantity) or 1
@@ -595,9 +704,59 @@ function S:OnSellSearchResults(isCommodity, idOrKey)
             end
         end
     end
-
     table.sort(tiers, function(a, b) return a.price < b.price end)
+    return tiers, totalQty
+end
 
+-- Tiers are marked (flip, reference) when applied: each use gets its own.
+local function CopyTiers(tiers)
+    local copy = {}
+    for i, tier in ipairs(tiers or {}) do
+        local t = {}
+        for k, v in pairs(tier) do t[k] = v end
+        t.isFlip, t.isReference = nil, nil
+        copy[i] = t
+    end
+    return copy
+end
+
+function S:OnSellSearchResults(isCommodity, idOrKey)
+    local scan = self.sell.scan
+    local forScan = scan and scan.pending and (
+        (isCommodity and scan.itemID == idOrKey)
+        or (not isCommodity and scan.itemKey and (type(idOrKey) ~= "table" or SameItemKey(idOrKey, scan.itemKey))))
+    local prefetch = self._sellPrefetch
+    local forPrefetch = prefetch and prefetch.sent and (
+        (isCommodity and prefetch.itemID == idOrKey)
+        or (not isCommodity and SameItemKey(idOrKey, prefetch.itemKey)))
+
+    if forPrefetch then
+        local tiers, totalQty = ReadSellResults(isCommodity, prefetch.itemID, prefetch.itemKey)
+        PriceCache()[PriceKey(isCommodity, prefetch.itemID, prefetch.itemKey)] =
+            { tiers = tiers, totalQty = totalQty, at = Now() }
+        self._sellPrefetch = nil
+    end
+    if not forScan then
+        self:PumpSell()
+        return
+    end
+
+    scan.isCommodity = isCommodity
+    if self.sell.selected and self.sell.selected.itemID == scan.itemID then
+        self.sell.selected.isCommodity = isCommodity
+    end
+    local tiers, totalQty = ReadSellResults(isCommodity, scan.itemID, scan.itemKey)
+    PriceCache()[PriceKey(isCommodity, scan.itemID, scan.itemKey)] =
+        { tiers = tiers, totalQty = totalQty, at = Now() }
+    self:ApplySellResults(scan, tiers, totalQty, isCommodity)
+    self:PrefetchNextSell()
+    self:PumpSell()
+end
+
+-- Prices in hand (read now or a moment ago): the scan is done and the price
+-- is set from them.
+function S:ApplySellResults(scan, cachedTiers, totalQty, isCommodity)
+    local tiers = CopyTiers(cachedTiers)
     local reference, skipped = ComputeSellReference(tiers, totalQty)
 
     scan.tiers = tiers
@@ -722,6 +881,11 @@ function S:PostSellItem()
     self._lastPostKey = entry.key
     self._lastPostTime = now
     self._sellDepositTrusted = true
+    -- Our own auction is on the market now: read its prices again next time.
+    local posted = self.sell.scan
+    if posted and posted.itemID == entry.itemID then
+        PriceCache()[PriceKey(isCommodity, entry.itemID, posted.itemKey)] = nil
+    end
 
     if entry.itemID and price > 0 then
         GetSellLastPrices()[entry.itemID] = price
@@ -831,9 +995,14 @@ function S:RunSellHotkeyAction()
     if not self.isAuctionHouseOpen then return end
     if self.shopTab ~= "sell" then return end
     if not self.sell.selected then return end
-    if not self:IsSellAHThrottleReady() then return end
     local now = GetTime and GetTime() or 0
     if self._lastSellPostTime and (now - self._lastSellPostTime) < 0.35 then return end
+    -- Prices still coming, or the auction house catching up: the press is
+    -- kept and done the moment both are ready - never at a guessed price.
+    if not self:IsSellScanReady() or not self:IsSellAHThrottleReady() then
+        self.sell.postQueued = { key = self.sell.selected.key, at = now }
+        return
+    end
     if self:PostSellItem() then
         self._lastSellPostTime = now
     end
@@ -967,9 +1136,7 @@ sellEventFrame:RegisterEvent("COMMODITY_PURCHASE_FAILED")
 sellEventFrame:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 sellEventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
-        if S._pendingSellScan then
-            C_Timer.After(0.05, function() S:ProcessSellScanQueue() end)
-        end
+        S:PumpSell()
         return
     end
 
@@ -1050,6 +1217,10 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
         S.sell.pendingBindPost = nil
         S.sell.awaitingPost = nil
         S._sellDepositTrusted = nil
+        S.sell.postQueued = nil
+        S.sell.priceCache = nil
+        S._sellPrefetch = nil
+        S._pendingSellScan = nil
         return
     end
 end)

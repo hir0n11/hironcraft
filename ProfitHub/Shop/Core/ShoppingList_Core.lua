@@ -6975,6 +6975,13 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+-- The Shop opens on Buy when there is a list to buy, else on Sell (with
+-- the first item of the bags already chosen).
+function LandingShopTab()
+    local rows = S.session and S.session.active and S.session.rows
+    return (type(rows) == "table" and #rows > 0) and "buy" or "sell"
+end
+
 eventFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
 eventFrame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
@@ -7132,9 +7139,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
                     S:EnsureAuctionTab()
                     UpdateAuctionTabVisibility()
                     -- Shop is the landing page every time the Auction House
-                    -- opens. An empty list is still a useful starting point for
-                    -- search and manual list creation.
-                    if S.SetShopTab then S:SetShopTab("buy") end
+                    -- opens: on Buy when there is a list to buy, else on Sell.
+                    if S.SetShopTab then S:SetShopTab(LandingShopTab()) end
                     S:ShowWindow()
                 else
                     UpdateAuctionTabVisibility()
@@ -7154,7 +7160,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
             if ShouldShowAuctionTab() then
                 S:EnsureAuctionTab()
                 UpdateAuctionTabVisibility()
-                if S.SetShopTab then S:SetShopTab("buy") end
+                if S.SetShopTab then S:SetShopTab(LandingShopTab()) end
                 S:ShowWindow()
             else
                 UpdateAuctionTabVisibility()

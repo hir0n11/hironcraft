@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Shop: landing tab, faster posting (0.4.53)
+
+- At the auction house the Shop opens on Buy when there is a shopping list,
+  and on Sell otherwise, with the first item of the bags already chosen
+  and its prices asked for.
+- Posting from Sell went quickly three times and then stalled: the auction
+  house takes only a few requests at a time, every post and every price
+  search is one, and a key press during the wait was simply lost. Now:
+  - a press is kept and done as soon as the auction house is ready and the
+    item's prices are in (for up to 5 seconds), never at a guessed price -
+    before, a quick press could post at the remembered price before the
+    search came back;
+  - the next item's prices are asked for while the current one is on
+    screen, so after a post they are already there;
+  - prices read in the last minute are not searched again.
+
 ## Analytics refreshes with the exchange (0.4.52)
 
 - The open analytics window showed new figures ten seconds after the chat
