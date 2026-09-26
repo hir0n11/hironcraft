@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A silver coin for tips in between (0.4.40)
+
+- A customer who has only ever tipped between 999 and 4,999 gold gets a
+  silver coin in front of the name, next to the gold (5,000+) and copper
+  (under 999) ones. One small tip makes them copper, one big tip gold.
+  Customers whose tips in between were counted before show silver at once.
+  The silver coin is automatic only and does not affect "Pause stingy".
+
 ## Pause stingy customers; a swallowed greeting comes back as the banner (0.4.39)
 
 - The orders window has a "Pause stingy" checkbox next to Busy Mode. While

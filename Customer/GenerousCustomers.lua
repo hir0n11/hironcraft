@@ -2,10 +2,12 @@ local Scan = select(2, ...)
 
 -- How customers tip. A delivered crafting order with a tip of 5,000 gold or
 -- more marks its customer generous (a gold coin); one under 999 gold marks
--- them stingy (a copper coin). The tip is the one the customer set; the cut
--- taken on delivery does not matter. Generosity wins: one small tip does not
--- make a generous customer stingy, one big tip lifts a stingy one. The
--- crafter can set or clear either mark by hand, and that decision sticks.
+-- them stingy (a copper coin); a customer who has only ever tipped in
+-- between is regular (a silver coin). The tip is the one the customer set;
+-- the cut taken on delivery does not matter. Generosity wins: one small tip
+-- does not make a generous customer stingy, one big tip lifts a stingy one.
+-- A small tip makes a regular customer stingy. The crafter can set or clear
+-- the gold and copper marks by hand, and that decision sticks.
 -- Marks are kept by character name without realm, the way order rows and
 -- crafting orders name the same player differently.
 local M = {}
@@ -16,6 +18,7 @@ M.DefaultStingyGold = 999
 local COPPER_PER_GOLD = 10000
 local ICONS = {
     generous = '|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:0:0|t',
+    regular = '|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:0:0|t',
     stingy = '|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:0:0|t',
 }
 
@@ -52,10 +55,13 @@ local function Mark(entry)
     local manual = entry.manual
     if manual == true then manual = 'generous' end
     if entry.removed and manual == nil then manual = 'none' end
-    if manual == 'generous' or manual == 'stingy' then return manual end
+    if manual == 'generous' or manual == 'stingy' or manual == 'regular' then return manual end
     if manual == 'none' then return nil end
     if entry.mark then return entry.mark end
-    if (tonumber(entry.max) or 0) >= M.ThresholdCopper() then return 'generous' end
+    local max = tonumber(entry.max) or 0
+    if max >= M.ThresholdCopper() then return 'generous' end
+    -- Tips in between counted before the silver coin (0.4.40) left no mark.
+    if (tonumber(entry.count) or 0) > 0 and max >= M.StingyCopper() then return 'regular' end
     return nil
 end
 
@@ -111,9 +117,12 @@ function M.RecordTip(name, tipCopper, orderID)
     entry.name = entry.name or name
     if tipCopper >= M.ThresholdCopper() then
         entry.mark = 'generous'
-    elseif tipCopper < M.StingyCopper() and entry.mark ~= 'generous'
-        and (tonumber(entry.max) or 0) < M.ThresholdCopper() then
-        entry.mark = 'stingy'
+    elseif tipCopper < M.StingyCopper() then
+        if entry.mark ~= 'generous' and (tonumber(entry.max) or 0) < M.ThresholdCopper() then
+            entry.mark = 'stingy'
+        end
+    elseif entry.mark == nil and (tonumber(entry.max) or 0) < M.ThresholdCopper() then
+        entry.mark = 'regular'
     end
     -- Second result: whether the coin in front of the name changed.
     return true, Mark(entry) ~= before
@@ -156,7 +165,8 @@ function M.Describe(name)
     if not entry or (not mark and (tonumber(entry.count) or 0) == 0) then return nil end
     local L = Scan.LOCAL and function(key) return Scan.LOCAL:GetText(key) end or function(key) return key end
     local title = mark == 'generous' and L('Generous customer')
-        or mark == 'stingy' and L('Stingy customer') or L('Customer tips')
+        or mark == 'stingy' and L('Stingy customer')
+        or mark == 'regular' and L('Regular customer') or L('Customer tips')
     local manual = entry.manual == 'generous' or entry.manual == 'stingy' or entry.manual == true
     if (tonumber(entry.count) or 0) > 0 then
         return string.format(L('%s: max tip %s, total %s, orders %d'), title,

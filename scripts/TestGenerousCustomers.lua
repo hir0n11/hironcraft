@@ -1,5 +1,6 @@
 -- How customers tip: 5,000 gold or more on one order marks them generous,
--- under 999 gold stingy; the crafter can set or clear either by hand.
+-- under 999 gold stingy, only tips in between regular; the crafter can set or
+-- clear the gold and copper marks by hand.
 local now = 1000
 function time() return now end
 local Scan = { DB = { settings = {} }, Utils = {} }
@@ -11,9 +12,26 @@ assert(loadfile('Customer/GenerousCustomers.lua'))('HironCraft', Scan)
 local G = Scan.Generous
 local GOLD = 10000
 
--- In between: counted, not marked.
+-- In between: a silver coin.
 local counted, changed = G.RecordTip('Middle-Realm', 4999 * GOLD, 1)
-assert(counted and not changed and G.MarkOf('Middle') == nil, 'a 4,999 gold tip got a mark')
+assert(counted and changed and G.MarkOf('Middle') == 'regular', 'a 4,999 gold tip did not make a regular')
+counted, changed = G.RecordTip('Middle', 2000 * GOLD, 11)
+assert(counted and not changed and G.MarkOf('Middle') == 'regular')
+assert(G.Decorate('Middle', 'Middle'):find('UI-SilverIcon', 1, true), 'no silver coin')
+assert(G.Describe('Middle'):find('Regular customer', 1, true), 'the tooltip does not name a regular')
+-- One small tip: no longer only in between.
+G.RecordTip('Middle', 500 * GOLD, 12)
+assert(G.IsStingy('Middle'), 'a small tip left a regular customer silver')
+-- One big tip: generous, and a later tip in between keeps the gold coin.
+G.RecordTip('Upper', 3000 * GOLD, 13)
+G.RecordTip('Upper', 6000 * GOLD, 14)
+assert(G.IsGenerous('Upper'), 'a big tip left a regular customer silver')
+G.RecordTip('Upper', 3000 * GOLD, 15)
+assert(G.IsGenerous('Upper'), 'a tip in between took the gold coin away')
+-- Tips in between counted by 0.4.39 and earlier left no mark: silver now.
+Scan.DB.settings.generous_customers.older = { max = 3000 * GOLD, count = 2, total = 5000 * GOLD, orders = {} }
+Scan.DB.settings.generous_customers.never = { manual = 'none', max = 3000 * GOLD, count = 1, orders = {} }
+assert(G.MarkOf('Older') == 'regular' and G.MarkOf('Never') == nil, 'older tips in between did not show silver')
 -- 5,000 and more: generous, whatever the realm or the case of the name.
 counted, changed = G.RecordTip('Big-Realm', 5000 * GOLD, 2)
 assert(changed, 'a new mark was not reported, so the list would not redraw')
@@ -24,7 +42,7 @@ G.RecordTip('Small-Realm', 998 * GOLD, 3)
 G.RecordTip('Nothing', 0, 4)
 assert(G.IsStingy('Small') and G.IsStingy('Nothing'), 'a small tip did not mark the customer stingy')
 G.RecordTip('Edge', 999 * GOLD, 5)
-assert(G.MarkOf('Edge') == nil, '999 gold is already stingy')
+assert(G.MarkOf('Edge') == 'regular', '999 gold is already stingy')
 -- Generosity wins: one small tip does not undo it, one big tip lifts a stingy customer.
 G.RecordTip('Big', 100 * GOLD, 6)
 assert(G.IsGenerous('Big'), 'a small tip made a generous customer stingy')
@@ -38,7 +56,7 @@ assert(G.Describe('Big'):find('5 000g', 1, true) and G.Describe('Big'):find('5 1
     'the tooltip does not show the tips')
 assert(G.Decorate('Big', 'Big'):find('UI-GoldIcon', 1, true), 'no gold coin')
 assert(G.Decorate('Nothing', 'Nothing'):find('UI-CopperIcon', 1, true), 'no copper coin')
-assert(G.Decorate('Middle', 'Middle') == 'Middle')
+assert(G.Decorate('Stranger', 'Stranger') == 'Stranger')
 
 -- By hand, and it sticks against later tips.
 G.SetManual('Friendly', 'generous')
@@ -64,9 +82,9 @@ assert(not G.IsHoldingStingy() and not G.IsGreetingHeld('Cheap'), 'the pause is 
 G.SetHoldingStingy(true)
 assert(G.IsHoldingStingy() and Scan.DB.settings.hold_stingy_greetings == true, 'the pause is not kept')
 assert(G.IsGreetingHeld('Cheap-Realm') and not G.IsGreetingHeld('Friendly')
-    and not G.IsGreetingHeld('Middle'), 'the pause held the wrong customers')
+    and not G.IsGreetingHeld('Older'), 'the pause held the wrong customers')
 G.SetHoldingStingy(false)
 assert(not G.IsGreetingHeld('Cheap') and Scan.DB.settings.hold_stingy_greetings == nil,
     'the pause did not switch off')
 
-print('Customer tip tests passed (generous 5,000+, stingy under 999, generosity wins, repeats, by hand, 0.4.32 data, pause).')
+print('Customer tip tests passed (generous 5,000+, stingy under 999, regular in between, generosity wins, repeats, by hand, older data, pause).')
