@@ -228,8 +228,11 @@ function M.Receive(operation, sender, data, senderID)
         if session then session.received = session.received + merged end
         if data.more and Ready(force) then
             Send(M.Operations.Pull, { from = account.analytics_received, force = force or nil }, sender)
-        elseif session then
-            Finish(senderID, session.received)
+        else
+            if session then Finish(senderID, session.received) end
+            -- The open window shows what came, together with the chat line.
+            local window = Scan.AnalyticsWindow
+            if merged > 0 and window and window.DataArrived then window.DataArrived() end
         end
         return merged
     end

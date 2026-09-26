@@ -403,6 +403,14 @@ for _, line in ipairs(said) do
     if line:find('1 new events from other', 1, true) then reported = true end
 end
 assert(reported, 'the result of the exchange was not reported: ' .. table.concat(said, ' | '))
+-- The open analytics window is refreshed as the exchange completes.
+local arrived = 0
+Scan.AnalyticsWindow = { DataArrived = function() arrived = arrived + 1 end }
+as(dbB, function() Log.Request('Late-Realm', { requestToken = 'b10', itemID = 1001, time = now }) end)
+as(dbA, function() Sync.SyncNow() end)
+deliver()
+assert(arrived >= 1, 'the window was not refreshed when the exchange finished')
+Scan.AnalyticsWindow = nil
 DEFAULT_CHAT_FRAME, C_Timer = nil, nil
 print('Analytics exchange report passed.')
 

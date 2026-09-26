@@ -672,6 +672,11 @@ local function ScheduleRebuild(delay)
     end)
 end
 
+-- A linked account's analytics has arrived: count it at once.
+function W.DataArrived()
+    if frame and frame:IsShown() then W.Reload() end
+end
+
 function W.Release()
     loadToken = loadToken + 1
     chunks, report, returns = nil, nil, nil
@@ -949,7 +954,7 @@ local function Create()
     sync:SetText(L('Exchange now'))
     sync:SetScript('OnClick', function()
         if Scan.AnalyticsSync then Scan.AnalyticsSync.SyncNow() end
-        ScheduleRebuild(20)
+        -- The window refreshes as soon as the exchange is done.
     end)
     sync:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_TOP')
@@ -1094,7 +1099,9 @@ local function Create()
     frame:RegisterEvent('UI_SCALE_CHANGED')
     frame:Hide()
 
-    Scan.AnalyticsLog.OnChange(function() ScheduleRebuild(10) end)
+    -- Events trickle in (mentions every few seconds): counted again shortly
+    -- after, not once per event.
+    Scan.AnalyticsLog.OnChange(function() ScheduleRebuild(2) end)
 end
 
 function W.Toggle()

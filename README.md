@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics refreshes with the exchange (0.4.52)
+
+- The open analytics window showed new figures ten seconds after the chat
+  line about the exchange: every new event waited 10 seconds before a
+  recount. A finished exchange now refreshes the window at once, and other
+  events are recounted after 2 seconds.
+
 ## Fitting: the first opening, and a compact name menu (0.4.51)
 
 - The orders window still came up too wide the first time it opened after
