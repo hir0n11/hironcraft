@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Shop: posting as before, one request at a time (0.4.54)
+
+- 0.4.53 made posting slower and lost posts: its queue could send several
+  auction house requests at once (a post, a search and a search ahead of
+  time); the auction house drops the extra ones, a dropped post left its
+  item in the bags but out of the list, and presses waited for dropped
+  searches. Posting is back to 0.4.52: one request at a time, a press posts
+  at the price shown.
+- Kept from 0.4.53: the landing tab and the first item chosen on Sell; a
+  press while the auction house is busy is kept for 3 seconds and done the
+  moment it is ready, alone.
+- When the auction house drops a request anyway, the bags are read again,
+  so an item that was not posted comes back into the list.
+
 ## Shop: landing tab, faster posting (0.4.53)
 
 - At the auction house the Shop opens on Buy when there is a shopping list,
