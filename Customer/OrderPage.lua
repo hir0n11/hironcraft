@@ -15,26 +15,6 @@ local function SetTooltipWithTitle(tooltip, title, text)
     GameTooltip_AddNormalLine(tooltip, text);
 end;
 
-local function GetSortedProfessions()
-    local result = {}
-    for parentProfID, hex in pairs(HironCraftScan.CONST.PROFESSION_COLORS) do
-        local profInfo = C_TradeSkillUI.GetProfessionInfoBySkillLineID(parentProfID);
-        table.insert(result, {
-            key = profInfo.professionName,
-            name = HironCraftScan.Utils.ColorizeText(profInfo.professionName, hex),
-            ppID = parentProfID,
-        });
-    end
-
-    table.sort(result, function(lhs, rhs) return lhs.key < rhs.key; end)
-
-    for _, profession in ipairs(result) do
-        profession.key = nil;
-    end
-
-    return result;
-end
-
 function HironCraftScanCrafterOrderListElementMixin:Init(elementData)
     self.order = elementData.order
     -- self.browseType = elementData.browseType;
@@ -244,21 +224,13 @@ function HironCraftScanCraftingOrderPageMixin:GetDesiredPageWidth()
     return 1105;
 end
 
-local function UpdateAnalyticsEnabled()
-    local enabled = HironCraftScan.DB.analytics.enabled;
-    if enabled then
-        HironCraftScanCraftingOrderPage:EnableAnalytics()
-    else
-        HironCraftScanCraftingOrderPage:DisableAnalytics()
-    end
-end
-
 function HironCraftScanCraftingOrderPageMixin:OnLoad()
     HironCraftScan.Utils.onLoad(function()
         self:ResetSortOrder() -- self.InitButtons()
         self:InitOrderListTable()
         self:SetupOrderListTable()
-        UpdateAnalyticsEnabled();
+        -- Analytics has a window of its own: the order list takes the height.
+        self.BrowseFrame.OrderList:SetHeight(self.BrowseFrame.LeftPanel:GetHeight());
     end);
 end
 
@@ -419,26 +391,6 @@ local function ScrollOrderListToEnd(scrollBox)
             pcall(scrollBox.SetScrollPercentage, scrollBox, 1)
         end
     end)
-end
-
-function HironCraftScanCraftingOrderPageMixin:DisableAnalytics()
-    self.BrowseFrame.AnalyticsTable:Hide();
-    self.BrowseFrame.ResizeButton:Hide();
-
-    self.BrowseFrame.OrderList:SetHeight(self.BrowseFrame.LeftPanel:GetHeight());
-end
-
-function HironCraftScanCraftingOrderPageMixin:EnableAnalytics()
-    self.BrowseFrame.AnalyticsTable:Init();
-    self.BrowseFrame.AnalyticsTable:Show();
-    self.BrowseFrame.ResizeButton:Show();
-
-    self.BrowseFrame.OrderList:SetHeight(HironCraftScan.DB.settings.order_list_height or 250)
-end
-
-function HironCraftScanCraftingOrderPageMixin:UpdateAnalytics()
-    if not self:IsShown() then return end
-    self.BrowseFrame.AnalyticsTable:Refresh();
 end
 
 -- Two linked accounts on one machine often sit on different sides: a Horde
@@ -804,466 +756,19 @@ function HironCraftScan_CrafterToggleMixin:OnLeave()
     GameTooltip:Hide();
 end
 
-local function AddClearAnalytics(rootDescription, itemID)
-    local intervals = {
-        { L("1 minute"),    60 },
-        { L("15 minutes "), 15 * 60 },
-        { L("1 hour"),      60 * 60 },
-        { L("1 day"),       24 * 60 * 60 },
-        { L("1 week "),     7 * 24 * 60 * 60 },
-        { L("30 days"),     30 * 24 * 60 * 60 },
-        { L("180 days"),    180 * 24 * 60 * 60 },
-        { L("1 year"),      365 * 24 * 60 * 60 },
-    };
+-- The analytics window, in place of the table that used to sit under the
+-- order list.
+HironCraftScan_OpenAnalyticsButtonMixin = {}
 
-    local recentData = rootDescription:CreateButton(L("Clear recent data"));
-    recentData:CreateTitle(L("Newer than"))
-    recentData:QueueDivider();
-    local function ClearItem(clearInfo)
-        if HironCraftScan.Analytics:ClearAnalyticsForItem(itemID, clearInfo) then
-            HironCraftScanCraftingOrderPage:UpdateAnalytics()
-        end
-    end
-    for _, interval in ipairs(intervals) do
-        recentData:CreateButton(interval[1], ClearItem, { seconds = interval[2], recent = true });
-    end
-
-    local oldData = rootDescription:CreateButton(L("Clear old data"));
-    oldData:CreateTitle(L("Older than"))
-    oldData:QueueDivider();
-    for i = #intervals, 1, -1 do
-        local interval = intervals[i];
-        oldData:CreateButton(interval[1], ClearItem, { seconds = interval[2], recent = false });
-    end
-end
-
-HironCraftScanAnalyticsTableListElementMixin = CreateFromMixins(TableBuilderRowMixin);
-
-function HironCraftScanAnalyticsTableListElementMixin:OnClick(button)
-    if button == "LeftButton" then
-        HironCraftScan.Utils.ShowTooltipPlot(self, self.item.itemID, self.item.times, true);
-    end
-
-    if button == "RightButton" then
-        MenuUtil.CreateContextMenu(self, function(owner, rootDescription)
-            rootDescription:CreateTitle(owner.item.name);
-
-            local professionAssignment = rootDescription:CreateButton("Assign Profession");
-            local professions = GetSortedProfessions();
-            for _, profession in ipairs(professions) do
-                professionAssignment:CreateRadio(profession.name,
-                    function(ppID) return HironCraftScan.DB.analytics.seen_items[owner.item.itemID].ppID == ppID; end,
-                    function(ppID)
-                        HironCraftScan.DB.analytics.seen_items[owner.item.itemID].ppID = ppID;
-                        HironCraftScanCraftingOrderPage:UpdateAnalytics()
-                    end,
-                    profession.ppID);
-            end
-
-            AddClearAnalytics(rootDescription, owner.item.itemID);
-        end);
-    end
-end
-
-function HironCraftScanAnalyticsTableListElementMixin:OnLineEnter()
-    self.HighlightTexture:Show();
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-    GameTooltip:SetItemByID(self.item.itemID);
-    GameTooltip:Show();
-    HironCraftScan.Utils.ShowTooltipPlot(self, self.item.itemID, self.item.times);
-end
-
-function HironCraftScanAnalyticsTableListElementMixin:OnLineLeave()
-    self.HighlightTexture:Hide();
-    GameTooltip:Hide();
-    HironCraftScan.Utils.HideTooltipPlot();
-end
-
-function HironCraftScanAnalyticsTableListElementMixin:OnHide()
-    HironCraftScan.Utils.ForceHideTooltipPlot()
-end
-
-function HironCraftScanAnalyticsTableListElementMixin:Init(elementData)
-    self.item = elementData.item;
-    self.pageFrame = elementData.pageFrame;
-    self.contextMenu = elementData.contextMenu;
-end
-
-HironCraftScanAnalyticsTableMixin = {}
-
-local analyticsInitialized = false
-function HironCraftScanAnalyticsTableMixin:Init()
-    if not HironCraftScan.DB.analytics.enabled or analyticsInitialized then return; end
-
-    self:ResetSortOrder();
-
-    local pad = 5;
-    local spacing = 1;
-    local view = CreateScrollBoxListLinearView(pad, pad, pad, pad, spacing);
-    view:SetElementInitializer("HironCraftScanAnalyticsTableListElementTemplate", function(button, elementData)
-        button:Init(elementData);
-    end);
-    ScrollUtil.InitScrollBoxListWithScrollBar(self.ScrollBox, self.ScrollBar, view);
-
-    if not self.tableBuilder then
-        self.tableBuilder = CreateTableBuilder(nil, HironCraftScanAnalyticsTableBuilderMixin);
-        local function ElementDataTranslator(elementData)
-            return elementData;
-        end
-        ScrollUtil.RegisterTableBuilder(self.ScrollBox, self.tableBuilder, ElementDataTranslator);
-
-        local function ElementDataProvider(elementData)
-            return elementData;
-        end
-        self.tableBuilder:SetDataProvider(ElementDataProvider);
-    end
-
-    self.tableBuilder:Reset();
-    self.tableBuilder:SetColumnHeaderOverlap(2);
-    self.tableBuilder:SetHeaderContainer(self.HeaderContainer);
-    self.tableBuilder:SetTableMargins(-3, 5);
-    self.tableBuilder:SetTableWidth(777);
-
-    local ATC = HironCraftScanAnalyticsTableConstants;
-
-    self.tableBuilder:AddFillColumn(self, ATC.NoPadding, 1.0, 8, ATC.ItemName.RightCellPadding,
-        HironCraftScan.AnalyticsTableSortOrder.ItemName, "HironCraftScanAnalyticsCellItemNameTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.ProfessionName.Width,
-        ATC.ProfessionName.LeftCellPadding,
-        ATC.ProfessionName.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.ProfessionName,
-        "HironCraftScanAnalyticsTableCellProfessionNameTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.TotalSeen.Width, ATC.TotalSeen.LeftCellPadding,
-        ATC.TotalSeen.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.TotalSeen,
-        "HironCraftScanAnalyticsTableCellTotalSeenTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.TotalSeenFiltered.Width,
-        ATC.TotalSeenFiltered.LeftCellPadding,
-        ATC.TotalSeenFiltered.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.TotalSeenFiltered,
-        "HironCraftScanAnalyticsTableCellTotalSeenFilteredTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.AveragePerDay.Width, ATC.AveragePerDay
-        .LeftCellPadding,
-        ATC.AveragePerDay.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.AveragePerDay,
-        "HironCraftScanAnalyticsTableCellAveragePerDayTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.PeakPerHour.Width, ATC.PeakPerHour.LeftCellPadding,
-        ATC.PeakPerHour.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.PeakPerHour,
-        "HironCraftScanAnalyticsTableCellPeakPerHourTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.MedianPerCustomer.Width,
-        ATC.MedianPerCustomer.LeftCellPadding,
-        ATC.MedianPerCustomer.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.MedianPerCustomer,
-        "HironCraftScanAnalyticsTableCellMedianPerCustomerTemplate");
-
-    self.tableBuilder:AddFixedWidthColumn(self, ATC.NoPadding, ATC.MedianPerCustomerFiltered.Width,
-        ATC.MedianPerCustomerFiltered.LeftCellPadding,
-        ATC.MedianPerCustomerFiltered.RightCellPadding, HironCraftScan.AnalyticsTableSortOrder.MedianPerCustomerFiltered,
-        "HironCraftScanAnalyticsTableCellMedianPerCustomerFilteredTemplate");
-
-    self.tableBuilder:Arrange();
-
-    analyticsInitialized = true
-end
-
-function HironCraftScanAnalyticsTableMixin:SortOrderIsValid(sortOrder)
-    return true;
-end
-
-function HironCraftScanAnalyticsTableMixin:ResetSortOrder()
-    self.primarySort = {
-        order = HironCraftScan.AnalyticsTableSortOrder.TotalSeen,
-        ascending = false
-    };
-
-    self.secondarySort = nil;
-
-    if self.tableBuilder then
-        for frame in self.tableBuilder:EnumerateHeaders() do
-            frame:UpdateArrow();
-        end
-    end
-end
-
-function HironCraftScanAnalyticsTableMixin:GetSortOrder()
-    return self.primarySort.order, self.primarySort.ascending;
-end
-
-function HironCraftScanAnalyticsTableMixin:SetSortOrder(sortOrder)
-    if self.primarySort.order == sortOrder then
-        self.primarySort.ascending = not self.primarySort.ascending;
-    else
-        self.secondarySort = CopyTable(self.primarySort);
-        self.primarySort = {
-            order = sortOrder,
-            ascending = true
-        };
-    end
-
-    if self.tableBuilder then
-        for frame in self.tableBuilder:EnumerateHeaders() do
-            frame:UpdateArrow();
-        end
-    end
-
-    self:Refresh()
-end
-
-function HironCraftScanAnalyticsTableMixin:OnShow()
-    self:Refresh();
-end
-
-local function ApplyAnalyticsSortOrder(sortOrder, lhsItem, rhsItem)
-    if sortOrder == HironCraftScan.AnalyticsTableSortOrder.ItemName then
-        return SortUtil.CompareUtf8i(lhsItem.name, rhsItem.name);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.ProfessionName then
-        return SortUtil.CompareUtf8i(lhsItem.profession, rhsItem.profession);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.TotalSeen then
-        return SortUtil.CompareNumeric(lhsItem.totalSeen, rhsItem.totalSeen);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.TotalSeenFiltered then
-        return SortUtil.CompareNumeric(lhsItem.totalSeenFiltered, rhsItem.totalSeenFiltered);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.AveragePerDay then
-        return SortUtil.CompareNumeric(lhsItem.averagePerDay, rhsItem.averagePerDay);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.PeakPerHour then
-        return SortUtil.CompareNumeric(lhsItem.peakPerHour, rhsItem.peakPerHour);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.MedianPerCustomer then
-        return SortUtil.CompareNumeric(lhsItem.medianPerCustomer, rhsItem.medianPerCustomer);
-    elseif sortOrder == HironCraftScan.AnalyticsTableSortOrder.MedianPerCustomerFiltered then
-        return SortUtil.CompareNumeric(lhsItem.medianPerCustomerFiltered, rhsItem.medianPerCustomerFiltered);
-    end
-    return 0;
-end
-
-local function GetTimeStamp(timeEntry)
-    return HironCraftScan.Analytics.GetTimeStamp(timeEntry);
-end
-
-local function CalculateAveragePerDay(times)
-    local totalTimes = #times;
-    local timeSpan = GetTimeStamp(times[totalTimes]) - GetTimeStamp(times[1]);
-    local numberOfDays = math.max(1, timeSpan / 86400);
-    return totalTimes / numberOfDays;
-end
-
-local function CalculateMedianPerCustomer(times)
-    local indices = {}
-    local n = #times;
-    for i = 1, n do
-        indices[i] = i
-    end
-
-    table.sort(indices, function(lhs, rhs)
-        local lhsValue = type(times[lhs]) == "table" and times[lhs].c or 1;
-        local rhsValue = type(times[rhs]) == "table" and times[rhs].c or 1;
-        return lhsValue < rhsValue;
-    end)
-
-    -- Ignoring full correctness for simplicity, median is half way ignoring odd/even count.
-    local medianPerCustomer = times[indices[math.ceil(n / 2)]]
-
-    -- Count the number of entries that included a repeat count, then get the
-    -- median of those. We're sorted low-high with raw timestamps first. Walk
-    -- until we hit the first entry with a count. We likely have far more single
-    -- requests than repeats, so walk in reverse.
-    local begin = 1;
-    for i = #indices, 1, -1 do
-        if type(times[indices[i]]) ~= "table" then
-            begin = i + 1;
-            break
-        end
-    end
-
-    local filteredTotal = n - begin;
-    local medianPerCustomerFiltered = times[indices[math.ceil(filteredTotal / 2) + begin]]
-
-    return type(medianPerCustomer) == "table" and medianPerCustomer.c or 1,
-        type(medianPerCustomerFiltered) == "table" and medianPerCustomerFiltered.c or 1;
-end
-
-local function CalculatePeakPerHour(times)
-    local peakHour = nil;
-    local peakCount = 0;
-    local j = 1;
-    for i = 1, #times do
-        local windowStart = GetTimeStamp(times[i]);
-        local windowEnd = windowStart + 3600;
-
-        -- Move to the end of the 1 hour window after i.
-        while j <= #times and GetTimeStamp(times[j]) <= windowEnd do
-            j = j + 1;
-        end
-
-        local count = j - i;
-        if count > peakCount then
-            peakCount = count;
-            peakHour = windowStart;
-        end
-    end
-    return peakCount, peakHour;
-end
-
-function CountDuplicates(array)
-    local count = 0
-    for _, value in ipairs(array) do
-        if type(value) == "table" and value.c and value.c > 1 then
-            count = count + 1
-        end
-    end
-    return count
-end
-
-function TableSize(tbl)
-    local count = 0
-    for _, _ in pairs(tbl) do
-        count = count + 1
-    end
-    return count
-end
-
-function HironCraftScanAnalyticsTableMixin:Refresh()
-    if not HironCraftScan.DB.analytics.enabled then return; end
-
-    self.ScrollBox:Show();
-
-    local seenItems = HironCraftScan.DB.analytics.seen_items;
-    if not seenItems or not next(seenItems) then
-        self.ResultsText:SetText(L("No analytics data"));
-        self.ResultsText:Show();
-        return;
-    else
-        self.ResultsText:Hide();
-    end
-
-    local items = {}
-    for itemID, itemInfo in pairs(seenItems) do
-        item = Item:CreateFromItemID(itemID);
-        item:ContinueOnItemLoad(function()
-            local peakPerHour, peakHour = CalculatePeakPerHour(itemInfo.times);
-            local medianPerCustomer, medianPerCustomerFiltered = CalculateMedianPerCustomer(itemInfo.times);
-            table.insert(items, {
-                itemID = itemID,
-                times = itemInfo.times,
-                name = item:GetItemName(),
-                profession = itemInfo.ppID and HironCraftScan.Utils.ColorizedProfessionNameByID(itemInfo.ppID) or "Unknown",
-                totalSeen = #itemInfo.times,
-                totalSeenFiltered = CountDuplicates(itemInfo.times),
-                averagePerDay = CalculateAveragePerDay(itemInfo.times),
-                peakPerHour = peakPerHour,
-                peakHour = peakHour,
-                medianPerCustomer = medianPerCustomer,
-                medianPerCustomerFiltered = medianPerCustomerFiltered,
-            })
-        end)
-    end
-
-    local dataProvider = CreateDataProvider();
-    self.ScrollBox:SetDataProvider(dataProvider);
-    local function OnAllItemsLoaded()
-        if #items ~= TableSize(seenItems) then
-            -- Wait for all item links to be asynchronously loaded.
-            C_Timer.After(0, OnAllItemsLoaded)
-            --return;
-        end
-
-        SortItemsByComparator(items, self, ApplyAnalyticsSortOrder);
-
-        for _, item in ipairs(items) do
-            dataProvider:Insert({
-                item = item,
-                pageFrame = self,
-            });
-        end
-        self.ScrollBox:SetDataProvider(dataProvider);
-    end
-
-    OnAllItemsLoaded();
-end
-
-local function EscapeCSV(str)
-    if str:find('[,"]') then
-        -- Double up any existing quotes
-        str = str:gsub('"', '""')
-        -- Enclose the entire string in double quotes
-        str = '"' .. str .. '"'
-    end
-    return str
-end
-
-HironCraftScan_ResetAnalyticsButtonMixin = {}
-
-function HironCraftScan_ResetAnalyticsButtonMixin:OnLoad()
-    self:SetText(L("Analytics Options"))
+function HironCraftScan_OpenAnalyticsButtonMixin:OnLoad()
+    self:SetText(L("Analytics"))
     self:FitToText();
-
-    HironCraftScan.Utils.onLoad(function()
-        self:SetupMenu(function(owner, rootDescription)
-            do
-                local function IsSelected()
-                    return HironCraftScan.DB.analytics.enabled;
-                end
-
-                local function SetSelected()
-                    HironCraftScan.DB.analytics.enabled = not HironCraftScan.DB.analytics.enabled;
-                    UpdateAnalyticsEnabled();
-                end
-
-                rootDescription:CreateCheckbox(L("Gather Analytics"), IsSelected, SetSelected);
-            end
-            rootDescription:CreateTitle(L("Reset Data"));
-            AddClearAnalytics(rootDescription);
-            rootDescription:QueueDivider();
-            rootDescription:QueueTitle(L("Export"));
-            rootDescription:CreateButton(L("Export CSV"), function()
-                local seenItems = HironCraftScan.DB.analytics.seen_items;
-                if not seenItems or not next(seenItems) then return; end
-
-                local csv = "itemID,name,time,count,wowhead" .. "\n";
-                for itemID, entry in pairs(seenItems) do
-                    local item = Item:CreateFromItemID(itemID);
-                    local name = EscapeCSV(item:GetItemName());
-                    for _, time in ipairs(entry.times) do
-                        local t = type(time) == "table" and time.t or time;
-                        local c = type(time) == "table" and time.c or 1;
-                        csv = csv ..
-                            string.format("%d,%s,%d,%d,https://www.wowhead.com/item=%d/", itemID, name, t,
-                                c, itemID) ..
-                            "\n";
-                    end
-                end
-                HironCraftScan.Utils.DumpCopyableText(csv);
-            end)
-        end);
-    end)
 end
 
-HironCraftScan_ResizeOrderListButtonMixin = {}
-
-function HironCraftScan_ResizeOrderListButtonMixin:OnLoad()
-    self:EnableMouse(true)
-    self:RegisterForDrag("LeftButton")
-end
-
-function HironCraftScan_ResizeOrderListButtonMixin:OnMouseDown()
-    self.isDragging = true
-
-    self.startY = select(2, GetCursorPosition())
-    self.startHeight = self:GetParent().OrderList:GetHeight()
-    self:GetParent().OrderList:SetScript("OnUpdate", function()
-        if self.isDragging then
-            local currentY = select(2, GetCursorPosition())
-            local offsetY = self.startY - currentY;
-            local newHeight = math.min(450, math.max(self.startHeight + offsetY, 100))
-            self:GetParent().OrderList:SetHeight(newHeight)
-            HironCraftScan.DB.settings.order_list_height = newHeight;
-        end
-    end)
-end
-
-function HironCraftScan_ResizeOrderListButtonMixin:OnMouseUp()
-    self.isDragging = false
-    self:GetParent().OrderList:SetScript("OnUpdate", nil);
-    ResetCursor()
+function HironCraftScan_OpenAnalyticsButtonMixin:OnClick()
+    if HironCraftScan.AnalyticsWindow then
+        HironCraftScan.AnalyticsWindow.Toggle()
+    end
 end
 
 function HironCraftScan:GetSortedCrafters()
@@ -1863,18 +1368,12 @@ function HironCraftScan_LinkedAccountListElementMixin:OnClick()
         if hasFull or hasAnalytics then
             rootDescription:QueueDivider();
             do
+                -- Normally analytics is exchanged by itself in a quiet period.
                 local function OnClick()
-                    HironCraftScanComm:ShareAnalytics(linkedAccountID);
+                    if HironCraftScan.AnalyticsSync then HironCraftScan.AnalyticsSync.SyncNow() end
                 end
 
-                rootDescription:CreateButton(L("Sync Analytics"), OnClick, nil)
-            end
-            do
-                local function OnClick()
-                    HironCraftScanComm:ShareAnalytics(linkedAccountID, true);
-                end
-
-                rootDescription:CreateButton(L("Sync Recent Analytics"), OnClick, nil)
+                rootDescription:CreateButton(L("Exchange analytics now"), OnClick, nil)
             end
         end
         rootDescription:QueueDivider();

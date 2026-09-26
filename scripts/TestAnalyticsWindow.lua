@@ -1,0 +1,192 @@
+-- The analytics window, built on a permissive stand-in for the frame API:
+-- creation, loading, the three tabs, filters, sorting and CSV export run
+-- without errors and show what the report counted.
+local now = os.time({ year = 2026, month = 9, day = 20, hour = 12 })
+function time(t) if t then return os.time(t) end return now end
+date = os.date
+function GetTime() return 1000 end
+function InCombatLockdown() return false end
+function UnitFactionGroup() return 'Horde' end
+strmatch = string.match
+assert(loadfile('ProfitHub/Core/Libs/LibStub/LibStub.lua'))()
+assert(loadfile('Libs/LibSerialize.lua'))()
+assert(loadfile('Libs/LibDeflate.lua'))()
+
+local initializers = {}
+local texts = {}
+local function Mock(kind)
+    local object = { kind = kind, scripts = {}, shown = true, text = nil, width = 800, height = 300 }
+    local methods = {}
+    function methods:SetScript(name, fn) self.scripts[name] = fn end
+    function methods:GetScript(name) return self.scripts[name] end
+    function methods:HookScript(name, fn) self.scripts[name] = fn end
+    function methods:Show() local was = self.shown; self.shown = true; if not was and self.scripts.OnShow then self.scripts.OnShow(self) end end
+    function methods:Hide() local was = self.shown; self.shown = false; if was and self.scripts.OnHide then self.scripts.OnHide(self) end end
+    function methods:SetShown(on) if on then self:Show() else self:Hide() end end
+    function methods:IsShown() return self.shown end
+    function methods:IsVisible() return self.shown end
+    function methods:GetWidth() return self.width end
+    function methods:GetHeight() return self.height end
+    function methods:SetWidth(w) self.width = w end
+    function methods:SetHeight(h) self.height = h end
+    function methods:SetSize(w, h) self.width, self.height = w, h end
+    function methods:SetText(text) self.text = text; texts[#texts + 1] = text end
+    function methods:GetText() return self.text end
+    function methods:GetStringWidth() return 50 end
+    function methods:CreateFontString() return Mock('FontString') end
+    function methods:CreateTexture() return Mock('Texture') end
+    function methods:GetHighlightTexture() return Mock('Texture') end
+    function methods:GetChecked() return self.checked end
+    function methods:SetChecked(on) self.checked = on end
+    function methods:SetupMenu(fn) self.menu = fn end
+    function methods:SetDataProvider(provider)
+        self.provider = provider
+        local init = initializers[self]
+        for _, data in ipairs(provider.list) do
+            local row = Mock('Row')
+            row.Stripe = Mock('Texture')
+            init(row, data)
+        end
+    end
+    function methods:GetID() return self.id end
+    function methods:SetID(id) self.id = id end
+    -- WoW methods are capitalised; any other missing key is a plain field.
+    return setmetatable(object, { __index = function(_, key)
+        if methods[key] then return methods[key] end
+        if type(key) == 'string' and key:match('^%u') then return function() end end
+        return nil
+    end })
+end
+
+UIParent = Mock('Frame')
+UISpecialFrames = {}
+function CreateFrame(kind, name, parent, template)
+    local frame = Mock(kind)
+    frame.shown = kind ~= 'Frame' or name == nil
+    if template == 'ButtonFrameTemplate' then frame.Inset = Mock('Frame'); frame.shown = true end
+    if name then _G[name] = frame end
+    return frame
+end
+function ButtonFrameTemplate_HidePortrait() end
+function ButtonFrameTemplate_HideButtonBar() end
+function PanelTemplates_SetNumTabs() end
+function PanelTemplates_SetTab() end
+function PanelTemplates_TabResize() end
+function PlaySound() end
+SOUNDKIT = {}
+GameTooltip = Mock('Tooltip')
+function GameTooltip_SetTitle() end
+function GameTooltip_AddNormalLine() end
+function BreakUpLargeNumbers(value) return tostring(value) end
+ITEM_QUALITY_COLORS = { [4] = { hex = '|cffa335ee' } }
+C_Item = {
+    GetItemNameByID = function(id) return 'Item ' .. id end,
+    RequestLoadItemDataByID = function() end,
+    GetItemIconByID = function() return 134400 end,
+    GetItemQualityByID = function() return 4 end,
+}
+C_Spell = { GetSpellName = function(id) return 'Recipe ' .. id end }
+C_TradeSkillUI = { GetProfessionInfoBySkillLineID = function(id) return { professionName = 'Prof ' .. id } end }
+C_Timer = { After = function(_, fn) end }
+ScrollBoxConstants = { RetainScrollPosition = true }
+function CreateDataProvider(list) return { list = list } end
+function CreateScrollBoxListLinearView()
+    local view = {}
+    function view:SetElementExtent() end
+    function view:SetElementInitializer(template, fn) self.template, self.init = template, fn end
+    return view
+end
+ScrollUtil = { InitScrollBoxListWithScrollBar = function(scrollBox, _, view) initializers[scrollBox] = view.init end }
+
+local dumped
+local Scan = {
+    DB = { analytics = {}, settings = { my_uuid = 'me' }, realm = { linked_accounts = {} }, characters = { ['Tailor-Realm'] = {} } },
+    Utils = {
+        Contains = function() return false end,
+        ColorizeText = function(text) return text end,
+        DumpCopyableText = function(text) dumped = text end,
+        saved = function(parent, key, default)
+            if parent[key] == nil then parent[key] = default end
+            return parent[key]
+        end,
+    },
+    CONST = { PROFESSION_COLORS = { [197] = 'ffffff' } },
+    LOCAL = { GetText = function(_, key) return key end },
+    NameAndRealmToName = function(name) return (name:gsub('%-.*', '')) end,
+}
+local function load(path) assert(loadfile(path))('HironCraft', Scan) end
+load('Customer/GenerousCustomers.lua')
+load('Customer/AnalyticsLog.lua')
+load('Customer/AnalyticsReport.lua')
+load('Customer/AnalyticsSync.lua')
+load('Customer/AnalyticsWindow.lua')
+local Log = Scan.AnalyticsLog
+Log.synchronous = true
+
+Log.Request('Buyer-Realm', { requestToken = 't1', itemID = 1001, parentProfID = 197, crafterFullName = 'Tailor-Realm', time = now - 60 })
+Log.Greeting('Buyer-Realm', { requestToken = 't1' })
+Log.Outcome({ orderID = 1, status = 'fulfilled', customerName = 'Buyer', itemID = 1001,
+    parentProfessionID = 197, tipAmount = 6000 * 10000, updatedAt = now - 30 })
+Log.Link('t1', 1, 'fulfilled')
+Log.Request('Slot-Realm', { requestToken = 't2', parentProfID = 197, time = now - 50,
+    equipmentRequest = { key = 'INVTYPE_WRIST', label = 'Wrist' } })
+Log.Mention('Chatty-Realm', 4004)
+Scan.Generous.RecordTip('Buyer', 6000 * 10000, 1)
+
+-- Opening it loads, counts and fills every tab.
+Scan.AnalyticsWindow.Toggle()
+local frame = _G.HironCraftAnalyticsFrame
+assert(frame and Scan.AnalyticsWindow.IsShown(), 'the window did not open')
+local items = frame.Items.rows
+assert(#items == 3, 'item rows: ' .. #items)
+local summary = frame.Summary:GetText()
+assert(summary:find('Greetings', 1, true) or summary:find('%s', 1, true) == nil, 'no summary')
+local found = false
+for _, text in ipairs(texts) do
+    if type(text) == 'string' and text:find('Item 1001', 1, true) then found = true end
+end
+assert(found, 'the crafted item was not drawn in the table')
+assert(#frame.Customers.rows == 2, 'customer rows: ' .. #frame.Customers.rows)
+
+-- Filters, tabs and sorting redraw without errors.
+local view = Scan.DB.settings.analytics_view
+view.side = 'A'
+Scan.AnalyticsWindow.Rebuild()
+assert(#frame.Items.rows == 0, 'the Alliance filter kept Horde conversations')
+view.side = 'H'
+Scan.AnalyticsWindow.Rebuild()
+assert(#frame.Items.rows == 3, 'the Horde filter lost its rows')
+view.side = nil
+view.tier = 'generous'
+Scan.AnalyticsWindow.Rebuild()
+assert(#frame.Customers.rows == 1 and frame.Customers.rows[1].key == 'buyer', 'the tier filter is off')
+view.tier = nil
+Scan.AnalyticsWindow.Rebuild()
+for _, tab in ipairs(frame.Tabs) do tab.scripts.OnClick(tab) end
+for _, header in ipairs(frame.Items.headers) do header.scripts.OnClick(header) end
+for _, header in ipairs(frame.Customers.headers) do header.scripts.OnClick(header) end
+
+-- Own dates typed in the boxes.
+frame.FromBox:SetText('19.09.2026')
+frame.FromBox.scripts.OnEnterPressed(frame.FromBox)
+assert(view.preset == 'custom' and os.date('%d.%m', view.from) == '19.09', 'a typed date was not used')
+frame.ToBox:SetText('nonsense')
+frame.ToBox.scripts.OnEnterPressed(frame.ToBox)
+assert(view.preset == 'custom', 'a wrong date broke the period')
+
+-- CSV of each tab.
+view.preset = 'all'
+Scan.AnalyticsWindow.Reload()
+for tab, header in ipairs({ 'item,item_id', 'customer,tier', 'period,requests' }) do
+    frame.Tabs[tab].scripts.OnClick(frame.Tabs[tab])
+    dumped = nil
+    frame.ExportButton.scripts.OnClick(frame.ExportButton)
+    assert(dumped and dumped:sub(1, #header) == header and dumped:find('\n', 1, true),
+        'CSV of tab ' .. tab .. ' is off')
+end
+assert(dumped:find('00:00,', 1, true), 'the time CSV has no hours')
+
+-- Closing lets the data go.
+Scan.AnalyticsWindow.Toggle()
+assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')
+print('Analytics window passed (open, tabs, filters, sorting, dates, CSV, close).')

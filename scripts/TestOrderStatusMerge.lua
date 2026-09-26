@@ -668,3 +668,40 @@ CraftScan.OrderFulfillment:ApplyRemoteCompletion({
 })
 assert(not CraftScan.Generous.IsGenerous("Decliner"), 'a declined order marked its customer')
 print('Generous tip notices passed.')
+
+-- Analytics: every new result is recorded once (received ones marked as
+-- such), and a request row that gets its order says which order it was.
+local recorded = {}
+CraftScan.AnalyticsLog = {
+    NoteActivity = function() end,
+    Outcome = function(notice, source) recorded[#recorded + 1] = { k = 'd', o = notice.orderID, source = source } end,
+    Link = function(token, orderID, status) recorded[#recorded + 1] = { k = 'l', id = token, o = orderID, st = status } end,
+}
+now = now + 10
+local notice = {
+    orderID = 9995, customerName = "Counted-Realm", spellID = 1, itemID = 2,
+    crafterFullName = "RemoteCrafter-Realm", origin = "remote-account",
+    updatedAt = now, status = "fulfilled", tipAmount = 100,
+}
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice)
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(notice)
+assert(#recorded == 1 and recorded[1].o == 9995 and recorded[1].source == 'notice',
+    'a received result was not recorded once as received')
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({
+    orderID = 9996, customerName = "Own-Realm", spellID = 1, itemID = 2,
+    crafterFullName = "Crafter-Realm", origin = "test-account",
+    updatedAt = now, status = "fulfilled",
+})
+assert(#recorded == 2 and recorded[2].source == nil, 'a result made here was recorded as received')
+CraftScan.DB.customers["Linked-Realm"] = {
+    responses = { [4242] = { responseID = 4242, requestToken = "linked-token", time = now - 5, recipeID = 4242 } },
+}
+local linkedRow = { customerName = "Linked-Realm", responseID = 4242 }
+CraftScan.DB.listed_orders[CraftScan.OrderToOrderID(linkedRow)] = linkedRow
+CraftScan.OrderFulfillment:SetStatus(linkedRow, "fulfilled", { craftingOrderID = 9997, force = true })
+assert(recorded[3] and recorded[3].k == 'l' and recorded[3].id == "linked-token" and recorded[3].o == 9997,
+    'the row did not say which order answered it')
+CraftScan.OrderFulfillment:SetStatus(linkedRow, "fulfilled", { craftingOrderID = 9997, force = true })
+assert(#recorded == 3, 'the same answer was recorded twice')
+CraftScan.AnalyticsLog = nil
+print('Analytics order results passed.')

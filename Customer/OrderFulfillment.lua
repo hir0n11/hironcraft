@@ -1311,6 +1311,15 @@ function OrderFulfillment:SetStatus(order, status, options)
     RememberCraftingOrder(entry)
     NotifyUpdated(entry)
 
+    -- Analytics: which crafting order answered this request row.
+    if HironCraftScan.AnalyticsLog then
+        HironCraftScan.AnalyticsLog.NoteActivity()
+        if (status == self.Status.Fulfilled or status == self.Status.Rejected) and entry.requestToken
+            and not (current and current.status == status and current.craftingOrderID == craftingOrderID) then
+            HironCraftScan.AnalyticsLog.Link(entry.requestToken, craftingOrderID, status, options.automatic == false)
+        end
+    end
+
     if HironCraftScanComm and HironCraftScanComm.ShareOrderStatus then
         HironCraftScanComm:ShareOrderStatus(entry)
     end
@@ -1467,6 +1476,12 @@ function OrderFulfillment:ApplyRemoteCompletion(noticeData)
 
     if current and current.status==notice.status then
         notice.reagentAudit=MergeReagentAudit(notice.reagentAudit,current.reagentAudit)
+    end
+    -- Analytics: a result made here is ours to share with linked accounts; one
+    -- received from them is only counted here.
+    if not current and HironCraftScan.AnalyticsLog then
+        local own = notice.origin == nil or notice.origin == HironCraftScan.DB.settings.my_uuid
+        HironCraftScan.AnalyticsLog.Outcome(notice, not own and 'notice' or nil)
     end
     notices[key] = notice
     InvalidateNoticeIndex()

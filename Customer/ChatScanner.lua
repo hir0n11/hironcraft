@@ -553,6 +553,8 @@ end
 
 HironCraftScan.Analytics = {}
 
+-- Entries of the old chat counter were a time or { t = time, ... }; the
+-- tooltip plot still reads times that way.
 function HironCraftScan.Analytics.GetTimeStamp(timeEntry)
     if type(timeEntry) == 'table' then
         return timeEntry.t
@@ -560,221 +562,39 @@ function HironCraftScan.Analytics.GetTimeStamp(timeEntry)
     return timeEntry
 end
 
-local function ClearAnalyticsForItem_(itemID, range)
-    local timeout = range.seconds
-    local recent = range.recent
-    local items = HironCraftScan.DB.analytics.seen_items
-    local itemInfo = items[itemID]
-    local now = time()
-    for i, timeInfo in ipairs(itemInfo.times) do
-        if HironCraftScan.Analytics.GetTimeStamp(timeInfo) + timeout > now then
-            if recent then
-                local count = #itemInfo.times - i + 1
-                if count == 0 then
-                    -- Don't need to refresh the display
-                    return false
-                end
-
-                RemoveBack(itemInfo.times, count)
-            else
-                local count = i - 1
-                if count == 0 then
-                    -- Don't need to refresh the display
-                    return false
-                end
-
-                itemInfo.times = RemoveFront(itemInfo.times, i - 1)
-            end
-            if #itemInfo.times == 0 then
-                items[itemID] = nil
-            end
-            return true
-        end
-    end
-    if not recent then
-        items[itemID] = nil
-        return true
-    end
-end
-
--- Remove entries older than timeout for the given itemID. If itemID is nil,
--- apply to all itemIDs.
-function HironCraftScan.Analytics:ClearAnalyticsForItem(itemID, range)
-    local timeout = range.seconds
-
-    local items = HironCraftScan.DB.analytics.seen_items
-    if timeout == nil then
-        if itemID == nil then
-            items = {}
-        else
-            items[itemID] = nil
-        end
-        return true
-    end
-
-    if itemID then
-        return ClearAnalyticsForItem_(itemID, range)
-    end
-
-    local result = false
-    for itemID, itemInfo in pairs(items) do
-        if ClearAnalyticsForItem_(itemID, range) then
-            result = true
-        end
-    end
-    return result
-end
-
--- If the same customer requests the same item repeatedly, that indicates a
--- supply gap in the market, so we try to track and highlight it. Duplicate
--- requests within 15 seconds are ignored completely - they're just impatient.
--- For an hour after their first request, if they keep requesting the same
--- thing, we count them.
-local ANALYTICS_IGNORE_DUPLICATE_INTERVAL = 15
-local ANALYTICS_RESET_DUPLICATE_INTERVAL = 3600
-
-local function CleanRecentAnalytics()
-    if not HironCraftScan.DB.analytics.seen_items then
-        return
-    end
-
-    local timeout = ANALYTICS_RESET_DUPLICATE_INTERVAL
-    local now = time()
-    for _, itemInfo in pairs(HironCraftScan.DB.analytics.seen_items) do
-        for i, timeInfo in ipairs(itemInfo.times) do
-            if type(timeInfo) == 'table' and timeInfo.t + timeout < now then
-                if timeInfo.c ~= nil then
-                    -- Save the count, but erase the customer to save some space.
-                    timeInfo['customer'] = nil
-                else
-                    -- No duplicates from this customer, so replace the dictionary with the raw time.
-                    itemInfo.times[i] = timeInfo.t
-                end
-            end
-        end
-    end
-
-    -- On login and every hour after that, clean up any recent records to save space.
-    C_Timer.After(timeout, CleanRecentAnalytics)
-end
-
-local function AddTimeToAnalytics(customer, item)
-    -- For recent requests, we track the customer, allowing us to detect
-    -- duplicate requests for the same item from the same person. This helps us
-    -- find items that are difficult to get crafted, which might indicate a good
-    -- item to invest in learning to craft.
-    local times = item.times
-
-    --  Track repeat requests for up to an hour. This aligns with our 'peak per
-    --  hour', so duplicate requests don't artificially inflate the peak requests.
-    local timeout = ANALYTICS_RESET_DUPLICATE_INTERVAL
-    local now = time()
-    for i = #times, 1, -1 do
-        local entry = times[i]
-        if type(entry) == 'table' then
-            if entry.t + ANALYTICS_IGNORE_DUPLICATE_INTERVAL > now then
-                -- Ignore it. Same customer spamming a request before they had a chance to get any replies.
-                HironCraftScan.Utils.printTable('Ignoring very recent request', true)
-                return
-            end
-
-            if entry.t + timeout < now then
-                HironCraftScan.Utils.printTable('Starting a new bucket', true)
-                break
-            end
-
-            if entry.customer == customer then
-                entry.c = (entry.c or 1) + 1
-                HironCraftScan.Utils.printTable('Incrementing bucket', entry)
-                HironCraftScanCraftingOrderPage:UpdateAnalytics()
-                return
-            end
-        else
-            -- After an hour, a garbage collector converts entries from
-            -- dictionaries to values if they don't contain a duplicate request
-            -- count, so hitting a non-dictionary value means we are done
-            -- looking for recent orders.
-            break
-        end
-    end
-    table.insert(item.times, { t = time(), customer = customer })
-
-    HironCraftScanCraftingOrderPage:UpdateAnalytics()
-end
-
-local function AddItemToAnalytics(customer, itemID, parentProfID)
-    if not HironCraftScan.DB.analytics.enabled then
-        return
-    end
-
-    local seen = saved(HironCraftScan.DB.analytics, 'seen_items', {})
-    local item = saved(seen, itemID, { times = {}, ppID = parentProfID })
-    AddTimeToAnalytics(customer, item)
-    if not item.ppID then
-        item.ppID = parentProfID
-    end
-end
-
+-- Every item link with a quality seen in chat goes to the analytics journal,
+-- items this account does not craft included: they show what is in demand.
 local function AddMessageToAnalytics(customer, message)
-    if not HironCraftScan.DB.analytics.enabled then
+    local log = HironCraftScan.AnalyticsLog
+    if not log or not log.IsEnabled() then
         return
     end
-
-    local itemIDs = GetItemIDsFromQualityLinks(message)
-    if not itemIDs then
-        return
-    end
-
-    local seen = saved(HironCraftScan.DB.analytics, 'seen_items', {})
-    for _, itemID in ipairs(itemIDs) do
+    for _, itemID in ipairs(GetItemIDsFromQualityLinks(message) or {}) do
         if type(itemID) == 'table' then
-            AddItemToAnalytics(customer, itemID.itemID, itemID.ppID)
+            log.Mention(customer, itemID.itemID, itemID.ppID)
         else
-            local item = saved(seen, itemID, { times = {} })
-            AddTimeToAnalytics(customer, item)
+            log.Mention(customer, itemID)
         end
     end
 end
 
--- Because we can't reverse look up from item link to crafting profession, we do
--- the translation when a profession is opened scan any saved items and see if
--- they are related to this profession.
-local function UpdateAnalyticsProfIDs(parentProfID)
-    if not HironCraftScan.DB.analytics.enabled then
+-- A link does not say which profession makes the item. When a profession
+-- window opens, the items it makes that were seen in chat learn it.
+local function UpdateAnalyticsProfIDs()
+    local log = HironCraftScan.AnalyticsLog
+    if not log or not log.IsEnabled() or not next(log.UnknownItems()) then
         return
     end
-
-    if not HironCraftScan.DB.analytics.seen_items then
-        return
-    end
-
     local ppInfo = C_TradeSkillUI.GetBaseProfessionInfo()
-
-    local itemIDs = nil
-    for itemID, itemInfo in pairs(HironCraftScan.DB.analytics.seen_items) do
-        if not itemInfo.ppID then
-            if not itemIDs then
-                itemIDs = {}
-                -- On the first analytics item without profession info, grab the
-                -- full list, convert it to all itemIDs created by the
-                -- profession, then check if we have a match.
-                local recipes = C_TradeSkillUI.GetAllRecipeIDs()
-                for _, id in pairs(recipes) do
-                    local recipeInfo = C_TradeSkillUI.GetRecipeInfo(id)
-                    local recipeItemIDs = HironCraftScan.Utils.GetOutputItems(recipeInfo)
-                    if recipeItemIDs then
-                        for _, itemID in ipairs(recipeItemIDs) do
-                            itemIDs[itemID] = true
-                        end
-                    end
-                end
-            end
-
-            if itemIDs[itemID] then
-                itemInfo.ppID = ppInfo.professionID
-            end
+    local made = {}
+    for _, id in pairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+        local recipeInfo = C_TradeSkillUI.GetRecipeInfo(id)
+        local recipeItemIDs = recipeInfo and HironCraftScan.Utils.GetOutputItems(recipeInfo)
+        for _, itemID in ipairs(recipeItemIDs or {}) do
+            made[itemID] = true
         end
     end
+    log.LearnProfessionItems(ppInfo and ppInfo.professionID, made)
 end
 
 local function MonitorsEquipmentRequest(crafterInfo,request)
@@ -1946,6 +1766,10 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
 
     local order = { customerName = customer, responseID = GENERAL_REQUEST_ID }
     if fresh then
+        -- A request shared by a linked account is counted there.
+        if not HironCraftScanComm.applying_remote_state and HironCraftScan.AnalyticsLog then
+            HironCraftScan.AnalyticsLog.Request(customer, response)
+        end
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
         local visualAlert, soundAlert = GenericAlertPreferences()
         if (HironCraftScan.IsHiddenOtherSideOrder and HironCraftScan.IsHiddenOtherSideOrder(order))
@@ -2003,8 +1827,11 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
     local needsResultCallbackOnly = overrides and overrides.resultCallback
 
+    -- Rows this request replaces, for analytics: one conversation.
+    local replacedTokens = {}
     if not needsResultCallbackOnly then
-        RemoveGeneralRequest(customer, customerInfo)
+        local general = RemoveGeneralRequest(customer, customerInfo)
+        if general and general.requestToken then replacedTokens[#replacedTokens + 1] = general.requestToken end
     end
 
     -- Replace only a compatible pending slot/type, never another requested
@@ -2064,6 +1891,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
             end
         end
         for _, old in ipairs(remove) do
+            if old.response.requestToken then replacedTokens[#replacedTokens + 1] = old.response.requestToken end
             HironCraftScan.DB.listed_orders[old.orderID] = nil
             for id, value in pairs(customerInfo.responses) do
                 if value == old.response then customerInfo.responses[id] = nil end
@@ -2278,6 +2106,14 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
             responseID = responseID,
         }
         HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] = order
+
+        -- A request shared by a linked account is counted there.
+        if not HironCraftScanComm.applying_remote_state and HironCraftScan.AnalyticsLog then
+            HironCraftScan.AnalyticsLog.Request(customer, response)
+            for _, token in ipairs(replacedTokens) do
+                HironCraftScan.AnalyticsLog.Replaced(token, response.requestToken)
+            end
+        end
 
         local ppConfig = ParentProfessionConfig(crafterInfo)
 
@@ -3043,7 +2879,6 @@ HironCraftScan.Utils.onLoad(function()
     hooksecurefunc(_G.ChatFrame1, 'AddMessage', CaptureChatMessage)
     UpdateScannerEventRegistry()
 
-    CleanRecentAnalytics()
     -- A wait started on the previous character goes on here.
     if next(WaitingForClass()) then ScheduleClassWait() end
 end)

@@ -1,0 +1,356 @@
+local Scan = select(2, ...)
+
+-- Counts for the analytics window, built from the journal's events (see
+-- AnalyticsLog.lua) only while the window is open.
+--
+-- A conversation is one request row, followed through the rows that replaced
+-- it ("LF tailor" -> "[Cloak]"). It is greeted when any of its rows was, and
+-- crafted when its last row got a delivered order. A request for a profession
+-- or a slot is counted under the item that was finally crafted.
+local M = {}
+Scan.AnalyticsReport = M
+
+local MENTION_SAME_SECONDS = 60
+local DAY = 24 * 60 * 60
+
+local function BaseKey(name)
+    if type(name) ~= 'string' or name == '' then return nil end
+    return (name:match('^([^-]+)') or name):lower()
+end
+M.BaseKey = BaseKey
+
+local function SameCrafter(filter, name)
+    return BaseKey(filter) == BaseKey(name)
+end
+
+-- Which row of the item table an event belongs to.
+local function Subject(event)
+    if event.i then return 'item:' .. event.i, { kind = 'item', itemID = event.i, ppID = event.p } end
+    if event.r then return 'recipe:' .. event.r, { kind = 'recipe', recipeID = event.r, ppID = event.p } end
+    if event.s then
+        return 'slot:' .. tostring(event.p) .. ':' .. event.s,
+            { kind = 'slot', slot = event.s, label = event.lb, ppID = event.p }
+    end
+    if event.g then return 'generic', { kind = 'generic' } end
+    if event.p then return 'prof:' .. event.p, { kind = 'profession', ppID = event.p } end
+    return 'unknown', { kind = 'unknown' }
+end
+
+local function NewRow(key, info)
+    local row = {
+        key = key, mentions = 0, requests = 0, greetings = 0, crafted = 0,
+        orders = 0, declined = 0, tips = 0, tipped = 0,
+    }
+    for field, value in pairs(info) do row[field] = value end
+    return row
+end
+
+local function NewCustomer(key, name)
+    return {
+        key = key, name = name, requests = 0, greetings = 0, crafted = 0,
+        orders = 0, declined = 0, tips = 0, tipped = 0, maxTip = 0, lastOrder = nil,
+    }
+end
+
+local function Hours()
+    local list = {}
+    for hour = 0, 23 do list[hour] = 0 end
+    return list
+end
+
+local function Weekdays()
+    return { 0, 0, 0, 0, 0, 0, 0 }
+end
+
+-- 1 = Monday ... 7 = Sunday.
+local function Weekday(t)
+    local wday = tonumber(date('%w', t)) or 0
+    return wday == 0 and 7 or wday
+end
+
+local function Hour(t)
+    return tonumber(date('%H', t)) or 0
+end
+
+-- filters: from, to, ppID, crafter, tier ('generous' / 'regular' /
+-- 'stingy' / 'none'), side ('H' / 'A').
+-- context.markOf(customer) gives the customer's coin, context.itemProf(itemID)
+-- the profession that makes an item.
+function M.Build(chunks, filters, context)
+    filters = filters or {}
+    context = context or {}
+    local from, to = filters.from or 0, filters.to or math.huge
+    local markOf = context.markOf or function() return nil end
+    local itemProf = context.itemProf or function() return nil end
+
+    local requests, replacedBy, greeted, links, orders, tokenOrders = {}, {}, {}, {}, {}, {}
+    local mentions = {}
+    for _, events in ipairs(chunks or {}) do
+        for _, event in ipairs(events) do
+            local kind = event.k
+            if kind == 'r' and event.id then
+                local seen = requests[event.id]
+                if not seen or event.t < seen.t then requests[event.id] = event end
+            elseif kind == 'x' and event.id and event.to then
+                replacedBy[event.id] = event.to
+            elseif kind == 'g' and event.id then
+                local seen = greeted[event.id]
+                if not seen or event.t < seen.t then greeted[event.id] = event end
+            elseif kind == 'l' and event.id then
+                local seen = links[event.id]
+                if not seen or event.t > seen.t then links[event.id] = event end
+            elseif kind == 'd' and event.o ~= nil then
+                local key = tostring(event.o) .. ':' .. tostring(event.st)
+                if not orders[key] then orders[key] = event end
+                if event.id then tokenOrders[event.id] = key end
+            elseif kind == 'm' and event.i then
+                mentions[#mentions + 1] = event
+            end
+        end
+    end
+
+    local function OrderOf(orderID)
+        if orderID == nil then return nil end
+        return orders[tostring(orderID) .. ':f'] or orders[tostring(orderID) .. ':r']
+    end
+
+    -- The last row of a conversation.
+    local function Final(token)
+        local seen = 0
+        while replacedBy[token] and seen < 20 do
+            token = replacedBy[token]
+            seen = seen + 1
+        end
+        return token
+    end
+
+    local members = {}
+    for token in pairs(requests) do
+        local final = Final(token)
+        members[final] = members[final] or {}
+        table.insert(members[final], token)
+    end
+    for token in pairs(greeted) do
+        local final = Final(token)
+        if not requests[token] then
+            members[final] = members[final] or {}
+            table.insert(members[final], token)
+        end
+    end
+
+    local function PassesCommon(ppID, crafters, customer, side)
+        if filters.ppID and ppID ~= filters.ppID then return false end
+        if filters.crafter then
+            local match = false
+            for _, name in ipairs(crafters) do
+                if name and SameCrafter(filters.crafter, name) then match = true end
+            end
+            if not match then return false end
+        end
+        if filters.tier and (markOf(customer) or 'none') ~= filters.tier then return false end
+        if filters.side and side ~= filters.side then return false end
+        return true
+    end
+
+    local report = {
+        rows = {}, customers = {},
+        hours = { requests = Hours(), greetings = Hours(), orders = Hours() },
+        weekdays = { requests = Weekdays(), greetings = Weekdays(), orders = Weekdays() },
+        totals = { mentions = 0, requests = 0, greetings = 0, crafted = 0, orders = 0,
+            declined = 0, tips = 0, tipped = 0 },
+        tiers = { generous = 0, regular = 0, stingy = 0, none = 0 },
+    }
+    local rows, customers = {}, {}
+    local function Row(key, info)
+        if not rows[key] then rows[key] = NewRow(key, info) end
+        return rows[key]
+    end
+    local function Customer(name)
+        local key = BaseKey(name)
+        if not key then return nil end
+        if not customers[key] then customers[key] = NewCustomer(key, name) end
+        return customers[key]
+    end
+
+    -- Orders that belong to a conversation take its side and subject.
+    local orderConversation = {}
+
+    for final, tokens in pairs(members) do
+        local request = requests[final]
+        local first = nil
+        for _, token in ipairs(tokens) do
+            local candidate = requests[token]
+            if candidate and (not first or candidate.t < first.t) then first = candidate end
+        end
+        request = request or first
+        local greeting = nil
+        for _, token in ipairs(tokens) do
+            local candidate = greeted[token]
+            if candidate and (not greeting or candidate.t < greeting.t) then greeting = candidate end
+        end
+        local link = links[final]
+        local order = link and OrderOf(link.o) or (tokenOrders[final] and orders[tokenOrders[final]])
+        if not link then
+            for _, token in ipairs(tokens) do
+                if not link and links[token] then
+                    link = links[token]
+                    order = OrderOf(link.o)
+                end
+            end
+        end
+        local crafted = (order and order.st == 'f') or (not order and link and link.st == 'f')
+        local declined = (order and order.st == 'r') or (not order and link and link.st == 'r')
+        local side = greeting and greeting.f or request and request.f
+        if order then orderConversation[tostring(order.o) .. ':' .. order.st] = { side = side, request = request } end
+
+        local started = first or request
+        if started and started.t >= from and started.t <= to then
+            local subjectEvent = (crafted and order and order.i) and order or request
+            local ppID = (order and order.p) or request.p or (request.i and itemProf(request.i))
+            local customer = request.c
+            if PassesCommon(ppID, { request.x, order and order.x, greeting and greeting.x }, customer, side) then
+                local key, info = Subject(subjectEvent)
+                if info.ppID == nil then info.ppID = ppID end
+                local row = Row(key, info)
+                row.requests = row.requests + 1
+                report.totals.requests = report.totals.requests + 1
+                report.hours.requests[Hour(started.t)] = report.hours.requests[Hour(started.t)] + 1
+                report.weekdays.requests[Weekday(started.t)] = report.weekdays.requests[Weekday(started.t)] + 1
+                local person = Customer(customer)
+                if person then person.requests = person.requests + 1 end
+                if greeting then
+                    row.greetings = row.greetings + 1
+                    report.totals.greetings = report.totals.greetings + 1
+                    report.hours.greetings[Hour(greeting.t)] = report.hours.greetings[Hour(greeting.t)] + 1
+                    report.weekdays.greetings[Weekday(greeting.t)] = report.weekdays.greetings[Weekday(greeting.t)] + 1
+                    if person then person.greetings = person.greetings + 1 end
+                    if crafted then
+                        row.crafted = row.crafted + 1
+                        report.totals.crafted = report.totals.crafted + 1
+                        if person then person.crafted = person.crafted + 1 end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Every order delivered or declined in the period, conversation or not.
+    local tierSeen = {}
+    for key, order in pairs(orders) do
+        if order.t >= from and order.t <= to then
+            local conversation = orderConversation[key]
+            local side = conversation and conversation.side or order.f
+            local ppID = order.p or (order.i and itemProf(order.i))
+            local request = conversation and conversation.request
+            if PassesCommon(ppID, { order.x, request and request.x }, order.c, side) then
+                local subjectKey, info = Subject(order)
+                if info.ppID == nil then info.ppID = ppID end
+                local row = Row(subjectKey, info)
+                local person = Customer(order.c)
+                if order.st == 'f' then
+                    row.orders = row.orders + 1
+                    report.totals.orders = report.totals.orders + 1
+                    report.hours.orders[Hour(order.t)] = report.hours.orders[Hour(order.t)] + 1
+                    report.weekdays.orders[Weekday(order.t)] = report.weekdays.orders[Weekday(order.t)] + 1
+                    if order.tip then
+                        row.tips = row.tips + order.tip
+                        row.tipped = row.tipped + 1
+                        report.totals.tips = report.totals.tips + order.tip
+                        report.totals.tipped = report.totals.tipped + 1
+                    end
+                    if person then
+                        person.orders = person.orders + 1
+                        if order.tip then
+                            person.tips = person.tips + order.tip
+                            person.tipped = person.tipped + 1
+                            person.maxTip = math.max(person.maxTip, order.tip)
+                        end
+                        if not person.lastOrder or order.t > person.lastOrder then person.lastOrder = order.t end
+                        if not tierSeen[person.key] then
+                            tierSeen[person.key] = true
+                            local mark = markOf(order.c) or 'none'
+                            report.tiers[mark] = (report.tiers[mark] or 0) + 1
+                        end
+                    end
+                else
+                    row.declined = row.declined + 1
+                    report.totals.declined = report.totals.declined + 1
+                    if person then person.declined = person.declined + 1 end
+                end
+            end
+        end
+    end
+
+    -- Mentions in chat: the same customer repeating the same item within a
+    -- minute is one mention, also when two linked accounts saw it.
+    table.sort(mentions, function(lhs, rhs) return lhs.t < rhs.t end)
+    local lastSeen = {}
+    for _, mention in ipairs(mentions) do
+        local who = BaseKey(mention.c)
+        local key = mention.i .. ':' .. (who or '')
+        local previous = lastSeen[key]
+        local repeated = previous and (who and mention.t - previous <= MENTION_SAME_SECONDS
+            or (not who and mention.t == previous))
+        lastSeen[key] = mention.t
+        if not repeated and mention.t >= from and mention.t <= to then
+            local ppID = mention.p or itemProf(mention.i)
+            if PassesCommon(ppID, {}, mention.c, mention.f) and not filters.crafter then
+                local row = Row('item:' .. mention.i, { kind = 'item', itemID = mention.i, ppID = ppID })
+                row.mentions = row.mentions + 1
+                report.totals.mentions = report.totals.mentions + 1
+            end
+        end
+    end
+
+    for _, row in pairs(rows) do
+        row.conversion = row.greetings > 0 and row.crafted / row.greetings or nil
+        row.averageTip = row.tipped > 0 and row.tips / row.tipped or nil
+        report.rows[#report.rows + 1] = row
+    end
+    for _, person in pairs(customers) do
+        person.conversion = person.greetings > 0 and person.crafted / person.greetings or nil
+        person.averageTip = person.tipped > 0 and person.tips / person.tipped or nil
+        person.mark = markOf(person.name) or 'none'
+        if not filters.tier or person.mark == filters.tier then
+            report.customers[#report.customers + 1] = person
+        end
+    end
+    local totals = report.totals
+    totals.conversion = totals.greetings > 0 and totals.crafted / totals.greetings or nil
+    totals.averageTip = totals.tipped > 0 and totals.tips / totals.tipped or nil
+    return report
+end
+
+-- Period presets: from, to.
+function M.Range(preset, now)
+    now = now or time()
+    local today = date('*t', now)
+    local midnight = time({ year = today.year, month = today.month, day = today.day, hour = 0 })
+    if preset == 'today' then return midnight, now end
+    if preset == 'yesterday' then return midnight - DAY, midnight - 1 end
+    if preset == '7d' then return midnight - 6 * DAY, now end
+    if preset == '30d' then return midnight - 29 * DAY, now end
+    if preset == 'month' then
+        return time({ year = today.year, month = today.month, day = 1, hour = 0 }), now
+    end
+    return 0, now
+end
+
+-- "25.09.2026" or "25.09" (this year); the start of that day, or its end.
+function M.ParseDate(text, endOfDay, now)
+    if type(text) ~= 'string' then return nil end
+    local day, month, year = text:match('^%s*(%d%d?)[%.%-/](%d%d?)[%.%-/](%d%d%d?%d?)%s*$')
+    if not day then
+        day, month = text:match('^%s*(%d%d?)[%.%-/](%d%d?)%s*$')
+        year = date('*t', now or time()).year
+    end
+    day, month, year = tonumber(day), tonumber(month), tonumber(year)
+    if not (day and month and year) or month < 1 or month > 12 or day < 1 or day > 31 then return nil end
+    if year < 100 then year = 2000 + year end
+    local t = time({ year = year, month = month, day = day, hour = 0 })
+    return endOfDay and (t + DAY - 1) or t
+end
+
+function M.FormatDate(t)
+    return t and t > 0 and date('%d.%m.%Y', t) or ''
+end

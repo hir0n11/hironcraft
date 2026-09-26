@@ -148,14 +148,19 @@ function Scan.SendOrderGreeting(order, userInitiated, source)
         Scan.QuickReplies:RememberSentReply(order.customerName, reply)
     end
     Scan.RequestTracking.GreetingSent(Scan.OrderToCustomerInfo(order), pending)
+    local recorded = {}
     for _, sentResponse in ipairs(pending) do
         if Scan.QuickReplies then Scan.QuickReplies:RememberConversationCharacter(sentResponse) end
         sentResponse.greeting_sent = true
         sentResponse.destination_only_greeting = nil
+        if Scan.AnalyticsLog then
+            recorded[#recorded + 1] = Scan.AnalyticsLog.Greeting(order.customerName, sentResponse)
+        end
     end
     lastGreeting = {
         customer = order.customerName,
         responses = pending,
+        analytics = recorded,
         source = source,
         at = (GetTime and GetTime()) or (time and time()) or 0,
     }
@@ -221,6 +226,7 @@ if Scan.Utils and Scan.Utils.OnChatThrottled then
             response.greeting_sent = false
             response.greetingSentAt = nil
         end
+        if Scan.AnalyticsLog then Scan.AnalyticsLog.Retract(recent.analytics) end
         print('|cffffd100HironCraftScan:|r ' .. string.format(
             Scan.LOCAL:GetText('Greeting was not sent, the server limited the rate'),
             tostring(Scan.NameAndRealmToName and Scan.NameAndRealmToName(recent.customer)

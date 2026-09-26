@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics in a window of its own (0.4.41)
+
+- The analytics table under the order list is replaced by an "Analytics"
+  window (the button above the order list). Nothing is counted while it is
+  closed: opening it unpacks the chosen dates, closing it lets them go.
+- It follows each request: requests to you, greetings sent, how many
+  greeted requests were crafted (conversion), all delivered orders,
+  declines and tips. A request for a profession or a slot counts under the
+  item finally crafted, and "LF tailor" narrowed to an item is one request.
+  Item links seen in chat are still counted (mentions), also for items you
+  do not craft.
+- Filters: dates (presets or own dates), profession, crafter, side and
+  customer coin. The side is that of the character that greeted or saw the
+  request; an order without a conversation goes by the customer's race.
+  Tabs: items, customers (orders, tips, conversion, last order) and by hour
+  and day of week. Each tab exports to CSV. The summary counts the
+  customers with each coin in the period and overall.
+- Stored the way Journalator stores its logs: a journal of small events,
+  full stores compressed with LibDeflate. The old chat counter moves in the
+  first time the window opens; the order journal, order rows and statuses
+  still kept are taken in once.
+- Linked accounts exchange their analytics by themselves once both have
+  been idle for 10 minutes (no requests, whispers, greetings or crafting)
+  and out of combat, in small batches on a channel of its own, stopping as
+  soon as either gets busy. "Exchange now" in the window does not wait.
+  Order results keep travelling with the order statuses.
+
 ## A silver coin for tips in between (0.4.40)
 
 - A customer who has only ever tipped between 999 and 4,999 gold gets a

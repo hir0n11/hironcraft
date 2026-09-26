@@ -1,0 +1,851 @@
+local Scan = select(2, ...)
+
+-- The analytics window. Nothing here runs until it is opened: the journal's
+-- stores for the chosen dates are unpacked then, counted, and let go again
+-- when the window closes.
+local W = {}
+Scan.AnalyticsWindow = W
+
+local function L(key)
+    return Scan.LOCAL:GetText(key)
+end
+
+local FRAME_NAME = 'HironCraftAnalyticsFrame'
+local ROW_HEIGHT = 20
+local GAP = 6
+local GOLD = 10000
+
+local frame = nil
+local chunks, report = nil, nil
+local loadToken = 0
+local rebuildPending = false
+local namesPending = false
+
+local TAB_ITEMS, TAB_CUSTOMERS, TAB_TIME = 1, 2, 3
+
+local PRESETS = {
+    { value = 'today', label = 'Today' },
+    { value = 'yesterday', label = 'Yesterday' },
+    { value = '7d', label = 'Last 7 days' },
+    { value = '30d', label = 'Last 30 days' },
+    { value = 'month', label = 'This month' },
+    { value = 'all', label = 'All time' },
+    { value = 'custom', label = 'Own dates' },
+}
+
+local TIERS = {
+    { value = nil, label = 'All customers' },
+    { value = 'generous', label = 'Generous customers', coin = 'generous' },
+    { value = 'regular', label = 'Regular customers', coin = 'regular' },
+    { value = 'stingy', label = 'Stingy customers', coin = 'stingy' },
+    { value = 'none', label = 'Customers without a mark' },
+}
+
+local SIDES = {
+    { value = nil, label = 'Both sides' },
+    { value = 'H', label = 'Horde' },
+    { value = 'A', label = 'Alliance' },
+}
+
+local METRICS = {
+    { value = 'requests', label = 'Requests' },
+    { value = 'greetings', label = 'Greetings' },
+    { value = 'orders', label = 'Crafted orders' },
+}
+
+local function View()
+    local settings = Scan.DB.settings
+    if type(settings.analytics_view) ~= 'table' then
+        settings.analytics_view = { preset = '30d', tab = TAB_ITEMS, metric = 'orders', sort = {} }
+    end
+    local view = settings.analytics_view
+    view.sort = type(view.sort) == 'table' and view.sort or {}
+    -- Most ordered first, until a header is clicked.
+    view.sort[TAB_ITEMS] = view.sort[TAB_ITEMS] or { key = 'orders', desc = true }
+    view.sort[TAB_CUSTOMERS] = view.sort[TAB_CUSTOMERS] or { key = 'orders', desc = true }
+    return view
+end
+
+local function CurrentRange()
+    local view = View()
+    if view.preset == 'custom' and view.from then
+        return view.from, view.to or time()
+    end
+    return Scan.AnalyticsReport.Range(view.preset)
+end
+
+-- Formatting -----------------------------------------------------------------
+
+local function Number(value)
+    if not value or value == 0 then return '|cff808080-|r' end
+    return BreakUpLargeNumbers and BreakUpLargeNumbers(value) or tostring(value)
+end
+
+local function Percent(value)
+    if not value then return '|cff808080-|r' end
+    return string.format('%d%%', math.floor(value * 100 + 0.5))
+end
+
+local function Gold(copper)
+    if not copper or copper <= 0 then return '|cff808080-|r' end
+    local gold = math.floor(copper / GOLD + 0.5)
+    return (BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold))
+        .. '|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:2:0|t'
+end
+
+local function PlainGold(copper)
+    return tostring(math.floor((copper or 0) / GOLD + 0.5))
+end
+
+local function StripCodes(text)
+    return (tostring(text or ''):gsub('|T.-|t', ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', ''))
+end
+
+local function ProfessionName(ppID)
+    if not ppID then return nil end
+    local info = C_TradeSkillUI and C_TradeSkillUI.GetProfessionInfoBySkillLineID
+        and C_TradeSkillUI.GetProfessionInfoBySkillLineID(ppID)
+    return info and info.professionName ~= '' and info.professionName or nil
+end
+
+local function ColoredProfession(ppID)
+    local name = ProfessionName(ppID)
+    if not name then return '|cff808080-|r' end
+    local hex = Scan.CONST.PROFESSION_COLORS and Scan.CONST.PROFESSION_COLORS[ppID]
+    return hex and Scan.Utils.ColorizeText(name, hex) or name
+end
+
+local function Coin(mark)
+    return Scan.Generous and mark and mark ~= 'none' and Scan.Generous.Icon(mark) or ''
+end
+
+-- What a row of the item table is: a name with its icon and quality colour.
+local function Subject(row)
+    if row.kind == 'item' and row.itemID then
+        local name = C_Item.GetItemNameByID(row.itemID)
+        if not name then
+            namesPending = true
+            C_Item.RequestLoadItemDataByID(row.itemID)
+            name = '#' .. row.itemID
+        end
+        local icon = C_Item.GetItemIconByID(row.itemID)
+        local quality = C_Item.GetItemQualityByID(row.itemID)
+        local color = quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+        local text = color and color.hex and (color.hex .. name .. '|r') or name
+        return (icon and ('|T' .. icon .. ':16:16:0:0|t ') or '') .. text, name
+    end
+    if row.kind == 'recipe' and row.recipeID then
+        local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(row.recipeID)
+            or (L('Recipe') .. ' ' .. row.recipeID)
+        return name, name
+    end
+    if row.kind == 'slot' then
+        local text = string.format(L('Slot: %s'), row.label or row.slot or '?')
+        return '|cffc0c0c0' .. text .. '|r', text
+    end
+    if row.kind == 'profession' then
+        local text = string.format(L('Profession: %s'), ProfessionName(row.ppID) or '?')
+        return '|cffc0c0c0' .. text .. '|r', text
+    end
+    if row.kind == 'generic' then
+        local text = L('General crafting request')
+        return '|cffc0c0c0' .. text .. '|r', text
+    end
+    return '?', '?'
+end
+
+-- Tables -----------------------------------------------------------------------
+
+local ITEM_COLUMNS = {
+    { key = 'name', label = 'Item', fill = true, align = 'LEFT',
+        text = function(row) return (Subject(row)) end,
+        value = function(row) return select(2, Subject(row)):lower() end },
+    { key = 'profession', label = 'Profession', width = 110, align = 'LEFT',
+        text = function(row) return ColoredProfession(row.ppID) end,
+        value = function(row) return (ProfessionName(row.ppID) or ''):lower() end },
+    { key = 'mentions', label = 'Mentions', width = 72, tip = 'Mentions tooltip' },
+    { key = 'requests', label = 'Requests', width = 68, tip = 'Requests tooltip' },
+    { key = 'greetings', label = 'Greetings', width = 72, tip = 'Greetings tooltip' },
+    { key = 'crafted', label = 'Crafted', width = 72, tip = 'Crafted tooltip' },
+    { key = 'conversion', label = 'Conversion', width = 76, tip = 'Conversion tooltip',
+        text = function(row) return Percent(row.conversion) end },
+    { key = 'orders', label = 'All orders', width = 76, tip = 'All orders tooltip' },
+    { key = 'declined', label = 'Declined', width = 64, tip = 'Declined tooltip' },
+    { key = 'averageTip', label = 'Average tip', width = 92,
+        text = function(row) return Gold(row.averageTip) end },
+}
+
+local CUSTOMER_COLUMNS = {
+    { key = 'name', label = 'Customer', fill = true, align = 'LEFT',
+        text = function(row)
+            local coin = Coin(row.mark)
+            return (coin ~= '' and (coin .. ' ') or '') .. (Scan.NameAndRealmToName and Scan.NameAndRealmToName(row.name) or row.name)
+        end,
+        value = function(row) return row.key end },
+    { key = 'orders', label = 'Orders', width = 70 },
+    { key = 'tips', label = 'Tips total', width = 100, text = function(row) return Gold(row.tips) end },
+    { key = 'averageTip', label = 'Average tip', width = 92, text = function(row) return Gold(row.averageTip) end },
+    { key = 'maxTip', label = 'Largest tip', width = 92, text = function(row) return Gold(row.maxTip) end },
+    { key = 'declined', label = 'Declined', width = 64 },
+    { key = 'greetings', label = 'Greetings', width = 72 },
+    { key = 'conversion', label = 'Conversion', width = 76, text = function(row) return Percent(row.conversion) end },
+    { key = 'lastOrder', label = 'Last order', width = 110,
+        text = function(row) return row.lastOrder and date('%d.%m.%Y %H:%M', row.lastOrder) or '|cff808080-|r' end },
+}
+
+local function CellText(column, row)
+    if column.text then return column.text(row) end
+    return Number(row[column.key])
+end
+
+local function SortValue(column, row)
+    if column.value then return column.value(row) end
+    return row[column.key] or -1
+end
+
+local function CreateTable(parent, columns, tabIndex, onEnter)
+    local tbl = { columns = columns, tabIndex = tabIndex }
+    tbl.frame = CreateFrame('Frame', nil, parent)
+    tbl.frame:SetAllPoints(parent)
+
+    local fixed = 0
+    for _, column in ipairs(columns) do fixed = fixed + (column.width or 0) + GAP end
+    local function Layout()
+        local width = math.max(200, tbl.frame:GetWidth() - 34)
+        local x = 8
+        for _, column in ipairs(columns) do
+            column.x = x
+            column.w = column.fill and math.max(120, width - fixed) or column.width
+            x = x + column.w + GAP
+        end
+    end
+    Layout()
+
+    tbl.headers = {}
+    for index, column in ipairs(columns) do
+        local header = CreateFrame('Button', nil, tbl.frame)
+        header:SetHeight(20)
+        header.text = header:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+        header.text:SetAllPoints()
+        header.text:SetJustifyH(column.align or 'RIGHT')
+        header:SetHighlightTexture('Interface\\Buttons\\UI-Listbox-Highlight2', 'ADD')
+        header:GetHighlightTexture():SetAlpha(0.3)
+        header:SetScript('OnClick', function()
+            local sort = View().sort[tabIndex]
+            if sort and sort.key == column.key then
+                sort.desc = not sort.desc
+            else
+                View().sort[tabIndex] = { key = column.key, desc = column.align ~= 'LEFT' }
+            end
+            tbl:Refresh()
+        end)
+        header:SetScript('OnEnter', function(self)
+            if not column.tip then return end
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip_SetTitle(GameTooltip, L(column.label))
+            GameTooltip_AddNormalLine(GameTooltip, L(column.tip))
+            GameTooltip:Show()
+        end)
+        header:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        tbl.headers[index] = header
+    end
+
+    tbl.scrollBox = CreateFrame('Frame', nil, tbl.frame, 'WowScrollBoxList')
+    tbl.scrollBox:SetPoint('TOPLEFT', tbl.frame, 'TOPLEFT', 4, -26)
+    tbl.scrollBox:SetPoint('BOTTOMRIGHT', tbl.frame, 'BOTTOMRIGHT', -24, 4)
+    tbl.scrollBar = CreateFrame('EventFrame', nil, tbl.frame, 'MinimalScrollBar')
+    tbl.scrollBar:SetPoint('TOPLEFT', tbl.scrollBox, 'TOPRIGHT', 6, 0)
+    tbl.scrollBar:SetPoint('BOTTOMLEFT', tbl.scrollBox, 'BOTTOMRIGHT', 6, 0)
+
+    local view = CreateScrollBoxListLinearView()
+    view:SetElementExtent(ROW_HEIGHT)
+    view:SetElementInitializer('HironCraftAnalyticsRowTemplate', function(row, data)
+        row.cells = row.cells or {}
+        for index, column in ipairs(columns) do
+            local cell = row.cells[index]
+            if not cell then
+                cell = row:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+                cell:SetWordWrap(false)
+                row.cells[index] = cell
+            end
+            cell:ClearAllPoints()
+            cell:SetPoint('LEFT', row, 'LEFT', column.x - 4, 0)
+            cell:SetWidth(column.w)
+            cell:SetJustifyH(column.align or 'RIGHT')
+            cell:SetText(CellText(column, data.row))
+        end
+        row.Stripe:SetShown(data.index % 2 == 0)
+        row.data = data.row
+        row:SetScript('OnEnter', function(self) if onEnter then onEnter(self, self.data) end end)
+        row:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    end)
+    ScrollUtil.InitScrollBoxListWithScrollBar(tbl.scrollBox, tbl.scrollBar, view)
+
+    function tbl:Refresh()
+        Layout()
+        local sort = View().sort[tabIndex]
+        for index, column in ipairs(columns) do
+            local header = self.headers[index]
+            header:ClearAllPoints()
+            header:SetPoint('TOPLEFT', self.frame, 'TOPLEFT', column.x, -4)
+            header:SetWidth(column.w)
+            local arrow = ''
+            if sort and sort.key == column.key then arrow = sort.desc and ' v' or ' ^' end
+            header.text:SetText(L(column.label) .. arrow)
+        end
+        local rows = self.rows or {}
+        local column = nil
+        for _, candidate in ipairs(columns) do
+            if sort and candidate.key == sort.key then column = candidate end
+        end
+        if column then
+            table.sort(rows, function(lhs, rhs)
+                local a, b = SortValue(column, lhs), SortValue(column, rhs)
+                if type(a) ~= type(b) then a, b = tostring(a), tostring(b) end
+                if a == b then return tostring(lhs.key) < tostring(rhs.key) end
+                if sort.desc then return a > b end
+                return a < b
+            end)
+        end
+        local list = {}
+        for index, row in ipairs(rows) do list[index] = { row = row, index = index } end
+        self.scrollBox:SetDataProvider(CreateDataProvider(list), ScrollBoxConstants.RetainScrollPosition)
+    end
+
+    function tbl:SetRows(rows)
+        self.rows = rows
+        self:Refresh()
+    end
+
+    return tbl
+end
+
+-- Charts --------------------------------------------------------------------------
+
+local function CreateChart(parent, count, labelOf)
+    local chart = CreateFrame('Frame', nil, parent)
+    chart.bars = {}
+    for index = 1, count do
+        local bar = CreateFrame('Frame', nil, chart)
+        bar.fill = bar:CreateTexture(nil, 'ARTWORK')
+        bar.fill:SetColorTexture(1, 0.78, 0.25, 0.85)
+        bar.fill:SetPoint('BOTTOMLEFT')
+        bar.fill:SetPoint('BOTTOMRIGHT')
+        bar.value = bar:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        bar.value:SetPoint('BOTTOM', bar.fill, 'TOP', 0, 2)
+        bar.label = chart:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+        bar.label:SetPoint('TOP', bar, 'BOTTOM', 0, -3)
+        bar.label:SetText(labelOf(index))
+        bar:EnableMouse(true)
+        bar:SetScript('OnEnter', function(self)
+            if not self.info then return end
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip_SetTitle(GameTooltip, self.info.title)
+            for _, line in ipairs(self.info.lines) do GameTooltip_AddNormalLine(GameTooltip, line) end
+            GameTooltip:Show()
+        end)
+        bar:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        chart.bars[index] = bar
+    end
+
+    function chart:SetValues(values, infos)
+        local width, height = self:GetWidth(), self:GetHeight() - 34
+        local slot = width / count
+        local max = 0
+        for index = 1, count do max = math.max(max, values[index] or 0) end
+        for index, bar in ipairs(self.bars) do
+            local value = values[index] or 0
+            bar:ClearAllPoints()
+            bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', (index - 1) * slot + slot * 0.15, 18)
+            bar:SetSize(slot * 0.7, height)
+            bar.fill:SetHeight(math.max(1, max > 0 and height * value / max or 1))
+            bar.fill:SetAlpha(value > 0 and 1 or 0.25)
+            bar.value:SetText(value > 0 and value or '')
+            bar.info = infos and infos[index]
+        end
+    end
+    return chart
+end
+
+-- Filters and summary ----------------------------------------------------------
+
+local function Filters()
+    local view = View()
+    local from, to = CurrentRange()
+    return { from = from, to = to, ppID = view.ppID, crafter = view.crafter, side = view.side, tier = view.tier }
+end
+
+local function Context()
+    local marks = {}
+    return {
+        markOf = function(name)
+            if type(name) ~= 'string' then return nil end
+            local key = Scan.AnalyticsReport.BaseKey(name)
+            if marks[key] == nil then
+                marks[key] = Scan.Generous and Scan.Generous.MarkOf(name) or false
+            end
+            return marks[key] or nil
+        end,
+        itemProf = function(itemID) return Scan.AnalyticsLog.ProfessionOfItem(itemID) end,
+    }
+end
+
+-- Customers with each coin, however long ago they got it.
+local function AllTimeTiers()
+    local counts = { generous = 0, regular = 0, stingy = 0 }
+    local store = Scan.DB.settings.generous_customers
+    if type(store) == 'table' and Scan.Generous then
+        for key in pairs(store) do
+            local mark = Scan.Generous.MarkOf(key)
+            if mark and counts[mark] then counts[mark] = counts[mark] + 1 end
+        end
+    end
+    return counts
+end
+
+local function UpdateSummary()
+    if not report then
+        frame.Summary:SetText('')
+        return
+    end
+    local totals = report.totals
+    local all = AllTimeTiers()
+    local tiers = report.tiers
+    frame.Summary:SetText(table.concat({
+        string.format(L('Analytics summary'), Number(totals.greetings), Number(totals.crafted),
+            Percent(totals.conversion), Number(totals.requests), Number(totals.mentions)),
+        string.format(L('Analytics orders'), Number(totals.orders), Number(totals.declined),
+            Gold(totals.tips), Gold(totals.averageTip)),
+        string.format(L('Analytics tiers'),
+            Coin('generous'), tiers.generous or 0, Coin('regular'), tiers.regular or 0,
+            Coin('stingy'), tiers.stingy or 0, tiers.none or 0,
+            Coin('generous'), all.generous, Coin('regular'), all.regular, Coin('stingy'), all.stingy),
+    }, '\n'))
+end
+
+local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
+
+local function UpdateCharts()
+    if not report then return end
+    local metric = View().metric or 'orders'
+    local function Infos(group, count, titleOf, offset)
+        local values, infos = {}, {}
+        for index = 1, count do
+            local slot = index - 1 + offset
+            values[index] = report[group][metric][slot] or 0
+            infos[index] = { title = titleOf(index), lines = {
+                string.format('%s: %d', L('Requests'), report[group].requests[slot] or 0),
+                string.format('%s: %d', L('Greetings'), report[group].greetings[slot] or 0),
+                string.format('%s: %d', L('Crafted orders'), report[group].orders[slot] or 0),
+            } }
+        end
+        return values, infos
+    end
+    frame.HourChart:SetValues(Infos('hours', 24, function(index) return string.format('%02d:00-%02d:59', index - 1, index - 1) end, 0))
+    frame.DayChart:SetValues(Infos('weekdays', 7, function(index) return L(WEEKDAYS[index]) end, 1))
+end
+
+local function SetStatus(text)
+    frame.Status:SetText(text or '')
+    frame.Status:SetShown(text ~= nil and text ~= '')
+end
+
+local function Render()
+    if not frame or not report then return end
+    namesPending = false
+    frame.Items:SetRows(report.rows)
+    frame.Customers:SetRows(report.customers)
+    UpdateSummary()
+    UpdateCharts()
+    local tab = View().tab
+    local empty = (tab == TAB_ITEMS and #report.rows == 0) or (tab == TAB_CUSTOMERS and #report.customers == 0)
+    SetStatus(empty and L('No analytics data for the period') or nil)
+    local last = Scan.AnalyticsSync and Scan.AnalyticsSync.LastSync()
+    frame.SyncText:SetText(last and string.format(L('Last exchange: %s'), date('%d.%m %H:%M', last)) or '')
+end
+
+function W.Rebuild()
+    if not frame or not chunks then return end
+    report = Scan.AnalyticsReport.Build(chunks, Filters(), Context())
+    Render()
+end
+
+function W.Reload()
+    if not frame or not frame:IsShown() then return end
+    loadToken = loadToken + 1
+    local token = loadToken
+    SetStatus(L('Loading analytics...'))
+    local from, to = CurrentRange()
+    Scan.AnalyticsLog.LoadRange(from, to, function(done, total)
+        if token == loadToken and frame:IsShown() then
+            SetStatus(string.format(L('Loading analytics %d / %d'), done, total))
+        end
+    end, function(loaded)
+        if token ~= loadToken or not frame:IsShown() then return end
+        chunks = loaded
+        W.Rebuild()
+    end)
+end
+
+-- New events while the window is open: counted again a little later.
+local function ScheduleRebuild(delay)
+    if rebuildPending or not frame or not frame:IsShown() then return end
+    rebuildPending = true
+    C_Timer.After(delay, function()
+        rebuildPending = false
+        if frame and frame:IsShown() then W.Reload() end
+    end)
+end
+
+function W.Release()
+    loadToken = loadToken + 1
+    chunks, report = nil, nil
+    if Scan.AnalyticsLog then Scan.AnalyticsLog.ReleaseCache() end
+    if frame then
+        frame.Items:SetRows({})
+        frame.Customers:SetRows({})
+    end
+end
+
+local function UpdateDateBoxes()
+    local from, to = CurrentRange()
+    frame.FromBox:SetText(from and from > 0 and Scan.AnalyticsReport.FormatDate(from) or '')
+    frame.ToBox:SetText(Scan.AnalyticsReport.FormatDate(to))
+    -- A typed date switches the period to own dates; show that.
+    if frame.Period and frame.Period.GenerateMenu then frame.Period:GenerateMenu() end
+end
+
+local function SelectTab(index)
+    View().tab = index
+    PanelTemplates_SetTab(frame, index)
+    frame.Items.frame:SetShown(index == TAB_ITEMS)
+    frame.Customers.frame:SetShown(index == TAB_CUSTOMERS)
+    frame.Charts:SetShown(index == TAB_TIME)
+    if report then Render() end
+end
+
+-- CSV of the visible tab, for a spreadsheet.
+local function CSV(text)
+    text = StripCodes(text)
+    if text:find('[,"\n]') then text = '"' .. text:gsub('"', '""') .. '"' end
+    return text
+end
+
+local function ExportCSV()
+    if not report then return end
+    local lines = {}
+    local tab = View().tab
+    if tab == TAB_CUSTOMERS then
+        lines[1] = 'customer,tier,orders,tips_gold,average_tip_gold,largest_tip_gold,declined,greetings,conversion,last_order'
+        for _, row in ipairs(frame.Customers.rows or {}) do
+            lines[#lines + 1] = table.concat({ CSV(row.name), row.mark or 'none', row.orders, PlainGold(row.tips),
+                PlainGold(row.averageTip), PlainGold(row.maxTip), row.declined, row.greetings,
+                row.conversion and string.format('%.2f', row.conversion) or '',
+                row.lastOrder and date('%Y-%m-%d %H:%M', row.lastOrder) or '' }, ',')
+        end
+    elseif tab == TAB_TIME then
+        lines[1] = 'period,requests,greetings,orders'
+        for hour = 0, 23 do
+            lines[#lines + 1] = string.format('%02d:00,%d,%d,%d', hour, report.hours.requests[hour],
+                report.hours.greetings[hour], report.hours.orders[hour])
+        end
+        for day = 1, 7 do
+            lines[#lines + 1] = string.format('%s,%d,%d,%d', CSV(L(WEEKDAYS[day])), report.weekdays.requests[day],
+                report.weekdays.greetings[day], report.weekdays.orders[day])
+        end
+    else
+        lines[1] = 'item,item_id,profession,mentions,requests,greetings,crafted,conversion,all_orders,declined,average_tip_gold'
+        for _, row in ipairs(frame.Items.rows or {}) do
+            local _, name = Subject(row)
+            lines[#lines + 1] = table.concat({ CSV(name), row.itemID or '', CSV(ProfessionName(row.ppID) or ''),
+                row.mentions, row.requests, row.greetings, row.crafted,
+                row.conversion and string.format('%.2f', row.conversion) or '', row.orders, row.declined,
+                row.averageTip and PlainGold(row.averageTip) or '' }, ',')
+        end
+    end
+    Scan.Utils.DumpCopyableText(table.concat(lines, '\n'))
+end
+
+-- Building the window ------------------------------------------------------------
+
+local function Dropdown(parent, width, entries, get, set)
+    local dropdown = CreateFrame('DropdownButton', nil, parent, 'WowStyle1DropdownTemplate')
+    dropdown:SetWidth(width)
+    dropdown:SetupMenu(function(_, root)
+        for _, entry in ipairs(entries()) do
+            root:CreateRadio(entry.text, function() return get() == entry.value end,
+                function() set(entry.value) end, entry.value)
+        end
+    end)
+    return dropdown
+end
+
+local function ProfessionEntries()
+    local list = { { text = L('All professions'), value = nil } }
+    local sorted = {}
+    for ppID in pairs(Scan.CONST.PROFESSION_COLORS or {}) do
+        local name = ProfessionName(ppID)
+        if name then sorted[#sorted + 1] = { text = ColoredProfession(ppID), value = ppID, sortName = name } end
+    end
+    table.sort(sorted, function(lhs, rhs) return lhs.sortName < rhs.sortName end)
+    for _, entry in ipairs(sorted) do list[#list + 1] = entry end
+    return list
+end
+
+local function CrafterEntries()
+    local list = { { text = L('All crafters'), value = nil } }
+    local names = {}
+    for name in pairs(Scan.DB.characters or {}) do names[#names + 1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        list[#list + 1] = { text = Scan.NameAndRealmToName and Scan.NameAndRealmToName(name) or name, value = name }
+    end
+    return list
+end
+
+local function Entries(source)
+    return function()
+        local list = {}
+        for _, entry in ipairs(source) do
+            local coin = entry.coin and (Coin(entry.coin) .. ' ') or ''
+            list[#list + 1] = { text = coin .. L(entry.label), value = entry.value }
+        end
+        return list
+    end
+end
+
+local function FilterChanged()
+    W.Rebuild()
+end
+
+local function Create()
+    frame = CreateFrame('Frame', FRAME_NAME, UIParent, 'ButtonFrameTemplate')
+    ButtonFrameTemplate_HidePortrait(frame)
+    ButtonFrameTemplate_HideButtonBar(frame)
+    frame:SetSize(1080, 640)
+    frame:SetPoint('CENTER')
+    frame:SetFrameStrata('HIGH')
+    frame:SetToplevel(true)
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag('LeftButton')
+    frame:SetScript('OnDragStart', frame.StartMoving)
+    frame:SetScript('OnDragStop', frame.StopMovingOrSizing)
+    frame:SetTitle(L('Analytics'))
+    table.insert(UISpecialFrames, FRAME_NAME)
+
+    frame.Inset:ClearAllPoints()
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -124)
+    frame.Inset:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -8, 8)
+
+    local view = View()
+
+    -- Row 1: period and filters.
+    local period = Dropdown(frame, 150, function()
+        local list = {}
+        for _, preset in ipairs(PRESETS) do list[#list + 1] = { text = L(preset.label), value = preset.value } end
+        return list
+    end, function() return View().preset end, function(value)
+        local current = View()
+        if value == 'custom' then
+            current.from, current.to = CurrentRange()
+        end
+        current.preset = value
+        UpdateDateBoxes()
+        W.Reload()
+    end)
+    period:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -32)
+    frame.Period = period
+
+    local function DateBox(label, anchor, endOfDay)
+        local text = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+        text:SetPoint('LEFT', anchor, 'RIGHT', 12, 0)
+        text:SetText(L(label))
+        local box = CreateFrame('EditBox', nil, frame, 'InputBoxTemplate')
+        box:SetSize(78, 20)
+        box:SetAutoFocus(false)
+        box:SetPoint('LEFT', text, 'RIGHT', 8, 0)
+        box:SetScript('OnEnterPressed', function(self)
+            local value = Scan.AnalyticsReport.ParseDate(self:GetText(), endOfDay)
+            self:ClearFocus()
+            if not value then UpdateDateBoxes() return end
+            local current = View()
+            local from, to = CurrentRange()
+            current.preset = 'custom'
+            current.from, current.to = from, to
+            if endOfDay then current.to = value else current.from = value end
+            UpdateDateBoxes()
+            W.Reload()
+        end)
+        box:SetScript('OnEscapePressed', function(self)
+            self:ClearFocus()
+            UpdateDateBoxes()
+        end)
+        box:SetScript('OnEnter', function(self)
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip_AddNormalLine(GameTooltip, L('Date box tooltip'))
+            GameTooltip:Show()
+        end)
+        box:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        return box
+    end
+    frame.FromBox = DateBox('From', period, false)
+    frame.ToBox = DateBox('To', frame.FromBox, true)
+
+    local profession = Dropdown(frame, 150, ProfessionEntries,
+        function() return View().ppID end, function(value) View().ppID = value FilterChanged() end)
+    profession:SetPoint('LEFT', frame.ToBox, 'RIGHT', 16, 0)
+    local crafter = Dropdown(frame, 150, CrafterEntries,
+        function() return View().crafter end, function(value) View().crafter = value FilterChanged() end)
+    crafter:SetPoint('LEFT', profession, 'RIGHT', 8, 0)
+    local side = Dropdown(frame, 120, Entries(SIDES),
+        function() return View().side end, function(value) View().side = value FilterChanged() end)
+    side:SetPoint('LEFT', crafter, 'RIGHT', 8, 0)
+    side:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+        GameTooltip_AddNormalLine(GameTooltip, L('Side filter tooltip'))
+        GameTooltip:Show()
+    end)
+    side:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    local tier = Dropdown(frame, 190, Entries(TIERS),
+        function() return View().tier end, function(value) View().tier = value FilterChanged() end)
+    tier:SetPoint('LEFT', side, 'RIGHT', 8, 0)
+
+    -- Row 2: what the period comes to, and the buttons.
+    frame.Summary = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    frame.Summary:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -66)
+    frame.Summary:SetPoint('RIGHT', frame, 'RIGHT', -330, 0)
+    frame.Summary:SetJustifyH('LEFT')
+    frame.Summary:SetJustifyV('TOP')
+    frame.Summary:SetSpacing(4)
+
+    local export = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    export:SetSize(110, 22)
+    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -64)
+    export:SetText(L('Export CSV'))
+    export:SetScript('OnClick', ExportCSV)
+    frame.ExportButton = export
+
+    local sync = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    sync:SetSize(150, 22)
+    sync:SetPoint('RIGHT', export, 'LEFT', -6, 0)
+    sync:SetText(L('Exchange now'))
+    sync:SetScript('OnClick', function()
+        if Scan.AnalyticsSync then Scan.AnalyticsSync.SyncNow() end
+        ScheduleRebuild(20)
+    end)
+    sync:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+        GameTooltip_SetTitle(GameTooltip, L('Exchange now'))
+        GameTooltip_AddNormalLine(GameTooltip, L('Exchange now tooltip'))
+        GameTooltip:Show()
+    end)
+    sync:SetScript('OnLeave', function() GameTooltip:Hide() end)
+
+    frame.SyncText = frame:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
+    frame.SyncText:SetPoint('TOPRIGHT', export, 'BOTTOMRIGHT', 0, -6)
+
+    local gather = CreateFrame('CheckButton', nil, frame, 'UICheckButtonTemplate')
+    gather:SetSize(22, 22)
+    gather:SetPoint('TOPLEFT', sync, 'BOTTOMLEFT', -4, -2)
+    gather.text = gather:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    gather.text:SetPoint('LEFT', gather, 'RIGHT', 2, 0)
+    gather.text:SetText(L('Gather Analytics'))
+    gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
+    gather:SetScript('OnClick', function(self) Scan.AnalyticsLog.SetEnabled(self:GetChecked()) end)
+
+
+    -- The tabs' contents.
+    frame.Items = CreateTable(frame.Inset, ITEM_COLUMNS, TAB_ITEMS, function(row, data)
+        if data.kind == 'item' and data.itemID then
+            GameTooltip:SetOwner(row, 'ANCHOR_RIGHT')
+            GameTooltip:SetItemByID(data.itemID)
+            GameTooltip:Show()
+        end
+    end)
+    frame.Customers = CreateTable(frame.Inset, CUSTOMER_COLUMNS, TAB_CUSTOMERS, function(row, data)
+        local text = Scan.Generous and Scan.Generous.Describe(data.name)
+        if text then
+            GameTooltip:SetOwner(row, 'ANCHOR_RIGHT')
+            GameTooltip_SetTitle(GameTooltip, data.name)
+            GameTooltip_AddNormalLine(GameTooltip, text)
+            GameTooltip:Show()
+        end
+    end)
+
+    frame.Charts = CreateFrame('Frame', nil, frame.Inset)
+    frame.Charts:SetAllPoints(frame.Inset)
+    frame.MetricDropdown = Dropdown(frame.Charts, 170, Entries(METRICS),
+        function() return View().metric end, function(value) View().metric = value UpdateCharts() end)
+    frame.MetricDropdown:SetPoint('TOPRIGHT', frame.Charts, 'TOPRIGHT', -10, -6)
+    local hourTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    hourTitle:SetPoint('TOPLEFT', 14, -10)
+    hourTitle:SetText(L('By hour of day'))
+    frame.HourChart = CreateChart(frame.Charts, 24, function(index) return tostring(index - 1) end)
+    frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -30)
+    frame.HourChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
+    frame.HourChart:SetHeight(200)
+    local dayTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    dayTitle:SetPoint('TOPLEFT', frame.HourChart, 'BOTTOMLEFT', 4, -14)
+    dayTitle:SetText(L('By day of week'))
+    frame.DayChart = CreateChart(frame.Charts, 7, function(index) return L(WEEKDAYS[index]) end)
+    frame.DayChart:SetPoint('TOPLEFT', dayTitle, 'BOTTOMLEFT', -4, -6)
+    frame.DayChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
+    frame.DayChart:SetPoint('BOTTOM', frame.Charts, 'BOTTOM', 0, 10)
+
+    frame.Status = frame.Inset:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+    frame.Status:SetPoint('CENTER')
+
+    -- Tabs under the window, as in Journalator.
+    frame.Tabs = {}
+    for index, label in ipairs({ 'Items', 'Customers', 'By time' }) do
+        local tab = CreateFrame('Button', FRAME_NAME .. 'Tab' .. index, frame, 'PanelTabButtonTemplate')
+        tab:SetID(index)
+        tab:SetText(L(label))
+        if index == 1 then
+            tab:SetPoint('TOPLEFT', frame, 'BOTTOMLEFT', 20, 2)
+        else
+            tab:SetPoint('LEFT', frame.Tabs[index - 1], 'RIGHT', -15, 0)
+        end
+        tab:SetScript('OnShow', function(self) PanelTemplates_TabResize(self, 30, nil, 20) end)
+        tab:SetScript('OnClick', function(self)
+            PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB)
+            SelectTab(self:GetID())
+        end)
+        PanelTemplates_TabResize(tab, 30, nil, 20)
+        frame.Tabs[index] = tab
+    end
+    PanelTemplates_SetNumTabs(frame, #frame.Tabs)
+
+    frame:SetScript('OnShow', function()
+        gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
+        UpdateDateBoxes()
+        SelectTab(View().tab or TAB_ITEMS)
+        W.Reload()
+    end)
+    frame:SetScript('OnHide', function() W.Release() end)
+    frame:SetScript('OnEvent', function(_, event)
+        if event == 'GET_ITEM_INFO_RECEIVED' and namesPending and report then
+            namesPending = false
+            C_Timer.After(0.3, function() if frame:IsShown() and report then Render() end end)
+        end
+    end)
+    frame:RegisterEvent('GET_ITEM_INFO_RECEIVED')
+    frame:Hide()
+
+    Scan.AnalyticsLog.OnChange(function() ScheduleRebuild(10) end)
+end
+
+function W.Toggle()
+    if not frame then Create() end
+    if frame:IsShown() then
+        frame:Hide()
+    else
+        frame:Show()
+    end
+end
+
+function W.IsShown()
+    return frame ~= nil and frame:IsShown()
+end

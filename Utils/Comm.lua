@@ -42,9 +42,13 @@ local HIRONCRAFT_SCAN_COMM_PREFIX = 'HIRONCRAFT_SCAN'
 -- prefix/priority as one FIFO pipe. On a shared prefix every material chunk
 -- delayed the following statuses, ACKs and pings.
 local HIRONCRAFT_BULK_COMM_PREFIX = 'HIRONCRAFT_BULK'
+-- Analytics between linked accounts has a channel of its own, so a long
+-- exchange never holds up material lists or profession data.
+local HIRONCRAFT_ANALYTICS_COMM_PREFIX = 'HIRONCRAFT_ANLT'
 function HironCraftScanComm:OnEnable()
     self:RegisterComm(HIRONCRAFT_SCAN_COMM_PREFIX)
     self:RegisterComm(HIRONCRAFT_BULK_COMM_PREFIX)
+    self:RegisterComm(HIRONCRAFT_ANALYTICS_COMM_PREFIX)
 
     -- We want to make sure we've waited until after the other channels are
     -- initialized so we don't plan HironCraftScan at /1. I tried being clever and
@@ -74,7 +78,9 @@ HironCraftScanComm.Operations = {
     ShareOrderOutcome = 'share_order_outcome',
     ShareOrderMaterials = 'share_order_materials',
     OrderMaterialsAck = 'order_materials_ack',
-    ShareAnalytics = 'share_analytics',
+    AnalyticsOffer = 'an_offer',
+    AnalyticsPull = 'an_pull',
+    AnalyticsEvents = 'an_events',
     Ping = 'ping',
     FindCrafter = 'fc',
     RequestCraft = 'rc',
@@ -1906,261 +1912,6 @@ local function ReceivePing(sender, data, senderID)
     end
 end
 
-local function ShareAnalytics_(senderID, sender, state, sinceLastUpdate)
-    local analytics = HironCraftScan.DB.analytics
-    local lastShare = HironCraftScan.DB.realm.linked_accounts[senderID].last_analytics_share
-
-    HironCraftScan.Utils.printTable(
-        'ShareAnalytics_ Account',
-        HironCraftScan.DB.realm.linked_accounts[senderID]
-    )
-
-    if sinceLastUpdate and lastShare then
-        -- Copy the analytics table, then filter the 'times' lists to be more
-        -- recent than the last sharing time.
-        local allAnalytics = analytics
-        analytics = { seen_items = {} }
-        local dst = analytics.seen_items
-        local src = allAnalytics.seen_items
-        if src then
-            for itemID, srcEntry in pairs(src) do
-                local times = {}
-                for _, t in ipairs(srcEntry.times) do
-                    if HironCraftScan.Analytics.GetTimeStamp(t) > lastShare then
-                        table.insert(times, t)
-                    end
-                end
-                if #times ~= 0 then
-                    dst[itemID] = {}
-                    dstEntry = dst[itemID]
-                    for key, value in pairs(srcEntry) do
-                        if key ~= 'times' then
-                            dstEntry[key] = value
-                        end
-                    end
-                    dst[itemID].times = times
-                end
-            end
-        end
-    end
-
-    HironCraftScanComm:Transmit(
-        { analytics = analytics, state = state, recent = sinceLastUpdate },
-        HironCraftScanComm.Operations.ShareAnalytics,
-        sender
-    )
-end
-
-local function MergeTimes(myTimes, otherTimes)
-    local GetTime = HironCraftScan.Analytics.GetTimeStamp
-    local i, j = 1, 1
-    local merged = {}
-    local merging = false
-    while i <= #myTimes and j <= #otherTimes do
-        local myTime = GetTime(myTimes[i])
-        local otherTime = GetTime(otherTimes[j])
-        if myTime == otherTime then
-            local myTable = type(myTimes[i]) == 'table'
-            local otherTable = type(otherTimes[j]) == 'table'
-            if myTable and otherTable then
-                -- If both sides saw repeats, take the max. We
-                -- assume they were both watching, but one of them
-                -- stayed online longer and saw more repeats.
-                myTimes[i].c = math.max(myTimes[i].c or 1, otherTimes[j].c or 1)
-            elseif otherTable then
-                myTimes[i] = otherTimes[j]
-            end
-
-            if merging then
-                table.insert(merged, myTimes[i])
-            end
-            i = i + 1
-            j = j + 1
-        elseif myTime < otherTime then
-            if merging then
-                table.insert(merged, myTimes[i])
-            end
-            i = i + 1
-        else
-            assert(myTime > otherTime)
-
-            -- The other side has an entry that needs to go before our next
-            -- entry, so time to copy and start merge inserting.
-            if not merging then
-                merging = true
-                for copyI = 1, i - 1, 1 do
-                    table.insert(merged, myTimes[copyI])
-                end
-            end
-
-            table.insert(merged, otherTimes[j])
-            j = j + 1
-        end
-    end
-
-    if merging then
-        while i <= #myTimes do
-            table.insert(merged, myTimes[i])
-            i = i + 1
-        end
-    end
-    while j <= #otherTimes do
-        if merging then
-            table.insert(merged, otherTimes[j])
-        else
-            table.insert(myTimes, otherTimes[j])
-        end
-        j = j + 1
-    end
-
-    assert(merging or #merged == 0)
-    return merging, merging and merged or myTimes
-end
-
-HironCraftScan.Utils.onLoad(function()
-    if not HironCraftScan.Debug.IsEnabled() then
-        return
-    end
-
-    function TestCase(index, myTimes, otherTimes, expectedMerged, expected)
-        local merged, times = MergeTimes(myTimes, otherTimes)
-        local failed = false
-        if merged ~= expectedMerged then
-            failed = true
-        end
-        if not merged and times ~= myTimes then
-            failed = true
-        end
-        if #times ~= #expected then
-            failed = true
-        end
-        for i, e in ipairs(expected) do
-            if type(times[i]) == 'table' then
-                if type(e) ~= 'table' then
-                    failed = true
-                end
-                if times[i].t ~= e.t then
-                    failed = true
-                end
-                if times[i].c ~= e.c then
-                    failed = true
-                end
-            elseif times[i] ~= e then
-                failed = true
-            end
-        end
-        if failed then
-            HironCraftScan.Utils.printTable('Failed Testcase Output', {
-                index = index,
-                merged = merged,
-                expectedMerged = expectedMerged,
-                times = times,
-                expected = expected,
-            })
-            assert(not failed)
-        end
-    end
-
-    -- Basic equal
-    TestCase(1, { 1, 2, 3 }, { 1, 2, 3 }, false, { 1, 2, 3 })
-    -- mine longer
-    TestCase(2, { 1, 2, 3, 4 }, { 1, 2, 3 }, false, { 1, 2, 3, 4 })
-    -- other longer
-    TestCase(3, { 1, 2, 3 }, { 1, 2, 3, 4 }, false, { 1, 2, 3, 4 })
-    -- other has a hole
-    TestCase(4, { 1, 2, 3 }, { 1, 3, 4 }, false, { 1, 2, 3, 4 })
-    -- Merges needed, other longer
-    TestCase(5, { 1, 4 }, { 1, 2, 3 }, true, { 1, 2, 3, 4 })
-    -- Merges needed, mine longer
-    TestCase(6, { 11, 14, 15 }, { 11, 12, 13 }, true, { 11, 12, 13, 14, 15 })
-
-    -- Mixed formats
-    TestCase(7, { { t = 1 }, 9, 12 }, { 1, 2, { t = 5 } }, true, { { t = 1 }, 2, { t = 5 }, 9, 12 })
-    TestCase(8, { { t = 1, c = 2 } }, { 1, 2 }, false, { { t = 1, c = 2 }, 2 })
-    TestCase(8, { { t = 1, c = 2 } }, { { t = 1, c = 5 }, 2 }, false, { { t = 1, c = 5 }, 2 })
-    TestCase(9, { 1 }, { { t = 1, c = 5 }, 2 }, false, { { t = 1, c = 5 }, 2 })
-    TestCase(10, { 1, 3, 5 }, { 2, { t = 5, c = 5 } }, true, { 1, 2, 3, { t = 5, c = 5 } })
-    TestCase(11, { 1, 3, { t = 5, c = 5 } }, { 2, 5 }, true, { 1, 2, 3, { t = 5, c = 5 } })
-    TestCase(12, { 1, 3, { t = 5, c = 5 } }, { 2 }, true, { 1, 2, 3, { t = 5, c = 5 } })
-    TestCase(12, { 1, 3 }, { 2, { t = 5, c = 5 } }, true, { 1, 2, 3, { t = 5, c = 5 } })
-end)
-
-local function ReceiveShareAnalytics(sender, data, senderID)
-    if data.state == SharingState.InitialInquiry then
-        ShareAnalytics_(senderID, sender, SharingState.ResponseInquiry, data.recent)
-    end
-
-    local function OnExitUpdate()
-        HironCraftScan.DB.realm.linked_accounts[senderID].last_analytics_share = time()
-        HironCraftScanCraftingOrderPage:UpdateAnalytics()
-    end
-
-    -- Our share analytics implementation is a merge. Any time stamps present on
-    -- both sides are left in place and treated as being the same entry. If one
-    -- side has an entry the other doesn't, it is merged into the collection at
-    -- the right spot. To avoid terrible performance, once we need to start
-    -- merging, we copy over all recent data and start appending to a new list
-    -- to replace the list rather than inserting in the middle of the list.
-    local other = data.analytics.seen_items
-    local mine = HironCraftScan.DB.analytics.seen_items
-    if not mine then
-        HironCraftScan.DB.analytics.seen_items = other
-        OnExitUpdate()
-        return
-    end
-    if not other then
-        return
-    end
-
-    for itemID, otherItem in pairs(other) do
-        local myItem = mine[itemID]
-        if not myItem then
-            mine[itemID] = otherItem
-        else
-            -- If one side has identified the profession, accept it if we have
-            -- not yet. If there's a difference, we leave our value in place and
-            -- spit out a message about it.
-            if otherItem.ppID then
-                if not myItem.ppID then
-                    myItem.ppID = otherItem.ppID
-                elseif otherItem.ppID ~= myItem.ppID then
-                    item = Item:CreateFromItemID(itemID)
-                    item:ContinueOnItemLoad(function()
-                        local myProf = HironCraftScan.Utils.ColorizedProfessionNameByID(myItem.ppID)
-                        local otherProf =
-                            HironCraftScan.Utils.ColorizedProfessionNameByID(otherItem.ppID)
-                        print(
-                            string.format(
-                                L(LID.ANALYTICS_PROF_MISMATCH),
-                                item:GetItemLink(),
-                                myProf,
-                                otherProf
-                            )
-                        )
-                    end)
-                end
-            end
-
-            local myTimes = myItem.times
-            local otherTimes = otherItem.times
-            local merged, times = MergeTimes(myTimes, otherTimes)
-            if merged then
-                myItem.times = times
-            else
-                assert(myTimes == times)
-            end
-        end
-    end
-
-    OnExitUpdate()
-end
-
-function HironCraftScanComm:ShareAnalytics(targetAccountID, sinceLastUpdate)
-    SendPing(targetAccountID, function(senderID, sender)
-        ShareAnalytics_(targetAccountID, sender, SharingState.InitialInquiry, sinceLastUpdate)
-    end)
-end
-
 local function MakeUUID()
     local template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
     return string.gsub(template, '[xy]', function(c)
@@ -2448,7 +2199,15 @@ local ALERT_OPERATIONS = {
 local BULK_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareCharacterData] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletionRepair] = true,
-    [HironCraftScanComm.Operations.ShareAnalytics] = true,
+    [HironCraftScanComm.Operations.AnalyticsOffer] = true,
+    [HironCraftScanComm.Operations.AnalyticsPull] = true,
+    [HironCraftScanComm.Operations.AnalyticsEvents] = true,
+}
+
+local ANALYTICS_OPERATIONS = {
+    [HironCraftScanComm.Operations.AnalyticsOffer] = true,
+    [HironCraftScanComm.Operations.AnalyticsPull] = true,
+    [HironCraftScanComm.Operations.AnalyticsEvents] = true,
 }
 
 local function PriorityForOperation(operation)
@@ -2462,6 +2221,9 @@ local function PriorityForOperation(operation)
 end
 
 local function PrefixForOperation(operation)
+    if ANALYTICS_OPERATIONS[operation] then
+        return HIRONCRAFT_ANALYTICS_COMM_PREFIX
+    end
     -- Public operations must stay on the original prefix: other players'
     -- clients (possibly older versions) only listen there.
     if ALERT_OPERATIONS[operation]
@@ -2675,6 +2437,11 @@ function HironCraftScanComm:Transmit(data, operation, target, onSent)
 
     local priority = PriorityForOperation(operation)
     local prefix = PrefixForOperation(operation)
+    -- Order traffic is load: analytics waits for a quiet period.
+    if priority == 'ALERT' and operation ~= HironCraftScanComm.Operations.Ping
+        and HironCraftScan.AnalyticsLog then
+        HironCraftScan.AnalyticsLog.NoteActivity()
+    end
     if priority == 'ALERT' then
         -- Critical order updates are small. Serialize them immediately so the
         -- addon queues the whisper in the same frame as the fulfillment event;
@@ -2805,9 +2572,14 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveShareOrderCompletion(sender, msg.data, msg.senderID)
         elseif
             (hasFull or hasAnalytics)
-            and msg.operation == HironCraftScanComm.Operations.ShareAnalytics
+            and HironCraftScan.AnalyticsSync
+            and HironCraftScan.AnalyticsSync.Handles(msg.operation)
         then
-            ReceiveShareAnalytics(sender, msg.data, msg.senderID)
+            HironCraftScan.AnalyticsSync.Receive(msg.operation, sender, msg.data, msg.senderID)
+        end
+        if ALERT_OPERATIONS[msg.operation] and msg.operation ~= HironCraftScanComm.Operations.Ping
+            and HironCraftScan.AnalyticsLog then
+            HironCraftScan.AnalyticsLog.NoteActivity()
         end
     end
 end
@@ -2830,7 +2602,8 @@ function HironCraftScanComm:OnCommReceived(prefix, payload, distribution, sender
         sender = HironCraftScan.GetUnitName(sender, true)
     end
 
-    if prefix ~= HIRONCRAFT_SCAN_COMM_PREFIX and prefix ~= HIRONCRAFT_BULK_COMM_PREFIX then
+    if prefix ~= HIRONCRAFT_SCAN_COMM_PREFIX and prefix ~= HIRONCRAFT_BULK_COMM_PREFIX
+        and prefix ~= HIRONCRAFT_ANALYTICS_COMM_PREFIX then
         return
     end
 
@@ -2861,6 +2634,11 @@ function HironCraftScanComm:OnCommReceived(prefix, payload, distribution, sender
     -- OnUpdate won't fire if the frame is hidden, which is is by default when
     -- fetched from the pool.
     processing:Show()
+end
+
+-- The character a linked account was last heard from, if that was recent.
+function HironCraftScanComm:FreshTarget(accountID)
+    return FreshTargetForAccount(accountID)
 end
 
 function HironCraftScanComm:LinkState(sourceID)

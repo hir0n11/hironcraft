@@ -366,6 +366,56 @@ do
 end
 print('Reply safety tests passed (crafter ads, hidden banners, whisper retargeting, stale requests).')
 
+-- Analytics: the scanner and the greeting write the journal. "LF bs" then the
+-- item is one conversation (a replacement), the greeting counts, and a
+-- greeting the server swallowed is taken back.
+do
+    loadSource('Customer/AnalyticsLog.lua')
+    local savedAnalytics=Scan.DB.analytics
+    Scan.DB.analytics={}
+    local function kinds()
+        local list={}
+        for _, event in ipairs(Scan.DB.analytics.open.events) do
+            if event.k~='m' then list[#list+1]=event end
+        end
+        return list
+    end
+    reset()
+    scan('LF bs')
+    scan('LF '..a)
+    local events=kinds()
+    assert(#events==3 and events[1].k=='r' and events[2].k=='r' and events[3].k=='x',
+        'a narrowed request was not recorded as one conversation')
+    assert(events[1].p==164 and not events[1].i and events[2].i==1001
+        and events[3].id==events[1].id and events[3].to==events[2].id and events[2].id==response(101).requestToken)
+    local mentioned=false
+    for _, event in ipairs(Scan.DB.analytics.open.events) do
+        if event.k=='m' and event.i==1001 and event.p==164 then mentioned=true end
+    end
+    assert(mentioned, 'the item link was not counted as a mention')
+    Scan.GreetCustomer('LeftButton', order(101))
+    events=kinds()
+    assert(#events==4 and events[4].k=='g' and events[4].id==response(101).requestToken, 'the greeting was not recorded')
+    -- The server refuses it: the greeting is taken back from the journal too.
+    reset()
+    Scan.DB.analytics={}
+    scan('LF '..a)
+    -- A clock past the earlier back-off whose own back-off ends before the
+    -- fixed GetTime() of the rest of the file.
+    local realGetTime,realAfter=GetTime,C_Timer.After
+    GetTime=function() return 90 end
+    C_Timer.After=function() end
+    Scan.GreetCustomer('LeftButton', order(101))
+    assert(#kinds()==2)
+    Scan.Utils.NoteChatThrottled()
+    events=kinds()
+    assert(#events==1 and events[1].k=='r', 'a swallowed greeting stayed in the journal')
+    GetTime,C_Timer.After=realGetTime,realAfter
+    Scan.DB.analytics=savedAnalytics
+    Scan.AnalyticsLog=nil
+end
+print('Analytics recording passed (requests, narrowing, mentions, greetings, swallowed greetings).')
+
 -- A broad request creates one click-only placeholder row. A later profession
 -- or item clarification replaces it even when the customer does not repeat LF.
 reset()

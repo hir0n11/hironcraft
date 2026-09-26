@@ -452,6 +452,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             if HironCraftScan.RequestTracking and HironCraftScan.RequestTracking.GreetingSent then
                 HironCraftScan.RequestTracking.GreetingSent(info, { response })
             end
+            -- The crafter already wrote to them: for analytics it was greeted.
+            if HironCraftScan.AnalyticsLog then HironCraftScan.AnalyticsLog.Greeting(target, response) end
         end
 
         do
