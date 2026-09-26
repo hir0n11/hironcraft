@@ -19,6 +19,9 @@ Scan.AnalyticsSync = M
 M.BATCH = 150
 M.OFFER_INTERVAL = 15 * 60
 M.ANSWER_SECONDS = 30
+-- The first version that exchanges analytics.
+M.FIRST_VERSION = '0.4.41'
+local ONLINE_SECONDS = 60
 local TICK_SECONDS = 60
 
 M.Operations = {
@@ -83,6 +86,37 @@ local function Reach(accountID, callback)
     end
 end
 
+-- '0.4.40' < '0.4.41'; anything that is not a version counts as older.
+local function Older(version, than)
+    if type(version) ~= 'string' or not version:match('^%d') then return true end
+    local a, b = {}, {}
+    for part in version:gmatch('%d+') do a[#a + 1] = tonumber(part) end
+    for part in than:gmatch('%d+') do b[#b + 1] = tonumber(part) end
+    for index = 1, math.max(#a, #b) do
+        local x, y = a[index] or 0, b[index] or 0
+        if x ~= y then return x < y end
+    end
+    return false
+end
+M.Older = Older
+
+-- Why a linked account did not answer "Exchange now".
+local function ReportSilence(accountID)
+    local comm = Comm()
+    local account = Accounts()[accountID] or {}
+    local heard = comm and comm.LastHeard and comm:LastHeard(accountID)
+    local version = account.addon_version
+    if not heard or time() - heard > ONLINE_SECONDS then
+        Say(string.format(L('Analytics exchange: %s is not online'), Name(accountID)))
+    elseif version == nil or version == 'old' then
+        Say(string.format(L('Analytics exchange: %s runs a HironCraft older than 0.4.45'), Name(accountID)))
+    elseif Older(version, M.FIRST_VERSION) then
+        Say(string.format(L('Analytics exchange: %s runs HironCraft %s'), Name(accountID), version))
+    else
+        Say(string.format(L('Analytics exchange: %s did not answer'), Name(accountID)))
+    end
+end
+
 function M.Handles(operation)
     return operation == M.Operations.Offer or operation == M.Operations.Pull
         or operation == M.Operations.Events
@@ -123,7 +157,7 @@ function M.SyncNow()
                 C_Timer.After(M.ANSWER_SECONDS, function()
                     if sessions[accountID] == session and not session.answered then
                         sessions[accountID] = nil
-                        Say(string.format(L('Analytics exchange: %s did not answer'), Name(accountID)))
+                        ReportSilence(accountID)
                     end
                 end)
             end
@@ -152,6 +186,19 @@ function M.Receive(operation, sender, data, senderID)
     if session then session.answered = true end
 
     if operation == M.Operations.Offer then
+        -- Gathering is switched off over there.
+        if data.off then
+            if session then
+                sessions[senderID] = nil
+                Say(string.format(L('Analytics exchange: gathering is off on %s'), Name(senderID)))
+            end
+            return
+        end
+        -- Switched off here: say so to an exchange started by hand.
+        if not Log().IsEnabled() then
+            if force and not data.reply then Send(M.Operations.Offer, { off = true, reply = true }, sender) end
+            return
+        end
         if not Ready(force) then return end
         local have = tonumber(data.seq) or 0
         local got = tonumber(account.analytics_received) or 0
@@ -202,7 +249,9 @@ function M.Status()
     local list = {}
     for accountID, account in pairs(Accounts()) do
         if MayShare(account) then
-            list[#list + 1] = { name = Name(accountID), at = tonumber(account.analytics_synced_at) }
+            local version = account.addon_version
+            list[#list + 1] = { name = Name(accountID), at = tonumber(account.analytics_synced_at),
+                version = version ~= 'old' and version or nil }
         end
     end
     table.sort(list, function(lhs, rhs) return lhs.name < rhs.name end)

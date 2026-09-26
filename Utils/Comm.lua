@@ -2419,6 +2419,18 @@ local STATUS_ORDER_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareOrderOutcome] = true,
 }
 
+-- This copy's HironCraft version (the toc), sent along so a linked account
+-- can tell which version answers it.
+local addonVersion = nil
+local function AddonVersion()
+    if addonVersion == nil then
+        local get = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+        local ok, version = pcall(get, 'HironCraft', 'Version')
+        addonVersion = ok and type(version) == 'string' and version or false
+    end
+    return addonVersion or nil
+end
+
 function HironCraftScanComm:Transmit(data, operation, target, onSent)
     if STATUS_ORDER_OPERATIONS[operation] then
         data = CompactOrderPayload(data)
@@ -2426,6 +2438,7 @@ function HironCraftScanComm:Transmit(data, operation, target, onSent)
     local msg = {
         operation = operation,
         version = HironCraftScan.CONST.CURRENT_VERSION,
+        addon = AddonVersion(),
         data = data,
     }
 
@@ -2534,6 +2547,8 @@ local function ReceiveDeserialized(msg, sender)
 
         remoteTargets = remoteTargets or {}
         ReceiveRemoteTarget(msg.senderID, sender)
+        -- Versions before 0.4.45 do not say theirs.
+        linkedAccount.addon_version = type(msg.addon) == 'string' and msg.addon or 'old'
 
         if msg.operation == HironCraftScanComm.Operations.Ping then
             ReceivePing(sender, msg.data, msg.senderID)
@@ -2639,6 +2654,15 @@ end
 -- The character a linked account was last heard from, if that was recent.
 function HironCraftScanComm:FreshTarget(accountID)
     return FreshTargetForAccount(accountID)
+end
+
+-- When anything last came from that linked account, or nil.
+function HironCraftScanComm:LastHeard(accountID)
+    local latest = nil
+    for _, seen in pairs(remoteTargets and remoteTargets[accountID] or {}) do
+        if type(seen) == 'number' and (not latest or seen > latest) then latest = seen end
+    end
+    return latest
 end
 
 -- The linked account's character: the one just heard from, or whichever

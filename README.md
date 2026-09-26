@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Linked accounts say their version (0.4.45)
+
+- Every message between linked accounts carries the sender's HironCraft
+  version, and each account remembers it. When "Exchange now" gets no answer
+  the chat says why: the account is not online, runs a HironCraft older than
+  0.4.45 (or one that cannot exchange analytics), or is current and simply
+  did not answer. An account with gathering switched off answers that it is
+  off instead of keeping quiet. The button's tooltip shows each account's
+  version next to its last exchange.
+
 ## Analytics: exchange you can see, one request per conversation, search (0.4.44)
 
 - "Exchange now" finds the linked accounts (pinging them when the link is

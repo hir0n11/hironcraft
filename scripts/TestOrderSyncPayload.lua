@@ -29,6 +29,7 @@ function GetTime() return 10 end
 function ChatFrame_AddMessageEventFilter() end
 function issecretvalue() return false end
 C_Timer={After=function(delay,callback) timers[#timers+1]={delay=delay,callback=callback} end}
+C_AddOns={GetAddOnMetadata=function(name,field) return name=='HironCraft' and field=='Version' and '0.4.45' or nil end}
 
 local Scan={CONST={TEXT={},CURRENT_VERSION=1},LOCAL={GetText=function(_,key) return key end},
     DB={settings={},realm={},customers={},listed_orders={}},State={realmID=1},
@@ -198,3 +199,20 @@ local retry=find(op.ShareOrderMaterials)
 assert(retry and retry.data.data.batch~=lost.data.data.batch
     and retry.data.data.statuses[1].craftingOrderID==50,'lost material list was not retried')
 print('Order sync payload tests passed (lean marks, bulk prefix, coalescing, single material batch, separate ACKs, reordering, isolation, retry).')
+
+-- Every message says which HironCraft sent it, and the receiver keeps it per
+-- account; analytics travels on a prefix of its own.
+sent={}
+actAs('source','receiver')
+comm:Transmit({seq=1},op.AnalyticsOffer,'Receiver-Realm');flushFrames()
+local offer=only(op.AnalyticsOffer)
+assert(offer.prefix=='HIRONCRAFT_ANLT' and offer.data.addon=='0.4.45','an analytics offer went out wrong')
+actAs('receiver','source')
+local fromNew=copy(offer);fromNew.data.operation=op.Ping;fromNew.data.data={state=2}
+receive(fromNew,'Source-Realm')
+assert(Scan.DB.realm.linked_accounts.source.addon_version=='0.4.45','the sender version was not kept')
+local fromOld=copy(fromNew);fromOld.data.addon=nil
+receive(fromOld,'Source-Realm')
+assert(Scan.DB.realm.linked_accounts.source.addon_version=='old','a sender without a version was not marked old')
+print('Linked account versions passed.')
+

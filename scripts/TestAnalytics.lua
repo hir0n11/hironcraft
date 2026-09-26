@@ -314,10 +314,35 @@ print('Analytics cross-account requests passed.')
 local said, timers = {}, {}
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) said[#said + 1] = text end }
 C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+-- Silence is explained: offline, an old version, or simply no answer.
+local heard = nil
+HironCraftScanComm.LastHeard = function() return heard end
+local function Silent(expected)
+    said, timers = {}, {}
+    as(dbA, function() Sync.SyncNow() end)
+    outbox = {}
+    for _, fn in ipairs(timers) do as(dbA, fn) end
+    assert(said[#said]:find(expected, 1, true), 'expected "' .. expected .. '", got: ' .. tostring(said[#said]))
+end
+Silent('is not online')
+heard = now
+dbA.realm.linked_accounts.other.addon_version = 'old'
+Silent('older than 0.4.45')
+dbA.realm.linked_accounts.other.addon_version = '0.4.40'
+Silent('runs HironCraft 0.4.40')
+dbA.realm.linked_accounts.other.addon_version = '0.4.45'
+Silent('did not answer')
+assert(Sync.Older('0.4.9', '0.4.41') and not Sync.Older('0.4.41', '0.4.41') and not Sync.Older('0.5', '0.4.41')
+    and Sync.Older('old', '0.4.41'))
+-- Gathering switched off over there: it says so instead of keeping quiet.
+said, timers = {}, {}
+dbB.analytics.enabled = false
 as(dbA, function() Sync.SyncNow() end)
-outbox = {}
-for _, fn in ipairs(timers) do as(dbA, fn) end
-assert(said[#said]:find('did not answer', 1, true), 'a silent account was not reported')
+deliver()
+local off = false
+for _, line in ipairs(said) do if line:find('gathering is off on other', 1, true) then off = true end end
+assert(off, 'a switched-off account was not reported: ' .. table.concat(said, ' | '))
+dbB.analytics.enabled = nil
 said, timers = {}, {}
 as(dbB, function() Log.Request('Bee-Realm', { requestToken = 'b9', itemID = 1001, time = now }) end)
 as(dbA, function() Sync.SyncNow() end)

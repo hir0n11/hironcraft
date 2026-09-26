@@ -867,7 +867,8 @@ local function Create()
         local status = Scan.AnalyticsSync and Scan.AnalyticsSync.Status() or {}
         if #status > 0 then GameTooltip:AddLine(' ') end
         for _, account in ipairs(status) do
-            GameTooltip:AddDoubleLine(account.name,
+            local name = account.name .. (account.version and (' |cff9d9d9d(' .. account.version .. ')|r') or '')
+            GameTooltip:AddDoubleLine(name,
                 account.at and date('%d.%m %H:%M', account.at) or L('never exchanged'), 1, 1, 1, 0.7, 0.7, 0.7)
         end
         GameTooltip:Show()
