@@ -25,6 +25,11 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A key to skip the top Quick Reply (0.4.68)
+
+- Key Bindings - HironCraftScan: "Skip top Quick Reply" puts the top quick
+  reply away unsent, as a right click on it does; the next one moves up.
+
 ## Analytics: time online as a gauge under the bar (0.4.67)
 
 - The grey block behind each bar used the chart's height, so it looked like

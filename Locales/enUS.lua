@@ -437,6 +437,7 @@ HironCraftScan.L = {
     ['Quick Replies'] = 'Quick Replies',
     ['Quick Reply'] = 'Quick Reply',
     ['Send top Quick Reply'] = 'Send top Quick Reply',
+    ['Skip top Quick Reply'] = 'Skip top Quick Reply',
     ['Quick Replies Description'] = 'Edit, rename or delete any quick reply, including defaults. Replies are sent only by click or binding; long material reports may use several whispers.',
     ['Quick reply click help'] = '|cffffd100Left click: Send this reply|r',
     ['Quick reply dismiss help'] = '|cffffd100Right click: Dismiss|r',

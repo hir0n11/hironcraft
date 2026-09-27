@@ -1113,6 +1113,8 @@ local function doOnce()
         string.format('%s - %s', L(LID.GREET_BUTTON_BINDING_NAME), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_QUICK_REPLY =
         string.format('%s - %s', L('Send top Quick Reply'), L(LID.HIRONCRAFT_SCAN))
+    BINDING_NAME_HIRONCRAFT_SCAN_DISMISS_QUICK_REPLY =
+        string.format('%s - %s', L('Skip top Quick Reply'), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_CHAT_CURRENT_CUSTOMER =
         string.format('%s - %s', L(LID.CHAT_BUTTON_BINDING_NAME), L(LID.HIRONCRAFT_SCAN))
     BINDING_NAME_HIRONCRAFT_SCAN_DISMISS_CURRENT_CUSTOMER =

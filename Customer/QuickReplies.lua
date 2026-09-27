@@ -1601,9 +1601,22 @@ function QuickReplies:SendTopReply(userInitiated)
     return true
 end
 
+-- The top toast put away unsent, as a right click on it does.
+function QuickReplies:DismissTopReply(userInitiated)
+    if userInitiated ~= true then return false end
+    local toast = VisibleToasts()[1]
+    if not toast or not toast:IsVisible() then return false end
+    DismissToast(toast)
+    return true
+end
+
 -- Key bindings and mouse clicks share the same context checks and cooldown.
 function HironCraftScanSendQuickReply()
     QuickReplies:SendTopReply(true)
+end
+
+function HironCraftScanDismissQuickReply()
+    QuickReplies:DismissTopReply(true)
 end
 
 local function SetupToast(toast, option, customerInfo, serial, optionIndex)

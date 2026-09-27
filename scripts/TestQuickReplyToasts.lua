@@ -301,7 +301,18 @@ Scan.Utils.SendResponses=send
 HironCraftScanSendQuickReply()
 assert(#sent==baseline+5 and sent[#sent].text=='hey hey','failed send consumed the cooldown')
 assert(not QuickReplies:SendTopReply(true),'empty stack consumed keyboard action')
-print('Quick reply cooldown and keyboard tests passed (6s, independent recipients/text, failure retry).')
+-- The skip key puts the top reply away unsent; the next one moves up.
+now=now+10
+propose('CooldownBuyer','sent'); propose('OtherCooldownBuyer','yo')
+assert(#visible()==2)
+local beforeSkip=#sent
+assert(not QuickReplies:DismissTopReply(false),'unguarded skip entry point')
+HironCraftScanDismissQuickReply()
+assert(#sent==beforeSkip and #visible()==1 and visible()[1].option.customer=='CooldownBuyer',
+    'the skip key did not put the newest reply away')
+HironCraftScanDismissQuickReply()
+assert(#sent==beforeSkip and #visible()==0 and not QuickReplies:DismissTopReply(true),'the skip key sent or kept a reply')
+print('Quick reply cooldown and keyboard tests passed (6s, independent recipients/text, failure retry, skip).')
 
 now=now+10
 propose('CooldownBuyer','sent')
