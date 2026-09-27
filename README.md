@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No "Player not found." at login (0.4.64)
+
+- At login the chat filter fills the game's ignore list from its own, and
+  the game answers "Player not found." for players who were renamed,
+  deleted or banned since. Those lines right after its own requests are no
+  longer shown, and a player the game failed to find twice is not asked for
+  again (the chat still hides them; the ignore list marks them "not found
+  by the game").
+
 ## "Save chat text" without the game's copy of the line (0.4.63)
 
 - "Save chat text" asked the game for the line's text and, when none came

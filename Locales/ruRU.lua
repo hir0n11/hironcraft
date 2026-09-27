@@ -660,6 +660,7 @@ L["Remove the leader from the ignore list"] = "Убрать лидера из и
 L["Ignore the leader"] = "Игнорировать лидера"
 L["Remove from the ignore list (HironCraft)"] = "Убрать из игнор-листа (HironCraft)"
 L["Ignore (HironCraft)"] = "Игнорировать (HironCraft)"
+L["not found by the game"] = "игра не находит"
 L["The game did not give the text of this line."] = "Игра не отдала текст этой строки."
 L["No greeting offers here"] = "Без предложений гритингов"
 L["No greeting offers here tooltip"] = "Пока отмечено, этот аккаунт не предлагает гритинги: запросы попадают в список без баннера, карточки гритинга, звука и мигания иконки, а щелчок по строке отправляет гритинг как обычно. Для крафтера, за которого заказы ловят связанные аккаунты. Остаётся включённым, пока не снимешь; действует только на этом аккаунте."

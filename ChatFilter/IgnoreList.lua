@@ -23,6 +23,9 @@ local BLIZZARD_LIMIT = 50
 local REPLY_EVERY_SECONDS = 5 * 60
 local REMOVED_KEPT_SECONDS = 90 * 24 * 60 * 60
 local NOTICE_SECONDS = 10
+-- A player the game failed to find this often (renamed, deleted, banned) is
+-- no longer put on its list; the chat still hides them by name.
+local GAME_MISSES_LIMIT = 2
 
 local DEFAULTS = { reply = false, decline = true, warn = true, lfg = true, blizzard = true, same_realm = true }
 
@@ -166,11 +169,16 @@ function I.GameListCount()
     return snapshot.valid and snapshot.count or nil
 end
 
+-- When we last asked the game to change its list: its "Player not found."
+-- names nobody, so any that comes right after is taken for ours.
+local lastGameCall = nil
+
 local function Game(action, name)
     local call = C_FriendList and C_FriendList[action]
     if not call then return false end
     local key = I.Key(name)
     if key then expected[key] = Now() + NOTICE_SECONDS end
+    lastGameCall = Now()
     syncing = true
     local ok = pcall(call, name)
     syncing = false
@@ -181,6 +189,8 @@ end
 local function FitsGameList(ignore, key)
     if not ignore.blizzard or not snapshot.valid or snapshot.keys[key] then return false end
     if snapshot.count >= BLIZZARD_LIMIT then return false end
+    local entry = ignore.players[key]
+    if entry and (tonumber(entry.game_misses) or 0) >= GAME_MISSES_LIMIT then return false end
     if ignore.same_realm and RealmOf(key) ~= Scan.FilterEngine.Lower(MyRealm()) then return false end
     return true
 end
@@ -196,8 +206,11 @@ function I.HidesSystemNotice(message)
     local ignore = I.Settings()
     if not ignore then return false end
     if message == rawget(_G, 'ERR_IGNORE_FULL') then return true end
-    for _, global in ipairs({ 'ERR_IGNORE_ADDED_S', 'ERR_IGNORE_REMOVED_S', 'ERR_IGNORE_ALREADY_S',
-        'ERR_IGNORE_NOT_FOUND' }) do
+    if lastGameCall and Now() - lastGameCall <= NOTICE_SECONDS
+        and (message == rawget(_G, 'ERR_IGNORE_NOT_FOUND') or message == rawget(_G, 'ERR_FRIEND_NOT_FOUND')) then
+        return true
+    end
+    for _, global in ipairs({ 'ERR_IGNORE_ADDED_S', 'ERR_IGNORE_REMOVED_S', 'ERR_IGNORE_ALREADY_S' }) do
         local pattern = PatternOf(rawget(_G, global))
         local name = pattern and message:match(pattern)
         local key = name and I.Key(name)
@@ -282,13 +295,27 @@ function I.Sync()
             end
         end
     end
+    local tried = {}
     for _, entry in ipairs(I.List()) do
         if snapshot.count >= BLIZZARD_LIMIT then break end
         if FitsGameList(ignore, entry.key) then
             Game('AddIgnore', entry.name)
+            tried[entry.key] = true
             snapshot.keys[entry.key] = entry.name
             snapshot.count = snapshot.count + 1
         end
+    end
+    -- A little later: whoever the game did not take was not found by it.
+    if next(tried) and C_Timer then
+        C_Timer.After(NOTICE_SECONDS, function()
+            if not TakeSnapshot() then return end
+            for key in pairs(tried) do
+                local entry = ignore.players[key]
+                if entry then
+                    entry.game_misses = not snapshot.keys[key] and (tonumber(entry.game_misses) or 0) + 1 or nil
+                end
+            end
+        end)
     end
     return true
 end

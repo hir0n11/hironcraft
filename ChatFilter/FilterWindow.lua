@@ -449,7 +449,10 @@ end
 local IGNORE_COLUMNS = {
     { label = 'Player', fill = true, text = function(entry) return entry.name or entry.key end },
     { label = 'Since', width = 90, text = function(entry) return entry.at and date('%d.%m.%Y', entry.at) or '' end },
-    { label = 'Note', width = 220, text = function(entry) return OneLine(entry.note) end },
+    { label = 'Note', width = 220, text = function(entry)
+        if entry.note and entry.note ~= '' then return OneLine(entry.note) end
+        return (tonumber(entry.game_misses) or 0) >= 2 and '|cff808080' .. L('not found by the game') .. '|r' or ''
+    end },
 }
 
 local function CreateIgnoreTab(parent)

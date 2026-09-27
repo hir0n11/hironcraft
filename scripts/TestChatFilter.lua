@@ -15,6 +15,7 @@ ERR_FRIEND_OFFLINE_S = '%s has gone offline.'
 ERR_IGNORE_FULL = 'Your ignore list is full.'
 ERR_IGNORE_ADDED_S = '%s is now being ignored.'
 ERR_IGNORE_REMOVED_S = '%s is no longer being ignored.'
+ERR_IGNORE_NOT_FOUND = 'Player not found.'
 UNKNOWN = 'Unknown'
 
 -- Frames, timers and the chat hook.
@@ -65,6 +66,7 @@ end
 
 -- The game's ignore list.
 local gameList = { 'Oldspam', 'Forgiven' }
+local addCalls = {}
 local function IndexOf(name)
     for index, entry in ipairs(gameList) do if entry:lower() == name:lower() then return index end end
 end
@@ -72,6 +74,9 @@ C_FriendList = {
     GetNumIgnores = function() return #gameList end,
     GetIgnoreName = function(index) return gameList[index] end,
     AddIgnore = function(name)
+        addCalls[name] = (addCalls[name] or 0) + 1
+        -- Gone was renamed: the game does not find them.
+        if name:match('^Gone') then return end
         if #gameList < 50 and not IndexOf(name) then gameList[#gameList + 1] = (name:gsub('%-Kazzak$', '')) end
     end,
     DelIgnore = function(name)
@@ -204,14 +209,31 @@ F.DB().presence.friends = false
 assert(Shown('CHAT_MSG_SYSTEM', 'Buddy has gone offline.'), 'friends were hidden with the option off')
 
 -- The game's list ----------------------------------------------------------------
+I.Add('Gone', { quiet = true, at = now + 100 })
 Fire('IGNORELIST_UPDATE')
 RunTimers()
+-- Gone is not found: the game's line is ours and not shown, twice missed
+-- they are not asked for again, and the chat still hides them.
+assert(addCalls['Gone-Kazzak'] == 1, 'Gone was not tried')
+assert(not Shown('CHAT_MSG_SYSTEM', 'Player not found.'), "the game's not-found line after the sync was shown")
+RunTimers()
+assert(I.Entry('Gone').game_misses == 1, 'a player the game did not find was not noted')
+I.Sync()
+RunTimers()
+assert(addCalls['Gone-Kazzak'] == 2 and I.Entry('Gone').game_misses == 2)
+I.Sync()
+RunTimers()
+assert(addCalls['Gone-Kazzak'] == 2, 'a player the game never finds was asked for again')
+assert(I.IsIgnored('Gone') and not Shown('CHAT_MSG_SAY', 'hi', 'Gone-Kazzak'), 'the chat stopped hiding them')
 assert(I.IsIgnored('Oldspam'), "someone ignored in the game was not taken in")
 assert(not IndexOf('Forgiven'), "someone unignored here stayed on the game's list")
 assert(IndexOf('Goodgirl') and IndexOf('Spammer'), "the game's list was not filled")
 -- Those lines were ours: not shown.
 assert(not Shown('CHAT_MSG_SYSTEM', 'Goodgirl is now being ignored.'), 'a sync line was shown')
 assert(Shown('CHAT_MSG_SYSTEM', 'Somebody is now being ignored.'), "someone else's ignore line was hidden")
+-- Later, a not-found line is the player's own (a mistyped /ignore).
+clock = clock + 60
+assert(Shown('CHAT_MSG_SYSTEM', 'Player not found.'), "someone's own not-found line was hidden")
 -- Ignoring and unignoring through the game changes this list.
 C_FriendList.AddIgnore('Newbie')
 assert(I.IsIgnored('Newbie-Kazzak'), 'an ignore through the game was not kept')

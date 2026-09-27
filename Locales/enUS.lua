@@ -651,6 +651,7 @@ HironCraftScan.L = {
     ["Ignore the leader"] = "Ignore the leader",
     ["Remove from the ignore list (HironCraft)"] = "Remove from the ignore list (HironCraft)",
     ["Ignore (HironCraft)"] = "Ignore (HironCraft)",
+    ["not found by the game"] = "not found by the game",
     ["The game did not give the text of this line."] = "The game did not give the text of this line.",
     ["No greeting offers here"] = "No greeting offers here",
     ["No greeting offers here tooltip"] = "While checked, this account offers no greetings: requests are listed without the banner, the greeting card, the sound or the flashing icon, and a click on the row greets as usual. For a crafter whose linked accounts catch the orders. Stays on until unchecked; applies to this account only.",
