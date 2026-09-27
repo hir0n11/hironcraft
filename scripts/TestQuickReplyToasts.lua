@@ -483,6 +483,11 @@ local awayDecline={status='rejected',craftingOrderID=97001,crafterFullName='Sell
 Scan.OrderFulfillment.GetStatus=function() return awayDecline end
 QuickReplies:OnOrderFulfillmentUpdated(awayOrder,awayDecline)
 assert(#visible('AwayBuyer')==1,'the crafter could not tell a customer why the order was declined')
+-- ...and the card sends from there, not only after a relog.
+local beforeDecline=#sent
+click(visible('AwayBuyer')[1])
+assert(#sent==beforeDecline+1 and sent[#sent].customer=='AwayBuyer','the decline card did nothing on the crafter')
+Scan.DB.settings.status_replies_sent=nil
 dismissAll()
 local awayDone={status='fulfilled',craftingOrderID=97002,crafterFullName='Seller-Realm',
     requestToken=awayResponse.requestToken}
@@ -580,11 +585,15 @@ dismissAll()
 -- while the crafter is in, so the crafter answers the decline right away.
 awayResponse.conversationCharacter='Alt-Realm'
 Scan.DB.characters={['Seller-Realm']={},['Alt-Realm']={}}
-Scan.OrderFulfillment.GetStatus=function() return awayDecline end
-QuickReplies:OnOrderFulfillmentUpdated(awayOrder,
-    {status='rejected',craftingOrderID=97003,crafterFullName='Seller-Realm',
-        requestToken=awayResponse.requestToken})
+local altDecline={status='rejected',craftingOrderID=97003,crafterFullName='Seller-Realm',
+    requestToken=awayResponse.requestToken}
+Scan.OrderFulfillment.GetStatus=function() return altDecline end
+QuickReplies:OnOrderFulfillmentUpdated(awayOrder,altDecline)
 assert(#visible('AwayBuyer')==1,'a decline waited for a relog to the talking character')
+local beforeAlt=#sent
+now=now+60
+click(visible('AwayBuyer')[1])
+assert(#sent==beforeAlt+1,'the decline card needed a relog to the talking character to send')
 Scan.DB.characters=nil
 Scan.OrderFulfillment.GetStatus=nil
 dismissAll()

@@ -25,12 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The decline reply sends from the crafter (0.4.71)
+
+- A declined order's reply ("I checked your order. {reagent_issues}") was
+  offered on the crafting character but did nothing when clicked there ("Quick
+  reply is no longer available") unless that character had also talked to the
+  customer; it took a relog to the talking character. The click now accepts
+  the crafter on the customer's side, as the offer does.
+- The "~" before estimated tips on the analytics tiles is gone.
+
 ## Analytics: tips as received (0.4.70)
 
 - Tips in the analytics are what you received: the customer's tip less the
   Artisan's Consortium's cut, which is now kept with each delivered order.
-  Orders recorded earlier get the cut at the share the newer ones show; the
-  Tips and Average tip tiles then carry a "~". The customer's coin still
+  Orders recorded earlier get the cut at the share the newer ones show. The
+  customer's coin still
   follows the tip they set.
 
 ## Text selection: double click and drag; clearer hide options (0.4.69)

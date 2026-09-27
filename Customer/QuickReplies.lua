@@ -1477,7 +1477,13 @@ function QuickReplies:ResolvePopupResponse(option)
                 return nil
             end
         end
-        return self:IsConversationCharacter(response) and response or nil
+        -- As when it was offered: the character that talked to the customer,
+        -- or the crafter on the customer's side.
+        if self:IsConversationCharacter(response) then return response end
+        if response and self:IsOrderCrafter(response, option.statusEntry) and self:IsOnConversationSide(response) then
+            return response
+        end
+        return nil
     end
     return response or FindEquivalentResponse(option)
 end

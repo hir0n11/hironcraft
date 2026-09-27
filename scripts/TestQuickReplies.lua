@@ -244,8 +244,12 @@ local rejectedOption = QuickReplies:BuildRejectedOrderOption(
 )
 assert(rejectedOption, "rejected order did not create a quick reply")
 assert(rejectedOption.response == first)
-currentCharacter = "Farrierr-Realm"
+-- Neither the talking character nor the crafter: nothing is sent.
+currentCharacter = "Other-Realm"
 assert(QuickReplies:ResolvePopupResponse(rejectedOption) == nil, "stale rejection popup sent from another character")
+-- The crafter of the order may send the decline it is offered.
+currentCharacter = "Farrierr-Realm"
+assert(QuickReplies:ResolvePopupResponse(rejectedOption) == first, "the crafter could not send the decline")
 currentCharacter = "Seller-Realm"
 assert(
     rejectedOption.reply == 'I checked your order. Recorded material issues',
