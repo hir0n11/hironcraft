@@ -25,6 +25,11 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No "attached order list hooks" at login (0.4.74)
+
+- The order panel's debugging line is printed only with the order debugging
+  (CO-debug) switched on.
+
 ## Chat filter: other people's duels (0.4.73)
 
 - "What is hidden" - Other system messages - Duel results: "A has defeated

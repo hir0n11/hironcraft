@@ -2158,7 +2158,8 @@ local function AttachHooks()
             end
         end)
     end
-    print("|cffb19cd9HironCraft CL|r attached order list hooks")
+    -- Only for the order debugging (CO-debug), not on every login.
+    if CO.DActionPrint then CO:DActionPrint("attached order list hooks") end
     return true
 end
 
