@@ -203,6 +203,18 @@ end }
 Capture.Show = function(text) shown = shown + 1; assert(text == 'message from chat'); return true end
 assert(Capture.ShowForLine('44') and chatReads == 1 and shown == 1)
 assert(not Capture.ShowForLine('bad') and chatReads == 1)
+-- The game gives no text back: the line the chat filter remembers; neither
+-- has it: nothing opens, and the chat says why.
+local countingChat, countingShow = C_ChatInfo, Capture.Show
+local notices = {}
+DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) notices[#notices + 1] = text end }
+C_ChatInfo = { GetChatLineText = function() return nil end }
+Scan.ChatFilter = { LineText = function(id) return id == 45 and 'remembered line' or nil end }
+Capture.Show = function(text) shown = shown + 1; assert(text == 'remembered line'); return true end
+assert(Capture.ShowForLine(45) and shown == 2, 'the remembered line was not used')
+assert(not Capture.ShowForLine(46) and shown == 2 and notices[1]:find('did not give', 1, true),
+    'a line without text failed silently')
+C_ChatInfo, Capture.Show, Scan.ChatFilter, DEFAULT_CHAT_FRAME, shown = countingChat, countingShow, nil, nil, 1
 
 Scan.DB.settings.explanations = {}
 Scan.DB.settings.ignored = {}

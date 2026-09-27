@@ -164,6 +164,8 @@ assert(not Shown('CHAT_MSG_CHANNEL', 'WTS M+ boost, fast', 'Seller-Kazzak', trad
     'a seller was shown')
 assert(F.Rules()[2].count == 49689, 'counted more than once for one line in three chat windows')
 assert(Shown('CHAT_MSG_CHANNEL', 'LF blacksmith for a weapon', 'Buyer-Kazzak', trade, tradeName), 'a request was hidden')
+assert(F.LineText(lineID) == 'LF blacksmith for a weapon' and F.LineText(tostring(lineID - 1)) == 'WTS M+ boost, fast',
+    'the lines are not remembered for the text selection tool')
 assert(Shown('CHAT_MSG_GUILD', 'WTS m+ boost', 'Guildie-Kazzak'), 'guild chat was filtered')
 assert(not Shown('CHAT_MSG_CHANNEL', '<Night Watch> recruit for raids', 'Rec-Kazzak', trade, tradeName),
     'guild recruitment was shown')

@@ -395,6 +395,23 @@ local function Remember(key, value)
     cache[key] = value
 end
 
+-- The last lines' text by their ID, hidden ones too: the text selection
+-- tool reads a line from here when the game does not give its text back.
+local LINE_MEMORY = 200
+local lineTexts, lineOrder = {}, {}
+
+function F.RememberLine(lineID, message)
+    if lineTexts[lineID] == nil then
+        lineOrder[#lineOrder + 1] = lineID
+        if #lineOrder > LINE_MEMORY then lineTexts[table.remove(lineOrder, 1)] = nil end
+    end
+    lineTexts[lineID] = message
+end
+
+function F.LineText(lineID)
+    return lineTexts[tonumber(lineID)]
+end
+
 local function LineKey(lineID)
     if not IsSecret(lineID) and type(lineID) == 'number' and lineID > 0 then return lineID end
     return nil
@@ -419,6 +436,7 @@ function F.MessageFilter(_, event, message, author, ...)
         if key then
             local known = cache[key]
             if known ~= nil then return known end
+            if type(message) == 'string' and not IsSecret(message) then F.RememberLine(key, message) end
         end
         local result = Evaluate(event, message, author, channelNumber, channelName)
         if key then Remember(key, result) end

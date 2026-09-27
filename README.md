@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## "Save chat text" without the game's copy of the line (0.4.63)
+
+- "Save chat text" asked the game for the line's text and, when none came
+  back, silently did nothing (seen on the laptop). The chat filter now keeps
+  the last 200 lines it saw, hidden ones too, and the text selection tool
+  takes the line from there when the game gives nothing; if neither has it,
+  the chat says so.
+
 ## No greeting offers on a crafter; analytics from the minimap (0.4.62)
 
 - "No greeting offers here" in the orders window, next to the stingy pause:

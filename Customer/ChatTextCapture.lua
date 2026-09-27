@@ -414,6 +414,7 @@ function Capture.Show(text)
     frame:ClearAllPoints()
     frame:SetPoint('CENTER', UIParent, 'CENTER', 0, 0)
     frame:Show()
+    frame:Raise()
     frame.Message.EditBox:SetFocus()
     frame.Message.EditBox:HighlightText(0, -1)
     return true
@@ -425,8 +426,21 @@ function Capture.ShowForLine(lineID)
         lineID = lineID:match('^%d+$') and tonumber(lineID) or nil
     end
     if type(lineID) ~= 'number' or lineID <= 0 then return false end
-    if not C_ChatInfo or not C_ChatInfo.GetChatLineText then return false end
-    local ok, text = pcall(C_ChatInfo.GetChatLineText, lineID)
-    if not ok then return false end
+    local text
+    if C_ChatInfo and C_ChatInfo.GetChatLineText then
+        local ok, value = pcall(C_ChatInfo.GetChatLineText, lineID)
+        if ok and not (issecretvalue and issecretvalue(value)) and type(value) == 'string' and value ~= '' then
+            text = value
+        end
+    end
+    -- The game does not always give a line's text back; the chat filter
+    -- keeps the last lines it saw.
+    local filter = HironCraftScan.ChatFilter
+    if not text and filter and filter.LineText then text = filter.LineText(lineID) end
+    if not text then
+        local chat = rawget(_G, 'DEFAULT_CHAT_FRAME')
+        if chat then chat:AddMessage('|cffffd200HironCraft:|r ' .. L('The game did not give the text of this line.')) end
+        return false
+    end
     return Capture.Show(text)
 end
