@@ -209,6 +209,8 @@ local function SnapshotOrderInfo(orderInfo, craftingOrderID, beforeCraft)
         orderType = orderInfo.orderType,
         npcCustomerName = orderInfo.npcCustomerName,
         tipAmount = tonumber(orderInfo.tipAmount),
+        -- What the Artisan's Consortium keeps of the tip on delivery.
+        consortiumCut = tonumber(orderInfo.consortiumCut),
         capturedAt = time(),
         reagentAudit = audit,
     }
@@ -541,6 +543,9 @@ local function SanitizeCompletionNotice(notice)
     clean.clockOffset = ValidClockOffset(notice.clockOffset)
     if type(notice.tipAmount) == 'number' and notice.tipAmount >= 0 then
         clean.tipAmount = math.floor(notice.tipAmount)
+    end
+    if type(notice.consortiumCut) == 'number' and notice.consortiumCut >= 0 then
+        clean.consortiumCut = math.floor(notice.consortiumCut)
     end
 
     clean.reagentAudit = CleanReagentAudit(notice.reagentAudit, clean.orderID)
@@ -1523,6 +1528,7 @@ function OrderFulfillment:RecordNotice(orderInfo, craftingOrderID, status, detai
         requestToken = orderInfo.requestToken,
         requestTime = tonumber(orderInfo.requestTime),
         tipAmount = tonumber(orderInfo.tipAmount),
+        consortiumCut = tonumber(orderInfo.consortiumCut),
         reagentAudit = CleanReagentAudit(orderInfo.reagentAudit, craftingOrderID or orderInfo.orderID),
     }
 

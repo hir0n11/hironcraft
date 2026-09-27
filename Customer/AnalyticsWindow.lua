@@ -602,8 +602,10 @@ local function UpdateSummary()
     end
     tiles.conversion.value:SetText(report and Percent(totals.conversion) or '')
     tiles.conversion.value:SetTextColor(ConversionColor(totals.conversion))
-    tiles.tips.value:SetText(report and Gold(totals.tips) or '')
-    tiles.averageTip.value:SetText(report and Gold(totals.averageTip) or '')
+    -- "~": part of the Consortium's cut is estimated (older orders).
+    local about = totals.tipsEstimated and totals.tips and totals.tips > 0 and '~' or ''
+    tiles.tips.value:SetText(report and about .. Gold(totals.tips) or '')
+    tiles.averageTip.value:SetText(report and about .. Gold(totals.averageTip) or '')
     LayoutTiles(frame.TileOrder)
     if not report then
         frame.Tiers:SetText('')

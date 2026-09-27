@@ -284,6 +284,24 @@ function M.Build(chunks, filters, context)
         end
     end
 
+    -- Tips as received: the customer's tip less the Artisan's Consortium's
+    -- cut. Orders recorded before the cut was kept get it at the share the
+    -- recorded ones show, marked as an estimate; with none recorded, as set.
+    local cutFrom, cutSum = 0, 0
+    for _, order in pairs(orders) do
+        if order.st == 'f' and order.tip and order.cut and order.tip > 0 then
+            cutFrom, cutSum = cutFrom + order.tip, cutSum + order.cut
+        end
+    end
+    local cutShare = cutFrom > 0 and cutSum / cutFrom or nil
+    local function Received(order)
+        if not order.tip then return nil end
+        if order.cut then return math.max(0, order.tip - order.cut) end
+        report.totals.tipsEstimated = true
+        if cutShare then return math.floor(order.tip * (1 - cutShare) + 0.5) end
+        return order.tip
+    end
+
     -- Every order delivered or declined in the period, conversation or not.
     local tierSeen = {}
     for key, order in pairs(orders) do
@@ -302,18 +320,19 @@ function M.Build(chunks, filters, context)
                     report.totals.orders = report.totals.orders + 1
                     report.hours.orders[Hour(order.t)] = report.hours.orders[Hour(order.t)] + 1
                     report.weekdays.orders[Weekday(order.t)] = report.weekdays.orders[Weekday(order.t)] + 1
-                    if order.tip then
-                        row.tips = row.tips + order.tip
+                    local tip = Received(order)
+                    if tip then
+                        row.tips = row.tips + tip
                         row.tipped = row.tipped + 1
-                        report.totals.tips = report.totals.tips + order.tip
+                        report.totals.tips = report.totals.tips + tip
                         report.totals.tipped = report.totals.tipped + 1
                     end
                     if person then
                         person.orders = person.orders + 1
-                        if order.tip then
-                            person.tips = person.tips + order.tip
+                        if tip then
+                            person.tips = person.tips + tip
                             person.tipped = person.tipped + 1
-                            person.maxTip = math.max(person.maxTip, order.tip)
+                            person.maxTip = math.max(person.maxTip, tip)
                         end
                         if not person.lastOrder or order.t > person.lastOrder then person.lastOrder = order.t end
                         if not tierSeen[person.key] then

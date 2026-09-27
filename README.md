@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: tips as received (0.4.70)
+
+- Tips in the analytics are what you received: the customer's tip less the
+  Artisan's Consortium's cut, which is now kept with each delivered order.
+  Orders recorded earlier get the cut at the share the newer ones show; the
+  Tips and Average tip tiles then carry a "~". The customer's coin still
+  follows the tip they set.
+
 ## Text selection: double click and drag; clearer hide options (0.4.69)
 
 - In the text selection window a double click followed by a drag selects

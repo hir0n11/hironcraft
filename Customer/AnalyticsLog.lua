@@ -18,7 +18,7 @@ local Scan = select(2, ...)
 --   c  customer;  f  side, 'H' or 'A';  id  request token
 --   i  item;  r  recipe;  p  profession;  s  slot;  lb  slot label
 --   x  crafter;  g  general request;  o  crafting order;  st  'f' / 'r'
---   tip  tip in copper;  to  the replacing token;  man  marked by hand
+--   tip  tip in copper;  cut  the Artisan's Consortium's part of it;  to  the replacing token;  man  marked by hand
 --   c (kind) a craft for a crafting order (op its craft operation, pr 1 when
 --      resourcefulness returned anything), with rs: the customer's reagents
 --      it returned, each { i item, n count, v price per unit when it
@@ -304,6 +304,7 @@ function M.Outcome(notice, source)
         c = notice.customerName, i = tonumber(notice.itemID), r = tonumber(notice.spellID),
         p = tonumber(notice.parentProfessionID), x = notice.crafterFullName,
         tip = status == 'f' and tonumber(notice.tipAmount) or nil,
+        cut = status == 'f' and tonumber(notice.consortiumCut) or nil,
         id = type(notice.requestToken) == 'string' and notice.requestToken or nil,
         f = CustomerSide(notice.customerGuid),
     }

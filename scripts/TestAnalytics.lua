@@ -482,3 +482,17 @@ assert(online.hours.online[13] == 2 and online.hours.possible[13] == 2,
     'the running slot counted in full: ' .. online.hours.online[13] .. ' of ' .. online.hours.possible[13])
 now = savedNow
 print('Analytics time online passed.')
+
+-- Tips as received: less the Consortium's cut; an order recorded without the
+-- cut gets it at the share the others show, and the total says it estimated.
+local cutReport = Report.Build({ {
+    { k = 'd', t = now, o = 901, st = 'f', c = 'A', i = 5, tip = 1000 * 10000, cut = 100 * 10000 },
+    { k = 'd', t = now, o = 902, st = 'f', c = 'B', i = 5, tip = 2000 * 10000 },
+} }, {}, {})
+assert(cutReport.totals.tips == 2700 * 10000 and cutReport.totals.tipsEstimated,
+    'tips were not counted as received: ' .. tostring(cutReport.totals.tips))
+local exact = Report.Build({ { { k = 'd', t = now, o = 903, st = 'f', c = 'A', i = 5, tip = 500 * 10000, cut = 50 * 10000 } } }, {}, {})
+assert(exact.totals.tips == 450 * 10000 and not exact.totals.tipsEstimated and exact.customers[1].maxTip == 450 * 10000)
+local event = Log.Outcome({ orderID = 904, status = 'fulfilled', customerName = 'C', tipAmount = 100, consortiumCut = 10, updatedAt = now })
+assert(event and event.tip == 100 and event.cut == 10, 'the cut was not recorded')
+print('Analytics tips as received passed.')
