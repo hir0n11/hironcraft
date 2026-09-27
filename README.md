@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: time online, simpler names, no mentions (0.4.65)
+
+- Time online: every 5 minutes online is marked in the journal and shared
+  with linked accounts. On the "By time" charts a grey block behind each bar
+  shows the share of that hour (or weekday) someone was online, and the
+  tooltip gives the minutes, e.g. "Online: 3 h 20 min of 5 h 00 min (67%)".
+  Counted from this version on.
+- Mentions (item links seen in chat) are no longer recorded or shown:
+  Requests already tell what is in demand, and mentions were most of the
+  journal.
+- Simpler names: Requests, Greeted, Ordered, Order rate, Orders done,
+  Declined, Tips, Average tip, Top tip; the returns tab: Crafts, With returns,
+  Return chance, Returned, Worth, Times; "Sync now", "Collect data".
+
 ## No "Player not found." at login (0.4.64)
 
 - At login the chat filter fills the game's ignore list from its own, and

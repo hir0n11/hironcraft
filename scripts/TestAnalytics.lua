@@ -74,13 +74,7 @@ Log.Link('t5', 558, 'rejected')
 -- An order from someone who never wrote: counted as an order only.
 Log.Outcome({ orderID = 557, status = 'fulfilled', customerName = 'Direct', itemID = 2002,
     parentProfessionID = 197, tipAmount = 2000 * 10000, updatedAt = now + 900 })
--- Mentions: the same customer repeating a link within a minute is one.
-Log.Mention('Chatty-Realm', 1001, 197)
-now = now + 30
-Log.Mention('Chatty-Realm', 1001)
-now = now + 40
-Log.Mention('Other-Realm', 1001)
-Log.Mention('Other-Realm', 4004)
+now = now + 70
 
 local report = build()
 local cloak = row(report, 'item:2002')
@@ -93,8 +87,6 @@ assert(bracer and bracer.requests == 1 and bracer.crafted == 1, 'a slot request 
 local asked = row(report, 'item:1001')
 assert(asked.requests == 2 and asked.greetings == 2 and asked.crafted == 0 and asked.declined == 1,
     'greeted-but-not-ordered and declined requests are off')
-assert(asked.mentions == 2, 'mentions were not merged within a minute: ' .. tostring(asked.mentions))
-assert(row(report, 'item:4004').mentions == 1)
 local totals = report.totals
 assert(totals.requests == 4 and totals.greetings == 4 and totals.crafted == 2 and totals.conversion == 0.5,
     'the funnel totals are off')
@@ -134,8 +126,8 @@ assert(report.totals.requests == 0 and report.totals.orders == 0, 'the date filt
 report = build({ ppID = 164 })
 assert(report.totals.requests == 0, 'the profession filter let tailoring through')
 report = build({ crafter = 'Tailor-Other' })
-assert(report.totals.requests == 2 and report.totals.mentions == 0, 'the crafter filter is off')
-print('Analytics report passed (narrowing, slots, funnel, mentions, tiers, sides, dates, filters).')
+assert(report.totals.requests == 2, 'the crafter filter is off')
+print('Analytics report passed (narrowing, slots, funnel, tiers, sides, dates, filters).')
 
 -- A greeting the server swallowed is taken back.
 local sent = Log.Greeting('Swallowed', { requestToken = 't9' })
@@ -163,7 +155,6 @@ assert(#unpackedChunks == 1, 'a store outside the range was unpacked')
 Scan.DB.analytics.seen_items = { [7007] = { ppID = 202, times = { now - 5000, { t = now - 4000, customer = 'Old-Realm', c = 2 } } } }
 all()
 assert(Scan.DB.analytics.seen_items == nil and Log.ProfessionOfItem(7007) == 202, 'the old counter was not moved')
-assert(row(build(), 'item:7007').mentions == 2, 'old mentions were lost')
 print('Analytics journal passed (retract, packing, ranges, old counter).')
 
 -- Two linked accounts exchange only their own events, in batches, when quiet.
@@ -270,7 +261,6 @@ assert(results > 0, 'an analytics-only account got no order results')
 clock = clock + Log.QUIET_SECONDS + 1
 as(dbA, function()
     Log.Request('Away-Realm', { requestToken = 'away1', itemID = 1001, time = now })
-    Log.Mention('Away-Realm', 1001)
     Log.Link('away1', 55, 'fulfilled')
     Log.Outcome({ orderID = 55, status = 'fulfilled', customerName = 'Away', updatedAt = now }, 'notice')
 end)
@@ -466,3 +456,24 @@ Auctionator.API.v1.GetAuctionPriceByItemID = function() return 99999 end
 assert(Report.BuildReturns(all(), {}).totals.value == 20000, 'the worth followed today\'s price')
 C_CraftingOrders, C_TradeSkillUI, Auctionator, TSM_API = nil, nil, nil, nil
 print('Analytics resource returns passed.')
+
+-- Time online: a mark per 5 minutes, merged with a linked account's, shown
+-- against the minutes the period had since the marks began.
+local noon = os.time({ year = 2026, month = 9, day = 21, hour = 12 })
+local savedNow = now
+now = noon + 2 * 3600
+assert(Log.NotePresence(noon) and not Log.NotePresence(noon + 60), 'a slot was marked twice')
+Log.NotePresence(noon + 600)
+Log.Merge({ { k = 'p', t = noon + 600, f = 'H' }, { k = 'p', t = noon + 3600 } }, 'peer')
+local day = os.time({ year = 2026, month = 9, day = 21, hour = 0 })
+local online = build({ from = day, to = day + 86399 })
+assert(online.hours.online[12] == 10 and online.hours.online[13] == 5 and online.hours.online[11] == 0,
+    'minutes online per hour are off: ' .. online.hours.online[12] .. ', ' .. online.hours.online[13])
+assert(online.hours.possible[12] == 60 and online.hours.possible[13] == 60 and online.hours.possible[14] == 0
+    and online.hours.possible[11] == 0, 'the minutes the period had are off')
+local weekday = tonumber(os.date('%w', noon))
+weekday = weekday == 0 and 7 or weekday
+assert(online.weekdays.online[weekday] == 15 and online.weekdays.possible[weekday] == 120)
+assert(build({ from = day, to = day + 86399, side = 'H' }).hours.online[12] == 5, 'the side filter is off for time online')
+now = savedNow
+print('Analytics time online passed.')

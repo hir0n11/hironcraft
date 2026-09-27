@@ -28,8 +28,6 @@ Scan.AnalyticsLog = M
 
 M.STORE_LIMIT = 2000
 M.QUIET_SECONDS = 3 * 60
-local MENTION_REPEAT_SECONDS = 15
-local UNKNOWN_ITEMS_LIMIT = 3000
 
 local LibSerialize = LibStub and LibStub('LibSerialize', true)
 local LibDeflate = LibStub and LibStub('LibDeflate', true)
@@ -225,35 +223,28 @@ function M.UnknownItems()
     return root and type(root.unknown_items) == 'table' and root.unknown_items or {}
 end
 
-local recentMentions, recentCount = {}, 0
+-- Time online, in 5-minute marks: one per slot while the game runs here.
+-- Linked accounts exchange them like any event, so the report knows when any
+-- of the accounts was there to see requests.
+local PRESENCE_SLOT = 300
+M.PRESENCE_SLOT = PRESENCE_SLOT
+local lastPresenceSlot = nil
 
--- An item link seen in chat, whether or not we craft it.
-function M.Mention(customer, itemID, ppID)
-    itemID = tonumber(itemID)
-    if not itemID or not M.IsEnabled() then return end
-    local root = M.Root()
-    if not root then return end
-    -- The same customer repeating the same link right away is impatience.
-    local key = tostring(customer) .. ':' .. itemID
-    local now = time()
-    if recentMentions[key] and now - recentMentions[key] < MENTION_REPEAT_SECONDS then return end
-    if recentCount > 2000 then recentMentions, recentCount = {}, 0 end
-    recentMentions[key] = now
-    recentCount = recentCount + 1
+function M.NotePresence(now)
+    if not M.IsEnabled() or not M.Root() then return nil end
+    now = now or time()
+    local slot = math.floor(now / PRESENCE_SLOT)
+    if slot == lastPresenceSlot then return nil end
+    lastPresenceSlot = slot
+    return M.Record({ k = 'p', t = slot * PRESENCE_SLOT, f = PlayerSide() })
+end
 
-    local known, unknown = ItemProfessions(root)
-    ppID = tonumber(ppID)
-    if ppID then
-        known[itemID] = ppID
-        unknown[itemID] = nil
-    elseif not known[itemID] then
-        local count = root.unknown_count or 0
-        if not unknown[itemID] and count < UNKNOWN_ITEMS_LIMIT then
-            unknown[itemID] = true
-            root.unknown_count = count + 1
-        end
+local presenceTicker = nil
+function M.StartPresence()
+    M.NotePresence()
+    if not presenceTicker and C_Timer and C_Timer.NewTicker then
+        presenceTicker = C_Timer.NewTicker(60, function() pcall(M.NotePresence) end)
     end
-    M.Record({ k = 'm', t = now, c = customer, i = itemID, p = ppID or known[itemID], f = PlayerSide() })
 end
 
 local function SideOf(faction)
@@ -613,5 +604,8 @@ if CreateFrame then
 end
 
 if Scan.Utils and Scan.Utils.onLoad then
-    Scan.Utils.onLoad(function() pcall(M.Startup) end)
+    Scan.Utils.onLoad(function()
+        pcall(M.Startup)
+        pcall(M.StartPresence)
+    end)
 end

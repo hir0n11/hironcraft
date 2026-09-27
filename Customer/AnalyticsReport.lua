@@ -10,7 +10,8 @@ local Scan = select(2, ...)
 local M = {}
 Scan.AnalyticsReport = M
 
-local MENTION_SAME_SECONDS = 60
+-- The journal marks each 5 minutes spent online (AnalyticsLog.NotePresence).
+local PRESENCE_SLOT = 300
 -- Two linked accounts see the same chat line a moment apart.
 local SAME_REQUEST_SECONDS = 180
 local DAY = 24 * 60 * 60
@@ -40,7 +41,7 @@ end
 
 local function NewRow(key, info)
     local row = {
-        key = key, mentions = 0, requests = 0, greetings = 0, crafted = 0,
+        key = key, requests = 0, greetings = 0, crafted = 0,
         orders = 0, declined = 0, tips = 0, tipped = 0,
     }
     for field, value in pairs(info) do row[field] = value end
@@ -86,7 +87,8 @@ function M.Build(chunks, filters, context)
     local itemProf = context.itemProf or function() return nil end
 
     local requests, replacedBy, greeted, links, orders, tokenOrders = {}, {}, {}, {}, {}, {}
-    local mentions = {}
+    -- Time online: 5-minute slots of any account, each counted once.
+    local online, firstOnline = {}, nil
     for _, events in ipairs(chunks or {}) do
         for _, event in ipairs(events) do
             local kind = event.k
@@ -105,8 +107,11 @@ function M.Build(chunks, filters, context)
                 local key = tostring(event.o) .. ':' .. tostring(event.st)
                 if not orders[key] then orders[key] = event end
                 if event.id then tokenOrders[event.id] = key end
-            elseif kind == 'm' and event.i then
-                mentions[#mentions + 1] = event
+            elseif kind == 'p' then
+                firstOnline = math.min(firstOnline or event.t, event.t)
+                if not filters.side or not event.f or event.f == filters.side then
+                    online[math.floor(event.t / PRESENCE_SLOT)] = true
+                end
             end
         end
     end
@@ -199,7 +204,7 @@ function M.Build(chunks, filters, context)
         -- of the greeting, for the conversion of each hour and day.
         hours = { requests = Hours(), greetings = Hours(), crafted = Hours(), orders = Hours() },
         weekdays = { requests = Weekdays(), greetings = Weekdays(), crafted = Weekdays(), orders = Weekdays() },
-        totals = { mentions = 0, requests = 0, greetings = 0, crafted = 0, orders = 0,
+        totals = { requests = 0, greetings = 0, crafted = 0, orders = 0,
             declined = 0, tips = 0, tipped = 0 },
         tiers = { generous = 0, regular = 0, stingy = 0, none = 0 },
     }
@@ -326,24 +331,33 @@ function M.Build(chunks, filters, context)
         end
     end
 
-    -- Mentions in chat: the same customer repeating the same item within a
-    -- minute is one mention, also when two linked accounts saw it.
-    table.sort(mentions, function(lhs, rhs) return lhs.t < rhs.t end)
-    local lastSeen = {}
-    for _, mention in ipairs(mentions) do
-        local who = BaseKey(mention.c)
-        local key = mention.i .. ':' .. (who or '')
-        local previous = lastSeen[key]
-        local repeated = previous and (who and mention.t - previous <= MENTION_SAME_SECONDS
-            or (not who and mention.t == previous))
-        lastSeen[key] = mention.t
-        if not repeated and mention.t >= from and mention.t <= to then
-            local ppID = mention.p or itemProf(mention.i)
-            if PassesCommon(ppID, {}, mention.c, mention.f) and not filters.crafter then
-                local row = Row('item:' .. mention.i, { kind = 'item', itemID = mention.i, ppID = ppID })
-                row.mentions = row.mentions + 1
-                report.totals.mentions = report.totals.mentions + 1
+    -- Minutes online in each hour of the day and day of the week, and how
+    -- many minutes of them the period had since the marks began: the share of
+    -- the time someone was there to see the requests.
+    report.hours.online, report.hours.possible = Hours(), Hours()
+    report.weekdays.online, report.weekdays.possible = Weekdays(), Weekdays()
+    local slotMinutes = PRESENCE_SLOT / 60
+    for slot in pairs(online) do
+        local t = slot * PRESENCE_SLOT
+        if t >= from and t <= to then
+            local hour, day = Hour(t), Weekday(t)
+            report.hours.online[hour] = report.hours.online[hour] + slotMinutes
+            report.weekdays.online[day] = report.weekdays.online[day] + slotMinutes
+            report.totals.online = (report.totals.online or 0) + slotMinutes
+        end
+    end
+    if firstOnline then
+        local first = math.max(from, firstOnline - firstOnline % PRESENCE_SLOT)
+        local last = math.min(to, time())
+        local hourStart = first - first % 3600
+        while hourStart < last do
+            local minutes = (math.min(last, hourStart + 3600) - math.max(first, hourStart)) / 60
+            if minutes > 0 then
+                local hour, day = Hour(hourStart), Weekday(hourStart)
+                report.hours.possible[hour] = report.hours.possible[hour] + minutes
+                report.weekdays.possible[day] = report.weekdays.possible[day] + minutes
             end
+            hourStart = hourStart + 3600
         end
     end
 

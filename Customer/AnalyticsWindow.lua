@@ -192,7 +192,6 @@ local ITEM_COLUMNS = {
     { key = 'profession', label = 'Profession', width = 110, align = 'LEFT',
         text = function(row) return ColoredProfession(row.ppID) end,
         value = function(row) return (ProfessionName(row.ppID) or ''):lower() end },
-    { key = 'mentions', label = 'Mentions', width = 72, tip = 'Mentions tooltip' },
     { key = 'requests', label = 'Requests', width = 68, tip = 'Requests tooltip' },
     { key = 'greetings', label = 'Greetings', width = 72, tip = 'Greetings tooltip' },
     { key = 'crafted', label = 'Crafted', width = 72, tip = 'Crafted tooltip' },
@@ -378,6 +377,11 @@ local function CreateChart(parent, count, labelOf)
     chart.bars = {}
     for index = 1, count do
         local bar = CreateFrame('Frame', nil, chart)
+        -- Behind it, grey: how much of that time someone was online.
+        bar.online = bar:CreateTexture(nil, 'BACKGROUND')
+        bar.online:SetColorTexture(0.75, 0.75, 0.75, 0.16)
+        bar.online:SetPoint('BOTTOMLEFT')
+        bar.online:SetPoint('BOTTOMRIGHT')
         bar.fill = bar:CreateTexture(nil, 'ARTWORK')
         bar.fill:SetColorTexture(1, 0.78, 0.25, 0.85)
         bar.fill:SetPoint('BOTTOMLEFT')
@@ -399,7 +403,7 @@ local function CreateChart(parent, count, labelOf)
         chart.bars[index] = bar
     end
 
-    function chart:SetValues(values, infos)
+    function chart:SetValues(values, infos, shares)
         local width, height = self:GetWidth(), self:GetHeight() - 34
         local slot = width / count
         local max = 0
@@ -412,6 +416,9 @@ local function CreateChart(parent, count, labelOf)
             bar.fill:SetHeight(math.max(1, max > 0 and height * value / max or 1))
             bar.fill:SetAlpha(value > 0 and 1 or 0.25)
             bar.value:SetText(value > 0 and value or '')
+            local share = shares and shares[index]
+            bar.online:SetHeight(math.max(1, share and height * math.min(1, share) or 1))
+            bar.online:SetShown(share ~= nil and share > 0)
             bar.info = infos and infos[index]
         end
     end
@@ -468,9 +475,6 @@ local TILE_GROUPS = {
         { key = 'declined', label = 'Declined', tip = 'Declined tooltip' },
         { key = 'tips', label = 'Tips total', tip = 'Tips tooltip', width = 104 },
         { key = 'averageTip', label = 'Average tip', tip = 'Average tip tooltip', width = 86 },
-    } },
-    { color = { 0.62, 0.62, 0.62 }, tiles = {
-        { key = 'mentions', label = 'Mentions', tip = 'Mentions tooltip' },
     } },
 }
 local TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GROUP_GAP = 74, 40, 4, 12
@@ -587,7 +591,7 @@ end
 local function UpdateSummary()
     local totals = report and report.totals or {}
     local tiles = frame.Tiles
-    for _, key in ipairs({ 'requests', 'greetings', 'crafted', 'orders', 'declined', 'mentions' }) do
+    for _, key in ipairs({ 'requests', 'greetings', 'crafted', 'orders', 'declined' }) do
         tiles[key].value:SetText(report and TileNumber(totals[key]) or '')
     end
     tiles.conversion.value:SetText(report and Percent(totals.conversion) or '')
@@ -624,26 +628,39 @@ end
 
 local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
 
+-- Minutes as "3 h 05 min" or "40 min".
+local function Duration(minutes)
+    minutes = math.floor((minutes or 0) + 0.5)
+    if minutes >= 60 then
+        return string.format(L('%d h %02d min'), math.floor(minutes / 60), minutes % 60)
+    end
+    return string.format(L('%d min'), minutes)
+end
+
 local function UpdateCharts()
     if not report then return end
     local metric = View().metric or 'orders'
     local function Infos(group, count, titleOf, offset)
-        local values, infos = {}, {}
+        local values, infos, shares = {}, {}, {}
         for index = 1, count do
             local slot = index - 1 + offset
             values[index] = report[group][metric][slot] or 0
             local greetings, crafted = report[group].greetings[slot] or 0, report[group].crafted[slot] or 0
+            local online, possible = report[group].online[slot] or 0, report[group].possible[slot] or 0
+            shares[index] = possible > 0 and online / possible or nil
             infos[index] = { title = titleOf(index), lines = {
                 string.format('%s: %d', L('Requests'), report[group].requests[slot] or 0),
                 string.format('%s: %d', L('Greetings'), greetings),
                 string.format('%s: %d', L('Crafted orders'), report[group].orders[slot] or 0),
-                -- Of the greetings sent in this hour, how many were crafted.
+                -- Of the greetings sent in this hour, how many were ordered.
                 string.format('%s: %s', L('Conversion'), greetings > 0
                     and string.format('%s (%d / %d)', Percent(crafted / greetings), crafted, greetings)
                     or Percent(nil)),
+                possible > 0 and string.format(L('Online: %s of %s (%s)'), Duration(online), Duration(possible),
+                    Percent(online / possible)) or L('Online: not recorded yet'),
             } }
         end
-        return values, infos
+        return values, infos, shares
     end
     frame.HourChart:SetValues(Infos('hours', 24, function(index) return string.format('%02d:00-%02d:59', index - 1, index - 1) end, 0))
     frame.DayChart:SetValues(Infos('weekdays', 7, function(index) return L(WEEKDAYS[index]) end, 1))
@@ -658,9 +675,9 @@ local function Matches(text)
     return searchText == '' or (text and text:lower():find(searchText, 1, true) ~= nil)
 end
 
--- Items only seen in chat are left out: a row appears once someone asked
--- you for it or ordered it, and fills in as more comes. A search looks at
--- every item, chat-only ones included, so any item can be checked.
+-- A row appears once someone asked you for an item or ordered it, and fills
+-- in as more comes. A search also finds rows that have nothing left in the
+-- period.
 local function ItemRows()
     local rows = {}
     for _, row in ipairs(report.rows) do
@@ -850,11 +867,11 @@ local function ExportCSV()
         for hour = 0, 23 do lines[#lines + 1] = Line(string.format('%02d:00', hour), 'hours', hour) end
         for day = 1, 7 do lines[#lines + 1] = Line(CSV(L(WEEKDAYS[day])), 'weekdays', day) end
     else
-        lines[1] = 'item,item_id,profession,mentions,requests,greetings,crafted,conversion,all_orders,declined,average_tip_gold'
+        lines[1] = 'item,item_id,profession,requests,greeted,ordered,order_rate,orders_done,declined,average_tip_gold'
         for _, row in ipairs(frame.Items.rows or {}) do
             local _, name = Subject(row)
             lines[#lines + 1] = table.concat({ CSV(name), row.itemID or '', CSV(ProfessionName(row.ppID) or ''),
-                row.mentions, row.requests, row.greetings, row.crafted,
+                row.requests, row.greetings, row.crafted,
                 row.conversion and string.format('%.2f', row.conversion) or '', row.orders, row.declined,
                 row.averageTip and PlainGold(row.averageTip) or '' }, ',')
         end
@@ -1130,6 +1147,9 @@ local function Create()
     local hourTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
     hourTitle:SetPoint('TOPLEFT', 14, -10)
     hourTitle:SetText(L('By hour of day'))
+    local legend = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
+    legend:SetPoint('LEFT', hourTitle, 'RIGHT', 16, 0)
+    legend:SetText(L('Grey behind a bar: the share of that time you were online.'))
     frame.HourChart = CreateChart(frame.Charts, 24, function(index) return tostring(index - 1) end)
     frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -30)
     frame.HourChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)

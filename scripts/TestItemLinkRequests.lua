@@ -404,11 +404,10 @@ do
         'a narrowed request was not recorded as one conversation')
     assert(events[1].p==164 and not events[1].i and events[2].i==1001
         and events[3].id==events[1].id and events[3].to==events[2].id and events[2].id==response(101).requestToken)
-    local mentioned=false
+    -- Item links in chat are no longer counted on their own (0.4.65).
     for _, event in ipairs(Scan.DB.analytics.open.events) do
-        if event.k=='m' and event.i==1001 and event.p==164 then mentioned=true end
+        assert(event.k~='m', 'an item link was still counted as a mention')
     end
-    assert(mentioned, 'the item link was not counted as a mention')
     Scan.GreetCustomer('LeftButton', order(101))
     events=kinds()
     assert(#events==4 and events[4].k=='g' and events[4].id==response(101).requestToken, 'the greeting was not recorded')
@@ -430,7 +429,7 @@ do
     Scan.DB.analytics=savedAnalytics
     Scan.AnalyticsLog=nil
 end
-print('Analytics recording passed (requests, narrowing, mentions, greetings, swallowed greetings).')
+print('Analytics recording passed (requests, narrowing, no mentions, greetings, swallowed greetings).')
 
 -- A broad request creates one click-only placeholder row. A later profession
 -- or item clarification replaces it even when the customer does not repeat LF.

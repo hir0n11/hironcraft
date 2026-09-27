@@ -499,43 +499,6 @@ local function GetRequestID(message, crafterInfo, profConfig, armorContext)
     return nil
 end
 
--- There does not appear to be any reverse look up from itemID to whether the
--- item is crafted or not. The onyl option I've found is the reverse direction,
--- but then we'd need a mapping of every craftable item in the game to determine
--- if a given itemID is crafted. Instead, we're going to depend on the fact that
--- players don't really have easy access to item links that don't have a
--- crafting 'quality' embedded in the link itself. (We generate such links, but
--- without an addon all items clicked from a profession or the order page have a
--- quality.)
-local function GetItemIDsFromQualityLinks(inputString)
-    local itemIDs = nil
-
-    local pattern = 'item:(%d+)'
-    local qualityPattern = 'professions%-chaticon%-quality%-tier'
-    for itemLink in string.gmatch(inputString, '(item:[%d:]+%|h%b[])') do
-        local itemIDStr = itemLink:match(pattern)
-        if itemIDStr then
-            local itemID = tonumber(itemIDStr)
-            local crafterInfo = config.items[itemID]
-            if crafterInfo or string.find(itemLink, qualityPattern) then
-                if not itemIDs then
-                    itemIDs = {}
-                end
-
-                if crafterInfo then
-                    local profConfig =
-                        HironCraftScan.DB.characters[crafterInfo.crafter].professions[crafterInfo.profID]
-                    table.insert(itemIDs, { itemID = itemID, ppID = profConfig.parentProfID })
-                else
-                    table.insert(itemIDs, itemID)
-                end
-            end
-        end
-    end
-
-    return itemIDs
-end
-
 -- Return array with the front n elements removed.
 local function RemoveFront(array, n)
     local result = {}
@@ -560,22 +523,6 @@ function HironCraftScan.Analytics.GetTimeStamp(timeEntry)
         return timeEntry.t
     end
     return timeEntry
-end
-
--- Every item link with a quality seen in chat goes to the analytics journal,
--- items this account does not craft included: they show what is in demand.
-local function AddMessageToAnalytics(customer, message)
-    local log = HironCraftScan.AnalyticsLog
-    if not log or not log.IsEnabled() then
-        return
-    end
-    for _, itemID in ipairs(GetItemIDsFromQualityLinks(message) or {}) do
-        if type(itemID) == 'table' then
-            log.Mention(customer, itemID.itemID, itemID.ppID)
-        else
-            log.Mention(customer, itemID)
-        end
-    end
 end
 
 -- A link does not say which profession makes the item. When a profession
@@ -922,16 +869,6 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
 
         if not HironCraftScanComm.applying_remote_state
             and not (HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)) then
-            -- Don't add to analytics based on proxied orders. The 'now' might
-            -- be slightly off because of the messaging. We don't want that to
-            -- create duplicates if both characters see the same message at the
-            -- same time. Instead, analytics can be separately sync'ed between
-            -- accounts, with a merge of timestamps to avoid creating
-            -- duplicates.
-
-            -- Analytics has its own handling of quality links, including items
-            -- this account does not monitor.
-            AddMessageToAnalytics(customer, message)
         end
 
         if #itemMatches > 0 then

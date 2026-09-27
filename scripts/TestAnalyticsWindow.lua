@@ -152,7 +152,6 @@ Log.Outcome({ orderID = 1, status = 'fulfilled', customerName = 'Buyer', itemID 
 Log.Link('t1', 1, 'fulfilled')
 Log.Request('Slot-Realm', { requestToken = 't2', parentProfID = 197, time = now - 50,
     equipmentRequest = { key = 'INVTYPE_WRIST', label = 'Wrist' } })
-Log.Mention('Chatty-Realm', 4004)
 Scan.Generous.RecordTip('Buyer', 6000 * 10000, 1)
 Log.Record({ k = 'c', o = 1, r = 1, p = 197, x = 'Tailor-Realm', t = now - 30,
     rs = { { i = 7001, n = 2, v = 30000, s = 'a', c = 1 } } })
@@ -164,7 +163,6 @@ local frame = _G.HironCraftAnalyticsFrame
 assert(frame and Scan.AnalyticsWindow.IsShown(), 'the window did not open')
 local items = frame.Items.rows
 assert(#items == 2, 'item rows (only those with data): ' .. #items)
-for _, row in ipairs(items) do assert(row.kind ~= 'item' or row.itemID ~= 4004, 'a chat-only item was listed') end
 -- A cell that fails leaves the rest of the row and its hover intact.
 for _, entry in ipairs(frame.Items.scrollBox.inited) do
     assert(entry.row.data == entry.data.row, 'a row kept the item it showed before')
@@ -237,15 +235,15 @@ assert(view.sort[1].key == 'orders' and view.sort[1].desc and not view.sort[1].s
 for _, header in ipairs(frame.Items.headers) do header.scripts.OnClick(header) end
 for _, header in ipairs(frame.Customers.headers) do header.scripts.OnClick(header) end
 
--- Search by name: any item, chat-only ones included; customers on their tab.
+-- Search by name or item ID; customers on their tab.
 local function Type(text)
     frame.Search:SetText(text)
     Soon(function() frame.Search.scripts.OnTextChanged(frame.Search) end)
 end
 Type('Item 1001')
 assert(#frame.Items.rows == 1 and frame.Items.rows[1].itemID == 1001, 'the search did not find the item')
-Type('4004')
-assert(#frame.Items.rows == 1 and frame.Items.rows[1].itemID == 4004, 'the search did not find a chat-only item')
+Type('1001')
+assert(#frame.Items.rows == 1 and frame.Items.rows[1].itemID == 1001, 'the search did not find the item by its ID')
 Type('BUYER')
 assert(#frame.Customers.rows == 1 and frame.Customers.rows[1].key == 'buyer', 'the customer search is off')
 Type('')
