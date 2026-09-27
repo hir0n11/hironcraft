@@ -235,4 +235,19 @@ issecretvalue = nil
 F.DB().enabled = false
 assert(Shown('CHAT_MSG_SAY', 'hello', 'Spammer-Kazzak'), 'the filter worked while switched off')
 F.DB().enabled = true
-print('Chat filter passed (expressions, GIL import, rules, keys, ignore list, answers, NPC speech, online/offline, game list, invitations).')
+-- At login: Global Ignore List on and nothing taken over yet - taken over
+-- by itself, once; already off with no rules - the chat says how.
+HironCraftScan_DB.chat_filter = nil
+C_AddOns = { IsAddOnLoaded = function(name) return name == 'GlobalIgnoreList' end }
+GlobalIgnoreDB = gil
+Fire('PLAYER_LOGIN')
+assert(#F.Rules() == 4 and F.DB().gil_imported and I.IsIgnored('Goodgirl'), 'Global Ignore List was not taken over at login')
+assert(printed[#printed]:find('taken over', 1, true), 'the take-over was not reported')
+local reports = #printed
+Fire('PLAYER_LOGIN')
+assert(#F.Rules() == 4 and #printed == reports, 'Global Ignore List was taken over twice')
+HironCraftScan_DB.chat_filter = nil
+C_AddOns, GlobalIgnoreDB = nil, nil
+Fire('PLAYER_LOGIN')
+assert(printed[#printed]:find('no rules yet', 1, true), 'an empty filter did not say how to fill it')
+print('Chat filter passed (expressions, GIL import, rules, keys, ignore list, answers, NPC speech, online/offline, game list, invitations, take-over at login).')

@@ -566,8 +566,11 @@ local function UpdateBanner()
         frame.Banner:SetText(db and db.gil_imported
             and L('Global Ignore List is still on: it filters the same chat again. Turn it off once you are happy.')
             or L('Global Ignore List is on. Take over its filters, ignore list and settings?'))
+    elseif db and db.gil_imported then
+        frame.Banner:SetText(L('Global Ignore List was taken over.'))
     else
-        frame.Banner:SetText(db and db.gil_imported and L('Global Ignore List was taken over.') or '')
+        frame.Banner:SetText(#F().Rules() == 0
+            and L('Nothing taken over yet: turn Global Ignore List on for one login.') or '')
     end
     frame.ImportButton:SetShown(gil and rawget(_G, 'GlobalIgnoreDB') ~= nil)
     frame.DisableGILButton:SetShown(gil)

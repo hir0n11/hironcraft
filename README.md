@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Chat filter: Global Ignore List taken over at login (0.4.61)
+
+- Global Ignore List's data can only be read while it is on, and turning it
+  off before pressing "Take over" left the chat filter with no rules. Now,
+  whenever GIL is on and nothing was taken over yet, its filters, ignore
+  list and options are taken over at login by themselves. With GIL off and
+  no rules, the chat says to turn it on for one login.
+
 ## Login fixed after the chat filter (0.4.60)
 
 - 0.4.59 kept the chat filter's settings at the top of the saved variables,

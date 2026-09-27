@@ -447,8 +447,11 @@ if CreateFrame then
     watcher:RegisterEvent('FRIENDLIST_UPDATE')
     watcher:RegisterEvent('PLAYER_GUILD_UPDATE')
     watcher:RegisterEvent('PLAYER_ENTERING_WORLD')
+    watcher:RegisterEvent('PLAYER_LOGIN')
     watcher:SetScript('OnEvent', function(_, event)
-        if event == 'PLAYER_ENTERING_WORLD' then
+        if event == 'PLAYER_LOGIN' then
+            F.TakeOverAtLogin()
+        elseif event == 'PLAYER_ENTERING_WORLD' then
             -- The roster is not there until asked for.
             if C_GuildInfo and C_GuildInfo.GuildRoster then pcall(C_GuildInfo.GuildRoster) end
         elseif event == 'FRIENDLIST_UPDATE' then
@@ -557,6 +560,31 @@ function F.ImportGIL(source)
     db.gil_imported = time()
     Changed()
     return result
+end
+
+local function Notice(text)
+    local chat = rawget(_G, 'DEFAULT_CHAT_FRAME')
+    if chat then chat:AddMessage('|cffffd200HironCraft:|r ' .. text) end
+end
+
+-- Global Ignore List's data can only be read while it is on. So when it is
+-- on and nothing was taken over yet, that happens at login by itself; when
+-- it is already off and the filter has no rules, say how to get them.
+function F.TakeOverAtLogin()
+    local db = F.DB()
+    if not db or db.gil_imported then return nil end
+    if F.GILLoaded() and type(rawget(_G, 'GlobalIgnoreDB')) == 'table' then
+        local result = F.ImportGIL()
+        if result then
+            Notice(string.format(L('Global Ignore List taken over: %d rules, %d players. It can be turned off now (/hcfilter).'),
+                result.rules, result.players))
+        end
+        return result
+    end
+    if #db.rules == 0 then
+        Notice(L('The chat filter has no rules yet. Turn Global Ignore List on for one login: its filters and ignore list are taken over by themselves.'))
+    end
+    return nil
 end
 
 -- Opening the window: /hcfilter, /hcf.
