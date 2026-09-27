@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Login fixed after the chat filter (0.4.60)
+
+- 0.4.59 kept the chat filter's settings at the top of the saved variables,
+  and an old migration took every such key for a realm: the login stopped
+  there on every start, so the saved data was never set up. Crafting
+  orders were drawn empty or without profit, the one-button crafting did
+  nothing, linked accounts and the recipe menu failed. The migration now
+  moves only entries that hold characters, and the stray entry 0.4.59 left
+  behind is removed by itself at the next login.
+
 ## Chat filter, in place of Global Ignore List (0.4.59)
 
 A chat filter of its own (/hcfilter, or "Chat filter" at the top of the

@@ -565,19 +565,26 @@ local function AllocateRealmID()
     return '_' .. HironCraftScan_DB.realm_id_seed
 end
 
+-- Keys at the top of the saved variables that are not realms.
+local NOT_REALMS = {
+    realms = true, connected_realms = true, settings = true, saved_addons = true, realm_id_seed = true,
+    chat_filter = true,
+}
+
 local function UpgradeRealmStorage()
     -- I was a bit of a dumbass and didn't originally nest realms in an object, so they
-    -- are scattered about at the top level. Everything except 'settings',
-    -- 'connected_realms', and 'realm_id_seed' are realms, so move them on down.
+    -- are scattered about at the top level. What is left at the top besides
+    -- NOT_REALMS and holds characters is a realm, so move them on down.
     local realms = HironCraftScan.Utils.saved(HironCraftScan_DB, 'realms', {})
+    -- 0.4.59 took the chat filter's settings for such a realm, and the login
+    -- stopped there on every start: take the stray entry back out.
+    local stray = realms.chat_filter
+    if stray ~= nil and (type(stray) ~= 'table' or type(stray.characters) ~= 'table') then
+        realms.chat_filter = nil
+        if type(HironCraftScan_DB.chat_filter) == 'table' then HironCraftScan_DB.chat_filter.linked_accounts = nil end
+    end
     for key, value in pairs(HironCraftScan_DB) do
-        if
-            key ~= 'realms'
-            and key ~= 'connected_realms'
-            and key ~= 'settings'
-            and key ~= 'saved_addons'
-            and key ~= 'realm_id_seed'
-        then
+        if not NOT_REALMS[key] and type(value) == 'table' and type(value.characters) == 'table' then
             realms[key] = value
 
             -- Preserve legacy account-wide links while moving old realm data.

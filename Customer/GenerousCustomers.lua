@@ -44,7 +44,8 @@ end
 
 local function Entry(name)
     local key = Key(name)
-    local store = key and Scan.DB.settings.generous_customers
+    local settings = Scan.DB and Scan.DB.settings
+    local store = key and settings and settings.generous_customers
     local entry = store and store[key]
     return type(entry) == 'table' and entry or nil
 end

@@ -110,6 +110,12 @@ local keep, keepInfo = addOrder('Healthy', 1, {time=999})
 Scan.DB.listed_orders.noResponseID = {customerName='Healthy'}
 local realm = { customers=Scan.DB.customers, listed_orders=Scan.DB.listed_orders, characters={} }
 HironCraftScan_DB = { realms={TestRealm=realm}, settings={customer_timeout=5, alert_icon_scale=123} }
+-- The chat filter keeps its settings at the top (0.4.59), and 0.4.59 took
+-- them for a realm without characters: the login stopped on every start.
+local chatFilter = { rules = {}, enabled = true }
+HironCraftScan_DB.chat_filter = chatFilter
+HironCraftScan_DB.realms.chat_filter = chatFilter
+chatFilter.linked_accounts = {}
 realm.characters['Oldsmith-TestRealm']={sourceID='test-owner',professions={},parent_professions={}}
 HironCraftScan_DB.settings.character_renames={
     ['Oldsmith-TestRealm']={to='Newsmith-TestRealm',sourceID='test-owner'},
@@ -163,6 +169,9 @@ local login = frames[1]
 loggedIn = true
 login:GetScript('OnEvent')(login, 'PLAYER_LOGIN')
 assert(hooked == 1, 'stale rows interrupted the page initializer')
+assert(HironCraftScan_DB.chat_filter == chatFilter and HironCraftScan_DB.realms.chat_filter == nil
+    and chatFilter.linked_accounts == nil and chatFilter.enabled, 'the chat filter was taken for a realm')
+assert(Scan.DB.settings and Scan.DB.realm, 'the login did not set the saved data up')
 assert(Scan.DB.characters['Newsmith-TestRealm'] and not Scan.DB.characters['Oldsmith-TestRealm'],
     'startup did not migrate character profiles before initializing the scanner')
 assert(later == 1, 'one failed initializer blocked later modules')
