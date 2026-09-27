@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## No greeting offers on a crafter; analytics from the minimap (0.4.62)
+
+- "No greeting offers here" in the orders window, next to the stingy pause:
+  on an account whose linked accounts catch the orders, requests are listed
+  without the banner, the greeting card, the sound or the flashing icon; a
+  click on the row still greets. Per account, until unchecked.
+- The minimap button: right-click opens the analytics window; the account
+  overview moved to Ctrl+right-click.
+
 ## Chat filter: Global Ignore List taken over at login (0.4.61)
 
 - Global Ignore List's data can only be read while it is on, and turning it

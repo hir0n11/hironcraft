@@ -166,6 +166,7 @@ local function StillWaiting(item)
     local tips = HironCraftScan.Generous
     return response ~= nil
         and not (tips and tips.IsGreetingHeld and tips.IsGreetingHeld(item.order.customerName))
+        and not (HironCraftScan.AreGreetingOffersOff and HironCraftScan.AreGreetingOffersOff())
         and response.requestToken == item.requestToken
         and (item.requestToken ~= nil or response.time == item.requestTime)
         and not response.greeting_sent

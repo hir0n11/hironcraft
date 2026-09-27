@@ -124,6 +124,7 @@ local button = { SetButtonText=noop, Init=noop }
 HironCraftScanCraftingOrderPage.EnableMouse = noop
 HironCraftScanCraftingOrderPage.BrowseFrame = {
     AddonToggleButton=button, CustomExplanationsButton=button, HoldStingyCheckButton=button,
+    QuietGreetingsCheckButton=button,
     LeftPanel={LinkedAccountList=button},
 }
 local hooked = 0

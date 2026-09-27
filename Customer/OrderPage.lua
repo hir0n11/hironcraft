@@ -1776,6 +1776,41 @@ function HironCraftScan_HoldStingyCheckButtonMixin:OnLeave()
     GameTooltip:Hide();
 end
 
+-- No greeting offers on this account: for a crafter whose linked accounts
+-- catch the orders. The rows are still listed; a click greets as usual.
+HironCraftScan_QuietGreetingsCheckButtonMixin = {}
+
+function HironCraftScan_QuietGreetingsCheckButtonMixin:Init()
+    self.Text:SetText(L('No greeting offers here'))
+    -- Just left of the stingy pause, whatever the labels' length.
+    local hold = self:GetParent().HoldStingyCheckButton
+    if hold then
+        self:ClearAllPoints()
+        self:SetPoint('BOTTOMLEFT', hold, 'BOTTOMLEFT', -(self:GetWidth() + self.Text:GetStringWidth() + 16), 0)
+    end
+    self:OnShow()
+end
+
+function HironCraftScan_QuietGreetingsCheckButtonMixin:OnShow()
+    self:SetChecked(HironCraftScan.AreGreetingOffersOff and HironCraftScan.AreGreetingOffersOff() or false)
+end
+
+function HironCraftScan_QuietGreetingsCheckButtonMixin:OnClick()
+    HironCraftScan.DB.settings.quiet_greeting_offers = self:GetChecked() and true or nil
+end
+
+function HironCraftScan_QuietGreetingsCheckButtonMixin:OnEnter()
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+    GameTooltip_SetTitle(GameTooltip, L('No greeting offers here'));
+    GameTooltip_AddNormalLine(GameTooltip, HironCraftScan.MakeTextWhite(L('No greeting offers here tooltip')));
+    GameTooltip:SetMinimumWidth(350);
+    GameTooltip:Show();
+end
+
+function HironCraftScan_QuietGreetingsCheckButtonMixin:OnLeave()
+    GameTooltip:Hide();
+end
+
 local openChatOrdersFrame = nil
 function HironCraftScan.UpdateShowChatOrdersTab()
     if openChatOrdersFrame then
@@ -1814,6 +1849,7 @@ HironCraftScan.Utils.onLoad(function()
     frame.BrowseFrame.AddonToggleButton:SetButtonText();
     frame.BrowseFrame.CustomExplanationsButton:Init();
     frame.BrowseFrame.HoldStingyCheckButton:Init();
+    frame.BrowseFrame.QuietGreetingsCheckButton:Init();
 
     frame.BrowseFrame.LeftPanel.LinkedAccountList:Init();
 

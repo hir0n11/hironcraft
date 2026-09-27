@@ -1675,10 +1675,19 @@ function HironCraftScan.OrderBannerText(customer, customerInfo, response)
         HironCraftScan.ColorizeCrafterName(response.crafterName))
 end
 
+-- An account whose linked accounts catch the orders offers no greetings (the
+-- orders window switch): no banner, card, sound or flashing, only the row.
+function HironCraftScan.AreGreetingOffersOff()
+    local settings = HironCraftScan.DB and HironCraftScan.DB.settings
+    return settings ~= nil and settings.quiet_greeting_offers == true
+end
+
 -- Stingy customers are on hold (the orders window switch): their requests
--- come in quietly. A row the crafter adds by hand is announced as asked.
+-- come in quietly, as all of them do on an account that offers no greetings.
+-- A row the crafter adds by hand is announced as asked.
 local function IsGreetingHeld(customer, overrides)
     if overrides and overrides.manualMatch then return false end
+    if HironCraftScan.AreGreetingOffersOff() then return true end
     local tips = HironCraftScan.Generous
     return tips and tips.IsGreetingHeld and tips.IsGreetingHeld(customer) or false
 end

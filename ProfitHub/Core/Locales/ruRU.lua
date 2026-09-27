@@ -93,7 +93,8 @@ L["majestic_fin"]  = "Majestic Fin"
 -- Minimap / LDB
 L["LDB_TITLE"]        = "HironCraft"
 L["LDB_LEFT_CLICK"]   = "ЛКМ — настройки"
-L["LDB_RIGHT_CLICK"]  = "ПКМ — обзор персонажей"
+L["LDB_RIGHT_CLICK"]  = "ПКМ — аналитика"
+L["LDB_CTRL_RIGHT_CLICK"] = "Ctrl+ПКМ — обзор персонажей"
 -- SkinningCheck UI
 L["SKINNING_TITLE"]        = "Шкуропроверятель"
 L["SKINNING_LURE_RMB_HINT"] = "ПКМ — отправить недостающие реагенты приманок в Закуп"

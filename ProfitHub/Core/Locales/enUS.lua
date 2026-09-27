@@ -102,7 +102,8 @@ L["slatefang"]   = "Superb Beast Fang"
 -- Minimap / LDB
 L["LDB_TITLE"]        = "HironCraft"
 L["LDB_LEFT_CLICK"]   = "LMB — settings"
-L["LDB_RIGHT_CLICK"]  = "RMB — account overview"
+L["LDB_RIGHT_CLICK"]  = "RMB — analytics"
+L["LDB_CTRL_RIGHT_CLICK"] = "Ctrl+RMB — account overview"
 -- SkinningCheck UI
 L["SKINNING_TITLE"]        = "Skinning Check"
 L["SKINNING_LURE_RMB_HINT"] = "Right click — send missing lure reagents to Shop"

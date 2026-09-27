@@ -320,6 +320,22 @@ do
     scan('LF '..a)
     assert(banner:GetOrder() and banner:GetOrder().customerName=='Buyer','the pause outlived being switched off')
     Scan.Generous.SetManual('Buyer','none')
+    -- An account that offers no greetings (its linked accounts catch the
+    -- orders): every request is a row without a banner, a waiting one too,
+    -- and a click on the row still greets.
+    fresh()
+    scan('LF '..a,nil,'Second')
+    scan('LF '..a)
+    assert(menu:GetQueuedAlertCount()==1)
+    Scan.DB.settings.quiet_greeting_offers=true
+    key()
+    assert(not banner:GetOrder(),'a waiting request got the banner with greeting offers off')
+    fresh()
+    scan('LF '..a)
+    assert(countRows()==1 and not banner:GetOrder(),'greeting offers off still showed a banner')
+    Scan.GreetCustomer('LeftButton',order(101))
+    assert(#sent==1 and sent[1].customer=='Buyer','a click on the row did not greet with greeting offers off')
+    Scan.DB.settings.quiet_greeting_offers=nil
     -- A greeting the server swallowed comes back as the banner it was sent from.
     fresh()
     local realAfter,realGetTime=C_Timer.After,GetTime
@@ -994,6 +1010,16 @@ assert(offered==0 and countRows()==1 and not response(164).greeting_sent,
     'a stingy customer on pause was offered the greeting card')
 Scan.Generous.SetHoldingStingy(false)
 Scan.Generous.SetManual('Buyer','none')
+-- Nor anyone on an account that offers no greetings.
+reset()
+scan('LF bs')
+Scan.DB.settings.quiet_greeting_offers=true
+offered=0
+now=1300
+Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist?','Buyer','Buyer-GUID')
+assert(offered==0 and countRows()==1 and not response(164).greeting_sent,
+    'the greeting card was offered with greeting offers off')
+Scan.DB.settings.quiet_greeting_offers=nil
 Scan.OrderFulfillment=previousFulfillment
 Scan.QuickReplies.ShowOrderGreeting=previousShowGreeting
 Scan.DB.settings.inclusions=previousInclusions

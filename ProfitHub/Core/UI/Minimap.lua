@@ -1,3 +1,4 @@
+local _, Scan = ...
 local PT = HironCraftProfit
 local L = PT.L
 local LDB = LibStub("LibDataBroker-1.1")
@@ -28,10 +29,12 @@ OnClick = function(self, button)
             if PT.DisEnchantSuper and PT.DisEnchantSuper.Toggle then
                 PT.DisEnchantSuper:Toggle()
             end
-        else
+        elseif IsControlKeyDown() then
             if PT.AccountOverview then
                 PT.AccountOverview:Toggle()
             end
+        elseif Scan and Scan.AnalyticsWindow then
+            Scan.AnalyticsWindow.Toggle()
         end
     end
 end,
@@ -40,6 +43,7 @@ OnTooltipShow = function(tt)
     tt:AddLine(L["LDB_TITLE"])
     tt:AddLine(L["LDB_LEFT_CLICK"], 1, 1, 1)
     tt:AddLine(L["LDB_RIGHT_CLICK"], 1, 1, 1)
+    tt:AddLine(L["LDB_CTRL_RIGHT_CLICK"], 1, 1, 1)
 end,
 })
 
