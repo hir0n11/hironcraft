@@ -470,6 +470,12 @@ HironCraftScan.Utils.onLoad(function()
         local initializer = Settings.CreateCheckbox(category, setting, L('Fit windows to the screen tooltip'))
         initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
     end
+    if CreateSettingsButtonInitializer then
+        local initializer = CreateSettingsButtonInitializer(L('Chat filter'), L('Open'), function()
+            if HironCraftScan.ChatFilterWindow then HironCraftScan.ChatFilterWindow.Show() end
+        end, L('Chat filter settings tooltip'), true)
+        layout:AddInitializer(initializer)
+    end
     Settings.RegisterAddOnCategory(category)
 end)
 

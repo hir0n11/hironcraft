@@ -771,6 +771,19 @@ function HironCraftScan.ApplyFitToScreen()
     end
 end
 
+HironCraftScan_OpenChatFilterButtonMixin = {}
+
+function HironCraftScan_OpenChatFilterButtonMixin:OnLoad()
+    self:SetText(L("Chat filter"))
+    self:FitToText();
+end
+
+function HironCraftScan_OpenChatFilterButtonMixin:OnClick()
+    if HironCraftScan.ChatFilterWindow then
+        HironCraftScan.ChatFilterWindow.Toggle()
+    end
+end
+
 HironCraftScan_OpenAnalyticsButtonMixin = {}
 
 function HironCraftScan_OpenAnalyticsButtonMixin:OnLoad()

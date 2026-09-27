@@ -25,6 +25,34 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Chat filter, in place of Global Ignore List (0.4.59)
+
+A chat filter of its own (/hcfilter, or "Chat filter" at the top of the
+orders window, or the addon's settings). It only hides lines from the chat
+windows: the scanner reads the chat events directly and still catches every
+request.
+
+- Rules: keys (a word or a phrase, anywhere or as whole words) and
+  expressions written as in Global Ignore List ([word=], [contains=], [link],
+  [journal], [guild], [community], and, or, not, parentheses...). "Take over
+  Global Ignore List" brings its filters (on/off, counters, their last
+  hidden lines), its ignore list and its options; after that GIL can be
+  turned off from the same window.
+- Keys from the text selection tool: select a phrase, right-click, "Hide in
+  chat".
+- NPC speech hidden by kind (saying, yelling, emotes, whispers), shown in
+  dungeons and raids if wished.
+- "Has come online / gone offline" hidden for your own characters (all
+  realms and linked accounts), guild members and friends.
+- The ignore list for the whole account, beyond the game's 50: their lines
+  are hidden everywhere, the game's list of each character is filled with
+  the most recently ignored, ignoring through the game's menus changes this
+  list too. Optionally: an answer to their whispers, their invitations,
+  duels and trades declined, a warning when one is in your group, their
+  groups marked in the group finder.
+- A journal of the last hidden lines, and each rule's own last lines; a
+  click opens a line in the text selection tool.
+
 ## Customer coins by the average tip; hourly conversion (0.4.58)
 
 - The coin in front of a customer's name now follows their average tip over

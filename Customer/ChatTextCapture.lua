@@ -112,6 +112,14 @@ function Capture.SaveQuickReplyKeyword(templateKey, text)
     return HironCraftScan.QuickReplies:AddKeyword(templateKey, value)
 end
 
+-- A key for the chat filter: messages with it are hidden from the chat.
+function Capture.SaveFilterKey(text, whole)
+    if not HironCraftScan.ChatFilter then return false, 'filter_unavailable' end
+    local ok, reason = HironCraftScan.ChatFilter.AddKey(text, whole)
+    if ok then return true end
+    return false, reason
+end
+
 function Capture.ConfigureMessageScrollFrame(scrollFrame)
     scrollFrame.maxLetters = 0
     scrollFrame.hideCharCount = true
@@ -227,6 +235,7 @@ local function SetStatus(frame, ok, reason)
         invalid_profession = L('This profession is no longer available.'),
         invalid_quick_reply = L('This quick response is no longer available.'),
         quick_replies_unavailable = L('Quick responses are not available.'),
+        filter_unavailable = L('The chat filter is not available.'),
     }
     if ok then
         frame.Status:SetTextColor(0.2, 1, 0.2)
@@ -282,6 +291,14 @@ function Capture.PopulateSelectionMenu(rootDescription, frame, selectedText)
             SetStatus(frame, Capture.SaveProfessionKeyword(char, parentProfessionID, selectedText))
         end)
     end
+
+    local hide = rootDescription:CreateButton(L('Hide in chat'))
+    hide:CreateButton(L('Messages with this phrase'), function()
+        SetStatus(frame, Capture.SaveFilterKey(selectedText, false))
+    end)
+    hide:CreateButton(L('Messages with this as whole words'), function()
+        SetStatus(frame, Capture.SaveFilterKey(selectedText, true))
+    end)
 
     rootDescription:CreateButton(L('Create new quick response for this keyword'), function()
         if HironCraftScan.Config.ShowCreateQuickReplyDialog then

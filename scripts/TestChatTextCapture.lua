@@ -143,14 +143,31 @@ local status = { SetText = function(self, value) self.text = value end,
 local frame = { Status = status }
 local root = NewMenu()
 assert(Capture.PopulateSelectionMenu(root, frame, 'chosen words'))
-assert(#root.entries == 5)
+assert(#root.entries == 6)
 assert(root.entries[1].label == 'Add to existing quick response')
 assert(root.entries[2].label == 'Add to global scanning')
 assert(root.entries[3].label == 'Add to generic craft requests')
 assert(root.entries[4].label == 'Add to profession scanning')
-assert(root.entries[5].label == 'Create new quick response for this keyword')
+assert(root.entries[5].label == 'Hide in chat')
+assert(root.entries[6].label == 'Create new quick response for this keyword')
 assert(#root.entries[1].child.entries >= 4, 'existing quick responses were not listed')
 assert(root.entries[4].child.entries[1].label == 'Favu - Blacksmithing')
+
+-- Hiding in chat: a key for the chat filter, whole words or anywhere.
+local keys = {}
+Scan.ChatFilter = { AddKey = function(text, whole)
+    for _, key in ipairs(keys) do if key.text:lower() == text:lower() then return false, 'duplicate_filter' end end
+    keys[#keys + 1] = { text = text, whole = whole }
+    return true, keys[#keys]
+end }
+local hide = root.entries[5].child.entries
+assert(#hide == 2, 'the chat filter offers ' .. #hide .. ' ways')
+hide[2].click()
+assert(keys[1].text == 'chosen words' and keys[1].whole == true and status.text == 'Keyword added.',
+    'the selection was not added to the chat filter')
+hide[1].click()
+assert(#keys == 1 and status.text == 'This keyword is already present.', 'a key was added twice')
+Scan.ChatFilter = nil
 
 -- Generic craft requests: a phrase that asks for a crafter without naming a
 -- profession yet.
@@ -212,4 +229,4 @@ save.click()
 assert(chatReads == 2 and shown == 2, 'clicked action did not open the source message')
 
 assert(SendChatMessage == nil and BNSendWhisper == nil, 'test unexpectedly gained a send API')
-print('Chat text selection tests passed (selection extraction, five-action menu, generic requests, global/profession/quick keys, dialog prefill and click-only source).')
+print('Chat text selection tests passed (selection extraction, six-action menu, generic requests, global/profession/quick keys, dialog prefill and click-only source).')

@@ -244,6 +244,17 @@
 				</Scripts>
 			</Button>
 
+			<Button parentKey="ChatFilterButton" inherits="UIPanelButtonTemplate" registerForClicks="LeftButtonUp" mixin="HironCraftScan_OpenChatFilterButtonMixin" frameLevel="510">
+				<Size x="120" y="22"/>
+				<Anchors>
+					<Anchor point="RIGHT" relativeKey="$parent.ReleaseNotesButton" relativePoint="LEFT" x="-2" y="0"/>
+				</Anchors>
+				<Scripts>
+					<OnLoad method="OnLoad"/>
+					<OnClick method="OnClick"/>
+				</Scripts>
+			</Button>
+
 			<Frame parentKey="BrowseFrame" setAllPoints="true">
 				<Size x="1105" y="658"/>
 				<Frames>
