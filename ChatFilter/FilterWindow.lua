@@ -158,6 +158,7 @@ local function Reason(entry)
     if reason == 'npc' then return L('NPC speech') end
     if reason == 'presence' then return L('Online/offline') end
     if reason == 'system' then return L('Ignore list notice') end
+    if reason == 'duel' then return L('Duel results') end
     if reason == 'imported' then return L('Global Ignore List') end
     local rule = F().RuleByID(reason)
     return rule and rule.name or L('Deleted rule')
@@ -402,9 +403,9 @@ local function CreateKindsTab(parent)
     local tab = CreateFrame('Frame', nil, parent)
     tab:SetAllPoints(parent)
     tab.Checks = {}
-    local function Column(x, title, entries)
+    local function Column(x, title, entries, y)
         local heading = Title(tab, title)
-        heading:SetPoint('TOPLEFT', tab, 'TOPLEFT', x, -14)
+        heading:SetPoint('TOPLEFT', tab, 'TOPLEFT', x, y or -14)
         local previous = heading
         for _, entry in ipairs(entries) do
             local check = Checkbox(tab, entry[1], entry[2], entry[3], entry[4])
@@ -441,6 +442,9 @@ local function CreateKindsTab(parent)
         { 'Guild members', nil, Setting('presence', 'guild') },
         { 'Friends', nil, Setting('presence', 'friends') },
     })
+    Column(640, 'Other system messages', {
+        { 'Duel results', 'Duel results tooltip', Setting('system', 'duels') },
+    }, -150)
     return tab
 end
 

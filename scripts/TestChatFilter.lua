@@ -16,6 +16,8 @@ ERR_IGNORE_FULL = 'Your ignore list is full.'
 ERR_IGNORE_ADDED_S = '%s is now being ignored.'
 ERR_IGNORE_REMOVED_S = '%s is no longer being ignored.'
 ERR_IGNORE_NOT_FOUND = 'Player not found.'
+DUEL_WINNER_KNOCKOUT = '%1$s has defeated %2$s in a duel'
+DUEL_WINNER_RETREAT = '%2$s has fled from %1$s in a duel'
 UNKNOWN = 'Unknown'
 
 -- Frames, timers and the chat hook.
@@ -205,6 +207,14 @@ assert(not Shown('CHAT_MSG_SYSTEM', 'Laptopmin has gone offline.'), "a linked ac
 assert(not Shown('CHAT_MSG_SYSTEM', '|Hplayer:Guildie-Kazzak|h[Guildie-Kazzak]|h has come online.'), 'a guild member')
 assert(not Shown('CHAT_MSG_SYSTEM', 'Buddy has gone offline.'), 'a friend was shown')
 assert(Shown('CHAT_MSG_SYSTEM', 'Stranger has gone offline.'), 'a stranger was hidden')
+-- Other people's duels are hidden; yours are not.
+assert(not Shown('CHAT_MSG_SYSTEM', 'Wickomode-TarrenMill has defeated Waior in a duel'), "someone else's duel was shown")
+assert(not Shown('CHAT_MSG_SYSTEM', 'Waior has fled from Wickedmode in a duel'), "someone else's retreat was shown")
+assert(Shown('CHAT_MSG_SYSTEM', 'Mavu has defeated Waior in a duel'), 'your own duel was hidden')
+assert(Shown('CHAT_MSG_SYSTEM', 'Waior has defeated Mavu-Kazzak in a duel'), 'your own lost duel was hidden')
+F.DB().system.duels = false
+assert(Shown('CHAT_MSG_SYSTEM', 'Wickomode-TarrenMill has defeated Waior in a duel'), 'duels were hidden with the option off')
+F.DB().system.duels = true
 F.DB().presence.friends = false
 assert(Shown('CHAT_MSG_SYSTEM', 'Buddy has gone offline.'), 'friends were hidden with the option off')
 

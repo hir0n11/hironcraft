@@ -30,6 +30,7 @@ local DEFAULTS = {
     skip = { guild = true, party = false, whisper = true, self = false },
     npc = { say = true, yell = true, emote = true, whisper = false, keep_in_instances = true },
     presence = { own = true, guild = true, friends = true },
+    system = { duels = true },
 }
 
 local function Fill(target, defaults)
@@ -211,6 +212,30 @@ function F.PresenceName(message)
     return nil
 end
 
+-- "A has defeated B in a duel", "A has fled from B in a duel": the names
+-- in the order the game's text has them ("%1$s", "%2$s" or plain "%s").
+local function NamesPattern(format)
+    if type(format) ~= 'string' then return nil end
+    local marked = format:gsub('%%%d%$s', '\001'):gsub('%%s', '\001')
+    marked = marked:gsub('([%(%)%.%+%-%*%?%[%]%^%$%%])', '%%%1')
+    return '^' .. marked:gsub('\001', '(.-)') .. '$'
+end
+
+-- A duel's result that does not name you.
+function F.IsOthersDuel(message)
+    if type(message) ~= 'string' then return false end
+    for _, global in ipairs({ 'DUEL_WINNER_KNOCKOUT', 'DUEL_WINNER_RETREAT' }) do
+        local pattern = NamesPattern(rawget(_G, global))
+        local first, second
+        if pattern then first, second = message:match(pattern) end
+        if first then
+            local me = UnitName and BaseName(UnitName('player'))
+            return BaseName(first) ~= me and BaseName(second) ~= me
+        end
+    end
+    return false
+end
+
 local sets = { own = nil, guild = nil, friends = nil }
 local ownBuiltAt = nil
 local OWN_REFRESH_SECONDS = 60
@@ -330,6 +355,7 @@ function F.Decide(event, message, author, channelNumber, channelName)
 
     if event == 'CHAT_MSG_SYSTEM' then
         if Scan.ChatIgnore and Scan.ChatIgnore.HidesSystemNotice(message) then return 'system' end
+        if db.system.duels and F.IsOthersDuel(message) then return 'duel' end
         return PresenceReason(db, message)
     end
 

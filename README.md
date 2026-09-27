@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Chat filter: other people's duels (0.4.73)
+
+- "What is hidden" - Other system messages - Duel results: "A has defeated
+  B in a duel" and "... has fled ... in a duel" are hidden unless they name
+  you. On by default.
+
 ## Right click on a row takes one mark at a time (0.4.72)
 
 - A right click on a row of the orders window first clears the customer's
