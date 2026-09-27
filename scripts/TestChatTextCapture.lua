@@ -109,6 +109,24 @@ box.first = nil
 box.cursor = 3; Capture.HandleMultiClick(box, 30)
 box.cursor = 3; Capture.HandleMultiClick(box, 31)
 assert(box.first == nil, 'two slow clicks were taken for a double click')
+-- Double click and drag: whole words from the one clicked to the one under
+-- the mouse, forwards or back; no drag leaves the plain double click.
+box.hironCraftLastClick, box.hironCraftAnchor = nil, nil
+box.cursor = 14; Capture.HandleMultiClick(box, 40)
+assert(Capture.BeginWordDrag(box, 40.2), 'the second press did not start a word drag')
+box.cursor = 27; Capture.UpdateWordDrag(box)
+assert(text:sub(box.first + 1, box.last) == "Farstrider's Faulds", 'the drag did not take whole words')
+box.cursor = 5; Capture.UpdateWordDrag(box)
+assert(text:sub(box.first + 1, box.last) == "crafter Farstrider's", 'the drag back did not take whole words')
+assert(Capture.FinishWordDrag(box) and text:sub(box.first + 1, box.last) == "crafter Farstrider's"
+    and box.hironCraftAnchor.first == 3, 'letting go lost the dragged words')
+assert(not Capture.BeginWordDrag(box, 41), 'a press long after a click started a drag')
+box.hironCraftLastClick = nil
+box.cursor = 14; Capture.HandleMultiClick(box, 50)
+assert(Capture.BeginWordDrag(box, 50.2))
+assert(not Capture.FinishWordDrag(box), 'a double click without a drag was taken for one')
+assert(Capture.HandleMultiClick(box, 50.2) == 11 and text:sub(box.first + 1, box.last) == "Farstrider's",
+    'the plain double click was lost')
 C_Timer = previousTimer
 
 local ok, reason = Capture.SaveGlobalKeyword(' lf ')

@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Text selection: double click and drag; clearer hide options (0.4.69)
+
+- In the text selection window a double click followed by a drag selects
+  whole words from the one clicked to the one under the mouse, forwards or
+  back; letting go keeps them, and Shift+click stretches further.
+- The chat filter entries of its menu read "Hide messages containing this":
+  "Anywhere, also inside other words" and "Only as separate words", each
+  with an example in its tooltip.
+
 ## A key to skip the top Quick Reply (0.4.68)
 
 - Key Bindings - HironCraftScan: "Skip top Quick Reply" puts the top quick

@@ -228,6 +228,50 @@ function Capture.HandleMultiClick(editBox, now, shift)
     return first, last
 end
 
+-- Double click and drag: the selection grows word by word from the word
+-- clicked, as in most editors. The press that makes the double click starts
+-- it; while the button is held the game moves the cursor with the mouse, and
+-- the selection follows it to whole words.
+function Capture.BeginWordDrag(editBox, now)
+    local previous = editBox.hironCraftLastClick
+    if not previous or previous.count ~= 1 or now - previous.at > MULTI_CLICK_SECONDS then return false end
+    local first, last = Capture.WordBoundsAt(editBox:GetText(), previous.cursor)
+    if not first then return false end
+    editBox.hironCraftDrag = { first = first, last = last, from = first, to = last }
+    return true
+end
+
+function Capture.UpdateWordDrag(editBox)
+    local drag = editBox.hironCraftDrag
+    if not drag then return nil end
+    local cursor = editBox:GetCursorPosition()
+    local wordFirst, wordLast = Capture.WordBoundsAt(editBox:GetText(), cursor)
+    wordFirst, wordLast = wordFirst or cursor, wordLast or cursor
+    drag.from, drag.to = math.min(drag.first, wordFirst), math.max(drag.last, wordLast)
+    editBox:HighlightText(drag.from, drag.to)
+    return drag.from, drag.to
+end
+
+-- The button is let go: a drag over more than the word keeps what it
+-- selected (Shift+click stretches it further); true when it did.
+function Capture.FinishWordDrag(editBox)
+    if not editBox.hironCraftDrag then return false end
+    Capture.UpdateWordDrag(editBox)
+    local drag = editBox.hironCraftDrag
+    editBox.hironCraftDrag = nil
+    if drag.from == drag.first and drag.to == drag.last then return false end
+    local first, last = drag.from, drag.to
+    editBox.hironCraftLastClick = nil
+    editBox.hironCraftAnchor = { first = first, last = last }
+    local function Apply()
+        editBox:SetCursorPosition(last)
+        editBox:HighlightText(first, last)
+    end
+    Apply()
+    if C_Timer and C_Timer.After then C_Timer.After(0, Apply) end
+    return true
+end
+
 local function SetStatus(frame, ok, reason)
     local errors = {
         missing_text = L('Select a word or phrase first.'),
@@ -293,12 +337,19 @@ function Capture.PopulateSelectionMenu(rootDescription, frame, selectedText)
     end
 
     local hide = rootDescription:CreateButton(L('Hide in chat'))
-    hide:CreateButton(L('Messages with this phrase'), function()
+    local anywhere = hide:CreateButton(L('Messages with this phrase'), function()
         SetStatus(frame, Capture.SaveFilterKey(selectedText, false))
     end)
-    hide:CreateButton(L('Messages with this as whole words'), function()
+    local whole = hide:CreateButton(L('Messages with this as whole words'), function()
         SetStatus(frame, Capture.SaveFilterKey(selectedText, true))
     end)
+    for _, entry in ipairs({ { anywhere, 'Hide anywhere tooltip' }, { whole, 'Hide whole words tooltip' } }) do
+        if entry[1] and entry[1].SetTooltip then
+            entry[1]:SetTooltip(function(tooltip)
+                GameTooltip_AddNormalLine(tooltip, L(entry[2]))
+            end)
+        end
+    end
 
     rootDescription:CreateButton(L('Create new quick response for this keyword'), function()
         if HironCraftScan.Config.ShowCreateQuickReplyDialog then
@@ -369,10 +420,16 @@ local function CreateEditor()
     editBox:SetScript('OnMouseDown', function(self, button)
         if button == 'RightButton' then
             self.hironCraftSelectedText = Capture.ExtractSelectedText(self)
+        elseif button == 'LeftButton' and not (IsShiftKeyDown and IsShiftKeyDown()) then
+            Capture.BeginWordDrag(self, GetTime and GetTime() or 0)
         end
+    end)
+    editBox:HookScript('OnUpdate', function(self)
+        if self.hironCraftDrag then Capture.UpdateWordDrag(self) end
     end)
     editBox:SetScript('OnMouseUp', function(self, button)
         if button == 'LeftButton' then
+            if Capture.FinishWordDrag(self) then return end
             Capture.HandleMultiClick(self, GetTime and GetTime() or 0, IsShiftKeyDown and IsShiftKeyDown())
         elseif button == 'RightButton' then
             local selectedText = self.hironCraftSelectedText
