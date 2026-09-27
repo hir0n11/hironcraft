@@ -894,12 +894,14 @@ function S:UpdateSellTotals()
     form.priceMoney:SetText(FormatGold(price))
 
     local valid = qty > 0 and price > 0 and qty <= self:GetSellPostLimit()
-    if IsFantasy() then
-        form.postBtn:SetEnabled(valid)
-    elseif valid then
+        and not self.sell.awaitingPost and not self.sell.pendingBuy
+        and self:IsSellScanReady() and self:IsSellAHThrottleReady()
+    form.postBtn:SetEnabled(valid and true or false)
+    form.skipBtn:SetEnabled(not self.sell.awaitingPost)
+    if not IsFantasy() and valid then
         form.postBtn.label:SetTextColor(1, 1, 1)
         form.postBtn:SetBackdropBorderColor(0.30, 0.75, 0.40, 1)
-    else
+    elseif not IsFantasy() then
         form.postBtn.label:SetTextColor(0.5, 0.5, 0.5)
         form.postBtn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     end
@@ -995,7 +997,18 @@ function S:RefreshSellUI()
     SetDurationVisual(form.dur48, self.sell.duration == 3)
 
     local scan = self.sell.scan
-    if scan and scan.pending then
+    local pending = self.sell.awaitingPost
+    if pending then
+        local status = T("PG_SELL_POST_WAIT", "Waiting for auction confirmation...")
+        if pending.phase == "confirmation" then
+            status = T("PG_SELL_CONFIRM_WAIT", "Confirm posting in the dialog")
+        elseif pending.delayed then
+            status = T("PG_SELL_POST_SLOW", "Response delayed — reopen the auction house")
+        end
+        form.marketLine:SetText(status)
+        form.marketLine:SetTextColor(1, 0.82, 0.35)
+        form.flipLine:SetText("")
+    elseif scan and scan.pending then
         form.marketLine:SetText(T("PG_SELL_SCANNING", "Scanning..."))
         form.marketLine:SetTextColor(0.7, 0.7, 0.75)
         form.flipLine:SetText("")

@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Reliable reagent auction posting (0.4.76)
+
+- Posting holds the selected item until the auction-created event and updated
+  bag counts agree. Repeated clicks/keys cannot queue duplicate posts or skip
+  an item, and only confirmed posts update the success message and last price.
+- Posts requiring an auction-house warning use an explicit confirmation dialog
+  bound to the original item, quantity, price and duration. Cancelling or a
+  server error retains the item; confirmation never runs from an event or timer.
+- A delayed response remains locked with a visible notice rather than silently
+  retrying. Close/reopen the auction house to reconcile with actual inventory.
+- Posting waits for the selected item's price search, validates its bag slot,
+  ignores unrelated search results and no longer restores stale sold items
+  just because the bags contain empty slots or bound equipment.
+- Busy-key presses are no longer replayed from an auction event, outside the
+  hardware click. When the auction house becomes ready, press Post again.
+
 ## Chat filter: other people's duels (0.4.73)
 
 - "What is hidden" - Other system messages - Duel results: "A has defeated

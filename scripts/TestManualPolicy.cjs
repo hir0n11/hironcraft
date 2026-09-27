@@ -59,11 +59,11 @@ const bnetSends = ownCalls.filter(call => /(^|\.)(BNSendWhisper|SendWhisper)$/.t
 assert.deepEqual(bnetSends.map(call => call.file), ['Utils/Utils.lua', 'Utils/Utils.lua'],
     'Battle.net chat bypassed the guarded central sender');
 
-function checkManualCalls(method, files) {
+function checkManualCalls(method, files, flagIndex = -1) {
     const matched = ownCalls.filter(call => call.name.endsWith('.' + method));
     assert.deepEqual(matched.map(call => call.file).sort(), files.sort(), 'review new ' + method + ' callers');
     for (const call of matched) {
-        const flag = call.node.arguments.at(-1);
+        const flag = call.node.arguments.at(flagIndex);
         assert(flag && flag.type === 'BooleanLiteral' && flag.value === true,
             'missing manual-action opt-in: ' + call.file + ':' + call.name);
     }
@@ -74,8 +74,9 @@ checkManualCalls('SendResponses', [
 ]);
 checkManualCalls('SendOrderGreeting', [
     'Customer/OrderPage.lua', 'Customer/QuickReplies.lua',
-]);
+], 1); // The optional third argument identifies the greeting's source.
 checkManualCalls('RequestCraft', ['Customer/CustomerPage.lua']);
+checkManualCalls('ConfirmSellPost', ['ProfitHub/Shop/Core/ShoppingList_Selling.lua']);
 
 function checkGuard(key) {
     const fn = functions.get(key);
@@ -92,6 +93,7 @@ function checkGuard(key) {
 checkGuard('Utils/Utils.lua:HironCraftScan.Utils.SendResponses');
 checkGuard('Customer/OrderGreetings.lua:Scan.SendOrderGreeting');
 checkGuard('Utils/Comm.lua:HironCraftScanComm.RequestCraft');
+checkGuard('ProfitHub/Shop/Core/ShoppingList_Selling.lua:S.ConfirmSellPost');
 const retired = functions.get('ProfitHub/Shop/Core/ShoppingList_Core.lua:S.AdvanceBuyAll');
 assert(retired && retired.body.length === 1
     && name(retired.body[0].expression?.base) === 'self.StopBuyAll', 'buy-all execution was reintroduced');

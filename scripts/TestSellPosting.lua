@@ -1,7 +1,6 @@
 -- Posting from the Sell tab against a mocked auction house: the first item is
--- chosen by itself, requests go one at a time, a press of the post key while
--- the auction house is busy is kept and done when it is ready, and a request
--- the auction house drops brings its item back into the list.
+-- chosen by itself, confirmed posts advance one at a time, and busy presses
+-- never post from server events outside the hardware click handler.
 local function noop() end
 if not setfenv then
     function setfenv(fn, env)
@@ -25,6 +24,7 @@ local market = {                -- itemID -> { {unitPrice, quantity}, ... }
     [12] = { { 900, 5 } },
 }
 local eventHandler
+local bags
 local refreshes = 0
 local S = { RefreshSellUI = noop, frame = { IsShown = function() return true end } }
 local E = setmetatable({
@@ -40,6 +40,14 @@ local E = setmetatable({
     ItemLocation = { CreateFromBagAndSlot = function(_, bag, slot)
         return { bag = bag, slot = slot, IsValid = function() return true end } end },
     C_Item = { DoesItemExist = function() return true end },
+    C_Container = {
+        GetContainerNumSlots = function(bag) return bag == 0 and 5 or 0 end,
+        GetContainerItemInfo = function(_, slot)
+            for _, entry in ipairs(bags or {}) do
+                if entry.slot == slot then return { itemID = entry.itemID, stackCount = entry.count } end
+            end
+        end,
+    },
     C_AuctionHouse = {
         MakeItemKey = function(itemID) return { itemID = itemID } end,
         SendSearchQuery = function(itemKey) searches[#searches + 1] = itemKey.itemID end,
@@ -62,7 +70,7 @@ dofile('ProfitHub/Shop/Core/ShoppingList_Selling.lua')
 S.isAuctionHouseOpen = true
 S.shopTab = 'sell'
 
-local bags = {
+bags = {
     { key = 'c:11', itemID = 11, count = 30, bag = 0, slot = 1, isCommodity = true, itemName = 'A' },
     { key = 'c:12', itemID = 12, count = 4, bag = 0, slot = 2, isCommodity = true, itemName = 'B' },
 }
@@ -84,25 +92,30 @@ assert(#searches == 1 and searches[1] == 11, 'the first item\'s prices were not 
 arrive(11)
 assert(S.sell.price == 500)
 
--- A press posts at once when the auction house is ready, then the next
--- item's prices are asked for.
+-- A press submits immediately, but only confirmation advances the list.
 S:RunSellHotkeyAction()
 assert(#posts == 1 and posts[1].price == 500 and posts[1].qty == 30, 'the press did not post')
+assert(S.sell.selected.key == 'c:11' and S.sell.awaitingPost, 'unconfirmed post advanced')
+table.remove(bags, 1)
+eventHandler(nil, 'AUCTION_HOUSE_AUCTION_CREATED', 1)
 assert(S.sell.selected.key == 'c:12' and searches[#searches] == 12)
 arrive(12)
 
--- The auction house is busy: the press is kept, not lost, and done when it is
--- ready - one request, the post; nothing else goes with it.
+-- Busy clicks are not replayed from THROTTLED_SYSTEM_READY. A new click is
+-- required, so the restricted posting call stays in hardware context.
 now = now + 1
 ready = false
 local before = #searches
 S:RunSellHotkeyAction()
-assert(#posts == 1 and S.sell.postQueued, 'a press during the throttle was lost or sent')
+assert(#posts == 1, 'a press during the throttle was sent')
 readyAgain()
-assert(#posts == 2 and posts[2].price == 900, 'the kept press was not done when the auction house was ready')
-assert(not S.sell.postQueued and #searches == before, 'more than one request went at once')
+assert(#posts == 1 and #searches == before, 'readiness event posted without a click')
+S:RunSellHotkeyAction()
+assert(#posts == 2 and posts[2].price == 900, 'fresh click did not post')
+bags = {}
+eventHandler(nil, 'AUCTION_HOUSE_AUCTION_CREATED', 2)
 
--- A kept press from too long ago is dropped.
+-- A much later ready event cannot replay a press either.
 bags = { { key = 'c:11', itemID = 11, count = 5, bag = 0, slot = 1, isCommodity = true, itemName = 'A' } }
 S.sell.selected = nil
 S:RefreshSellList()
@@ -122,8 +135,7 @@ now = now + 1
 runTimers()
 assert(refreshes > refreshesBefore, 'a dropped request did not bring the bags back')
 
--- Closing the auction house forgets a kept press.
-S.sell.postQueued = { key = 'c:11', at = now }
+-- Closing clears any pending searches and posting state.
 eventHandler(nil, 'AUCTION_HOUSE_CLOSED')
-assert(not S.sell.postQueued, 'closing kept a press')
-print('Sell posting passed (first item, one request at a time, kept presses, stale presses, dropped requests, closing).')
+assert(not S.sell.awaitingPost and not S._pendingSellScan, 'closing kept a pending action')
+print('Sell posting passed (first item, confirmed progression, manual presses, dropped requests, closing).')

@@ -38,6 +38,7 @@ function S:IsSellExcluded(itemID)
 end
 
 function S:AddSellExclusion(itemID)
+    if self.sell.awaitingPost then return end
     if not itemID then return end
     GetSellExclusions()[itemID] = true
     if self.sell.selected and self.sell.selected.itemID == itemID then
@@ -201,7 +202,13 @@ function S:ScanSellBags()
     IterateSellBags(function(bag, slot)
         dbg.slots = dbg.slots + 1
         local okInfo, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
-        if not okInfo or not info or not info.itemID then dbg.noinfo = dbg.noinfo + 1; return end
+        if not okInfo or not info or not info.itemID then
+            -- Empty bag slots are normal, not a reason to retain a stale list.
+            if not okInfo or (C_Container.GetContainerItemID and C_Container.GetContainerItemID(bag, slot)) then
+                dbg.noinfo = dbg.noinfo + 1
+            end
+            return
+        end
         if (info.quality or 1) == 0 then dbg.q0 = dbg.q0 + 1; return end
         if GetSellExclusions()[info.itemID] then dbg.excl = dbg.excl + 1; return end
 
@@ -259,7 +266,7 @@ function S:ScanSellBags()
     end)
 
     local prev = self.sell.items or {}
-    local unstable = (dbg.noinfo > 0) or (dbg.invalid > 0)
+    local unstable = dbg.noinfo > 0
     if unstable and #order < #prev then
         self._sellRescanTries = (self._sellRescanTries or 0) + 1
         if self._sellRescanTries <= 3 then
@@ -280,6 +287,12 @@ function S:ScanSellBags()
 end
 
 function S:RefreshSellList()
+    -- Bag events can precede AUCTION_CREATED. Keep the submitted item selected
+    -- until both the server and inventory have acknowledged it.
+    if self.sell.awaitingPost then
+        self:TryFinishSellPost()
+        return
+    end
     if not self.sell._durInit then
         self.sell.duration = GetSellDefaultDuration()
         self.sell._durInit = true
@@ -305,6 +318,7 @@ function S:RefreshSellList()
 
         if stillThere then
             self.sell.selected = stillThere
+            self.sell.quantity = math.min(self.sell.quantity or 0, self:GetSellPostLimit())
         elseif prevIndex and #order > 0 then
             local target = order[prevIndex] or order[#order]
             if target then
@@ -364,11 +378,12 @@ function S:GetSellEntryByKey(key)
 end
 
 function S:ClearSellSelection()
+    if self.sell.awaitingPost then return end
     self.sell.selected = nil
     self.sell.scan = nil
     self.sell.quantity = 0
     self.sell.price = 0
-    self.sell.awaitingPost = nil
+    self._pendingSellScan = nil
     if self.RefreshSellUI then
         self:RefreshSellUI()
     end
@@ -424,6 +439,7 @@ function S:GetSellDeposit()
 end
 
 function S:SelectSellItem(entry)
+    if self.sell.awaitingPost then return end
     if not entry then return end
     self.sell.selected = entry
     self.sell.quantity = self:GetSellPostLimit()
@@ -456,6 +472,7 @@ local function BuildSellSorts()
 end
 
 function S:DoSellSearch(entry)
+    if self.sell.awaitingPost then return end
     entry = entry or self.sell.selected
     if not entry then return end
     if not SellAHReady() then return end
@@ -513,6 +530,7 @@ function S:QueueSellSearch(itemKey, sorts)
 end
 
 function S:ProcessSellScanQueue()
+    if self.sell.awaitingPost or not self.isAuctionHouseOpen then return end
     local q = self._pendingSellScan
     if not q then return end
     if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then return end
@@ -567,6 +585,16 @@ end
 function S:OnSellSearchResults(isCommodity, idOrKey)
     local scan = self.sell.scan
     if not scan or not scan.pending then return end
+    if self.sell.awaitingPost then return end
+    if isCommodity then
+        if scan.itemID ~= idOrKey then return end
+    else
+        local key = scan.itemKey
+        if not key or type(idOrKey) ~= "table" then return end
+        for _, field in ipairs({ "itemID", "itemLevel", "itemSuffix", "battlePetSpeciesID" }) do
+            if (key[field] or 0) ~= (idOrKey[field] or 0) then return end
+        end
+    end
 
     scan.isCommodity = isCommodity
     if self.sell.selected and self.sell.selected.itemID == scan.itemID then
@@ -658,19 +686,153 @@ function S:OnSellSearchResults(isCommodity, idOrKey)
     end
 end
 
+local SELL_CONFIRM_DIALOG = "HIRONCRAFT_SELL_CONFIRM"
+
+local function MatchesSellEntry(info, entry)
+    return info and info.itemID == entry.itemID
+        and (entry.isCommodity or info.hyperlink == entry.itemLink)
+end
+
+local function SellLocationMatches(entry)
+    if not C_Container or not C_Container.GetContainerItemInfo then return false end
+    local info = C_Container.GetContainerItemInfo(entry.bag, entry.slot)
+    return MatchesSellEntry(info, entry) and not info.isLocked
+end
+
+local function CountSellInventory(entry)
+    local count, complete = 0, true
+    IterateSellBags(function(bag, slot)
+        local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+        if not ok or (not info and C_Container.GetContainerItemID and C_Container.GetContainerItemID(bag, slot)) then
+            complete = false
+        elseif MatchesSellEntry(info, entry) then
+            count = count + (info.stackCount or 1)
+        end
+    end)
+    return complete and count or nil
+end
+
+function S:FailSellPost(pending, message)
+    if not pending or self.sell.awaitingPost ~= pending then return end
+    self.sell.awaitingPost = nil
+    if StaticPopup_Hide then StaticPopup_Hide(SELL_CONFIRM_DIALOG) end
+    if message then print("|cffb19cd9HironCraft:|r " .. message) end
+    self:RefreshSellList()
+end
+
+function S:TryFinishSellPost()
+    local pending = self.sell.awaitingPost
+    if not pending or not pending.created then return end
+    local count = CountSellInventory(pending.entry)
+    if not count or count > pending.beforeCount - pending.quantity then return end
+
+    local entry, qty, price = pending.entry, pending.quantity, pending.price
+    self.sell.awaitingPost = nil
+    self._sellDepositTrusted = true
+    GetSellLastPrices()[entry.itemID] = price
+    local link = entry.itemLink or entry.itemName or ("item:" .. tostring(entry.itemID))
+    local each = (GetMoneyString and GetMoneyString(price, true)) or tostring(price)
+    local total = (GetMoneyString and GetMoneyString(price * qty, true)) or tostring(price * qty)
+    if DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format(
+            T("PG_SELL_POSTED_MSG", "Posted: %s x%d at %s/ea (total %s)"), link, qty, each, total))
+    end
+    -- Read actual remaining stacks/locations instead of subtracting from a
+    -- cached entry that BAG_UPDATE may already have changed.
+    self:RefreshSellList()
+end
+
+function S:WatchSellPost(pending)
+    if not C_Timer then return end
+    local function tick()
+        if S.sell.awaitingPost ~= pending then return end
+        S:TryFinishSellPost()
+        if S.sell.awaitingPost ~= pending then return end
+        if (GetTime() - pending.startedAt) >= 20 then
+            -- No automatic retry: a delayed server response is not a failure.
+            pending.delayed = true
+            print("|cffb19cd9HironCraft:|r " .. T("PG_SELL_POST_DELAYED",
+                "Auction response delayed. Check your auctions and reopen the auction house before retrying."))
+            if S.RefreshSellUI then S:RefreshSellUI() end
+            return
+        end
+        C_Timer.After(0.2, tick)
+    end
+    C_Timer.After(0.2, tick)
+end
+
+function S:ConfirmSellPost(pending, userInitiated)
+    if userInitiated ~= true then return false end
+    if self.sell.awaitingPost ~= pending or pending.phase ~= "confirmation" then return false end
+    if not self.isAuctionHouseOpen or not self:IsSellAHThrottleReady()
+        or not SellLocationMatches(pending.entry) or self:GetSellPostLimit() < pending.quantity then
+        self:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
+        return false
+    end
+    pending.phase = "posting"
+    pending.startedAt = GetTime()
+    local ok
+    if pending.entry.isCommodity then
+        ok = C_AuctionHouse.ConfirmPostCommodity and pcall(C_AuctionHouse.ConfirmPostCommodity,
+            pending.location, pending.duration, pending.quantity, pending.price)
+    else
+        ok = C_AuctionHouse.ConfirmPostItem and pcall(C_AuctionHouse.ConfirmPostItem,
+            pending.location, pending.duration, pending.quantity, nil, pending.price)
+    end
+    if not ok then
+        self:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
+        return false
+    end
+    self:WatchSellPost(pending)
+    if self.RefreshSellUI then self:RefreshSellUI() end
+    return true
+end
+
+function S:ShowSellPostConfirmation(pending)
+    if not StaticPopupDialogs or not StaticPopup_Show then
+        self:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
+        return
+    end
+    StaticPopupDialogs[SELL_CONFIRM_DIALOG] = StaticPopupDialogs[SELL_CONFIRM_DIALOG] or {
+        text = "%s\n\n%s", button1 = ACCEPT, button2 = CANCEL,
+        timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true,
+        OnAccept = function(_, data) S:ConfirmSellPost(data, true) end,
+        OnCancel = function(_, data) S:FailSellPost(data) end,
+    }
+    -- Blizzard's popup only knows about posts made through its own sell form.
+    -- Preserve its warning, but bind confirmation to our exact frozen request.
+    if StaticPopup_Hide then StaticPopup_Hide("AUCTION_HOUSE_POST_WARNING") end
+    local price = GetMoneyString and GetMoneyString(pending.price, true) or tostring(pending.price)
+    local details = string.format("%s x%d — %s", pending.entry.itemLink or pending.entry.itemName
+        or ("item:" .. tostring(pending.entry.itemID)),
+        pending.quantity, price)
+    if not StaticPopup_Show(SELL_CONFIRM_DIALOG, CONFIRM_AUCTION_POSTING_TEXT, details, pending) then
+        self:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
+    end
+end
+
 function S:PostSellItem()
     local entry = self.sell.selected
     if not entry then return false end
+    if self.sell.awaitingPost or self.sell.pendingBuy then return false end
+    if not self.isAuctionHouseOpen then return false end
     if not C_AuctionHouse then return false end
     if not self:IsSellAHThrottleReady() then return false end
+    if not self:IsSellScanReady() then return false end
+    if not SellLocationMatches(entry) then
+        self:RefreshSellList()
+        return false
+    end
 
     local now = (GetTime and GetTime()) or 0
     if self._lastPostKey == entry.key and self._lastPostTime and (now - self._lastPostTime) < 0.5 then
         return false
     end
 
-    local qty = self.sell.quantity or 0
-    local price = NormalizeSellPrice(self.sell.price or 0)
+    local qty = math.floor(tonumber(self.sell.quantity) or 0)
+    local rawPrice = tonumber(self.sell.price) or 0
+    if rawPrice <= 0 then return false end
+    local price = NormalizeSellPrice(rawPrice)
     local dur = self:GetSellDurationCode()
 
     if qty <= 0 or price <= 0 then return false end
@@ -713,49 +875,39 @@ function S:PostSellItem()
     end
     entry.isCommodity = isCommodity
 
-    local ok = false
+    local beforeCount = CountSellInventory(entry)
+    if not beforeCount or beforeCount < qty then return false end
+    local snapshot = {}
+    for key, value in pairs(entry) do snapshot[key] = value end
+    local pending = { entry = snapshot, quantity = qty, price = price, duration = dur,
+        location = loc, beforeCount = beforeCount, startedAt = now, phase = "posting" }
+    self.sell.awaitingPost = pending
+    self._pendingSellScan = nil
+    local ok, needsConfirmation = false, false
     if isCommodity then
         if C_AuctionHouse.PostCommodity then
-            ok = pcall(C_AuctionHouse.PostCommodity, loc, dur, qty, price)
+            ok, needsConfirmation = pcall(C_AuctionHouse.PostCommodity, loc, dur, qty, price)
         end
     else
         if C_AuctionHouse.PostItem then
-            ok = pcall(C_AuctionHouse.PostItem, loc, dur, qty, nil, price)
+            ok, needsConfirmation = pcall(C_AuctionHouse.PostItem, loc, dur, qty, nil, price)
         end
     end
 
     if not ok then
+        self:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
         return false
     end
 
     self._lastPostKey = entry.key
     self._lastPostTime = now
-    self._sellDepositTrusted = true
-
-    if entry.itemID and price > 0 then
-        GetSellLastPrices()[entry.itemID] = price
-    end
-
-    local linkOrName = entry.itemLink or entry.itemName or ("item:" .. tostring(entry.itemID))
-    local perEach = (GetMoneyString and GetMoneyString(price, true)) or tostring(price)
-    local total = (GetMoneyString and GetMoneyString(price * qty, true)) or tostring(price * qty)
-    if DEFAULT_CHAT_FRAME then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format(
-            T("PG_SELL_POSTED_MSG", "Posted: %s x%d at %s/ea (total %s)"),
-            linkOrName, qty, perEach, total))
-    end
-
-    if qty >= (entry.count or 0) then
-        self:AdvanceSellSelection(entry.key)
-        local items = self.sell.items or {}
-        for i = #items, 1, -1 do
-            if items[i].key == entry.key then
-                table.remove(items, i)
-                break
-            end
+    if self.sell.awaitingPost == pending then
+        if needsConfirmation then
+            pending.phase = "confirmation"
+            self:ShowSellPostConfirmation(pending)
+        else
+            self:WatchSellPost(pending)
         end
-    else
-        entry.count = (entry.count or qty) - qty
     end
     if self.RefreshSellUI then
         self:RefreshSellUI()
@@ -824,6 +976,7 @@ end
 function S:IsSellScanReady()
     local scan = self.sell and self.sell.scan
     if not scan then return false end
+    if not self.sell.selected or scan.itemID ~= self.sell.selected.itemID then return false end
     if scan.pending then return false end
     return true
 end
@@ -836,42 +989,18 @@ function S:IsSellAHThrottleReady()
     return true
 end
 
--- A press of the post key while the auction house is still busy with the
--- last request is kept this long and done the moment it is ready - the same
--- post as a press then, one request at a time.
-local QUEUED_POST_SECONDS = 3
-
 function S:RunSellHotkeyAction()
     if not self.isAuctionHouseOpen then return end
     if self.shopTab ~= "sell" then return end
     if not self.sell.selected then return end
+    -- Posting must remain in the real click/key handler. Never replay a busy
+    -- press from THROTTLED_SYSTEM_READY (which has no hardware action context).
+    if not self:IsSellAHThrottleReady() then return end
     local now = GetTime and GetTime() or 0
     if self._lastSellPostTime and (now - self._lastSellPostTime) < 0.35 then return end
-    if not self:IsSellAHThrottleReady() then
-        self.sell.postQueued = { key = self.sell.selected.key, at = now }
-        return
-    end
-    self.sell.postQueued = nil
     if self:PostSellItem() then
         self._lastSellPostTime = now
     end
-end
-
--- The auction house is ready: a kept press for the same item goes first.
-function S:RunQueuedSellPost()
-    local queued = self.sell.postQueued
-    if not queued then return false end
-    self.sell.postQueued = nil
-    local selected = self.sell.selected
-    local now = GetTime and GetTime() or 0
-    if not selected or selected.key ~= queued.key or now - queued.at > QUEUED_POST_SECONDS then return false end
-    if not self.isAuctionHouseOpen or self.shopTab ~= "sell" or not self:IsSellAHThrottleReady() then return false end
-    -- A real press, kept: not held back by the key-repeat guard.
-    if self:PostSellItem() then
-        self._lastSellPostTime = now
-        return true
-    end
-    return false
 end
 
 function S:RunSkipHotkeyAction()
@@ -945,6 +1074,7 @@ function S:ClearSellTemporaryBinding()
 end
 
 function S:BuySellTier(tier)
+    if self.sell.awaitingPost then return end
     if not tier or not self.sell.selected then return end
     if not self.isAuctionHouseOpen then return end
     local entry = self.sell.selected
@@ -1001,13 +1131,30 @@ sellEventFrame:RegisterEvent("COMMODITY_PURCHASE_SUCCEEDED")
 sellEventFrame:RegisterEvent("COMMODITY_PURCHASE_FAILED")
 sellEventFrame:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 pcall(sellEventFrame.RegisterEvent, sellEventFrame, "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED")
+sellEventFrame:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
+sellEventFrame:RegisterEvent("AUCTION_HOUSE_POST_ERROR")
+sellEventFrame:RegisterEvent("AUCTION_HOUSE_SHOW_ERROR")
 sellEventFrame:SetScript("OnEvent", function(_, event, ...)
+    if event == "AUCTION_HOUSE_AUCTION_CREATED" then
+        local pending = S.sell.awaitingPost
+        if pending and pending.phase == "posting" then
+            pending.created = true
+            S:TryFinishSellPost()
+        end
+        return
+    end
+    if event == "AUCTION_HOUSE_POST_ERROR" or event == "AUCTION_HOUSE_SHOW_ERROR" then
+        local pending = S.sell.awaitingPost
+        if pending and not pending.created then
+            S:FailSellPost(pending, T("PG_SELL_POST_FAILED", "could not post the item — try again"))
+        end
+        return
+    end
     if event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
-        -- One request at a time: the kept post, or else the waiting search.
-        if S:RunQueuedSellPost() then return end
         if S._pendingSellScan then
             C_Timer.After(0.05, function() S:ProcessSellScanQueue() end)
         end
+        if S.RefreshSellUI then S:RefreshSellUI() end
         return
     end
 
@@ -1033,6 +1180,7 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 
     if event == "BAG_UPDATE_DELAYED" then
+        S:TryFinishSellPost()
         if S.frame and S.shopTab == "sell" and S.frame:IsShown() then
             S:RefreshSellListSoon()
         end
@@ -1096,8 +1244,9 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
         S.sell.pendingBuy = nil
         S.sell.pendingBindPost = nil
         S.sell.awaitingPost = nil
+        S._pendingSellScan = nil
+        if StaticPopup_Hide then StaticPopup_Hide(SELL_CONFIRM_DIALOG) end
         S._sellDepositTrusted = nil
-        S.sell.postQueued = nil
         return
     end
 end)
