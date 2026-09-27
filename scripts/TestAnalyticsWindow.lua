@@ -177,6 +177,10 @@ assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.val
     and frame.Tiles.crafted.value:GetText() == '1' and frame.Tiles.conversion.value:GetText() == '100%'
     and frame.Tiles.orders.value:GetText() == '1', 'the summary tiles are off')
 assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
+-- The hour's tooltip: the conversion of the greetings sent in it.
+local noon = frame.HourChart.bars[13].info
+assert(noon and noon.lines[4] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[4]))
+assert(frame.HourChart.bars[12].info.lines[4]:find('-', 1, true), 'an hour without greetings shows a conversion')
 -- A figure wider than its tile widens it, not climbing over the name; the
 -- tiles after it move along, and when the row runs into the buttons the
 -- widened ones take the smaller font.

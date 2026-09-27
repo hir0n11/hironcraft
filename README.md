@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Customer coins by the average tip; hourly conversion (0.4.58)
+
+- The coin in front of a customer's name now follows their average tip over
+  delivered orders instead of their largest one: 3,000 gold or more is gold,
+  1,000 to 2,999 silver, under 1,000 copper. Orders without a tip count too.
+  Records kept so far are judged the same way right away; marks set by hand
+  stay. The tooltip shows the average, the largest and the total tip.
+- The hour and weekday tooltips of the analytics "By time" tab show the
+  conversion: how many of the greetings sent in that hour (or on that day)
+  ended in a crafted order. The time CSV has the crafted and conversion
+  columns too.
+
 ## Analytics: reagent names and ranks (0.4.57)
 
 - Reagents not in the game's cache stayed as their item numbers (#238205):

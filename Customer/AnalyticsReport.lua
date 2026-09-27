@@ -195,8 +195,10 @@ function M.Build(chunks, filters, context)
 
     local report = {
         rows = {}, customers = {},
-        hours = { requests = Hours(), greetings = Hours(), orders = Hours() },
-        weekdays = { requests = Weekdays(), greetings = Weekdays(), orders = Weekdays() },
+        -- crafted: greeted conversations that ended in an order, by the time
+        -- of the greeting, for the conversion of each hour and day.
+        hours = { requests = Hours(), greetings = Hours(), crafted = Hours(), orders = Hours() },
+        weekdays = { requests = Weekdays(), greetings = Weekdays(), crafted = Weekdays(), orders = Weekdays() },
         totals = { mentions = 0, requests = 0, greetings = 0, crafted = 0, orders = 0,
             declined = 0, tips = 0, tipped = 0 },
         tiers = { generous = 0, regular = 0, stingy = 0, none = 0 },
@@ -268,6 +270,8 @@ function M.Build(chunks, filters, context)
                     if crafted then
                         row.crafted = row.crafted + 1
                         report.totals.crafted = report.totals.crafted + 1
+                        report.hours.crafted[Hour(greeting.t)] = report.hours.crafted[Hour(greeting.t)] + 1
+                        report.weekdays.crafted[Weekday(greeting.t)] = report.weekdays.crafted[Weekday(greeting.t)] + 1
                         if person then person.crafted = person.crafted + 1 end
                     end
                 end

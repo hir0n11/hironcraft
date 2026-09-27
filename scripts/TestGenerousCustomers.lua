@@ -1,6 +1,6 @@
--- How customers tip: 5,000 gold or more on one order marks them generous,
--- under 999 gold stingy, only tips in between regular; the crafter can set or
--- clear the gold and copper marks by hand.
+-- How customers tip, by the average of their tips: 3,000 gold or more marks
+-- them generous, 1,000 to 2,999 regular, under 1,000 stingy; the crafter
+-- can set or clear the mark by hand.
 local now = 1000
 function time() return now end
 local Scan = { DB = { settings = {} }, Utils = {} }
@@ -12,51 +12,55 @@ assert(loadfile('Customer/GenerousCustomers.lua'))('HironCraft', Scan)
 local G = Scan.Generous
 local GOLD = 10000
 
--- In between: a silver coin.
-local counted, changed = G.RecordTip('Middle-Realm', 4999 * GOLD, 1)
-assert(counted and changed and G.MarkOf('Middle') == 'regular', 'a 4,999 gold tip did not make a regular')
-counted, changed = G.RecordTip('Middle', 2000 * GOLD, 11)
-assert(counted and not changed and G.MarkOf('Middle') == 'regular')
+-- An average in between: a silver coin.
+local counted, changed = G.RecordTip('Middle-Realm', 2000 * GOLD, 1)
+assert(counted and changed and G.MarkOf('Middle') == 'regular', 'a 2,000 gold average did not make a regular')
 assert(G.Decorate('Middle', 'Middle'):find('UI-SilverIcon', 1, true), 'no silver coin')
 assert(G.Describe('Middle'):find('Regular customer', 1, true), 'the tooltip does not name a regular')
--- One small tip: no longer only in between.
-G.RecordTip('Middle', 500 * GOLD, 12)
-assert(G.IsStingy('Middle'), 'a small tip left a regular customer silver')
--- One big tip: generous, and a later tip in between keeps the gold coin.
-G.RecordTip('Upper', 3000 * GOLD, 13)
-G.RecordTip('Upper', 6000 * GOLD, 14)
-assert(G.IsGenerous('Upper'), 'a big tip left a regular customer silver')
-G.RecordTip('Upper', 3000 * GOLD, 15)
-assert(G.IsGenerous('Upper'), 'a tip in between took the gold coin away')
--- Tips in between counted by 0.4.39 and earlier left no mark: silver now.
-Scan.DB.settings.generous_customers.older = { max = 3000 * GOLD, count = 2, total = 5000 * GOLD, orders = {} }
-Scan.DB.settings.generous_customers.never = { manual = 'none', max = 3000 * GOLD, count = 1, orders = {} }
-assert(G.MarkOf('Older') == 'regular' and G.MarkOf('Never') == nil, 'older tips in between did not show silver')
--- 5,000 and more: generous, whatever the realm or the case of the name.
-counted, changed = G.RecordTip('Big-Realm', 5000 * GOLD, 2)
-assert(changed, 'a new mark was not reported, so the list would not redraw')
-assert(G.IsGenerous('Big') and G.IsGenerous('big-otherrealm') and G.IsGenerous('BIG'),
-    'a 5,000 gold tip did not mark')
--- Under 999: stingy; no tip at all is stingy too.
-G.RecordTip('Small-Realm', 998 * GOLD, 3)
-G.RecordTip('Nothing', 0, 4)
-assert(G.IsStingy('Small') and G.IsStingy('Nothing'), 'a small tip did not mark the customer stingy')
-G.RecordTip('Edge', 999 * GOLD, 5)
-assert(G.MarkOf('Edge') == 'regular', '999 gold is already stingy')
--- Generosity wins: one small tip does not undo it, one big tip lifts a stingy customer.
-G.RecordTip('Big', 100 * GOLD, 6)
-assert(G.IsGenerous('Big'), 'a small tip made a generous customer stingy')
-G.RecordTip('Small', 7000 * GOLD, 7)
-assert(G.IsGenerous('Small'), 'a big tip did not lift a stingy customer')
--- The same order seen again counts once.
-assert(not G.RecordTip('Big', 5000 * GOLD, 2))
-local entry = G.Get('Big')
-assert(entry.count == 2 and entry.total == 5100 * GOLD and entry.max == 5000 * GOLD)
-assert(G.Describe('Big'):find('5 000g', 1, true) and G.Describe('Big'):find('5 100g', 1, true),
-    'the tooltip does not show the tips')
-assert(G.Decorate('Big', 'Big'):find('UI-GoldIcon', 1, true), 'no gold coin')
+-- The edges: 1,000 is silver, 999 copper, 3,000 gold; no tip at all is copper.
+G.RecordTip('Edge', 1000 * GOLD, 2)
+G.RecordTip('Below', 999 * GOLD, 3)
+G.RecordTip('Top', 3000 * GOLD, 4)
+G.RecordTip('Nothing', 0, 5)
+assert(G.MarkOf('Edge') == 'regular' and G.IsStingy('Below') and G.IsGenerous('Top') and G.IsStingy('Nothing'),
+    'the coin edges are off')
+assert(G.Decorate('Top', 'Top'):find('UI-GoldIcon', 1, true), 'no gold coin')
 assert(G.Decorate('Nothing', 'Nothing'):find('UI-CopperIcon', 1, true), 'no copper coin')
 assert(G.Decorate('Stranger', 'Stranger') == 'Stranger')
+
+-- The average decides, not the largest tip: orders without a tip bring a
+-- generous customer down step by step, a big tip lifts them again.
+G.RecordTip('Mixed', 6000 * GOLD, 6)
+counted, changed = G.RecordTip('Mixed', 0, 7)          -- 3,000 on average
+assert(G.IsGenerous('Mixed') and not changed, 'a 3,000 gold average is not gold')
+counted, changed = G.RecordTip('Mixed', 0, 8)          -- 2,000
+assert(G.MarkOf('Mixed') == 'regular' and changed, 'the average did not bring the coin down to silver')
+for order = 9, 11 do G.RecordTip('Mixed', 0, order) end -- 1,000
+assert(G.MarkOf('Mixed') == 'regular', 'a 1,000 gold average is not silver')
+G.RecordTip('Mixed', 0, 12)                             -- 857
+assert(G.IsStingy('Mixed'), 'the average did not bring the coin down to copper')
+G.RecordTip('Mixed', 20000 * GOLD, 13)                  -- 3,250
+assert(G.IsGenerous('Mixed'), 'a big tip did not lift the average to gold')
+
+-- Whatever the realm or the case of the name; the same order counts once.
+counted, changed = G.RecordTip('Big-Realm', 5000 * GOLD, 20)
+assert(changed, 'a new mark was not reported, so the list would not redraw')
+assert(G.IsGenerous('Big') and G.IsGenerous('big-otherrealm') and G.IsGenerous('BIG'), 'the name did not match')
+G.RecordTip('Big', 100 * GOLD, 21)
+assert(not G.RecordTip('Big', 5000 * GOLD, 20), 'a repeated order counted again')
+local entry = G.Get('Big')
+assert(entry.count == 2 and entry.total == 5100 * GOLD and entry.max == 5000 * GOLD and G.MarkOf('Big') == 'regular')
+local describe = G.Describe('Big')
+assert(describe:find('2 550g', 1, true) and describe:find('5 000g', 1, true) and describe:find('5 100g', 1, true),
+    'the tooltip does not show the average, the largest and the total tip: ' .. describe)
+
+-- Records of earlier versions: the average of what they kept decides, over
+-- the mark they stored.
+Scan.DB.settings.generous_customers.older = { max = 3000 * GOLD, count = 2, total = 5000 * GOLD, orders = {} }
+Scan.DB.settings.generous_customers.never = { manual = 'none', max = 3000 * GOLD, count = 1, orders = {} }
+Scan.DB.settings.generous_customers.kept = { mark = 'generous', max = 6000 * GOLD, count = 3, total = 6300 * GOLD, orders = {} }
+assert(G.MarkOf('Older') == 'regular' and G.MarkOf('Never') == nil and G.MarkOf('Kept') == 'regular',
+    'earlier records are not judged by their average')
 
 -- By hand, and it sticks against later tips.
 G.SetManual('Friendly', 'generous')
@@ -98,4 +102,4 @@ G.MarkUntipped({ 'Later' })
 G.RecordTip('Later', 100 * GOLD, 21)
 assert(G.IsStingy('Later'), 'a small tip did not move an untipped customer to copper')
 
-print('Customer tip tests passed (generous 5,000+, stingy under 999, regular in between, generosity wins, repeats, by hand, older data, pause).')
+print('Customer tip tests passed (average: gold 3,000+, silver 1,000-2,999, copper under 1,000; repeats, by hand, older data, pause).')

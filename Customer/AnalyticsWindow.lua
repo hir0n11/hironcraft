@@ -632,10 +632,15 @@ local function UpdateCharts()
         for index = 1, count do
             local slot = index - 1 + offset
             values[index] = report[group][metric][slot] or 0
+            local greetings, crafted = report[group].greetings[slot] or 0, report[group].crafted[slot] or 0
             infos[index] = { title = titleOf(index), lines = {
                 string.format('%s: %d', L('Requests'), report[group].requests[slot] or 0),
-                string.format('%s: %d', L('Greetings'), report[group].greetings[slot] or 0),
+                string.format('%s: %d', L('Greetings'), greetings),
                 string.format('%s: %d', L('Crafted orders'), report[group].orders[slot] or 0),
+                -- Of the greetings sent in this hour, how many were crafted.
+                string.format('%s: %s', L('Conversion'), greetings > 0
+                    and string.format('%s (%d / %d)', Percent(crafted / greetings), crafted, greetings)
+                    or Percent(nil)),
             } }
         end
         return values, infos
@@ -836,15 +841,14 @@ local function ExportCSV()
                 row.lastOrder and date('%Y-%m-%d %H:%M', row.lastOrder) or '' }, ',')
         end
     elseif tab == TAB_TIME then
-        lines[1] = 'period,requests,greetings,orders'
-        for hour = 0, 23 do
-            lines[#lines + 1] = string.format('%02d:00,%d,%d,%d', hour, report.hours.requests[hour],
-                report.hours.greetings[hour], report.hours.orders[hour])
+        lines[1] = 'period,requests,greetings,crafted,conversion,orders'
+        local function Line(period, group, slot)
+            local greetings, crafted = report[group].greetings[slot], report[group].crafted[slot]
+            return string.format('%s,%d,%d,%d,%s,%d', period, report[group].requests[slot], greetings, crafted,
+                greetings > 0 and string.format('%.2f', crafted / greetings) or '', report[group].orders[slot])
         end
-        for day = 1, 7 do
-            lines[#lines + 1] = string.format('%s,%d,%d,%d', CSV(L(WEEKDAYS[day])), report.weekdays.requests[day],
-                report.weekdays.greetings[day], report.weekdays.orders[day])
-        end
+        for hour = 0, 23 do lines[#lines + 1] = Line(string.format('%02d:00', hour), 'hours', hour) end
+        for day = 1, 7 do lines[#lines + 1] = Line(CSV(L(WEEKDAYS[day])), 'weekdays', day) end
     else
         lines[1] = 'item,item_id,profession,mentions,requests,greetings,crafted,conversion,all_orders,declined,average_tip_gold'
         for _, row in ipairs(frame.Items.rows or {}) do
