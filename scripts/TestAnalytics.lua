@@ -475,5 +475,10 @@ local weekday = tonumber(os.date('%w', noon))
 weekday = weekday == 0 and 7 or weekday
 assert(online.weekdays.online[weekday] == 15 and online.weekdays.possible[weekday] == 120)
 assert(build({ from = day, to = day + 86399, side = 'H' }).hours.online[12] == 5, 'the side filter is off for time online')
+-- The slot running now counts only the minutes gone, never more than the hour had.
+now = noon + 3600 + 120
+online = build({ from = day, to = day + 86399 })
+assert(online.hours.online[13] == 2 and online.hours.possible[13] == 2,
+    'the running slot counted in full: ' .. online.hours.online[13] .. ' of ' .. online.hours.possible[13])
 now = savedNow
 print('Analytics time online passed.')

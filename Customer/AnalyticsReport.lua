@@ -336,10 +336,13 @@ function M.Build(chunks, filters, context)
     -- the time someone was there to see the requests.
     report.hours.online, report.hours.possible = Hours(), Hours()
     report.weekdays.online, report.weekdays.possible = Weekdays(), Weekdays()
-    local slotMinutes = PRESENCE_SLOT / 60
+    -- A slot counts only as far as it has gone: the one running now is not
+    -- five minutes yet.
+    local until_ = math.min(to, time())
     for slot in pairs(online) do
         local t = slot * PRESENCE_SLOT
-        if t >= from and t <= to then
+        local slotMinutes = (math.min(t + PRESENCE_SLOT, until_) - t) / 60
+        if t >= from and t <= to and slotMinutes > 0 then
             local hour, day = Hour(t), Weekday(t)
             report.hours.online[hour] = report.hours.online[hour] + slotMinutes
             report.weekdays.online[day] = report.weekdays.online[day] + slotMinutes

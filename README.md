@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: time online never above the time gone (0.4.66)
+
+- The 5-minute mark running now counted in full, so a fresh hour could show
+  more online time than had passed ("15 min of 13 min (114%)"). It counts
+  only the minutes gone.
+
 ## Analytics: time online, simpler names, no mentions (0.4.65)
 
 - Time online: every 5 minutes online is marked in the journal and shared
