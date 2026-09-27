@@ -22,6 +22,9 @@ local returns = nil
 local loadToken = 0
 local rebuildPending = false
 local namesPending = false
+-- Redraws for names still on their way; a few, in case a load goes unanswered.
+local NAME_RETRIES, NAME_RETRY_SECONDS = 5, 2
+local nameRedrawAt, nameRetries = nil, 0
 -- What was typed in the search box, lower case; '' shows everything.
 local searchText = ''
 
@@ -126,7 +129,26 @@ local function Coin(mark)
     return Scan.Generous and mark and mark ~= 'none' and Scan.Generous.Icon(mark) or ''
 end
 
--- What a row of the item table is: a name with its icon and quality colour.
+-- A reagent's rank as the game draws it: two ranks from Midnight on, three
+-- before. Tells apart rows of one name.
+local function RankMark(itemID)
+    local get = C_TradeSkillUI and C_TradeSkillUI.GetItemReagentQualityByItemInfo
+    if not get then return '' end
+    local ok, tier = pcall(get, itemID)
+    tier = ok and tonumber(tier)
+    if not tier or tier < 1 then return '' end
+    local expansion = C_Item.GetItemInfo and tonumber((select(15, C_Item.GetItemInfo(itemID))))
+    local atlas
+    if (expansion and expansion >= 11) or (not expansion and tier <= 2) then
+        atlas = 'Professions-Icon-Quality-12-Tier' .. math.min(tier, 2)
+    else
+        atlas = 'Professions-Icon-Quality-Tier' .. math.min(tier, 3)
+    end
+    return ' |A:' .. atlas .. ':16:16|a'
+end
+
+-- What a row of the item table is: a name with its icon, quality colour and
+-- rank.
 local function Subject(row)
     if row.kind == 'item' and row.itemID then
         local name = C_Item.GetItemNameByID(row.itemID)
@@ -139,7 +161,7 @@ local function Subject(row)
         local quality = C_Item.GetItemQualityByID(row.itemID)
         local color = quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
         local text = color and color.hex and (color.hex .. name .. '|r') or name
-        return (icon and ('|T' .. icon .. ':16:16:0:0|t ') or '') .. text, name
+        return (icon and ('|T' .. icon .. ':16:16:0:0|t ') or '') .. text .. RankMark(row.itemID), name
     end
     if row.kind == 'recipe' and row.recipeID then
         local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(row.recipeID)
@@ -663,6 +685,8 @@ local function ReturnRows()
     return rows
 end
 
+local ScheduleNameRedraw
+
 local function Render()
     if not frame or not report then return end
     namesPending = false
@@ -678,10 +702,30 @@ local function Render()
     SetStatus(empty and L('No analytics data for the period') or nil)
     local last = Scan.AnalyticsSync and Scan.AnalyticsSync.LastSync()
     frame.SyncText:SetText(last and string.format(L('Last exchange: %s'), date('%d.%m %H:%M', last)) or '')
+    -- Names still missing: look again shortly, even if no word comes.
+    if namesPending and nameRetries < NAME_RETRIES then
+        nameRetries = nameRetries + 1
+        ScheduleNameRedraw(NAME_RETRY_SECONDS)
+    end
+end
+
+-- Item names come from the server a moment after they are asked for: the
+-- tables are drawn again once they are here. An earlier redraw takes the
+-- place of a later one.
+function ScheduleNameRedraw(delay)
+    local at = GetTime() + delay
+    if nameRedrawAt and nameRedrawAt <= at then return end
+    nameRedrawAt = at
+    C_Timer.After(delay, function()
+        if nameRedrawAt ~= at then return end
+        nameRedrawAt = nil
+        if frame and frame:IsShown() and report and namesPending then Render() end
+    end)
 end
 
 function W.Rebuild()
     if not frame or not chunks then return end
+    nameRetries = 0
     report = Scan.AnalyticsReport.Build(chunks, Filters(), Context())
     returns = Scan.AnalyticsReport.BuildReturns(chunks, Filters())
     Render()
@@ -1131,11 +1175,13 @@ local function Create()
         if (event == 'DISPLAY_SIZE_CHANGED' or event == 'UI_SCALE_CHANGED') and frame:IsShown() then
             if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
         end
-        if event == 'GET_ITEM_INFO_RECEIVED' and namesPending and report then
-            namesPending = false
-            C_Timer.After(0.3, function() if frame:IsShown() and report then Render() end end)
+        -- Loading by ID answers with ITEM_DATA_LOAD_RESULT, not always with
+        -- GET_ITEM_INFO_RECEIVED.
+        if (event == 'ITEM_DATA_LOAD_RESULT' or event == 'GET_ITEM_INFO_RECEIVED') and namesPending and report then
+            ScheduleNameRedraw(0.3)
         end
     end)
+    frame:RegisterEvent('ITEM_DATA_LOAD_RESULT')
     frame:RegisterEvent('GET_ITEM_INFO_RECEIVED')
     frame:RegisterEvent('DISPLAY_SIZE_CHANGED')
     frame:RegisterEvent('UI_SCALE_CHANGED')

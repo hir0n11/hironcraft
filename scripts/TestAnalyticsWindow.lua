@@ -94,15 +94,20 @@ function GameTooltip_SetTitle() end
 function GameTooltip_AddNormalLine() end
 function BreakUpLargeNumbers(value) return tostring(value) end
 ITEM_QUALITY_COLORS = { [4] = { hex = '|cffa335ee' } }
+-- Items whose data has not come from the server yet.
+local unloaded = {}
 C_Item = {
-    GetItemNameByID = function(id) return 'Item ' .. id end,
+    GetItemNameByID = function(id) if not unloaded[id] then return 'Item ' .. id end end,
     RequestLoadItemDataByID = function() end,
     GetItemIconByID = function() return 134400 end,
     GetItemQualityByID = function() return 4 end,
 }
 C_Spell = { GetSpellName = function(id) return 'Recipe ' .. id end }
-C_TradeSkillUI = { GetProfessionInfoBySkillLineID = function(id) return { professionName = 'Prof ' .. id } end }
-C_Timer = { After = function(_, fn) end }
+C_TradeSkillUI = { GetProfessionInfoBySkillLineID = function(id) return { professionName = 'Prof ' .. id } end,
+    GetItemReagentQualityByItemInfo = function(id) return id == 7001 and 2 or nil end }
+local timers = {}
+C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+local function RunTimers() local list = timers; timers = {}; for _, fn in ipairs(list) do fn() end end
 local function Soon(fn) local saved = C_Timer.After; C_Timer.After = function(_, f) f() end; fn(); C_Timer.After = saved end
 ScrollBoxConstants = { RetainScrollPosition = true }
 function CreateDataProvider(list) return { list = list } end
@@ -265,8 +270,22 @@ end
 assert(dumped:find('00:00,', 1, true), 'the time CSV has no hours')
 
 -- The resource returns tab: its own tiles, no side or coin filter.
+-- A reagent not loaded yet shows its number, and its name once the game has
+-- it; its rank is marked.
+unloaded[7001] = true
+Scan.AnalyticsWindow.Rebuild()
 frame.Tabs[4].scripts.OnClick(frame.Tabs[4])
 assert(#frame.Returns.rows == 1 and frame.Returns.rows[1].itemID == 7001, 'the returns table is off')
+local function ReagentCell()
+    local inited = frame.Returns.scrollBox.inited
+    return inited[#inited].row.cells[1].text
+end
+assert(ReagentCell():find('#7001', 1, true) and ReagentCell():find('Professions-Icon-Quality-12-Tier2', 1, true),
+    'an unloaded reagent or its rank is drawn wrong: ' .. ReagentCell())
+unloaded[7001] = nil
+frame.scripts.OnEvent(frame, 'ITEM_DATA_LOAD_RESULT', 7001, true)
+RunTimers()
+assert(ReagentCell():find('Item 7001', 1, true), 'the reagent name did not come: ' .. ReagentCell())
 assert(frame.ReturnTiles.chance.value:GetText() == '50%' and frame.ReturnTiles.crafts.value:GetText() == '2',
     'the returns tiles are off')
 assert(not frame.SideDropdown:IsShown() and not frame.TierDropdown:IsShown() and not frame.Tiers:IsShown()

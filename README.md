@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: reagent names and ranks (0.4.57)
+
+- Reagents not in the game's cache stayed as their item numbers (#238205):
+  the window waited for a server answer the game does not always send when
+  an item is loaded by its ID. It now listens for the right one and looks
+  again a few times on its own, so the names come in shortly after opening.
+- Reagents of the same name are told apart by their rank icon.
+
 ## Analytics: long figures stay on their tile (0.4.56)
 
 - A figure too long for its summary tile (a big sum of tips) wrapped onto a
