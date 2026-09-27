@@ -662,6 +662,7 @@ L["Remove the leader from the ignore list"] = "Убрать лидера из и
 L["Ignore the leader"] = "Игнорировать лидера"
 L["Remove from the ignore list (HironCraft)"] = "Убрать из игнор-листа (HironCraft)"
 L["Ignore (HironCraft)"] = "Игнорировать (HironCraft)"
+L["Key bindings restored:"] = "Восстановлены бинды клавиш:"
 L["Other system messages"] = "Другие системные сообщения"
 L["Duel results"] = "Итоги дуэлей"
 L["Duel results tooltip"] = "«X has defeated Y in a duel» и «... has fled ... in a duel» чужих дуэлей. Твои собственные дуэли показываются."

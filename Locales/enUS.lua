@@ -653,6 +653,7 @@ HironCraftScan.L = {
     ["Ignore the leader"] = "Ignore the leader",
     ["Remove from the ignore list (HironCraft)"] = "Remove from the ignore list (HironCraft)",
     ["Ignore (HironCraft)"] = "Ignore (HironCraft)",
+    ["Key bindings restored:"] = "Key bindings restored:",
     ["Other system messages"] = "Other system messages",
     ["Duel results"] = "Duel results",
     ["Duel results tooltip"] = "\"A has defeated B in a duel\" and \"... has fled ... in a duel\" of other players. Your own duels are still shown.",

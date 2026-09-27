@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Key bindings survive a login without the addon (0.4.75)
+
+- The game drops the keys of an addon that was switched off for a session.
+  HironCraft now remembers the keys of its commands while it runs and gives
+  them back at login if they were dropped, unless something else took the
+  key meanwhile; the chat names what was restored. A key taken off by hand
+  is not brought back.
+
 ## No "attached order list hooks" at login (0.4.74)
 
 - The order panel's debugging line is printed only with the order debugging
