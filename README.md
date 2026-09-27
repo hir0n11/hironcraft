@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Right click on a row takes one mark at a time (0.4.72)
+
+- A right click on a row of the orders window first clears the customer's
+  answer (the second mark), then the order's status (a decline's cross or
+  the delivered mark), and only when no mark is left removes the row. The
+  banner's right click and its key still dismiss the customer at once.
+
 ## The decline reply sends from the crafter (0.4.71)
 
 - A declined order's reply ("I checked your order. {reagent_issues}") was

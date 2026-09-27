@@ -67,6 +67,7 @@ L["Details: Warband alerts."] = "Оповещения боевого отряд�
 L["Disable"] = "Отключить"
 L["Discoverable"] = "Доступно для клиентов"
 L["Dismiss"] = "|cffffd100ПКМ: Отклонить%s|r"
+L["Row right click help"] = "|cffffd100ПКМ: снять отметку (ответ, затем статус), потом убрать строку%s|r"
 L["Excluded keywords"] = "Исключенные ключевые слова"
 L["Find Crafter"] = "Найти ремесленника"
 L["General"] = "Общее"

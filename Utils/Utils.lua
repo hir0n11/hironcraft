@@ -1455,7 +1455,7 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     tooltip:AddDoubleLine(
         '',
         HironCraftScan.Utils.PopulateBinds(
-            L('Dismiss'),
+            includeBinds and L('Dismiss') or L('Row right click help'),
             includeBinds and 'HIRONCRAFT_SCAN_DISMISS_CURRENT_CUSTOMER'
         )
     )

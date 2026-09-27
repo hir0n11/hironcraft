@@ -265,7 +265,13 @@ end
 function HironCraftScanBannerMixin:OnClick(button)
     local order = self:GetOrder()
     if not order then return end
-    HironCraftScan.GreetCustomer(button, order)
+    -- The banner's right click (and its key) dismisses the customer outright;
+    -- only the row takes its marks off one by one.
+    if button == 'RightButton' then
+        HironCraftScan.DismissOrder(order)
+    else
+        HironCraftScan.GreetCustomer(button, order)
+    end
     self:GetParent():ClearAlert(order)
 end
 

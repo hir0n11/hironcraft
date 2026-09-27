@@ -107,8 +107,30 @@ function HironCraftScan.GreetCustomer(button, order)
             end
         end
     elseif button == "RightButton" then
-        HironCraftScan.DismissOrder(order);
+        HironCraftScan.PeelOrderMark(order);
     end
+end
+
+-- A right click on a row takes it apart one mark at a time: first the
+-- customer's answer (the second mark), then the order's status - a decline's
+-- cross or the delivered mark - and only when nothing is left, the row
+-- itself. Returns what it took: 'answer', 'status' or 'row'.
+function HironCraftScan.PeelOrderMark(order)
+    local response = HironCraftScan.OrderToResponse(order)
+    if type(response) == 'table' and response.customer_answered and HironCraftScan.RequestTracking then
+        HironCraftScan.RequestTracking.ToggleAnswered(response)
+        HironCraftScanCraftingOrderPage:ShowGeneric()
+        return 'answer'
+    end
+    local fulfillment = HironCraftScan.OrderFulfillment
+    local entry = type(response) == 'table' and fulfillment and fulfillment.GetStatus and fulfillment:GetStatus(order)
+    if type(entry) == 'table' and entry.status and entry.status ~= fulfillment.Status.Unknown then
+        fulfillment:SetStatus(order, fulfillment.Status.Unknown, { automatic = false, force = true })
+        HironCraftScanCraftingOrderPage:ShowGeneric()
+        return 'status'
+    end
+    HironCraftScan.DismissOrder(order)
+    return 'row'
 end
 
 function HironCraftScan.DismissOrder(order)

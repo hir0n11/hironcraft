@@ -133,6 +133,7 @@ HironCraftScan.L = {
     ['Chat Help'] = '|cffffd100Left click: Open whisper|r',
     ['Chat Override'] = '|cffffd100Middle click: Open whisper%s|r',
     ['Dismiss'] = '|cffffd100Right click: Dismiss%s|r',
+    ['Row right click help'] = '|cffffd100Right click: clear a mark (answer, then status), then remove%s|r',
     ['Proposed Greeting'] = 'Proposed greeting:',
     [LID.CHAT_BUTTON_BINDING_NAME] = 'Whisper Banner Customer',
     ['Customer Request'] = 'Request from %s',
