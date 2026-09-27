@@ -25,6 +25,12 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics: time online as a gauge under the bar (0.4.67)
+
+- The grey block behind each bar used the chart's height, so it looked like
+  another count. Time online is now a thin green gauge under each bar: empty
+  when nobody was online in that hour, full when someone always was.
+
 ## Analytics: time online never above the time gone (0.4.66)
 
 - The 5-minute mark running now counted in full, so a fresh hour could show

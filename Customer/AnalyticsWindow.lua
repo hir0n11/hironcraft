@@ -377,11 +377,16 @@ local function CreateChart(parent, count, labelOf)
     chart.bars = {}
     for index = 1, count do
         local bar = CreateFrame('Frame', nil, chart)
-        -- Behind it, grey: how much of that time someone was online.
-        bar.online = bar:CreateTexture(nil, 'BACKGROUND')
-        bar.online:SetColorTexture(0.75, 0.75, 0.75, 0.16)
-        bar.online:SetPoint('BOTTOMLEFT')
-        bar.online:SetPoint('BOTTOMRIGHT')
+        -- Under it, a thin gauge: how much of that time someone was online.
+        bar.onlineTrack = bar:CreateTexture(nil, 'BACKGROUND')
+        bar.onlineTrack:SetColorTexture(1, 1, 1, 0.08)
+        bar.onlineTrack:SetPoint('TOPLEFT', bar, 'BOTTOMLEFT', 0, -3)
+        bar.onlineTrack:SetPoint('TOPRIGHT', bar, 'BOTTOMRIGHT', 0, -3)
+        bar.onlineTrack:SetHeight(3)
+        bar.onlineFill = bar:CreateTexture(nil, 'ARTWORK')
+        bar.onlineFill:SetColorTexture(0.35, 0.85, 0.45, 0.9)
+        bar.onlineFill:SetPoint('TOPLEFT', bar.onlineTrack, 'TOPLEFT')
+        bar.onlineFill:SetHeight(3)
         bar.fill = bar:CreateTexture(nil, 'ARTWORK')
         bar.fill:SetColorTexture(1, 0.78, 0.25, 0.85)
         bar.fill:SetPoint('BOTTOMLEFT')
@@ -389,7 +394,7 @@ local function CreateChart(parent, count, labelOf)
         bar.value = bar:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         bar.value:SetPoint('BOTTOM', bar.fill, 'TOP', 0, 2)
         bar.label = chart:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-        bar.label:SetPoint('TOP', bar, 'BOTTOM', 0, -3)
+        bar.label:SetPoint('TOP', bar, 'BOTTOM', 0, -9)
         bar.label:SetText(labelOf(index))
         bar:EnableMouse(true)
         bar:SetScript('OnEnter', function(self)
@@ -404,21 +409,22 @@ local function CreateChart(parent, count, labelOf)
     end
 
     function chart:SetValues(values, infos, shares)
-        local width, height = self:GetWidth(), self:GetHeight() - 34
+        local width, height = self:GetWidth(), self:GetHeight() - 40
         local slot = width / count
         local max = 0
         for index = 1, count do max = math.max(max, values[index] or 0) end
         for index, bar in ipairs(self.bars) do
             local value = values[index] or 0
             bar:ClearAllPoints()
-            bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', (index - 1) * slot + slot * 0.15, 18)
+            bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', (index - 1) * slot + slot * 0.15, 24)
             bar:SetSize(slot * 0.7, height)
             bar.fill:SetHeight(math.max(1, max > 0 and height * value / max or 1))
             bar.fill:SetAlpha(value > 0 and 1 or 0.25)
             bar.value:SetText(value > 0 and value or '')
             local share = shares and shares[index]
-            bar.online:SetHeight(math.max(1, share and height * math.min(1, share) or 1))
-            bar.online:SetShown(share ~= nil and share > 0)
+            bar.onlineTrack:SetShown(share ~= nil)
+            bar.onlineFill:SetWidth(math.max(0.01, slot * 0.7 * math.min(1, share or 0)))
+            bar.onlineFill:SetShown(share ~= nil and share > 0)
             bar.info = infos and infos[index]
         end
     end
