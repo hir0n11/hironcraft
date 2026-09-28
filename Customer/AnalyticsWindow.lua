@@ -135,8 +135,8 @@ local function Percent(value)
     return string.format('%d%%', math.floor(value * 100 + 0.5))
 end
 
-local function Gold(copper)
-    if not copper or copper <= 0 then return '|cff808080-|r' end
+local function Gold(copper, showZero)
+    if not copper or copper < 0 or (copper == 0 and not showZero) then return '|cff808080-|r' end
     local gold = math.floor(copper / GOLD + 0.5)
     return (BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold))
         .. '|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:2:0|t'
@@ -537,6 +537,10 @@ local TILE_GROUPS = {
         { key = 'tips', label = 'Tips total', tip = 'Tips tooltip', width = 104 },
         { key = 'averageTip', label = 'Average tip', tip = 'Average tip tooltip', width = 86 },
     } },
+    { color = { 0.45, 0.85, 0.55 }, tiles = {
+        { key = 'returnedValue', label = 'Reagent returns value', tip = 'Returned worth tooltip', width = 104 },
+        { key = 'online', label = 'Online time', tip = 'Online time tooltip', width = 86 },
+    } },
 }
 local TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GROUP_GAP = 74, 40, 4, 12
 -- The export and exchange buttons at the right end of the tile row.
@@ -603,12 +607,11 @@ local function CreateTiles(parent, x, y, groups)
     return tiles, order
 end
 
--- Each tile widens to its figure (a big sum of tips), the ones after it move
--- along; should the row then run into the buttons on the right, the figures
--- that needed more room take a smaller font instead.
+-- Keep figures readable without widening the game window. Long values use
+-- the smaller font first; any remaining overflow wraps clear of the controls.
 local function LayoutTiles(order)
     local limit = frame:GetWidth() - TILE_ROW_RESERVED
-    local function Place(shrink)
+    local function Measure(shrink)
         local x = order.x
         for index, tile in ipairs(order) do
             tile.value:SetFontObject(TILE_FONT)
@@ -620,12 +623,34 @@ local function LayoutTiles(order)
             if index > 1 then x = x + tile.gap end
             local width = math.max(tile.minWidth, need)
             tile:SetWidth(width)
-            tile:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, order.y)
             x = x + width
         end
         return x
     end
-    if Place(false) > limit then Place(true) end
+    if Measure(false) > limit then Measure(true) end
+    local x, y, rows = order.x, order.y, 1
+    for index, tile in ipairs(order) do
+        local gap = x > order.x and tile.gap or 0
+        if x + gap + tile:GetWidth() > limit and x > order.x then
+            x, y, rows = order.x, y - TILE_HEIGHT - TILE_GAP, rows + 1
+            gap = 0
+        end
+        x = x + gap
+        tile:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
+        x = x + tile:GetWidth()
+    end
+    order.rows = rows
+end
+
+local function LayoutSummaryHeader()
+    local order = View().tab == TAB_RETURNS and frame.ReturnTileOrder or frame.TileOrder
+    local extra = ((order.rows or 1) - 1) * (TILE_HEIGHT + TILE_GAP)
+    frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -116 - extra)
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -142 - extra)
+    if frame:GetHeight() ~= 640 + extra then
+        frame:SetHeight(640 + extra)
+        if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
+    end
 end
 
 -- The resourcefulness tab: how often it comes, and what it brought.
@@ -659,6 +684,11 @@ local function UpdateSummary()
     tiles.conversion.value:SetTextColor(ConversionColor(totals.conversion))
     tiles.tips.value:SetText(report and Gold(totals.tips) or '')
     tiles.averageTip.value:SetText(report and Gold(totals.averageTip) or '')
+    local returned = returns and returns.totals
+    tiles.returnedValue.value:SetText(returned and (Gold(returned.value, true)
+        .. (returned.unpriced > 0 and ' |cffffb347*|r' or '')) or '')
+    local minutes = math.floor(totals.online or 0)
+    tiles.online.value:SetText(report and string.format('%d:%02d', math.floor(minutes / 60), minutes % 60) or '')
     LayoutTiles(frame.TileOrder)
     if not report then
         frame.Tiers:SetText('')
@@ -816,6 +846,7 @@ local function Render()
     frame.Returns:SetRows(ReturnRows())
     UpdateSummary()
     UpdateReturnTiles()
+    LayoutSummaryHeader()
     UpdateCharts()
     local tab = View().tab
     local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #frame.Customers.rows == 0)
@@ -1219,6 +1250,27 @@ local function Create()
     -- Row 2: what the period comes to, and the buttons.
     frame.Tiles, frame.TileOrder = CreateTiles(frame, 16, -68)
     frame.ReturnTiles, frame.ReturnTileOrder = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
+    frame.Tiles.returnedValue:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
+        GameTooltip_SetTitle(GameTooltip, L('Reagent returns value'))
+        GameTooltip_AddNormalLine(GameTooltip, L('Returned worth tooltip'))
+        GameTooltip_AddNormalLine(GameTooltip, L('Reagent returns filters tooltip'))
+        local totals = returns and returns.totals
+        if totals then
+            GameTooltip:AddDoubleLine(L('Reagents returned'), TileNumber(totals.quantity), 1, 1, 1, 1, 1, 1)
+            if totals.unpriced > 0 then
+                GameTooltip:AddLine(string.format(L('Without a price: %d'), totals.unpriced), 1, 0.5, 0.4, true)
+            end
+        end
+        GameTooltip:Show()
+    end)
+    frame.Tiles.online:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
+        GameTooltip_SetTitle(GameTooltip, L('Online time'))
+        GameTooltip_AddNormalLine(GameTooltip, L('Online time tooltip'))
+        if report then GameTooltip:AddLine(Duration(report.totals.online), 1, 1, 1) end
+        GameTooltip:Show()
+    end)
     frame.ReturnTiles.chance:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
         GameTooltip_SetTitle(GameTooltip, L('Chance'))

@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Returns and online time in the analytics summary (0.4.79)
+
+- The main summary now includes the gold value of resourcefulness-returned
+  customer reagents, using the same historical prices and date/profession/
+  crafter filters as the Returns tab. Hover for returned quantities. An
+  asterisk marks an incomplete valuation when some saved prices are missing;
+  own reagents and unknown prices do not inflate the total.
+- Online time shows total hours:minutes for the selected dates, with precise
+  seconds on hover. Today therefore shows today's online time. Overlapping
+  linked accounts count once; faction filtering applies, while profession,
+  crafter and customer filters do not alter account presence. Local intervals
+  refresh with the existing checkpoints; remote intervals appear after sync.
+- Summary tiles wrap when needed, keeping the window's existing width and
+  preserving room for the charts, customer counts and right-hand controls.
+
 ## Preserve declined-order identity (0.4.78)
 
 - The decline button snapshots the customer, game order, recipe and material

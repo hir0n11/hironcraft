@@ -62,7 +62,7 @@ local function Mock(kind)
             self.inited[#self.inited + 1] = { row = row, data = data }
         end
     end
-    function methods:SetPoint(_, relative, _, x) self.anchor, self.x = relative, x end
+    function methods:SetPoint(_, relative, _, x, y) self.anchor, self.x, self.y = relative, x, y end
     function methods:GetID() return self.id end
     function methods:SetID(id) self.id = id end
     -- WoW methods are capitalised; any other missing key is a plain field.
@@ -157,6 +157,8 @@ Scan.Generous.RecordTip('Buyer', 6000 * 10000, 1)
 Log.Record({ k = 'c', o = 1, r = 1, p = 197, x = 'Tailor-Realm', t = now - 30,
     rs = { { i = 7001, n = 2, v = 30000, s = 'a', c = 1 } } })
 Log.Record({ k = 'c', o = 2, r = 1, p = 197, x = 'Tailor-Realm', t = now - 20 })
+Log.Record({ k = 'p', t = now - 90, e = now, f = 'H' })
+Log.Merge({ { k = 'p', t = now - 60, e = now, f = 'H' } }, 'peer')
 
 -- Opening it loads, counts and fills every tab.
 Scan.AnalyticsWindow.Toggle()
@@ -176,6 +178,11 @@ assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.val
     and frame.Tiles.crafted.value:GetText() == '1' and frame.Tiles.conversion.value:GetText() == '100%'
     and frame.Tiles.orders.value:GetText() == '1', 'the summary tiles are off')
 assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
+assert(frame.Tiles.returnedValue.value.text:find('^6|T'), 'summary return value differs from the Returns report')
+assert(frame.Tiles.online.value.text=='0:01', 'summary online doubled linked accounts or rounded up')
+assert(frame.TileOrder.rows==2 and frame:GetWidth()==1080 and frame:GetHeight()==684,
+    'extra metrics widened the window or overlapped the old header')
+assert(frame.Tiers.y==-160 and frame.Inset.y==-186,'wrapped metrics overlap customer counts or content')
 -- The hour's tooltip: the conversion of the greetings sent in it.
 local noon = frame.HourChart.bars[13].info
 assert(noon and noon.lines[5] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[5]))
@@ -191,14 +198,16 @@ local function CheckTiles(small)
         local font = small and small[tile] and 'GameFontHighlight' or 'GameFontHighlightLarge'
         assert(tile.value.font == font, 'the tile font is ' .. tostring(tile.value.font))
         local before = order[index - 1]
-        assert(not before or tile.x >= before.x + before.width + 4, 'tiles overlap')
+        assert(not before or tile.y < before.y or tile.x >= before.x + before.width + 4, 'tiles overlap')
+        assert(tile.x + tile.width <= frame:GetWidth() - 284, 'tile overlaps the right-hand controls')
     end
 end
 CheckTiles()
 charWidth = 30
 Scan.AnalyticsWindow.Rebuild()
 assert(frame.Tiles.tips.width > 104, 'a long sum of tips did not widen its tile')
-CheckTiles({ [frame.Tiles.tips] = true, [frame.Tiles.averageTip] = true, [frame.Tiles.conversion] = true })
+CheckTiles({ [frame.Tiles.tips] = true, [frame.Tiles.averageTip] = true, [frame.Tiles.conversion] = true,
+    [frame.Tiles.online] = true })
 charWidth = 5
 Scan.AnalyticsWindow.Rebuild()
 CheckTiles()
@@ -292,6 +301,7 @@ RunTimers()
 assert(ReagentCell():find('Item 7001', 1, true), 'the reagent name did not come: ' .. ReagentCell())
 assert(frame.ReturnTiles.chance.value:GetText() == '50%' and frame.ReturnTiles.crafts.value:GetText() == '2',
     'the returns tiles are off')
+assert(frame:GetHeight()==640 and frame.Inset.y==-142, 'the Returns tab retained an empty summary row')
 assert(not frame.SideDropdown:IsShown() and not frame.TierDropdown:IsShown() and not frame.Tiers:IsShown()
     and frame.ReturnTiles.value:IsShown() and not frame.Tiles.requests:IsShown(), 'the returns tab shows the wrong controls')
 dumped = nil
@@ -299,6 +309,7 @@ frame.ExportButton.scripts.OnClick(frame.ExportButton)
 assert(dumped and dumped:find('^reagent,item_id') and dumped:find('7001', 1, true), 'the returns CSV is off')
 frame.Tabs[1].scripts.OnClick(frame.Tabs[1])
 assert(frame.SideDropdown:IsShown() and frame.Tiles.requests:IsShown(), 'leaving the returns tab left its controls')
+assert(frame:GetHeight()==684 and frame.Inset.y==-186, 'leaving Returns did not restore the wrapped header')
 
 -- Closing lets the data go.
 -- The lower chart is an independent calendar, not a sum of all Mondays.
@@ -380,6 +391,56 @@ pending[1].done({})
 assert(frame.DayChart.bars[3].value.text == 1 and frame.CalendarTitle.text:find('2021', 1, true))
 Log.LoadRange = originalLoad
 print('Analytics calendar UI passed (day clicks, presets, navigation, year/month/day drill-down, filters, CSV, load races).')
+
+-- Summary metrics reuse the same historical returns and unioned presence as
+-- the detailed reports. Missing prices are explicit; own reagents stay out.
+view.preset = 'today'; view.side = nil; view.ppID = nil; view.crafter = nil; view.tier = nil
+Log.Record({ k = 'c', o = 3, r = 1, p = 197, x = 'Tailor-Realm', t = now - 10,
+    rs = { { i = 7002, n = 3, c = 1 }, { i = 7003, n = 100, v = 90000 } } })
+W.Reload()
+assert(frame.Tiles.returnedValue.value.text:find('^6|T')
+    and frame.Tiles.returnedValue.value.text:find('*',1,true), 'unpriced/own reagents inflated returns or lacked a warning')
+assert(frame.Tiles.online.value.text=='0:01')
+local tooltipLines = {}
+GameTooltip.AddLine = function(_, text) tooltipLines[#tooltipLines+1] = text end
+GameTooltip.AddDoubleLine = function(_, left, right) tooltipLines[#tooltipLines+1] = left..': '..right end
+frame.Tiles.returnedValue.scripts.OnEnter(frame.Tiles.returnedValue)
+assert(tooltipLines[1]=='Reagents returned: 5' and tooltipLines[2]=='Without a price: 3',
+    'return tooltip lost reagent quantities or missing-price count')
+frame.Tiles.online.scripts.OnEnter(frame.Tiles.online)
+assert(tooltipLines[3]=='1 min 30 s','online tooltip lost precise seconds')
+
+view.side = 'A'; W.Rebuild()
+assert(frame.Tiles.online.value.text=='0:00' and frame.Tiles.returnedValue.value.text:find('^6|T'),
+    'faction filtering disagrees with the existing online/returns reports')
+view.side = nil; view.crafter = 'Other-Realm'; W.Rebuild()
+assert(frame.Tiles.online.value.text=='0:01' and frame.Tiles.returnedValue.value.text:find('^0|T')
+    and not frame.Tiles.returnedValue.value.text:find('*',1,true), 'crafter filtering left stale return figures')
+view.crafter = nil; view.ppID = 164; W.Rebuild()
+assert(frame.Tiles.online.value.text=='0:01' and frame.Tiles.returnedValue.value.text:find('^0|T'),
+    'profession filtering changed account presence or retained another profession returns')
+view.ppID = nil; view.preset = 'yesterday'; W.Reload()
+assert(frame.Tiles.online.value.text=='0:00' and frame.Tiles.returnedValue.value.text:find('^0|T'),
+    'an empty date retained the previous day summary')
+
+-- Local checkpoints refresh an already-open window, including an interval
+-- not committed to the journal yet. Overlaps still count only once.
+view.preset = 'today'; W.Reload()
+Log.StartPresence()
+now = now + 30; Log.NotePresence(); RunTimers()
+assert(frame.Tiles.online.value.text=='0:02','live pending presence did not refresh the summary')
+now = now + 30; Log.NotePresence(); RunTimers()
+assert(frame.Tiles.online.value.text=='0:02','partial minutes rounded up in the summary')
+Log.StopPresence(); RunTimers()
+
+-- Long ranges display total hours, not a clock that wraps after 24 hours.
+local multiDayStart = At(2026,9,10)
+Log.Record({ k = 'p', t = multiDayStart, e = multiDayStart + 49*3600 + 120, f = 'H' })
+view.preset = 'custom'; view.from = multiDayStart; view.to = multiDayStart + 3*86400 - 1
+W.Reload()
+assert(frame.Tiles.online.value.text=='49:02' and frame.Tiles.returnedValue.value.text:find('^0|T'),
+    'multi-day online time wrapped at midnight or ignored the selected dates')
+print('Analytics summary metrics passed (historical value, missing prices, quantities, filters, interval union, live refresh, multi-day hours, layout).')
 
 Scan.AnalyticsWindow.Toggle()
 assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')
