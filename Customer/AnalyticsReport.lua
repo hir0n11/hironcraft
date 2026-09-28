@@ -10,11 +10,11 @@ local Scan = select(2, ...)
 local M = {}
 Scan.AnalyticsReport = M
 
--- The journal marks each 5 minutes spent online (AnalyticsLog.NotePresence).
+-- Legacy presence marks cover five minutes. New ones carry exact [t, e)
+-- intervals; both formats are unioned, never added once per linked account.
 local PRESENCE_SLOT = 300
 -- Two linked accounts see the same chat line a moment apart.
 local SAME_REQUEST_SECONDS = 180
-local DAY = 24 * 60 * 60
 
 local function BaseKey(name)
     if type(name) ~= 'string' or name == '' then return nil end
@@ -75,6 +75,40 @@ local function Hour(t)
     return tonumber(date('%H', t)) or 0
 end
 
+-- Construct local calendar boundaries, never assuming a day has 86400 seconds
+-- (DST), or that every month has the same number of days.
+local function Midnight(year, month, day)
+    return time({ year = year, month = month, day = day, hour = 0, min = 0, sec = 0 })
+end
+
+function M.CalendarRange(mode, anchor)
+    local d = date('*t', anchor or time())
+    if mode == 'year' then return Midnight(d.year, 1, 1), Midnight(d.year + 1, 1, 1) - 1 end
+    if mode == 'month' then return Midnight(d.year, d.month, 1), Midnight(d.year, d.month + 1, 1) - 1 end
+    local day = mode == 'week' and d.day - Weekday(anchor or time()) + 1 or d.day
+    return Midnight(d.year, d.month, day), Midnight(d.year, d.month, day + (mode == 'week' and 7 or 1)) - 1
+end
+
+function M.ShiftCalendar(mode, anchor, direction)
+    local d = date('*t', (M.CalendarRange(mode, anchor)))
+    if mode == 'year' then return Midnight(d.year + direction, 1, 1) end
+    if mode == 'month' then return Midnight(d.year, d.month + direction, 1) end
+    return Midnight(d.year, d.month, d.day + direction * (mode == 'week' and 7 or 1))
+end
+
+function M.CalendarBuckets(mode, anchor)
+    local first, last = M.CalendarRange(mode, anchor)
+    local buckets, cursor = {}, first
+    local unit = mode == 'year' and 'month' or 'day'
+    while cursor <= last do
+        local next_ = M.ShiftCalendar(unit, cursor, 1)
+        buckets[#buckets + 1] = { from = cursor, to = next_ - 1,
+            key = date(unit == 'month' and '%Y-%m' or '%Y-%m-%d', cursor), unit = unit }
+        cursor = next_
+    end
+    return buckets
+end
+
 -- filters: from, to, ppID, crafter, tier ('generous' / 'regular' /
 -- 'stingy' / 'none'), side ('H' / 'A').
 -- context.markOf(customer) gives the customer's coin, context.itemProf(itemID)
@@ -108,9 +142,11 @@ function M.Build(chunks, filters, context)
                 if not orders[key] then orders[key] = event end
                 if event.id then tokenOrders[event.id] = key end
             elseif kind == 'p' then
-                firstOnline = math.min(firstOnline or event.t, event.t)
+                local start = event.e and event.t or math.floor(event.t / PRESENCE_SLOT) * PRESENCE_SLOT
+                local finish = tonumber(event.e) or start + PRESENCE_SLOT
+                firstOnline = math.min(firstOnline or start, start)
                 if not filters.side or not event.f or event.f == filters.side then
-                    online[math.floor(event.t / PRESENCE_SLOT)] = true
+                    if finish > start then online[#online + 1] = { start, finish } end
                 end
             end
         end
@@ -204,11 +240,25 @@ function M.Build(chunks, filters, context)
         -- of the greeting, for the conversion of each hour and day.
         hours = { requests = Hours(), greetings = Hours(), crafted = Hours(), orders = Hours() },
         weekdays = { requests = Weekdays(), greetings = Weekdays(), crafted = Weekdays(), orders = Weekdays() },
+        calendar = { days = {}, months = {} },
         totals = { requests = 0, greetings = 0, crafted = 0, orders = 0,
             declined = 0, tips = 0, tipped = 0 },
         tiers = { generous = 0, regular = 0, stingy = 0, none = 0 },
     }
     local rows, customers = {}, {}
+    local function CountTime(metric, t, amount)
+        if t < from or t > to then return end
+        amount = amount or 1
+        local hour, weekday = Hour(t), Weekday(t)
+        report.hours[metric][hour] = (report.hours[metric][hour] or 0) + amount
+        report.weekdays[metric][weekday] = (report.weekdays[metric][weekday] or 0) + amount
+        for group, format in pairs({ days = '%Y-%m-%d', months = '%Y-%m' }) do
+            local key = date(format, t)
+            local calendar = report.calendar[group]
+            calendar[key] = calendar[key] or {}
+            calendar[key][metric] = (calendar[key][metric] or 0) + amount
+        end
+    end
     local function Row(key, info)
         if not rows[key] then rows[key] = NewRow(key, info) end
         return rows[key]
@@ -252,32 +302,35 @@ function M.Build(chunks, filters, context)
         if order then orderConversation[tostring(order.o) .. ':' .. order.st] = { side = side, request = request } end
 
         local started = first or request
-        if started and started.t >= from and started.t <= to then
+        if started then
             local subjectEvent = (crafted and order and order.i) and order or request
             local ppID = (order and order.p) or request.p or (request.i and itemProf(request.i))
             local customer = request.c
             if PassesCommon(ppID, { request.x, order and order.x, greeting and greeting.x }, customer, side) then
-                local key, info = Subject(subjectEvent)
-                if info.ppID == nil then info.ppID = ppID end
-                local row = Row(key, info)
-                row.requests = row.requests + 1
-                report.totals.requests = report.totals.requests + 1
-                report.hours.requests[Hour(started.t)] = report.hours.requests[Hour(started.t)] + 1
-                report.weekdays.requests[Weekday(started.t)] = report.weekdays.requests[Weekday(started.t)] + 1
-                local person = Customer(customer)
-                if person then person.requests = person.requests + 1 end
+                -- Charts use the actual timestamp of each event, including a
+                -- greeting after midnight for a request from the previous day.
+                CountTime('requests', started.t)
                 if greeting then
-                    row.greetings = row.greetings + 1
-                    report.totals.greetings = report.totals.greetings + 1
-                    report.hours.greetings[Hour(greeting.t)] = report.hours.greetings[Hour(greeting.t)] + 1
-                    report.weekdays.greetings[Weekday(greeting.t)] = report.weekdays.greetings[Weekday(greeting.t)] + 1
-                    if person then person.greetings = person.greetings + 1 end
-                    if crafted then
-                        row.crafted = row.crafted + 1
-                        report.totals.crafted = report.totals.crafted + 1
-                        report.hours.crafted[Hour(greeting.t)] = report.hours.crafted[Hour(greeting.t)] + 1
-                        report.weekdays.crafted[Weekday(greeting.t)] = report.weekdays.crafted[Weekday(greeting.t)] + 1
-                        if person then person.crafted = person.crafted + 1 end
+                    CountTime('greetings', greeting.t)
+                    if crafted then CountTime('crafted', greeting.t) end
+                end
+                if started.t >= from and started.t <= to then
+                    local key, info = Subject(subjectEvent)
+                    if info.ppID == nil then info.ppID = ppID end
+                    local row = Row(key, info)
+                    row.requests = row.requests + 1
+                    report.totals.requests = report.totals.requests + 1
+                    local person = Customer(customer)
+                    if person then person.requests = person.requests + 1 end
+                    if greeting then
+                        row.greetings = row.greetings + 1
+                        report.totals.greetings = report.totals.greetings + 1
+                        if person then person.greetings = person.greetings + 1 end
+                        if crafted then
+                            row.crafted = row.crafted + 1
+                            report.totals.crafted = report.totals.crafted + 1
+                            if person then person.crafted = person.crafted + 1 end
+                        end
                     end
                 end
             end
@@ -318,8 +371,7 @@ function M.Build(chunks, filters, context)
                 if order.st == 'f' then
                     row.orders = row.orders + 1
                     report.totals.orders = report.totals.orders + 1
-                    report.hours.orders[Hour(order.t)] = report.hours.orders[Hour(order.t)] + 1
-                    report.weekdays.orders[Weekday(order.t)] = report.weekdays.orders[Weekday(order.t)] + 1
+                    CountTime('orders', order.t)
                     local tip = Received(order)
                     if tip then
                         row.tips = row.tips + tip
@@ -350,37 +402,35 @@ function M.Build(chunks, filters, context)
         end
     end
 
-    -- Minutes online in each hour of the day and day of the week, and how
-    -- many minutes of them the period had since the marks began: the share of
-    -- the time someone was there to see the requests.
+    -- Merge account/session overlaps, clip to the selected range, and split
+    -- at local hour boundaries (including half-hour time zones and DST).
     report.hours.online, report.hours.possible = Hours(), Hours()
     report.weekdays.online, report.weekdays.possible = Weekdays(), Weekdays()
-    -- A slot counts only as far as it has gone: the one running now is not
-    -- five minutes yet.
-    local until_ = math.min(to, time())
-    for slot in pairs(online) do
-        local t = slot * PRESENCE_SLOT
-        local slotMinutes = (math.min(t + PRESENCE_SLOT, until_) - t) / 60
-        if t >= from and t <= to and slotMinutes > 0 then
-            local hour, day = Hour(t), Weekday(t)
-            report.hours.online[hour] = report.hours.online[hour] + slotMinutes
-            report.weekdays.online[day] = report.weekdays.online[day] + slotMinutes
-            report.totals.online = (report.totals.online or 0) + slotMinutes
+    local until_ = math.min(to + 1, time())
+    local function CountInterval(metric, start, finish)
+        local cursor, last = math.max(from, start), math.min(until_, finish)
+        while cursor < last do
+            local d = date('*t', cursor)
+            local next_ = math.min(last, cursor + (60 - d.min) * 60 - d.sec)
+            local minutes = (next_ - cursor) / 60
+            CountTime(metric, cursor, minutes)
+            if metric == 'online' then report.totals.online = (report.totals.online or 0) + minutes end
+            cursor = next_
         end
     end
-    if firstOnline then
-        local first = math.max(from, firstOnline - firstOnline % PRESENCE_SLOT)
-        local last = math.min(to, time())
-        local hourStart = first - first % 3600
-        while hourStart < last do
-            local minutes = (math.min(last, hourStart + 3600) - math.max(first, hourStart)) / 60
-            if minutes > 0 then
-                local hour, day = Hour(hourStart), Weekday(hourStart)
-                report.hours.possible[hour] = report.hours.possible[hour] + minutes
-                report.weekdays.possible[day] = report.weekdays.possible[day] + minutes
-            end
-            hourStart = hourStart + 3600
+    table.sort(online, function(a, b) return a[1] < b[1] end)
+    local start, finish
+    for _, interval in ipairs(online) do
+        if finish and interval[1] <= finish then
+            finish = math.max(finish, interval[2])
+        else
+            if finish then CountInterval('online', start, finish) end
+            start, finish = interval[1], interval[2]
         end
+    end
+    if finish then CountInterval('online', start, finish) end
+    if firstOnline then
+        CountInterval('possible', firstOnline, until_)
     end
 
     for _, row in pairs(rows) do
@@ -483,14 +533,14 @@ end
 function M.Range(preset, now)
     now = now or time()
     local today = date('*t', now)
-    local midnight = time({ year = today.year, month = today.month, day = today.day, hour = 0 })
+    local midnight = Midnight(today.year, today.month, today.day)
     if preset == '1h' then return now - 60 * 60, now end
     if preset == 'today' then return midnight, now end
-    if preset == 'yesterday' then return midnight - DAY, midnight - 1 end
-    if preset == '7d' then return midnight - 6 * DAY, now end
-    if preset == '30d' then return midnight - 29 * DAY, now end
-    if preset == 'month' then
-        return time({ year = today.year, month = today.month, day = 1, hour = 0 }), now
+    if preset == 'yesterday' then return M.ShiftCalendar('day', midnight, -1), midnight - 1 end
+    if preset == '7d' then return M.ShiftCalendar('day', midnight, -6), now end
+    if preset == '30d' then return M.ShiftCalendar('day', midnight, -29), now end
+    if preset == 'week' or preset == 'month' or preset == 'year' then
+        return (M.CalendarRange(preset, now)), now
     end
     return 0, now
 end
@@ -506,8 +556,10 @@ function M.ParseDate(text, endOfDay, now)
     day, month, year = tonumber(day), tonumber(month), tonumber(year)
     if not (day and month and year) or month < 1 or month > 12 or day < 1 or day > 31 then return nil end
     if year < 100 then year = 2000 + year end
-    local t = time({ year = year, month = month, day = day, hour = 0 })
-    return endOfDay and (t + DAY - 1) or t
+    local t = Midnight(year, month, day)
+    local actual = date('*t', t)
+    if actual.year ~= year or actual.month ~= month or actual.day ~= day then return nil end
+    return endOfDay and (M.ShiftCalendar('day', t, 1) - 1) or t
 end
 
 function M.FormatDate(t)

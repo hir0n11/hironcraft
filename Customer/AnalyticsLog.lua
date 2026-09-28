@@ -14,6 +14,7 @@ local Scan = select(2, ...)
 --      d order result, l a request row got its order result, x a request row
 --      replaced by a narrower one
 --   t  time;  q  own sequence number (events made here; merged ones have m)
+--   p (kind) online: [t, e) in seconds; without e, a historical 5-minute mark
 --   m  the linked account an event came from
 --   c  customer;  f  side, 'H' or 'A';  id  request token
 --   i  item;  r  recipe;  p  profession;  s  slot;  lb  slot label
@@ -54,7 +55,9 @@ function M.IsEnabled()
 end
 
 function M.SetEnabled(on)
+    if not on and M.StopPresence then M.StopPresence() end
     Scan.DB.analytics.enabled = on and true or false
+    if on and M.StartPresence then M.StartPresence() end
 end
 
 function M.Seq()
@@ -166,7 +169,8 @@ local function Append(event, source)
     local open = root.open
     open.events[#open.events + 1] = event
     open.from = math.min(open.from or event.t, event.t)
-    open.to = math.max(open.to or event.t, event.t)
+    local ends = event.k == 'p' and tonumber(event.e) or event.t
+    open.to = math.max(open.to or event.t, event.t, ends or event.t)
     if event.q then open.maxQ = event.q end
     Changed()
     return event
@@ -223,28 +227,70 @@ function M.UnknownItems()
     return root and type(root.unknown_items) == 'table' and root.unknown_items or {}
 end
 
--- Time online, in 5-minute marks: one per slot while the game runs here.
--- Linked accounts exchange them like any event, so the report knows when any
--- of the accounts was there to see requests.
-local PRESENCE_SLOT = 300
-M.PRESENCE_SLOT = PRESENCE_SLOT
-local lastPresenceSlot = nil
+-- Precise, half-open intervals [t, e). Checkpoints update only the local
+-- pending interval; immutable journal records are emitted at most once per
+-- five minutes, and on leaving the world. Already-sent records never change.
+M.PRESENCE_SLOT = 300 -- Historical marks without an `e` retain this size.
+M.PRESENCE_CHECKPOINT = 30
+local PRESENCE_FLUSH = 300
+local PRESENCE_MAX_GAP = 75
+local presenceRunning, presenceTicker = false, nil
+
+local function CommitPresence(root)
+    local pending = root.presencePending
+    root.presencePending = nil
+    if pending and pending.e > pending.t then
+        return M.Record({ k = 'p', t = pending.t, e = pending.e, f = pending.f })
+    end
+end
 
 function M.NotePresence(now)
     if not M.IsEnabled() or not M.Root() then return nil end
     now = now or time()
-    local slot = math.floor(now / PRESENCE_SLOT)
-    if slot == lastPresenceSlot then return nil end
-    lastPresenceSlot = slot
-    return M.Record({ k = 'p', t = slot * PRESENCE_SLOT, f = PlayerSide() })
+    local root, side = M.Root(), PlayerSide()
+    local pending = root.presencePending
+    if pending and (now < pending.e or now - pending.e > PRESENCE_MAX_GAP or pending.f ~= side) then
+        -- A suspended client or disconnected/loading gap is not proof of
+        -- continuous online time. Preserve only the last observed endpoint.
+        CommitPresence(root)
+        pending = nil
+    end
+    if not pending then
+        root.presencePending = { t = now, e = now, f = side }
+    else
+        if now == pending.e then return nil end
+        pending.e = now
+        if now - pending.t >= PRESENCE_FLUSH then
+            CommitPresence(root)
+            root.presencePending = { t = now, e = now, f = side }
+        end
+    end
+    Changed()
+    return true
 end
 
-local presenceTicker = nil
 function M.StartPresence()
+    if not M.IsEnabled() or not M.Root() then return end
+    if not presenceRunning then
+        -- Saved by an earlier session: do not extend it across a relog or
+        -- offline gap. It is safe to replay; it was never sent while pending.
+        CommitPresence(M.Root())
+        presenceRunning = true
+    end
     M.NotePresence()
     if not presenceTicker and C_Timer and C_Timer.NewTicker then
-        presenceTicker = C_Timer.NewTicker(60, function() pcall(M.NotePresence) end)
+        presenceTicker = C_Timer.NewTicker(M.PRESENCE_CHECKPOINT, function()
+            if presenceRunning then pcall(M.NotePresence) end
+        end)
     end
+end
+
+function M.StopPresence()
+    local root = M.Root()
+    if not root then return end
+    if presenceRunning then M.NotePresence() end
+    CommitPresence(root)
+    presenceRunning = false
 end
 
 local function SideOf(faction)
@@ -417,6 +463,11 @@ function M.LoadRange(from, to, progress, done)
     local chunks, step = {}, 0
     local function Finish()
         chunks[#chunks + 1] = M.Root().open.events
+        local pending = M.Root().presencePending
+        if pending and pending.e > pending.t then
+            -- A snapshot, not the mutable saved table or a sync-able record.
+            chunks[#chunks + 1] = { { k = 'p', t = pending.t, e = pending.e, f = pending.f } }
+        end
         done(chunks)
     end
     local function Next()
@@ -441,6 +492,7 @@ function M.LoadRange(from, to, progress, done)
             Finish()
         end
     end)
+    return function() frame:SetScript('OnUpdate', nil) end
 end
 
 -- Own events newer than a linked account has, oldest first, at most limit,
@@ -590,6 +642,13 @@ end
 
 -- Whispers the player types, crafting and orders count as load.
 if CreateFrame then
+    local presence = CreateFrame('Frame')
+    for _, event in ipairs({ 'PLAYER_ENTERING_WORLD', 'PLAYER_LEAVING_WORLD', 'PLAYER_LOGOUT' }) do
+        presence:RegisterEvent(event)
+    end
+    presence:SetScript('OnEvent', function(_, event)
+        if event == 'PLAYER_ENTERING_WORLD' then M.StartPresence() else M.StopPresence() end
+    end)
     local watcher = CreateFrame('Frame')
     for _, event in ipairs({
         'CHAT_MSG_WHISPER_INFORM', 'CHAT_MSG_BN_WHISPER_INFORM', 'CRAFTINGORDERS_CLAIMED_ORDER_ADDED',

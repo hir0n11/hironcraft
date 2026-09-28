@@ -25,6 +25,28 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics calendar and precise online time (0.4.77)
+
+- Click a day in the lower chart to see that date's hourly statistics above.
+  Today/Yesterday/Own dates follows the selection, while the calendar stays
+  on its week or month so adjacent days remain easy to compare.
+- Browse weeks, months and years with the calendar selector and arrows.
+  Click a month in the year view to open its days, then a day for its hours.
+  The Current button returns to the current period. All other filters still
+  apply to both charts, and CSV exports identify the actual dates.
+- Chart tooltips now show Ordered alongside Greeted and Orders done, and
+  Ordered is also available as a chart metric. Order rate remains
+  Ordered / Greeted: extra completed items and orders without a greeting
+  do not inflate it.
+- New online history uses actual session intervals with a local checkpoint
+  every 30 seconds and a final endpoint on normal logout. Overlapping linked
+  accounts count only once. Records are batched every five minutes or on
+  leaving the world, without adding a network message every 30 seconds.
+  Historical five-minute marks remain readable; their old rounding cannot
+  be undone. Update both linked clients for the precise interval display.
+  A crash can still lose unsaved game data; checkpoints do not force disk
+  writes, and unobserved disconnect/suspension gaps are not filled in.
+
 ## Reliable reagent auction posting (0.4.76)
 
 - Posting holds the selected item until the auction-created event and updated

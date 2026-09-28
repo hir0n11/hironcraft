@@ -17,6 +17,9 @@ local GOLD = 10000
 
 local frame = nil
 local chunks, report = nil, nil
+local calendarReport, loadedFrom, loadedTo = nil, nil, nil
+local loading = false
+local cancelLoad = nil
 -- Resourcefulness on crafting orders, for the fourth tab.
 local returns = nil
 local loadToken = 0
@@ -34,11 +37,19 @@ local PRESETS = {
     { value = '1h', label = 'Last hour' },
     { value = 'today', label = 'Today' },
     { value = 'yesterday', label = 'Yesterday' },
+    { value = 'week', label = 'This week' },
     { value = '7d', label = 'Last 7 days' },
     { value = '30d', label = 'Last 30 days' },
     { value = 'month', label = 'This month' },
+    { value = 'year', label = 'This year' },
     { value = 'all', label = 'All time' },
     { value = 'custom', label = 'Own dates' },
+}
+
+local CALENDAR_MODES = {
+    { value = 'week', label = 'Week' },
+    { value = 'month', label = 'Month' },
+    { value = 'year', label = 'Year' },
 }
 
 local TIERS = {
@@ -57,6 +68,7 @@ local SIDES = {
 local METRICS = {
     { value = 'requests', label = 'Requests' },
     { value = 'greetings', label = 'Greetings' },
+    { value = 'crafted', label = 'Crafted' },
     { value = 'orders', label = 'Crafted orders' },
 }
 
@@ -82,6 +94,33 @@ local function CurrentRange()
         return view.from, view.to or time()
     end
     return Scan.AnalyticsReport.Range(view.preset)
+end
+
+local function CalendarState()
+    local view = View()
+    local mode = view.calendarMode
+    if mode ~= 'week' and mode ~= 'month' and mode ~= 'year' then
+        mode = (view.preset == 'month' or view.preset == 'year') and view.preset or 'week'
+    end
+    local anchor = view.calendarAnchor
+    if not anchor then
+        local from = CurrentRange()
+        anchor = (view.preset == 'custom' or view.preset == 'yesterday') and from > 0 and from or time()
+    end
+    return mode, anchor
+end
+
+local function RequiredRange()
+    local from, to = CurrentRange()
+    local mode, anchor = CalendarState()
+    local calendarFrom, calendarTo = Scan.AnalyticsReport.CalendarRange(mode, anchor)
+    return math.min(from, calendarFrom), math.max(to, math.min(calendarTo, time()))
+end
+
+local function RangeLabel(from, to)
+    if not from or from == 0 then return L('All time') end
+    local first, last = date('%d.%m.%Y', from), date('%d.%m.%Y', to)
+    return first == last and first or (first .. ' – ' .. last)
 end
 
 -- Formatting -----------------------------------------------------------------
@@ -376,7 +415,17 @@ local function CreateChart(parent, count, labelOf)
     local chart = CreateFrame('Frame', nil, parent)
     chart.bars = {}
     for index = 1, count do
-        local bar = CreateFrame('Frame', nil, chart)
+        local bar = CreateFrame('Button', nil, chart)
+        bar:RegisterForClicks('LeftButtonUp')
+        bar:SetHighlightTexture('Interface\\Buttons\\UI-Listbox-Highlight2', 'ADD')
+        bar:GetHighlightTexture():SetAlpha(0.15)
+        bar.selection = bar:CreateTexture(nil, 'BACKGROUND')
+        bar.selection:SetAllPoints()
+        bar.selection:SetColorTexture(1, 0.82, 0.25, 0.12)
+        bar.selection:Hide()
+        bar:SetScript('OnClick', function(self)
+            if not loading and self.info and self.info.bucket then W.SelectCalendarBucket(self.info.bucket) end
+        end)
         -- Under it, a thin gauge: how much of that time someone was online.
         bar.onlineTrack = bar:CreateTexture(nil, 'BACKGROUND')
         bar.onlineTrack:SetColorTexture(1, 1, 1, 0.08)
@@ -408,16 +457,21 @@ local function CreateChart(parent, count, labelOf)
         chart.bars[index] = bar
     end
 
-    function chart:SetValues(values, infos, shares)
+    function chart:SetValues(values, infos, shares, labels, selected)
         local width, height = self:GetWidth(), self:GetHeight() - 40
-        local slot = width / count
+        local visible = #values
+        local slot = width / math.max(1, visible)
         local max = 0
         for index = 1, count do max = math.max(max, values[index] or 0) end
         for index, bar in ipairs(self.bars) do
+            bar:SetShown(index <= visible)
+            bar.label:SetShown(index <= visible)
+            bar.selection:SetShown(selected and selected[index] == true or false)
+            if labels then bar.label:SetText(labels[index] or '') end
             local value = values[index] or 0
             bar:ClearAllPoints()
             bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', (index - 1) * slot + slot * 0.15, 24)
-            bar:SetSize(slot * 0.7, height)
+            bar:SetSize(slot * 0.7, math.max(1, height))
             bar.fill:SetHeight(math.max(1, max > 0 and height * value / max or 1))
             bar.fill:SetAlpha(value > 0 and 1 or 0.25)
             bar.value:SetText(value > 0 and value or '')
@@ -426,6 +480,7 @@ local function CreateChart(parent, count, labelOf)
             bar.onlineFill:SetWidth(math.max(0.01, slot * 0.7 * math.min(1, share or 0)))
             bar.onlineFill:SetShown(share ~= nil and share > 0)
             bar.info = infos and infos[index]
+            bar:SetEnabled(not bar.info or not bar.info.bucket or bar.info.bucket.from <= time())
         end
     end
     return chart
@@ -636,7 +691,15 @@ local WEEKDAYS = { 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' }
 
 -- Minutes as "3 h 05 min" or "40 min".
 local function Duration(minutes)
-    minutes = math.floor((minutes or 0) + 0.5)
+    local seconds = math.floor((minutes or 0) * 60 + 0.5)
+    minutes = math.floor(seconds / 60)
+    if seconds % 60 > 0 then
+        if minutes >= 60 then
+            return string.format(L('%d h %02d min %02d s'), math.floor(minutes / 60), minutes % 60, seconds % 60)
+        end
+        if minutes > 0 then return string.format(L('%d min %02d s'), minutes, seconds % 60) end
+        return string.format(L('%d s'), seconds)
+    end
     if minutes >= 60 then
         return string.format(L('%d h %02d min'), math.floor(minutes / 60), minutes % 60)
     end
@@ -644,20 +707,21 @@ local function Duration(minutes)
 end
 
 local function UpdateCharts()
-    if not report then return end
+    if not report or not calendarReport then return end
     local metric = View().metric or 'orders'
-    local function Infos(group, count, titleOf, offset)
+    local function Infos(count, statsOf, titleOf)
         local values, infos, shares = {}, {}, {}
         for index = 1, count do
-            local slot = index - 1 + offset
-            values[index] = report[group][metric][slot] or 0
-            local greetings, crafted = report[group].greetings[slot] or 0, report[group].crafted[slot] or 0
-            local online, possible = report[group].online[slot] or 0, report[group].possible[slot] or 0
+            local stats = statsOf(index)
+            values[index] = stats[metric] or 0
+            local greetings, crafted = stats.greetings or 0, stats.crafted or 0
+            local online, possible = stats.online or 0, stats.possible or 0
             shares[index] = possible > 0 and online / possible or nil
             infos[index] = { title = titleOf(index), lines = {
-                string.format('%s: %d', L('Requests'), report[group].requests[slot] or 0),
+                string.format('%s: %d', L('Requests'), stats.requests or 0),
                 string.format('%s: %d', L('Greetings'), greetings),
-                string.format('%s: %d', L('Crafted orders'), report[group].orders[slot] or 0),
+                string.format('%s: %d', L('Crafted'), crafted),
+                string.format('%s: %d', L('Crafted orders'), stats.orders or 0),
                 -- Of the greetings sent in this hour, how many were ordered.
                 string.format('%s: %s', L('Conversion'), greetings > 0
                     and string.format('%s (%d / %d)', Percent(crafted / greetings), crafted, greetings)
@@ -668,8 +732,37 @@ local function UpdateCharts()
         end
         return values, infos, shares
     end
-    frame.HourChart:SetValues(Infos('hours', 24, function(index) return string.format('%02d:00-%02d:59', index - 1, index - 1) end, 0))
-    frame.DayChart:SetValues(Infos('weekdays', 7, function(index) return L(WEEKDAYS[index]) end, 1))
+    local from, to = CurrentRange()
+    local range = RangeLabel(from, to)
+    frame.HourTitle:SetText(L('By hour of day') .. ' — ' .. range)
+    frame.HourChart:SetValues(Infos(24, function(index)
+        local stats = {}
+        for key, slots in pairs(report.hours) do stats[key] = slots[index - 1] end
+        return stats
+    end, function(index) return range .. ' · ' .. string.format('%02d:00-%02d:59', index - 1, index - 1) end))
+
+    local mode, anchor = CalendarState()
+    local first, last = Scan.AnalyticsReport.CalendarRange(mode, anchor)
+    local buckets = Scan.AnalyticsReport.CalendarBuckets(mode, anchor)
+    local values, infos, shares = Infos(#buckets, function(index)
+        local bucket = buckets[index]
+        return calendarReport.calendar[bucket.unit == 'month' and 'months' or 'days'][bucket.key] or {}
+    end, function(index) return RangeLabel(buckets[index].from, buckets[index].to) end)
+    local labels, selected = {}, {}
+    for index, bucket in ipairs(buckets) do
+        labels[index] = mode == 'week' and (L(WEEKDAYS[index]) .. ' ' .. date('%d.%m', bucket.from))
+            or date(mode == 'year' and '%m' or '%d', bucket.from)
+        selected[index] = from == bucket.from and to <= bucket.to
+        infos[index].bucket = bucket
+        infos[index].lines[#infos[index].lines + 1] = L(bucket.unit == 'month'
+            and 'Click to view this month' or 'Click to view this day')
+    end
+    frame.DayChart.buckets = buckets
+    frame.DayChart:SetValues(values, infos, shares, labels, selected)
+    frame.CalendarTitle:SetText(RangeLabel(first, last))
+    frame.CalendarNext:SetEnabled(last < time())
+    frame.CalendarPrevious:SetEnabled(date('*t', first).year > 1970)
+    if frame.CalendarMode.GenerateMenu then frame.CalendarMode:GenerateMenu() end
 end
 
 local function SetStatus(text)
@@ -754,26 +847,54 @@ end
 function W.Rebuild()
     if not frame or not chunks then return end
     nameRetries = 0
-    report = Scan.AnalyticsReport.Build(chunks, Filters(), Context())
+    local filters, context = Filters(), Context()
+    report = Scan.AnalyticsReport.Build(chunks, filters, context)
+    local mode, anchor = CalendarState()
+    local from, to = Scan.AnalyticsReport.CalendarRange(mode, anchor)
+    to = math.min(to, time())
+    if filters.from == from and filters.to == to then
+        calendarReport = report
+    else
+        local calendarFilters = { from = from, to = to, ppID = filters.ppID,
+            crafter = filters.crafter, side = filters.side, tier = filters.tier }
+        calendarReport = Scan.AnalyticsReport.Build(chunks, calendarFilters, context)
+    end
     returns = Scan.AnalyticsReport.BuildReturns(chunks, Filters())
     Render()
 end
 
 function W.Reload()
     if not frame or not frame:IsShown() then return end
+    if cancelLoad then cancelLoad(); cancelLoad = nil end
     loadToken = loadToken + 1
     local token = loadToken
+    loading = true
+    chunks, report, calendarReport = nil, nil, nil
+    frame.HourChart:SetValues({})
+    frame.DayChart:SetValues({})
     SetStatus(L('Loading analytics...'))
-    local from, to = CurrentRange()
-    Scan.AnalyticsLog.LoadRange(from, to, function(done, total)
+    local from, to = RequiredRange()
+    cancelLoad = Scan.AnalyticsLog.LoadRange(from, to, function(done, total)
         if token == loadToken and frame:IsShown() then
             SetStatus(string.format(L('Loading analytics %d / %d'), done, total))
         end
     end, function(loaded)
         if token ~= loadToken or not frame:IsShown() then return end
+        cancelLoad = nil
         chunks = loaded
+        loading = false
+        loadedFrom, loadedTo = from, to
         W.Rebuild()
     end)
+end
+
+local function RefreshSelection()
+    local from, to = RequiredRange()
+    if not loading and chunks and loadedFrom <= from and loadedTo >= to then
+        W.Rebuild()
+    else
+        W.Reload()
+    end
 end
 
 -- New events while the window is open: counted again a little later.
@@ -792,8 +913,10 @@ function W.DataArrived()
 end
 
 function W.Release()
+    if cancelLoad then cancelLoad(); cancelLoad = nil end
     loadToken = loadToken + 1
-    chunks, report, returns = nil, nil, nil
+    chunks, report, returns, calendarReport = nil, nil, nil, nil
+    loadedFrom, loadedTo, loading = nil, nil, false
     if Scan.AnalyticsLog then Scan.AnalyticsLog.ReleaseCache() end
     if frame then
         frame.Items:SetRows({})
@@ -817,6 +940,45 @@ local function UpdateDateBoxes()
     end
     -- A typed date switches the period to own dates; show that.
     if frame.Period and frame.Period.GenerateMenu then frame.Period:GenerateMenu() end
+end
+
+-- A day click changes only the detailed period, not the calendar below it.
+function W.SelectCalendarBucket(bucket)
+    if not bucket or bucket.from > time() then return end
+    local view, model = View(), Scan.AnalyticsReport
+    if bucket.unit == 'month' then
+        view.calendarMode, view.calendarAnchor = 'month', bucket.from
+        view.preset = bucket.from == model.CalendarRange('month') and 'month' or 'custom'
+    else
+        local today = model.CalendarRange('day')
+        local yesterday = model.ShiftCalendar('day', today, -1)
+        view.preset = bucket.from == today and 'today' or bucket.from == yesterday and 'yesterday' or 'custom'
+    end
+    view.from, view.to = bucket.from, bucket.to
+    UpdateDateBoxes()
+    RefreshSelection()
+end
+
+function W.SelectCalendarPeriod(mode, anchor)
+    local view, model = View(), Scan.AnalyticsReport
+    local from, to = model.CalendarRange(mode, anchor)
+    if from > time() or date('*t', from).year < 1970 then return end
+    view.calendarMode, view.calendarAnchor = mode, from
+    view.preset = from == model.CalendarRange(mode) and mode or 'custom'
+    view.from, view.to = from, to
+    UpdateDateBoxes()
+    RefreshSelection()
+end
+
+function W.MoveCalendar(direction)
+    local mode, anchor = CalendarState()
+    W.SelectCalendarPeriod(mode, Scan.AnalyticsReport.ShiftCalendar(mode, anchor, direction))
+end
+
+local function ResetCalendarForFilter()
+    local view = View()
+    view.calendarMode = (view.preset == 'year' or view.preset == 'month') and view.preset or 'week'
+    view.calendarAnchor = nil
 end
 
 local function SelectTab(index)
@@ -870,8 +1032,16 @@ local function ExportCSV()
             return string.format('%s,%d,%d,%d,%s,%d', period, report[group].requests[slot], greetings, crafted,
                 greetings > 0 and string.format('%.2f', crafted / greetings) or '', report[group].orders[slot])
         end
-        for hour = 0, 23 do lines[#lines + 1] = Line(string.format('%02d:00', hour), 'hours', hour) end
-        for day = 1, 7 do lines[#lines + 1] = Line(CSV(L(WEEKDAYS[day])), 'weekdays', day) end
+        local from, to = CurrentRange()
+        for hour = 0, 23 do
+            lines[#lines + 1] = Line(CSV(RangeLabel(from, to) .. ' ' .. string.format('%02d:00', hour)), 'hours', hour)
+        end
+        for _, bucket in ipairs(frame.DayChart.buckets or {}) do
+            local stats = calendarReport.calendar[bucket.unit == 'month' and 'months' or 'days'][bucket.key] or {}
+            local greetings, crafted = stats.greetings or 0, stats.crafted or 0
+            lines[#lines + 1] = string.format('%s,%d,%d,%d,%s,%d', bucket.key, stats.requests or 0,
+                greetings, crafted, greetings > 0 and string.format('%.2f', crafted / greetings) or '', stats.orders or 0)
+        end
     else
         lines[1] = 'item,item_id,profession,requests,greeted,ordered,order_rate,orders_done,declined,average_tip_gold'
         for _, row in ipairs(frame.Items.rows or {}) do
@@ -971,6 +1141,7 @@ local function Create()
             current.from, current.to = CurrentRange()
         end
         current.preset = value
+        ResetCalendarForFilter()
         UpdateDateBoxes()
         W.Reload()
     end)
@@ -996,6 +1167,14 @@ local function Create()
             current.preset = 'custom'
             current.from, current.to = from, to
             if endOfDay then current.to = value else current.from = value end
+            if current.from > current.to then
+                if endOfDay then
+                    current.from = Scan.AnalyticsReport.CalendarRange('day', value)
+                else
+                    current.to = select(2, Scan.AnalyticsReport.CalendarRange('day', value))
+                end
+            end
+            ResetCalendarForFilter()
             UpdateDateBoxes()
             W.Reload()
         end)
@@ -1151,20 +1330,45 @@ local function Create()
         function() return View().metric end, function(value) View().metric = value UpdateCharts() end)
     frame.MetricDropdown:SetPoint('TOPRIGHT', frame.Charts, 'TOPRIGHT', -10, -6)
     local hourTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    frame.HourTitle = hourTitle
     hourTitle:SetPoint('TOPLEFT', 14, -10)
     hourTitle:SetText(L('By hour of day'))
     local legend = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    legend:SetPoint('LEFT', hourTitle, 'RIGHT', 16, 0)
+    legend:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 14, -28)
     legend:SetText(L('Grey behind a bar: the share of that time you were online.'))
     frame.HourChart = CreateChart(frame.Charts, 24, function(index) return tostring(index - 1) end)
-    frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -30)
+    frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -46)
     frame.HourChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
-    frame.HourChart:SetHeight(200)
+    frame.HourChart:SetHeight(184)
     local dayTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    frame.CalendarTitle = dayTitle
     dayTitle:SetPoint('TOPLEFT', frame.HourChart, 'BOTTOMLEFT', 4, -14)
     dayTitle:SetText(L('By day of week'))
-    frame.DayChart = CreateChart(frame.Charts, 7, function(index) return L(WEEKDAYS[index]) end)
-    frame.DayChart:SetPoint('TOPLEFT', dayTitle, 'BOTTOMLEFT', -4, -6)
+    frame.CalendarMode = Dropdown(frame.Charts, 110, Entries(CALENDAR_MODES),
+        function() return (CalendarState()) end, function(mode)
+            local _, anchor = CalendarState()
+            local selectedFrom = CurrentRange()
+            if selectedFrom > 0 then anchor = selectedFrom end
+            W.SelectCalendarPeriod(mode, anchor)
+        end)
+    local function CalendarButton(text, width, action)
+        local button = CreateFrame('Button', nil, frame.Charts, 'UIPanelButtonTemplate')
+        button:SetSize(width, 22)
+        button:SetText(text)
+        button:SetScript('OnClick', action)
+        return button
+    end
+    frame.CalendarCurrent = CalendarButton(L('Current period'), 96, function()
+        W.SelectCalendarPeriod((CalendarState()), time())
+    end)
+    frame.CalendarCurrent:SetPoint('TOPRIGHT', frame.HourChart, 'BOTTOMRIGHT', 0, -8)
+    frame.CalendarNext = CalendarButton('>', 26, function() W.MoveCalendar(1) end)
+    frame.CalendarNext:SetPoint('RIGHT', frame.CalendarCurrent, 'LEFT', -4, 0)
+    frame.CalendarPrevious = CalendarButton('<', 26, function() W.MoveCalendar(-1) end)
+    frame.CalendarPrevious:SetPoint('RIGHT', frame.CalendarNext, 'LEFT', -4, 0)
+    frame.CalendarMode:SetPoint('RIGHT', frame.CalendarPrevious, 'LEFT', -8, 0)
+    frame.DayChart = CreateChart(frame.Charts, 31, function() return '' end)
+    frame.DayChart:SetPoint('TOPLEFT', frame.HourChart, 'BOTTOMLEFT', 0, -40)
     frame.DayChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
     frame.DayChart:SetPoint('BOTTOM', frame.Charts, 'BOTTOM', 0, 10)
 

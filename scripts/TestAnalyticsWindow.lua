@@ -24,6 +24,7 @@ local function Mock(kind)
     function methods:Show() local was = self.shown; self.shown = true; if not was and self.scripts.OnShow then self.scripts.OnShow(self) end end
     function methods:Hide() local was = self.shown; self.shown = false; if was and self.scripts.OnHide then self.scripts.OnHide(self) end end
     function methods:SetShown(on) if on then self:Show() else self:Hide() end end
+    function methods:SetEnabled(on) self.enabled = on end
     function methods:IsShown() return self.shown end
     function methods:IsVisible() return self.shown end
     function methods:GetWidth() return self.width end
@@ -177,8 +178,9 @@ assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.val
 assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
 -- The hour's tooltip: the conversion of the greetings sent in it.
 local noon = frame.HourChart.bars[13].info
-assert(noon and noon.lines[4] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[4]))
-assert(frame.HourChart.bars[12].info.lines[4]:find('-', 1, true), 'an hour without greetings shows a conversion')
+assert(noon and noon.lines[5] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[5]))
+assert(noon.lines[3] == 'Crafted: 1', 'the Ordered numerator is missing from the tooltip')
+assert(frame.HourChart.bars[12].info.lines[5]:find('-', 1, true), 'an hour without greetings shows a conversion')
 -- A figure wider than its tile widens it, not climbing over the name; the
 -- tiles after it move along, and when the row runs into the buttons the
 -- widened ones take the smaller font.
@@ -299,6 +301,86 @@ frame.Tabs[1].scripts.OnClick(frame.Tabs[1])
 assert(frame.SideDropdown:IsShown() and frame.Tiles.requests:IsShown(), 'leaving the returns tab left its controls')
 
 -- Closing lets the data go.
+-- The lower chart is an independent calendar, not a sum of all Mondays.
+local W, R = Scan.AnalyticsWindow, Scan.AnalyticsReport
+local function At(y, m, d, h) return os.time({ year = y, month = m, day = d, hour = h or 0, min = 0, sec = 0 }) end
+Log.Record({ k = 'd', st = 'f', o = 901, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 15, 9) })
+Log.Record({ k = 'd', st = 'f', o = 902, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 19, 10) })
+Log.Record({ k = 'd', st = 'f', o = 903, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 8, 14) })
+Log.Record({ k = 'd', st = 'f', o = 904, c = 'Calendar', p = 197, f = 'H', t = At(2025, 2, 14, 15) })
+frame.Tabs[3].scripts.OnClick(frame.Tabs[3])
+W.SelectCalendarPeriod('week', now)
+assert(view.preset == 'week' and #frame.DayChart.buckets == 7)
+local weekAnchor = view.calendarAnchor
+local function ClickDay(index)
+    local bar = frame.DayChart.bars[index]
+    bar.scripts.OnClick(bar)
+end
+ClickDay(2)
+assert(view.preset == 'custom' and view.calendarAnchor == weekAnchor and date('%d.%m', view.from) == '15.09')
+assert(frame.FromBox.text == '15.09.2026' and frame.ToBox.text == '15.09.2026')
+assert(frame.DayChart.bars[2].selection.shown and frame.HourChart.bars[10].value.text == 1)
+assert(frame.HourChart.bars[15].value.text == '', 'another Tuesday leaked into selected day')
+assert(frame.HourTitle.text:find('15.09.2026', 1, true))
+assert(frame.DayChart.bars[6].value.text == 1, 'day selection narrowed the lower calendar')
+ClickDay(6)
+assert(view.preset == 'yesterday' and not frame.FromBox.shown)
+ClickDay(7)
+assert(view.preset == 'today' and view.calendarAnchor == weekAnchor)
+W.MoveCalendar(-1)
+assert(view.preset == 'custom' and date('%d.%m', view.from) == '07.09' and date('%d.%m', view.to) == '13.09')
+assert(frame.DayChart.bars[2].value.text == 1, 'previous week was not loaded')
+ClickDay(2)
+assert(frame.HourChart.bars[15].value.text == 1 and frame.HourChart.bars[10].value.text == '')
+W.MoveCalendar(1)
+assert(view.preset == 'week' and not frame.CalendarNext.enabled)
+
+W.SelectCalendarPeriod('year', At(2025, 7, 1))
+assert(#frame.DayChart.buckets == 12 and frame.DayChart.bars[2].value.text == 1)
+ClickDay(2)
+assert(view.calendarMode == 'month' and #frame.DayChart.buckets == 28 and date('%Y-%m', view.from) == '2025-02')
+assert(view.preset == 'custom' and date('%d.%m', view.to) == '28.02')
+ClickDay(14)
+assert(view.calendarMode == 'month' and #frame.DayChart.buckets == 28)
+assert(frame.HourChart.bars[16].value.text == 1 and view.from == At(2025, 2, 14))
+assert(frame.DayChart.bars[14].selection.shown and not frame.DayChart.bars[29].shown)
+frame.ExportButton.scripts.OnClick(frame.ExportButton)
+assert(dumped:find('2025-02-14,', 1, true), 'calendar CSV exported aggregated weekdays')
+W.SelectCalendarPeriod('month', At(2024, 2, 10))
+assert(#frame.DayChart.buckets == 29 and frame.DayChart.bars[29].shown and not frame.DayChart.bars[30].shown)
+W.SelectCalendarPeriod('year', now)
+assert(view.preset == 'year')
+ClickDay(9)
+assert(view.preset == 'month' and view.calendarMode == 'month' and #frame.DayChart.buckets == 30)
+local previousFrom = view.from
+ClickDay(30) -- now is September 20: future dates cannot be selected.
+assert(view.from == previousFrom and not frame.DayChart.bars[30].enabled)
+
+-- Common filters affect the calendar and the drill-down together.
+view.side = 'A'; W.Rebuild()
+assert(frame.DayChart.bars[15].value.text == '')
+view.side = nil; W.Rebuild()
+assert(frame.DayChart.bars[15].value.text == 1)
+
+-- Rapid navigation while loading: an older reply must not replace the new one.
+local originalLoad, pending = Log.LoadRange, {}
+W.Release() -- The earlier All time selection had cached every historical year.
+Log.LoadRange = function(from, to, _, done)
+    local request = { from = from, to = to, done = done }
+    pending[#pending + 1] = request
+    return function() request.cancelled = true end
+end
+W.SelectCalendarPeriod('year', At(2022, 1, 1))
+W.SelectCalendarPeriod('year', At(2021, 1, 1))
+assert(#pending == 2 and pending[2].from == At(2021, 1, 1))
+assert(pending[1].cancelled, 'obsolete year kept unpacking after rapid navigation')
+pending[2].done({ { { k = 'd', st = 'f', o = 1000, c = 'Older', t = At(2021, 3, 1) } } })
+assert(frame.DayChart.bars[3].value.text == 1)
+pending[1].done({})
+assert(frame.DayChart.bars[3].value.text == 1 and frame.CalendarTitle.text:find('2021', 1, true))
+Log.LoadRange = originalLoad
+print('Analytics calendar UI passed (day clicks, presets, navigation, year/month/day drill-down, filters, CSV, load races).')
+
 Scan.AnalyticsWindow.Toggle()
 assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')
 print('Analytics window passed (open, tabs, filters, sorting, dates, CSV, close).')

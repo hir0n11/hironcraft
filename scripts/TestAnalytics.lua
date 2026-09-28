@@ -462,8 +462,8 @@ print('Analytics resource returns passed.')
 local noon = os.time({ year = 2026, month = 9, day = 21, hour = 12 })
 local savedNow = now
 now = noon + 2 * 3600
-assert(Log.NotePresence(noon) and not Log.NotePresence(noon + 60), 'a slot was marked twice')
-Log.NotePresence(noon + 600)
+Log.Record({ k = 'p', t = noon, f = Log.PlayerSide() })
+Log.Record({ k = 'p', t = noon + 600, f = Log.PlayerSide() })
 Log.Merge({ { k = 'p', t = noon + 600, f = 'H' }, { k = 'p', t = noon + 3600 } }, 'peer')
 local day = os.time({ year = 2026, month = 9, day = 21, hour = 0 })
 local online = build({ from = day, to = day + 86399 })
@@ -482,6 +482,25 @@ assert(online.hours.online[13] == 2 and online.hours.possible[13] == 2,
     'the running slot counted in full: ' .. online.hours.online[13] .. ' of ' .. online.hours.possible[13])
 now = savedNow
 print('Analytics time online passed.')
+
+-- Exact endpoints survive compression and the same immutable event payload
+-- used for linked-account exchange, including a range starting after `t`.
+as(newDB(), function()
+    local from, to = now - 50, now - 7
+    Log.Record({ k = 'p', t = from, e = to, f = 'H' })
+    assert(Log.CloseOpenStore())
+    Log.ReleaseCache()
+    local decoded = Log.Decode(Log.Root().stores[1].data)
+    assert(decoded[1].t == from and decoded[1].e == to, 'precise presence lost its endpoints in storage')
+    local outgoing = Log.OwnSince(0, 10)
+    as(newDB(), function()
+        Log.Merge(outgoing, 'peer')
+        local clipped = build({ from = from + 20, to = to - 1 })
+        assert(math.abs(clipped.totals.online - 23 / 60) < 0.000001,
+            'precise presence changed after exchange or clipping')
+    end)
+end)
+print('Analytics precise presence storage/exchange passed.')
 
 -- Tips as received: less the Consortium's cut; an order recorded without the
 -- cut gets it at the share the others show, and the total says it estimated.
