@@ -355,6 +355,24 @@ function CO:ReleaseOrder(order, pageFrame, forRejection)
     return ok
 end
 
+-- Identity must outlive both ReleaseOrder and RejectOrder. Row/API tables can
+-- be retired during those calls; saving only their material list is not enough
+-- to record the outcome for a customer on another account.
+local REJECTION_IDENTITY_FIELDS = {
+    "orderID", "customerName", "customerGuid", "spellID", "itemID",
+    "parentProfessionID", "orderType", "npcCustomerName", "tipAmount",
+    "consortiumCut", "isRecraft", "outputItemHyperlink",
+}
+local function CopyRejectionIdentity(source, previous)
+    local snapshot = {}
+    for _, field in ipairs(REJECTION_IDENTITY_FIELDS) do
+        local value = source and source[field]
+        if value == nil and previous then value = previous[field] end
+        snapshot[field] = value
+    end
+    return snapshot
+end
+
 function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
@@ -411,24 +429,29 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     for id, cached in pairs(self.rejectionReagentSnapshots) do
         if auditNow - cached.time > 300 then self.rejectionReagentSnapshots[id] = nil end
     end
+    local previous = self.rejectionReagentSnapshots[auditKey]
+    local fromClaim = claimed and SameOrderID(claimed.orderID, order.orderID)
+    local rejectionOrder = CopyRejectionIdentity(order, previous and previous.order)
+    if fromClaim then rejectionOrder = CopyRejectionIdentity(claimed, rejectionOrder) end
+    local saved = previous or {}
+    saved.order, saved.time = rejectionOrder, auditNow
+    self.rejectionReagentSnapshots[auditKey] = saved
     local capture = _G.HironCraft and _G.HironCraft.CaptureCraftingOrderReagents
     if type(capture) == "function" then
         -- Capture before Release/Reject: Blizzard may clear order.reagents
         -- synchronously. Retain the authoritative pre-release snapshot if the
         -- next row refresh has only a partial listing of the same game order.
-        local source = claimed and SameOrderID(claimed.orderID, order.orderID) and claimed or order
+        local source = fromClaim and claimed or order
         local ok, audit = pcall(capture, source, {
             reason=rejectionReason,
             quality=self.qualityRejectDetails and self.qualityRejectDetails[auditKey],
         })
-        local previous = self.rejectionReagentSnapshots[auditKey]
-        local fromClaim = claimed and SameOrderID(claimed.orderID, order.orderID)
-        if ok and audit and (not previous or fromClaim or (not previous.fromClaim and audit.complete)) then
-            self.rejectionReagentSnapshots[auditKey] = {snapshot=audit, time=auditNow, fromClaim=fromClaim}
+        if ok and audit and (not saved.snapshot or fromClaim or (not saved.fromClaim and audit.complete)) then
+            saved.snapshot, saved.fromClaim = audit, fromClaim
         end
     end
-    local reagentAudit = self.rejectionReagentSnapshots[auditKey]
-    reagentAudit = reagentAudit and reagentAudit.snapshot
+    local reagentAudit = saved.snapshot
+    rejectionOrder.reagentAudit = reagentAudit
     if claimed and SameOrderID(claimed.orderID, order.orderID) then
         if qualityRejection then
             self:SetStatus(T("COA_STATUS_RELEASING_FOR_REJECT_QUALITY", "Releasing order before declining it for insufficient quality..."))
@@ -451,7 +474,7 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     self:RefreshVisibleRows()
 
     local ok = SafeCall("RejectOrder", function()
-        C_CraftingOrders.RejectOrder(order.orderID, "", profession)
+        C_CraftingOrders.RejectOrder(rejectionOrder.orderID, "", profession)
     end)
     if not ok then
         self.rejectedOrderIDs[key] = nil
@@ -460,23 +483,22 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
         return false
     end
 
-    self.selectedOrders[key] = nil
-    if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(order.orderID) end
-    self.orderIssues[key] = nil
-    if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
-        self.currentQueueOrderID = nil
-    end
-
+    -- Persist/share the result before optional selection/UI cleanup, which
+    -- must not be able to discard an otherwise successful rejection.
     local recordRejected = _G.HironCraft
         and _G.HironCraft.RecordRejectedCraftingOrder
     if type(recordRejected) == "function" then
-        local recorded, err = pcall(
+        local callOK, recorded = pcall(
             recordRejected,
-            order,
+            rejectionOrder,
             rejectionReason,
             reagentAudit
         )
-        if not recorded then
+        if not callOK or recorded ~= true then
+            local err = string.format("order=%s customer=%s recipe=%s reason=%s: %s",
+                tostring(rejectionOrder.orderID), tostring(rejectionOrder.customerName),
+                tostring(rejectionOrder.spellID), tostring(rejectionReason),
+                callOK and "rejection was not recorded" or tostring(recorded))
             self:DActionPrint("CraftScan rejection status failed:", err)
             if _G.HironCraft.ReportError then
                 _G.HironCraft.ReportError("RecordRejectedCraftingOrder", err)
@@ -484,8 +506,15 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
         end
     end
 
+    self.selectedOrders[key] = nil
+    if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(rejectionOrder.orderID) end
+    self.orderIssues[key] = nil
+    if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, rejectionOrder.orderID) then
+        self.currentQueueOrderID = nil
+    end
+
     if self.ClearOrderQualityRejection then
-        self:ClearOrderQualityRejection(order)
+        self:ClearOrderQualityRejection(rejectionOrder)
     end
     self.rejectionReagentSnapshots[auditKey] = nil
     if qualityRejection then

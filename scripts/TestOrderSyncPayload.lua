@@ -216,3 +216,66 @@ receive(fromOld,'Source-Realm')
 assert(Scan.DB.realm.linked_accounts.source.addon_version=='old','a sender without a version was not marked old')
 print('Linked account versions passed.')
 
+-- One crafter and two collectors: an ACK from one collector must not consume
+-- the other's rejected-order mark or its independent material delivery.
+Scan.DB={settings={my_uuid='craft-three'},realm={linked_accounts={
+    ['lap-horde']={permissions={1}},['lap-alliance']={permissions={1}},
+}},customers={},listed_orders={}}
+Scan.OrderToResponse=function(row)
+    local customer=Scan.DB.customers[row.customerName]
+    return customer and customer.responses[row.responseID]
+end
+Scan.QuickReplies={IsOtherSide=function() return true end}
+for _,peer in ipairs({'lap-horde','lap-alliance'}) do
+    receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID=peer,data={state=2}}},peer..'-Realm')
+end
+sent={};timers={};frames={}
+local rejectionAudit={version=1,orderID=888,recipeID=1230061,capturedAt=time(),complete=true,
+    rows={{itemID=11,name='Ink',required=20,known=true,supplied={{itemID=11,quantity=15,quality=1}}}}}
+assert(fulfillment:RecordRejection({orderID=888,customerName='Three-Realm',spellID=1230061,itemID=245769,
+    parentProfessionID=773},888,'missing_customer_reagents',rejectionAudit))
+local sourceDB=Scan.DB
+local notice
+for _,value in pairs(fulfillment:GetCompletionNotices()) do if value.orderID==888 then notice=value end end
+assert(notice and notice.deliveryPending['lap-horde'] and notice.deliveryPending['lap-alliance'])
+runTimers(0.3)
+local markPackets={}
+for _,packet in ipairs(sent) do if packet.data.operation==op.ShareOrderCompletion then markPackets[packet.target]=packet end end
+assert(markPackets['lap-horde-Realm'] and markPackets['lap-alliance-Realm'],'one of two collectors received no decline packet')
+for _,packet in pairs(markPackets) do markSent(packet) end
+sent={};runTimers(1.5);flushFrames()
+local materialPackets={}
+for _,packet in ipairs(sent) do if packet.data.operation==op.ShareOrderMaterials then materialPackets[packet.target]=packet end end
+assert(materialPackets['lap-horde-Realm'] and materialPackets['lap-alliance-Realm'],'one collector received no material packet')
+
+-- Deliver Alliance's ACK first, while Horde has received nothing yet.
+local ack={orderID=888,customerName=notice.customerName,spellID=notice.spellID,itemID=notice.itemID,
+    status='rejected',origin=notice.origin,updatedAt=notice.updatedAt}
+receive({prefix='HIRONCRAFT_SCAN',data={operation=op.OrderCompletionAck,version=1,senderID='lap-alliance',
+    data={notices={ack}}}},'lap-alliance-Realm')
+assert(notice.deliveryPending['lap-horde'] and not notice.deliveryPending['lap-alliance'],
+    'one collector ACK cleared the other collector decline')
+assert(notice.materialsPending['lap-horde'],'one collector ACK cleared the other material list')
+
+local row={customerName='Three-Realm',responseID=1230061}
+Scan.DB={settings={my_uuid='lap-horde'},realm={linked_accounts={['craft-three']={permissions={1}}}},
+    customers={['Three-Realm']={responses={[1230061]={recipeID=1230061,itemID=245769,parentProfID=773,
+        time=time()-60,requestToken='horde-request',crafterFullName='Crafter-Realm'}}}},
+    listed_orders={['Three-Realm:1230061']=row}}
+receive(markPackets['lap-horde-Realm'],'Crafter-Realm')
+local completionACK=find(op.OrderCompletionAck)
+local received=fulfillment:GetStatus(row)
+assert(received and received.status=='rejected','the Horde collector did not display its rejection')
+receive(materialPackets['lap-horde-Realm'],'Crafter-Realm')
+local materialACK=find(op.OrderMaterialsAck)
+received=fulfillment:GetStatus(row)
+assert(received.reagentAudit and received.reagentAudit.recipeID==1230061
+    and received.reagentAudit.rows[1].supplied[1].quantity==15,'the Horde collector lost the supplied material quantities')
+Scan.DB=sourceDB
+receive(completionACK,'lap-horde-Realm')
+assert(not notice.deliveryPending,'both collectors ACKed, but the mark is still pending')
+receive(materialACK,'lap-horde-Realm')
+assert(not notice.materialsPending['lap-horde'] and notice.materialsPending['lap-alliance'],
+    'material ACK was not scoped to its collector')
+print('Three-account rejection passed (independent recipients, cross-faction notice, material quantities and ACKs).')
+

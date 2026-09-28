@@ -148,6 +148,7 @@ HironCraft={CaptureCraftingOrderReagents=function(source,details)
 end,RecordRejectedCraftingOrder=function(source,reason,audit)
     assert(audit.provided==17 and audit.reason==reason,'pre-release snapshot lost or changed')
     auditRecordCount=auditRecordCount+1
+    return true
 end}
 for _,reason in ipairs({'missing_customer_reagents','insufficient_quality'}) do
     claimed={orderID=7001,orderState='claimed',provided=17}
@@ -171,6 +172,58 @@ for _,reason in ipairs({'missing_customer_reagents','insufficient_quality'}) do
 end
 assert(released==2 and rejected==2)
 assert(auditRecordCount==2,'decline failed to record a reagent snapshot')
+
+-- The rejection bridge must see immutable identity as well as immutable mats.
+-- The game/row refresh can retire the very table passed to RejectOrder.
+order={orderID=7010,orderState='created',customerName='Buyer-Realm',customerGuid='Player-1-ABCD',
+    spellID=1230061,itemID=245769,parentProfessionID=773,provided=17}
+claimed=nil;missing=true;quality=false
+local capturedRejection, capturedAudit
+HironCraft.RecordRejectedCraftingOrder=function(source,reason,audit)
+    capturedRejection,capturedAudit=source,audit
+    return true
+end
+OE.C_CraftingOrders.RejectOrder=function(id)
+    assert(id==7010)
+    for key in pairs(order) do order[key]=nil end
+end
+assert(CO:RejectOrder(order,page),'decline submission failed')
+assert(capturedRejection.orderID==7010 and capturedRejection.customerName=='Buyer-Realm'
+    and capturedRejection.spellID==1230061,'decline lost customer/recipe identity after the game removed the row')
+assert(capturedAudit.provided==17,'decline lost pre-submit materials')
+assert(capturedRejection and capturedRejection~=order,'rejection kept the mutable API table')
+
+-- Release can leave a sparse list row for the second, explicit decline click.
+order={orderID=7012,orderState='created'}
+claimed={orderID=7012,orderState='claimed',customerName='Released-Realm',spellID=1230061,provided=17}
+HironCraft.RecordRejectedCraftingOrder=function(source,reason,audit)
+    capturedRejection,capturedAudit=source,audit
+    return true
+end
+assert(CO:RejectOrder(order,page))
+claimed=nil
+CO:OnEvent('CRAFTINGORDERS_CLAIMED_ORDER_REMOVED')
+OE.C_CraftingOrders.RejectOrder=noop
+assert(CO:RejectOrder(order,page))
+assert(capturedRejection.customerName=='Released-Realm' and capturedRejection.spellID==1230061
+    and capturedAudit.provided==17,'release lost the customer identity or supplied materials')
+
+-- A failed game call must never manufacture a rejected-order notice.
+order={orderID=7013,orderState='created',customerName='NotDeclined-Realm',provided=17}
+capturedRejection=nil
+OE.C_CraftingOrders.RejectOrder=function() error('game call failed') end
+assert(not CO:RejectOrder(order,page) and not capturedRejection,'a failed game action was recorded as a decline')
+
+-- A normal Lua return of false is a failed recording, not a successful pcall.
+order={orderID=7011,orderState='created',customerName='Unrecorded-Realm',provided=17}
+OE.C_CraftingOrders.RejectOrder=noop
+local rejectionErrors={}
+CO.DActionPrint=noop
+HironCraft.ReportError=function(context,err) rejectionErrors[#rejectionErrors+1]={context,err} end
+HironCraft.RecordRejectedCraftingOrder=function() return false end
+assert(CO:RejectOrder(order,page),'game decline did not run')
+assert(#rejectionErrors==1 and tostring(rejectionErrors[1][2]):find('7011',1,true),
+    'a failed rejection record was silently treated as success')
 
 -- Even a manually requested craft must not send from a later item-cache event.
 local comm, whispers, packets, cacheCallbacks, cached = {}, 0, 0, {}, false

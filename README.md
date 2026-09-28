@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Preserve declined-order identity (0.4.78)
+
+- The decline button snapshots the customer, game order, recipe and material
+  evidence before submitting the action. Identity is retained across the
+  separate release/decline clicks and no longer depends on an API/list table
+  remaining populated after the order is removed.
+- The rejection is recorded before selection/UI cleanup. A normal `false`
+  return from the recording bridge is now reported with order/customer/recipe
+  context instead of being mistaken for a successful recording. Failed game
+  calls still do not create rejected-order notices.
+- Material snapshots retain modern recipe IDs above one million, including
+  Aln'hara Lantern, rather than silently dropping them during sanitization.
+- Regression checks cover disappearing order data, sparse rows after release,
+  and one crafter delivering a cross and material list independently to two
+  collectors. An ACK from one collector cannot clear the other's delivery.
+  These changes cannot reconstruct a past order whose evidence was never saved.
+
 ## Analytics calendar and precise online time (0.4.77)
 
 - Click a day in the lower chart to see that date's hourly statistics above.

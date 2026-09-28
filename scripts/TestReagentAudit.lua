@@ -26,6 +26,8 @@ local order={orderID=7001,spellID=123,isRecraft=true,reagents={reagent(101,20,1)
     reagent(103,5,1,2),reagent(201,1,2),reagent(401,1,3)}}
 local audit=A.Capture(order)
 assert(audit.complete and #audit.rows==3)
+local modern=A.Sanitize({version=1,orderID=7002,recipeID=1230061,capturedAt=time(),rows={}})
+assert(modern.recipeID==1230061,'a Midnight recipe ID was silently discarded from the saved material snapshot')
 local total,missing,replace=A.Analyze(audit.rows[1])
 assert(total==35 and missing==5 and #replace==2,'crafter inventory or ranks polluted customer counts')
 assert(audit.rows[3].supplied[1].maxQuality==2,'unrelated optional reagent raised the maximum tier')

@@ -91,7 +91,7 @@ end
 function Audit.Sanitize(snapshot)
     if type(snapshot) ~= 'table' or snapshot.version ~= 1 then return nil end
     local result = {version=1, orderID=Number(snapshot.orderID, 1e16),
-        recipeID=Number(snapshot.recipeID), capturedAt=Number(snapshot.capturedAt, 1e12),
+        recipeID=Number(snapshot.recipeID, 2147483647), capturedAt=Number(snapshot.capturedAt, 1e12),
         complete=snapshot.complete == true, isRecraft=snapshot.isRecraft == true,
         craftStarted=snapshot.craftStarted == true,
         craftAttempt=Number(snapshot.craftAttempt,10000),
