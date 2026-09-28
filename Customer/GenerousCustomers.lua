@@ -1,9 +1,9 @@
 local Scan = select(2, ...)
 
 -- How customers tip, by the average tip over their delivered crafting
--- orders: 3,000 gold or more marks them generous (a gold coin), 1,000 to
--- 2,999 gold regular (a silver coin), under 1,000 gold stingy (a copper
--- coin). Every order counts, one without a tip too, so the coin follows the
+-- orders: 10,000 gold or more earns a diamond, 3,000 to 9,999 gold a gold
+-- coin, 1,000 to 2,999 a silver coin, under 1,000 a copper coin.
+-- Every order counts, one without a tip too, so the mark follows the
 -- customer's habit rather than one order. The tip is the one the customer
 -- set; the cut taken on delivery does not matter. The crafter can set or
 -- clear the mark by hand, and that decision sticks.
@@ -16,8 +16,10 @@ Scan.Generous = M
 -- stingy.
 M.DefaultThresholdGold = 3000
 M.DefaultStingyGold = 1000
+M.DiamondThresholdGold = 10000
 local COPPER_PER_GOLD = 10000
 local ICONS = {
+    diamond = '|TInterface\\Icons\\INV_Misc_Gem_Diamond_01:12:12:0:0|t',
     generous = '|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:0:0|t',
     regular = '|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:0:0|t',
     stingy = '|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:0:0|t',
@@ -42,6 +44,12 @@ function M.StingyCopper()
     return math.max(0, gold) * COPPER_PER_GOLD
 end
 
+local function CoinTier(averageCopper)
+    if averageCopper >= M.ThresholdCopper() then return 'generous' end
+    if averageCopper >= M.StingyCopper() then return 'regular' end
+    return 'stingy'
+end
+
 local function Entry(name)
     local key = Key(name)
     local settings = Scan.DB and Scan.DB.settings
@@ -63,6 +71,9 @@ local function Mark(entry)
     if count > 0 then
         -- The first records (0.4.32) may lack the total: the largest tip then.
         local total = tonumber(entry.total)
+        -- A maximum alone cannot establish a 10k average across several
+        -- legacy orders. Preserve their previous coin classification.
+        if not total and count > 1 then return CoinTier(tonumber(entry.max) or 0) end
         return M.TierOf(total and total / count or tonumber(entry.max) or 0)
     end
     -- No tip on record: the silver MarkUntipped gave orders from before tips
@@ -72,9 +83,8 @@ end
 
 -- The coin an average tip (copper) earns.
 function M.TierOf(averageCopper)
-    if averageCopper >= M.ThresholdCopper() then return 'generous' end
-    if averageCopper >= M.StingyCopper() then return 'regular' end
-    return 'stingy'
+    if averageCopper >= M.DiamondThresholdGold * COPPER_PER_GOLD then return 'diamond' end
+    return CoinTier(averageCopper)
 end
 
 function M.AverageTip(entry)
@@ -92,7 +102,10 @@ function M.MarkOf(name)
     return Mark(Entry(name))
 end
 
-function M.IsGenerous(name) return M.MarkOf(name) == 'generous' end
+function M.IsGenerous(name)
+    local mark = M.MarkOf(name)
+    return mark == 'generous' or mark == 'diamond'
+end
 function M.IsStingy(name) return M.MarkOf(name) == 'stingy' end
 
 -- A pause for stingy customers, switched from the orders window. While it is
@@ -192,7 +205,8 @@ function M.Describe(name)
     local mark = Mark(entry)
     if not entry or (not mark and (tonumber(entry.count) or 0) == 0) then return nil end
     local L = Scan.LOCAL and function(key) return Scan.LOCAL:GetText(key) end or function(key) return key end
-    local title = mark == 'generous' and L('Generous customer')
+    local title = mark == 'diamond' and L('Diamond customer')
+        or mark == 'generous' and L('Generous customer')
         or mark == 'stingy' and L('Stingy customer')
         or mark == 'regular' and L('Regular customer') or L('Customer tips')
     local manual = entry.manual == 'generous' or entry.manual == 'stingy' or entry.manual == true

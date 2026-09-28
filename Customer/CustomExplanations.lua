@@ -711,7 +711,9 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 { mark = 'generous', set = 'Mark as generous customer', clear = 'Unmark generous customer' },
                 { mark = 'stingy', set = 'Mark as stingy customer', clear = 'Unmark stingy customer' },
             }) do
-                local marked = mark == choice.mark
+                -- Diamond is the automatic top generous tier; the existing
+                -- unmark action must clear it, not replace it with manual gold.
+                local marked = mark == choice.mark or (mark == 'diamond' and choice.mark == 'generous')
                 local button = subMenu:CreateButton(prefix .. L(marked and choice.clear or choice.set),
                     function() Set(marked and 'none' or choice.mark) end)
                 button:SetTooltip(Tooltip)

@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Diamond customers (0.4.81)
+
+- Customers whose average tip across recorded completed orders is at least
+  10,000 gold now have a diamond instead of the gold coin. The exact average
+  decides, including zero-tip orders, not the largest or most recent tip.
+  A later order can move the customer back down; duplicate completion notices
+  still count once. Existing complete histories qualify immediately.
+- Diamond has its own customer filter and period/all-time counts in analytics,
+  and is shown in customer rows, tooltips and CSV exports. The existing
+  unmark-generous action also clears diamond. Explicit manual marks/removals
+  retain priority; old maximum-only histories with several orders cannot
+  establish a diamond average and keep their previous coin classification.
+
 ## Single-row analytics summary (0.4.80)
 
 - All ten summary metrics now share one full-width row. Search, collection,

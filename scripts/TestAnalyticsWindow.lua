@@ -186,7 +186,7 @@ assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no cust
 assert(frame.Tiles.returnedValue.value.text:find('^6|T'), 'summary return value differs from the Returns report')
 assert(frame.Tiles.online.value.text=='0:01', 'summary online doubled linked accounts or rounded up')
 assert(frame:GetWidth()==1080 and frame:GetHeight()==670, 'the summary changed the fixed window size')
-assert(frame.Tiers.y==-116 and frame.Inset.points.TOPLEFT.y==-172, 'summary, customer counts and content do not have separate rows')
+assert(frame.Tiers.points.TOPLEFT.y==-116 and frame.Inset.points.TOPLEFT.y==-172, 'summary, customer counts and content do not have separate rows')
 assert(frame.Toolbar.y==-138 and frame.Toolbar.height==22 and frame.Toolbar.width==1048,
     'the toolbar is not below the metrics and above the chart')
 assert(frame.Search.parent==frame.Toolbar and frame.Search.anchor==frame.Toolbar
@@ -475,6 +475,37 @@ W.Reload()
 assert(frame.Tiles.online.value.text=='49:02' and frame.Tiles.returnedValue.value.text:find('^0|T'),
     'multi-day online time wrapped at midnight or ignored the selected dates')
 print('Analytics summary metrics passed (historical value, missing prices, quantities, filters, interval union, live refresh, multi-day hours, layout).')
+
+-- Diamond customers get the same mark in rows, counters, filtering and CSV.
+Scan.Generous.RecordTip('Buyer',14000*10000,11000) -- 6k + 14k = 10k average.
+Log.Outcome({orderID=11000,status='fulfilled',customerName='Buyer',itemID=1001,
+    parentProfessionID=197,tipAmount=14000*10000,updatedAt=now})
+view.preset='all'; view.tier=nil; W.Reload()
+local diamondCount=Scan.Generous.Icon('diamond')..' |cffffffff1|r'
+local firstDiamond=assert(frame.Tiers.text:find(diamondCount,1,true),'period diamond counter missing')
+assert(frame.Tiers.text:find(diamondCount,firstDiamond+#diamondCount,true),'overall diamond counter missing')
+local diamondFilter
+frame.TierDropdown.menu(frame.TierDropdown,{CreateRadio=function(_,text,selected,click,value)
+    if value=='diamond' then
+        assert(text:find(Scan.Generous.Icon('diamond'),1,true),'diamond filter lacks its icon')
+        diamondFilter=click
+    end
+end})
+assert(diamondFilter,'diamond tier missing from filter choices')
+diamondFilter()
+assert(#frame.Customers.rows==1 and frame.Customers.rows[1].key=='buyer'
+    and frame.Customers.rows[1].mark=='diamond','diamond filter did not narrow the customer table')
+local renderedDiamond=false
+for _,entry in ipairs(frame.Customers.scrollBox.inited) do
+    if entry.row.cells[1].text:find(Scan.Generous.Icon('diamond'),1,true) then renderedDiamond=true end
+end
+assert(renderedDiamond,'customer row does not render the diamond')
+frame.Tabs[2].scripts.OnClick(frame.Tabs[2])
+frame.ExportButton.scripts.OnClick(frame.ExportButton)
+assert(dumped:find(',diamond,',1,true),'CSV lost the diamond tier')
+view.tier=nil; W.Rebuild()
+CheckTiles()
+print('Diamond analytics UI passed (existing-average promotion, counters, filter, customer row, CSV).')
 
 -- Moving actions to the toolbar must preserve their manual callbacks.
 local originalSync, syncClicks = Scan.AnalyticsSync.SyncNow, 0

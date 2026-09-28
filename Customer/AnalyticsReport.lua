@@ -109,7 +109,7 @@ function M.CalendarBuckets(mode, anchor)
     return buckets
 end
 
--- filters: from, to, ppID, crafter, tier ('generous' / 'regular' /
+-- filters: from, to, ppID, crafter, tier ('diamond' / 'generous' / 'regular' /
 -- 'stingy' / 'none'), side ('H' / 'A').
 -- context.markOf(customer) gives the customer's coin, context.itemProf(itemID)
 -- the profession that makes an item.
@@ -243,7 +243,7 @@ function M.Build(chunks, filters, context)
         calendar = { days = {}, months = {} },
         totals = { requests = 0, greetings = 0, crafted = 0, orders = 0,
             declined = 0, tips = 0, tipped = 0 },
-        tiers = { generous = 0, regular = 0, stingy = 0, none = 0 },
+        tiers = { diamond = 0, generous = 0, regular = 0, stingy = 0, none = 0 },
     }
     local rows, customers = {}, {}
     local function CountTime(metric, t, amount)

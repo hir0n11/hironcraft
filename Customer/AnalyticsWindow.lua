@@ -54,6 +54,7 @@ local CALENDAR_MODES = {
 
 local TIERS = {
     { value = nil, label = 'All customers' },
+    { value = 'diamond', label = 'Diamond customers', coin = 'diamond' },
     { value = 'generous', label = 'Generous customers', coin = 'generous' },
     { value = 'regular', label = 'Regular customers', coin = 'regular' },
     { value = 'stingy', label = 'Stingy customers', coin = 'stingy' },
@@ -511,7 +512,7 @@ end
 
 -- Customers with each coin, however long ago they got it.
 local function AllTimeTiers()
-    local counts = { generous = 0, regular = 0, stingy = 0 }
+    local counts = { diamond = 0, generous = 0, regular = 0, stingy = 0 }
     local store = Scan.DB.settings.generous_customers
     if type(store) == 'table' and Scan.Generous then
         for key in pairs(store) do
@@ -693,11 +694,15 @@ local function UpdateSummary()
     local function Count(mark, count)
         return Coin(mark) .. ' |cffffffff' .. TileNumber(count) .. '|r'
     end
-    frame.Tiers:SetText(string.format('|cffffd100%s|r   %s     %s     %s          |cff9d9d9d%s|r   %s     %s     %s',
-        L('Customers in the period:'),
-        Count('generous', tiers.generous), Count('regular', tiers.regular), Count('stingy', tiers.stingy),
-        L('Marked overall:'),
-        Count('generous', all.generous), Count('regular', all.regular), Count('stingy', all.stingy)))
+    local function Counts(counts)
+        local parts = {}
+        for _, mark in ipairs({ 'diamond', 'generous', 'regular', 'stingy' }) do
+            parts[#parts + 1] = Count(mark, counts[mark])
+        end
+        return table.concat(parts, '     ')
+    end
+    frame.Tiers:SetText(string.format('|cffffd100%s|r   %s          |cff9d9d9d%s|r   %s',
+        L('Customers in the period:'), Counts(tiers), L('Marked overall:'), Counts(all)))
 end
 
 local function UpdateReturnTiles()
@@ -1278,7 +1283,9 @@ local function Create()
     end)
     frame.Tiers = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -116)
+    frame.Tiers:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -18, -116)
     frame.Tiers:SetJustifyH('LEFT')
+    frame.Tiers:SetWordWrap(false)
 
     -- Row 3: search, collection/status and actions, separate from the metrics.
     local toolbar = CreateFrame('Frame', nil, frame)

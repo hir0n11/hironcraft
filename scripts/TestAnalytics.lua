@@ -113,6 +113,15 @@ assert(build({ tier = 'regular' }, { buyer = 'generous', slot = 'stingy' }).tota
     'the silver filter missed an untipped customer')
 report = build({ tier = 'generous' }, marks)
 assert(report.totals.orders == 1 and #report.customers == 1, 'the tier filter let others through')
+local diamondMarks = { buyer = 'diamond', slot = 'stingy', direct = 'generous' }
+report = build(nil, diamondMarks)
+assert(report.tiers.diamond == 1 and report.tiers.generous == 1 and customer(report,'buyer').mark=='diamond',
+    'diamond customers were omitted or counted again as gold')
+report = build({ tier = 'diamond' }, diamondMarks)
+assert(report.totals.orders==1 and #report.customers==1 and report.customers[1].key=='buyer',
+    'the diamond filter included a different customer tier')
+assert(build({ tier='generous' },diamondMarks).customers[1].key=='direct',
+    'the gold filter still includes diamond customers')
 
 -- Side: a conversation is on the side of the character that greeted.
 report = build({ side = 'H' })

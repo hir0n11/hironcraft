@@ -258,5 +258,21 @@ assert(save, 'save-chat-text action missing')
 save.click()
 assert(chatReads == 2 and shown == 2, 'clicked action did not open the source message')
 
+-- Diamond is cleared by the existing unmark-generous action, without a
+-- send, an extra manual-gold assignment or a new automatic action on hover.
+time=function() return 1000 end
+assert(loadfile('Customer/GenerousCustomers.lua'))('HironCraft',Scan)
+Scan.Generous.RecordTip('Buyer-Realm',10000*10000,100)
+buttons={}
+menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Buyer-Realm',lineID='44'})
+assert(Scan.Generous.MarkOf('Buyer')=='diamond','opening the menu changed the diamond')
+local unmarkDiamond
+for _,button in ipairs(buttons) do
+    if button.label=='HironCraftScan - Unmark generous customer' then unmarkDiamond=button end
+end
+assert(unmarkDiamond,'diamond has no clear-mark menu action')
+unmarkDiamond.click()
+assert(Scan.Generous.MarkOf('Buyer')==nil,'clearing diamond assigned a manual gold mark instead')
+
 assert(SendChatMessage == nil and BNSendWhisper == nil, 'test unexpectedly gained a send API')
 print('Chat text selection tests passed (selection extraction, six-action menu, generic requests, global/profession/quick keys, dialog prefill and click-only source).')

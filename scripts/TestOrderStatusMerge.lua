@@ -667,6 +667,19 @@ CraftScan.OrderFulfillment:ApplyRemoteCompletion({
     updatedAt = now, status = "rejected", tipAmount = 9000 * 10000,
 })
 assert(not CraftScan.Generous.IsGenerous("Decliner"), 'a declined order marked its customer')
+local diamondNotice={orderID=9992,customerName='DiamondTipper-Realm',spellID=1,itemID=2,
+    crafterFullName='RemoteCrafter-Realm',origin='remote-account',updatedAt=now,
+    status='fulfilled',tipAmount=10000*10000}
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(diamondNotice)
+CraftScan.OrderFulfillment:ApplyRemoteCompletion(diamondNotice)
+assert(CraftScan.Generous.MarkOf('DiamondTipper')=='diamond'
+    and CraftScan.Generous.Get('DiamondTipper').count==1,
+    'linked completion failed to award diamond exactly once')
+CraftScan.OrderFulfillment:ApplyRemoteCompletion({orderID=9993,customerName='DiamondTipper-Realm',spellID=1,itemID=2,
+    crafterFullName='RemoteCrafter-Realm',origin='remote-account',updatedAt=now,
+    status='fulfilled',tipAmount=0})
+assert(CraftScan.Generous.MarkOf('DiamondTipper')=='generous',
+    'linked zero-tip completion did not lower the average from diamond')
 print('Generous tip notices passed.')
 
 -- Analytics: every new result is recorded once (received ones marked as

@@ -1,5 +1,5 @@
--- How customers tip, by the average of their tips: 3,000 gold or more marks
--- them generous, 1,000 to 2,999 regular, under 1,000 stingy; the crafter
+-- Customer tip tiers: diamond at 10,000+, gold at 3,000+, silver at 1,000+,
+-- copper below 1,000; the crafter
 -- can set or clear the mark by hand.
 local now = 1000
 function time() return now end
@@ -102,4 +102,44 @@ G.MarkUntipped({ 'Later' })
 G.RecordTip('Later', 100 * GOLD, 21)
 assert(G.IsStingy('Later'), 'a small tip did not move an untipped customer to copper')
 
-print('Customer tip tests passed (average: gold 3,000+, silver 1,000-2,999, copper under 1,000; repeats, by hand, older data, pause).')
+-- The diamond threshold is inclusive and uses the unrounded average, not
+-- the maximum or last tip. Duplicate linked notices never change it.
+assert(G.TierOf(10000*GOLD-1)=='generous' and G.TierOf(10000*GOLD)=='diamond',
+    'diamond threshold rounded up or excluded exactly 10,000 gold')
+G.RecordTip('DiamondEdge-Realm',10000*GOLD,101)
+assert(G.MarkOf('DIAMONDEDGE-Other')=='diamond' and G.IsGenerous('DiamondEdge'))
+assert(G.Decorate('DiamondEdge','Name'):find('INV_Misc_Gem_Diamond_01',1,true)
+    and G.Describe('DiamondEdge'):find('Diamond customer: average tip 10 000g',1,true),
+    'diamond icon or average-tip tooltip is missing')
+G.RecordTip('DiamondMix',9000*GOLD,102)
+counted,changed=G.RecordTip('DiamondMix',11000*GOLD,103)
+assert(counted and changed and G.MarkOf('DiamondMix')=='diamond','crossing 10k did not update the mark')
+assert(not G.RecordTip('DiamondMix-Other',11000*GOLD,103) and G.Get('DiamondMix').count==2,
+    'a replay raised the diamond average')
+counted,changed=G.RecordTip('DiamondMix',0,104)
+assert(counted and changed and G.MarkOf('DiamondMix')=='generous',
+    'a zero-tip order did not lower the average below diamond')
+
+-- Existing complete histories upgrade without mutation or another order.
+local savedDiamond={mark='generous',count=2,total=24000*GOLD,max=20000*GOLD,orders={}}
+Scan.DB.settings.generous_customers.saveddiamond=savedDiamond
+assert(G.MarkOf('SavedDiamond')=='diamond' and savedDiamond.mark=='generous' and savedDiamond.count==2,
+    'old history needed migration or a new order to earn diamond')
+Scan.DB.settings.generous_customers.unknownaverage={count=2,max=20000*GOLD,orders={}}
+assert(G.MarkOf('UnknownAverage')=='generous','a legacy maximum was mistaken for a known 10k average')
+Scan.DB.settings.generous_tip_gold=25000
+assert(G.MarkOf('UnknownAverage')=='regular','legacy fallback ignored an existing custom coin threshold')
+Scan.DB.settings.generous_tip_gold=nil
+Scan.DB.settings.generous_customers.singleold={count=1,max=10000*GOLD,orders={}}
+assert(G.MarkOf('SingleOld')=='diamond','a known single-order legacy average was ignored')
+G.SetManual('DiamondEdge','none')
+G.RecordTip('DiamondEdge',30000*GOLD,105)
+assert(G.MarkOf('DiamondEdge')==nil,'diamond overrode a manually removed mark')
+G.SetManual('SavedDiamond','stingy')
+assert(G.IsStingy('SavedDiamond'),'diamond overrode a manual copper mark')
+G.RecordTip('Friendly',20000*GOLD,106)
+assert(G.MarkOf('Friendly')=='generous','diamond changed an explicit manual gold mark')
+G.SetHoldingStingy(true)
+assert(not G.IsGreetingHeld('SingleOld'),'a diamond customer was held by the copper pause')
+
+print('Customer tip tests passed (diamond 10,000+, gold/silver/copper; exact averages, repeats, manual priority, saved data, pause).')
