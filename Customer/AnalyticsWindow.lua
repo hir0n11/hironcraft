@@ -522,8 +522,7 @@ local function AllTimeTiers()
     return counts
 end
 
--- The summary: one tile per figure, in three groups - the way from request
--- to craft, the orders, the chat - and a line of customers per coin.
+-- One full-width strip: request funnel, order results, returns/online.
 local TILE_GROUPS = {
     { color = { 0.35, 0.65, 1.00 }, tiles = {
         { key = 'requests', label = 'Requests', tip = 'Requests tooltip' },
@@ -543,8 +542,6 @@ local TILE_GROUPS = {
     } },
 }
 local TILE_WIDTH, TILE_HEIGHT, TILE_GAP, GROUP_GAP = 74, 40, 4, 12
--- The export and exchange buttons at the right end of the tile row.
-local TILE_ROW_RESERVED = 14 + 110 + 6 + 150 + 4
 local TILE_FONT, TILE_FONT_SMALL = 'GameFontHighlightLarge', 'GameFontHighlight'
 
 local function TileNumber(value)
@@ -559,7 +556,11 @@ end
 
 -- Returns the tiles by key and in their order along the row.
 local function CreateTiles(parent, x, y, groups)
-    local tiles, order = {}, { x = x, y = y }
+    local strip = CreateFrame('Frame', nil, parent)
+    strip:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
+    strip:SetSize(parent:GetWidth() - 2 * x, TILE_HEIGHT)
+    local tiles, order = {}, { x = x, y = y, frame = strip, parent = parent }
+    parent, x, y = strip, 0, 0
     for groupIndex, group in ipairs(groups or TILE_GROUPS) do
         for index, info in ipairs(group.tiles) do
             local tile = CreateFrame('Frame', nil, parent)
@@ -607,12 +608,14 @@ local function CreateTiles(parent, x, y, groups)
     return tiles, order
 end
 
--- Keep figures readable without widening the game window. Long values use
--- the smaller font first; any remaining overflow wraps clear of the controls.
+-- The toolbar has its own row, leaving all the horizontal space for metrics.
+-- Distribute spare space evenly; for unusually long totals/localized labels,
+-- try the smaller value font, then fit the entire strip without clipping,
+-- abbreviating amounts, wrapping, or changing the window's size.
 local function LayoutTiles(order)
-    local limit = frame:GetWidth() - TILE_ROW_RESERVED
+    local available = order.parent:GetWidth() - 2 * order.x
     local function Measure(shrink)
-        local x = order.x
+        local width = 0
         for index, tile in ipairs(order) do
             tile.value:SetFontObject(TILE_FONT)
             local need = math.ceil(TextWidth(tile.value) + 14)
@@ -620,36 +623,27 @@ local function LayoutTiles(order)
                 tile.value:SetFontObject(TILE_FONT_SMALL)
                 need = math.ceil(TextWidth(tile.value) + 14)
             end
-            if index > 1 then x = x + tile.gap end
-            local width = math.max(tile.minWidth, need)
-            tile:SetWidth(width)
-            x = x + width
+            if index > 1 then width = width + tile.gap end
+            tile:SetWidth(math.max(tile.minWidth, need))
+            width = width + tile:GetWidth()
         end
-        return x
+        return width
     end
-    if Measure(false) > limit then Measure(true) end
-    local x, y, rows = order.x, order.y, 1
+    local width = Measure(false)
+    if width > available then width = Measure(true) end
+    local extra = math.max(0, available - width) / #order
+    local scale = math.min(1, available / width)
+    order.frame:SetSize(math.max(available, width), TILE_HEIGHT)
+    order.frame:SetScale(scale)
+    order.frame:ClearAllPoints()
+    -- Point offsets are in the scaled strip's units; keep its outer margin.
+    order.frame:SetPoint('TOPLEFT', order.parent, 'TOPLEFT', order.x / scale, order.y / scale)
+    local x = 0
     for index, tile in ipairs(order) do
-        local gap = x > order.x and tile.gap or 0
-        if x + gap + tile:GetWidth() > limit and x > order.x then
-            x, y, rows = order.x, y - TILE_HEIGHT - TILE_GAP, rows + 1
-            gap = 0
-        end
-        x = x + gap
-        tile:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
+        if index > 1 then x = x + tile.gap end
+        tile:SetWidth(tile:GetWidth() + extra)
+        tile:SetPoint('TOPLEFT', order.frame, 'TOPLEFT', x, 0)
         x = x + tile:GetWidth()
-    end
-    order.rows = rows
-end
-
-local function LayoutSummaryHeader()
-    local order = View().tab == TAB_RETURNS and frame.ReturnTileOrder or frame.TileOrder
-    local extra = ((order.rows or 1) - 1) * (TILE_HEIGHT + TILE_GAP)
-    frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -116 - extra)
-    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -142 - extra)
-    if frame:GetHeight() ~= 640 + extra then
-        frame:SetHeight(640 + extra)
-        if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
     end
 end
 
@@ -846,7 +840,6 @@ local function Render()
     frame.Returns:SetRows(ReturnRows())
     UpdateSummary()
     UpdateReturnTiles()
-    LayoutSummaryHeader()
     UpdateCharts()
     local tab = View().tab
     local empty = (tab == TAB_ITEMS and #frame.Items.rows == 0) or (tab == TAB_CUSTOMERS and #frame.Customers.rows == 0)
@@ -1021,6 +1014,8 @@ local function SelectTab(index)
     frame.Returns.frame:SetShown(index == TAB_RETURNS)
     -- Resourcefulness has figures of its own, and no side or coin to filter.
     local onReturns = index == TAB_RETURNS
+    frame.TileOrder.frame:SetShown(not onReturns)
+    frame.ReturnTileOrder.frame:SetShown(onReturns)
     for _, tile in pairs(frame.Tiles) do tile:SetShown(not onReturns) end
     for _, tile in pairs(frame.ReturnTiles) do tile:SetShown(onReturns) end
     frame.Tiers:SetShown(not onReturns)
@@ -1142,7 +1137,7 @@ local function Create()
     frame = CreateFrame('Frame', FRAME_NAME, UIParent, 'ButtonFrameTemplate')
     ButtonFrameTemplate_HidePortrait(frame)
     ButtonFrameTemplate_HideButtonBar(frame)
-    frame:SetSize(1080, 640)
+    frame:SetSize(1080, 670)
     frame:SetPoint('CENTER')
     frame:SetFrameStrata('HIGH')
     frame:SetToplevel(true)
@@ -1156,7 +1151,7 @@ local function Create()
     table.insert(UISpecialFrames, FRAME_NAME)
 
     frame.Inset:ClearAllPoints()
-    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -142)
+    frame.Inset:SetPoint('TOPLEFT', frame, 'TOPLEFT', 10, -172)
     frame.Inset:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -8, 8)
 
     local view = View()
@@ -1247,7 +1242,7 @@ local function Create()
     tier:SetPoint('LEFT', side, 'RIGHT', 8, 0)
     frame.SideDropdown, frame.TierDropdown = side, tier
 
-    -- Row 2: what the period comes to, and the buttons.
+    -- Row 2: a single full-width row of metrics, followed by customer counts.
     frame.Tiles, frame.TileOrder = CreateTiles(frame, 16, -68)
     frame.ReturnTiles, frame.ReturnTileOrder = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
     frame.Tiles.returnedValue:SetScript('OnEnter', function(self)
@@ -1285,14 +1280,20 @@ local function Create()
     frame.Tiers:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18, -116)
     frame.Tiers:SetJustifyH('LEFT')
 
-    local export = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    -- Row 3: search, collection/status and actions, separate from the metrics.
+    local toolbar = CreateFrame('Frame', nil, frame)
+    toolbar:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -138)
+    toolbar:SetSize(1048, 22)
+    frame.Toolbar = toolbar
+
+    local export = CreateFrame('Button', nil, toolbar, 'UIPanelButtonTemplate')
     export:SetSize(110, 22)
-    export:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -14, -68)
+    export:SetPoint('RIGHT', toolbar, 'RIGHT', 0, 0)
     export:SetText(L('Export CSV'))
     export:SetScript('OnClick', ExportCSV)
     frame.ExportButton = export
 
-    local sync = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    local sync = CreateFrame('Button', nil, toolbar, 'UIPanelButtonTemplate')
     sync:SetSize(150, 22)
     sync:SetPoint('RIGHT', export, 'LEFT', -6, 0)
     sync:SetText(L('Exchange now'))
@@ -1314,11 +1315,12 @@ local function Create()
         GameTooltip:Show()
     end)
     sync:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    frame.SyncButton = sync
 
     -- Search by name: items on the item tab, customers on the customer tab.
-    local search = CreateFrame('EditBox', nil, frame, 'SearchBoxTemplate')
-    search:SetSize(258, 20)
-    search:SetPoint('TOPRIGHT', export, 'BOTTOMRIGHT', 0, -4)
+    local search = CreateFrame('EditBox', nil, toolbar, 'SearchBoxTemplate')
+    search:SetSize(236, 20)
+    search:SetPoint('LEFT', toolbar, 'LEFT', 0, 0)
     search:SetAutoFocus(false)
     if search.Instructions then search.Instructions:SetText(L('Search by name')) end
     local searchPending = false
@@ -1335,17 +1337,21 @@ local function Create()
     end)
     frame.Search = search
 
-    frame.SyncText = frame:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    frame.SyncText:SetPoint('TOPRIGHT', search, 'BOTTOMRIGHT', 0, -8)
-
-    local gather = CreateFrame('CheckButton', nil, frame, 'UICheckButtonTemplate')
+    local gather = CreateFrame('CheckButton', nil, toolbar, 'UICheckButtonTemplate')
     gather:SetSize(22, 22)
-    gather:SetPoint('TOPLEFT', search, 'BOTTOMLEFT', -8, -1)
+    gather:SetPoint('LEFT', search, 'RIGHT', 16, 0)
     gather.text = gather:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     gather.text:SetPoint('LEFT', gather, 'RIGHT', 2, 0)
     gather.text:SetText(L('Gather Analytics'))
     gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
     gather:SetScript('OnClick', function(self) Scan.AnalyticsLog.SetEnabled(self:GetChecked()) end)
+    frame.GatherCheck = gather
+
+    frame.SyncText = toolbar:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
+    frame.SyncText:SetPoint('LEFT', gather.text, 'RIGHT', 20, 0)
+    frame.SyncText:SetPoint('RIGHT', sync, 'LEFT', -16, 0)
+    frame.SyncText:SetJustifyH('LEFT')
+    frame.SyncText:SetWordWrap(false)
 
 
     -- The tabs' contents.

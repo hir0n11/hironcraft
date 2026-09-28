@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Single-row analytics summary (0.4.80)
+
+- All ten summary metrics now share one full-width row. Search, collection,
+  last exchange and the sync/export buttons have their own toolbar below.
+- Tiles distribute free space evenly, retain complete amounts and fit unusually
+  long values or translated labels without wrapping. Window width and chart
+  space are preserved, and changing tabs no longer changes the window height.
+
 ## Returns and online time in the analytics summary (0.4.79)
 
 - The main summary now includes the gold value of resourcefulness-returned

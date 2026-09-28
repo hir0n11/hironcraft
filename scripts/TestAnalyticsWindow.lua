@@ -16,7 +16,7 @@ local initializers = {}
 charWidth = 5
 local texts = {}
 local function Mock(kind)
-    local object = { kind = kind, scripts = {}, shown = true, text = nil, width = 800, height = 300 }
+    local object = { kind = kind, scripts = {}, points = {}, shown = true, text = nil, width = 800, height = 300 }
     local methods = {}
     function methods:SetScript(name, fn) self.scripts[name] = fn end
     function methods:GetScript(name) return self.scripts[name] end
@@ -32,6 +32,7 @@ local function Mock(kind)
     function methods:SetWidth(w) self.width = w end
     function methods:SetHeight(h) self.height = h end
     function methods:SetSize(w, h) self.width, self.height = w, h end
+    function methods:SetScale(scale) self.scale = scale end
     function methods:SetText(text) self.text = text; texts[#texts + 1] = text end
     function methods:GetText() return self.text end
     function methods:GetStringWidth() return 50 end
@@ -62,7 +63,10 @@ local function Mock(kind)
             self.inited[#self.inited + 1] = { row = row, data = data }
         end
     end
-    function methods:SetPoint(_, relative, _, x, y) self.anchor, self.x, self.y = relative, x, y end
+    function methods:SetPoint(point, relative, relativePoint, x, y)
+        self.anchor, self.x, self.y = relative, x, y
+        self.points[point] = { relative = relative, point = relativePoint, x = x, y = y }
+    end
     function methods:GetID() return self.id end
     function methods:SetID(id) self.id = id end
     -- WoW methods are capitalised; any other missing key is a plain field.
@@ -77,6 +81,7 @@ UIParent = Mock('Frame')
 UISpecialFrames = {}
 function CreateFrame(kind, name, parent, template)
     local frame = Mock(kind)
+    frame.parent = parent
     frame.shown = kind ~= 'Frame' or name == nil
     if template == 'ButtonFrameTemplate' then frame.Inset = Mock('Frame'); frame.shown = true end
     if template == 'SearchBoxTemplate' then frame.Instructions = Mock('FontString') end
@@ -180,35 +185,61 @@ assert(frame.Tiles.requests.value:GetText() == '2' and frame.Tiles.greetings.val
 assert(frame.Tiers:GetText():find('Customers in the period:', 1, true), 'no customers per coin')
 assert(frame.Tiles.returnedValue.value.text:find('^6|T'), 'summary return value differs from the Returns report')
 assert(frame.Tiles.online.value.text=='0:01', 'summary online doubled linked accounts or rounded up')
-assert(frame.TileOrder.rows==2 and frame:GetWidth()==1080 and frame:GetHeight()==684,
-    'extra metrics widened the window or overlapped the old header')
-assert(frame.Tiers.y==-160 and frame.Inset.y==-186,'wrapped metrics overlap customer counts or content')
+assert(frame:GetWidth()==1080 and frame:GetHeight()==670, 'the summary changed the fixed window size')
+assert(frame.Tiers.y==-116 and frame.Inset.points.TOPLEFT.y==-172, 'summary, customer counts and content do not have separate rows')
+assert(frame.Toolbar.y==-138 and frame.Toolbar.height==22 and frame.Toolbar.width==1048,
+    'the toolbar is not below the metrics and above the chart')
+assert(frame.Search.parent==frame.Toolbar and frame.Search.anchor==frame.Toolbar
+    and frame.ExportButton.parent==frame.Toolbar and frame.ExportButton.anchor==frame.Toolbar
+    and frame.SyncButton.anchor==frame.ExportButton and frame.GatherCheck.anchor==frame.Search,
+    'search/actions still occupy the metrics row')
 -- The hour's tooltip: the conversion of the greetings sent in it.
 local noon = frame.HourChart.bars[13].info
 assert(noon and noon.lines[5] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[5]))
 assert(noon.lines[3] == 'Crafted: 1', 'the Ordered numerator is missing from the tooltip')
 assert(frame.HourChart.bars[12].info.lines[5]:find('-', 1, true), 'an hour without greetings shows a conversion')
--- A figure wider than its tile widens it, not climbing over the name; the
--- tiles after it move along, and when the row runs into the buttons the
--- widened ones take the smaller font.
-local function CheckTiles(small)
-    local order = frame.TileOrder
+-- All metrics stay on one baseline. Spare width is distributed; long figures
+-- shrink/fill as one strip, never wrap or disappear behind the toolbar.
+local function CheckTiles(small, order)
+    order = order or frame.TileOrder
     for index, tile in ipairs(order) do
         assert(tile.width >= tile.value:GetUnboundedStringWidth() + 12, 'a figure is wider than its tile')
         local font = small and small[tile] and 'GameFontHighlight' or 'GameFontHighlightLarge'
-        assert(tile.value.font == font, 'the tile font is ' .. tostring(tile.value.font))
+        if small ~= false then assert(tile.value.font == font, 'the tile font is ' .. tostring(tile.value.font)) end
         local before = order[index - 1]
-        assert(not before or tile.y < before.y or tile.x >= before.x + before.width + 4, 'tiles overlap')
-        assert(tile.x + tile.width <= frame:GetWidth() - 284, 'tile overlaps the right-hand controls')
+        assert(tile.y==0 and tile.anchor==order.frame, 'a metric moved onto another row')
+        assert(not before or tile.x >= before.x + before.width + 4, 'tiles overlap')
+        assert((tile.x + tile.width) * order.frame.scale <= frame:GetWidth() - 32 + 0.01,
+            'a metric extends beyond the available width')
     end
+    local last = order[#order]
+    assert(math.abs((last.x + last.width) * order.frame.scale - (frame:GetWidth()-32)) < 0.01,
+        'metrics do not evenly fill the available strip')
+    assert(math.abs(order.frame.x * order.frame.scale - 16)<0.01
+        and math.abs(order.frame.y * order.frame.scale + 68)<0.01, 'scaled metrics shifted the outer margin')
+    assert(frame:GetHeight()==670 and frame.Inset.points.TOPLEFT.y==-172, 'long numbers changed the window height')
 end
 CheckTiles()
+assert(frame.TileOrder.frame.scale==1,'normal figures were unnecessarily scaled down')
 charWidth = 30
 Scan.AnalyticsWindow.Rebuild()
 assert(frame.Tiles.tips.width > 104, 'a long sum of tips did not widen its tile')
 CheckTiles({ [frame.Tiles.tips] = true, [frame.Tiles.averageTip] = true, [frame.Tiles.conversion] = true,
     [frame.Tiles.online] = true })
+assert(frame.TileOrder.frame.scale<1,'unusually wide figures did not fit the single strip')
 charWidth = 5
+Scan.AnalyticsWindow.Rebuild()
+CheckTiles()
+assert(frame.TileOrder.frame.scale==1,'smaller totals did not restore normal text size')
+-- Wide translated labels must also stay intact on one line.
+local savedWidths = {}
+for index, tile in ipairs(frame.TileOrder) do
+    savedWidths[index] = tile.minWidth
+    tile.minWidth = tile.minWidth + 40
+end
+Scan.AnalyticsWindow.Rebuild()
+CheckTiles(false)
+for index, tile in ipairs(frame.TileOrder) do tile.minWidth = savedWidths[index] end
 Scan.AnalyticsWindow.Rebuild()
 CheckTiles()
 local found = false
@@ -301,7 +332,9 @@ RunTimers()
 assert(ReagentCell():find('Item 7001', 1, true), 'the reagent name did not come: ' .. ReagentCell())
 assert(frame.ReturnTiles.chance.value:GetText() == '50%' and frame.ReturnTiles.crafts.value:GetText() == '2',
     'the returns tiles are off')
-assert(frame:GetHeight()==640 and frame.Inset.y==-142, 'the Returns tab retained an empty summary row')
+assert(frame:GetHeight()==670 and frame.Inset.points.TOPLEFT.y==-172, 'the Returns tab moved/resized the content')
+assert(frame.ReturnTileOrder.frame.shown and not frame.TileOrder.frame.shown, 'inactive metric strip covers Returns')
+CheckTiles(nil, frame.ReturnTileOrder)
 assert(not frame.SideDropdown:IsShown() and not frame.TierDropdown:IsShown() and not frame.Tiers:IsShown()
     and frame.ReturnTiles.value:IsShown() and not frame.Tiles.requests:IsShown(), 'the returns tab shows the wrong controls')
 dumped = nil
@@ -309,7 +342,8 @@ frame.ExportButton.scripts.OnClick(frame.ExportButton)
 assert(dumped and dumped:find('^reagent,item_id') and dumped:find('7001', 1, true), 'the returns CSV is off')
 frame.Tabs[1].scripts.OnClick(frame.Tabs[1])
 assert(frame.SideDropdown:IsShown() and frame.Tiles.requests:IsShown(), 'leaving the returns tab left its controls')
-assert(frame:GetHeight()==684 and frame.Inset.y==-186, 'leaving Returns did not restore the wrapped header')
+assert(frame:GetHeight()==670 and frame.Inset.points.TOPLEFT.y==-172, 'leaving Returns moved/resized the content')
+assert(frame.TileOrder.frame.shown and not frame.ReturnTileOrder.frame.shown, 'inactive Returns strip covers metrics')
 
 -- Closing lets the data go.
 -- The lower chart is an independent calendar, not a sum of all Mondays.
@@ -441,6 +475,20 @@ W.Reload()
 assert(frame.Tiles.online.value.text=='49:02' and frame.Tiles.returnedValue.value.text:find('^0|T'),
     'multi-day online time wrapped at midnight or ignored the selected dates')
 print('Analytics summary metrics passed (historical value, missing prices, quantities, filters, interval union, live refresh, multi-day hours, layout).')
+
+-- Moving actions to the toolbar must preserve their manual callbacks.
+local originalSync, syncClicks = Scan.AnalyticsSync.SyncNow, 0
+Scan.AnalyticsSync.SyncNow = function() syncClicks = syncClicks + 1 end
+frame.SyncButton.scripts.OnClick(frame.SyncButton)
+assert(syncClicks==1, 'the relocated sync button does not respond')
+Scan.AnalyticsSync.SyncNow = originalSync
+frame.GatherCheck:SetChecked(false)
+frame.GatherCheck.scripts.OnClick(frame.GatherCheck)
+assert(not Log.IsEnabled(), 'the relocated collection checkbox cannot stop recording')
+frame.GatherCheck:SetChecked(true)
+frame.GatherCheck.scripts.OnClick(frame.GatherCheck)
+assert(Log.IsEnabled(), 'the relocated collection checkbox cannot resume recording')
+print('Analytics single-row header passed (long values/labels, stable tabs, separate toolbar, manual actions).')
 
 Scan.AnalyticsWindow.Toggle()
 assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')
