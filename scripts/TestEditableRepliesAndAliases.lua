@@ -161,4 +161,51 @@ assert(not contains(requests('need writs','WARRIOR'),'INVTYPE_WRIST'),'the switc
 assert(contains(requests('need wrist','WARRIOR'),'INVTYPE_WRIST'),'the switch broke exact matching')
 Scan.DB.settings.quick_replies.typo_tolerance=nil
 
+-- One message can ask for several different professions. A local qualifier
+-- must neither retarget another group nor discard jewelry from the list.
+for _,text in ipairs({
+    'LF loa Ring crafter and crafter for plate wrist and tailor for cloak',
+    'LF tailor for cloak and plate wrist and loa ring crafter',
+    'LF plate wrist, ring, tailor for cloak',
+    'LF ring; plate wrist; tailor cloak',
+    'LF ring / plate wrist + tailor cloak',
+}) do
+    for _,class in ipairs({'WARRIOR','MAGE','ROGUE',false}) do
+        local list=requests(text,class or nil)
+        local wrist,ring,cloak=contains(list,'INVTYPE_WRIST'),contains(list,'INVTYPE_FINGER'),contains(list,'INVTYPE_CLOAK')
+        assert(#list==3 and wrist and wrist.parentProfID==164 and wrist.armor==4
+            and ring and ring.parentProfID==755 and cloak and cloak.parentProfID==197,
+            'mixed professions lost/retargeted a group: '..text)
+    end
+end
+for _,text in ipairs({'LF ring and tailor for cloak','LF tailor for cloak and ring'}) do
+    local list=requests(text)
+    assert(#list==2 and contains(list,'INVTYPE_FINGER').parentProfID==755
+        and contains(list,'INVTYPE_CLOAK').parentProfID==197,'tailor still swallowed a separate ring')
+end
+local mixed=requests('need plate wrist and cloth hands and ring','ROGUE')
+assert(#mixed==3 and contains(mixed,'INVTYPE_WRIST').armor==4
+    and contains(mixed,'INVTYPE_HAND').armor==1 and contains(mixed,'INVTYPE_HAND').parentProfID==197
+    and contains(mixed,'INVTYPE_FINGER').parentProfID==755,'the last material overrode another slot')
+local shared=requests('need plate wrist and hands and tailor for cloak','MAGE')
+assert(#shared==3 and contains(shared,'INVTYPE_HAND').armor==4,'a list lost its shared material')
+local trailing=requests('need wrist and hands tailor','WARRIOR')
+assert(#trailing==2 and contains(trailing,'INVTYPE_WRIST').parentProfID==197
+    and contains(trailing,'INVTYPE_HAND').parentProfID==197,'a trailing shared profession was lost')
+local duplicate=requests('need plate wrist and plate bracers and tailor cloak')
+assert(#duplicate==2 and contains(duplicate,'INVTYPE_WRIST').armor==4,'repeated aliases made duplicate rows')
+local twoWrists=requests('need plate wrist and cloth wrist and ring')
+assert(#twoWrists==3,'different armor professions collapsed into one wrist request')
+local leatherMail=requests('need leather wrist and mail wrist')
+assert(#leatherMail==1 and leatherMail[1].parentProfID==165 and not leatherMail[1].armor,
+    'shared leather/mail row retained only one armor restriction')
+assert(#requests('need wrist and ring enchant','WARRIOR')==0,'enchants became gear craft offers')
+assert(#requests('need enchanting wrist and ring','WARRIOR')==0,'shared enchant qualifier was lost')
+assert(#requests('need tailoring ring and neck','WARRIOR')==0,'incompatible fixed items were guessed')
+Scan.DB.settings.match_customer_class=false
+local explicit=requests('LF ring and plate wrist and tailor cloak')
+assert(#explicit==3 and contains(explicit,'INVTYPE_WRIST').armor==4,'class opt-out disabled explicit routing')
+Scan.DB.settings.match_customer_class=true
+print('Mixed equipment clauses passed (screenshot, reordered lists, separators, fixed slots, armor, opt-out, enchant safety).')
+
 print('Equipment aliases passed (26 starter types, jewelry/off-hand/trinkets, complete craftable weapons, edits, reload, class opt-out, typos).')

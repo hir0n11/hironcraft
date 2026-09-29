@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Independent profession qualifiers in equipment lists (0.4.84)
+
+- Mixed requests such as "LF loa Ring crafter and crafter for plate wrist
+  and tailor for cloak" now keep each equipment group's profession/material:
+  Ring goes to Jewelcrafting, plate Wrist to Blacksmithing, Cloak to Tailoring.
+  A later profession no longer redirects the whole list or discards jewelry.
+- Groups separated by and, commas, semicolons, slashes, plus or ampersand
+  retain shared compatible qualifiers, including trailing qualifiers on a
+  uniform list. Fixed-profession items do not inherit an incompatible armor
+  crafter. Existing enchant restrictions and configured aliases are preserved.
+- Requests remain manual-send only. Follow-up item links replace only their
+  matching slot/profession row, and an unavailable smith never falls back to
+  a tailor. Install the update on the scanning clients as well as crafters.
+
 ## Stable analytics refresh and current calendar periods (0.4.83)
 
 - Background updates keep the displayed charts, totals and tables intact

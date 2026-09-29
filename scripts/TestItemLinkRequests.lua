@@ -1714,6 +1714,49 @@ Scan.QuickReplies.HasUnfinishedOrders=nil
 
 print('Jewelry/off-hand/trinket scanner tests passed (fixed routing, monitored dynamic professions, exact replacement).')
 
+-- Stoneapple's trade message: tailor refers only to the cloak. Plate wrist
+-- and Ring must survive as independent rows, even for a cloth/leather class
+-- or when the customer's class has not arrived yet.
+do
+    local text='LF loa Ring crafter and crafter for plate wrist and tailor for cloak'
+    local expected={['equipment:164:INVTYPE_WRIST']='Smith-Realm',
+        ['equipment:755:INVTYPE_FINGER']='Jewel-Realm',
+        ['equipment:197:INVTYPE_CLOAK']='Seller-Realm'}
+    for _,class in ipairs({'WARRIOR','MAGE','ROGUE',false}) do
+        reset();classByGUID['Buyer-GUID']=class or nil
+        scan(text)
+        assert(countRows()==3,'mixed trade request did not create exactly three rows')
+        for id,crafter in pairs(expected) do
+            assert(response(id) and response(id).crafterFullName==crafter,'mixed request routed wrong: '..id)
+        end
+        assert(response('equipment:164:INVTYPE_WRIST').equipmentRequest.armor==4)
+        assert(not response('equipment:197:INVTYPE_WRIST') and not response(197),
+            'plate wrist became Tailoring or a generic profession')
+        flushTimers();assert(#sent==0,'mixed trade request sent automatically')
+    end
+    assert(Scan.SendOrderGreeting(order(ringID),true),'mixed greeting cannot be sent manually')
+    local manuallySent=#sent
+    assert(manuallySent>0)
+    Scan.OnMessage('CHAT_MSG_WHISPER',link(1211),'Buyer','Buyer-GUID')
+    assert(countRows()==3 and response(211) and not response(ringID)
+        and response('equipment:164:INVTYPE_WRIST') and response('equipment:197:INVTYPE_CLOAK'),
+        'ring link replaced another mixed request')
+    Scan.OnMessage('CHAT_MSG_WHISPER',link(1201),'Buyer','Buyer-GUID')
+    assert(countRows()==3 and response(201) and not response('equipment:164:INVTYPE_WRIST')
+        and response(211) and response('equipment:197:INVTYPE_CLOAK'),
+        'plate wrist link failed to replace only the plate placeholder')
+    assert(#sent==manuallySent,'mixed link replacement auto-sent a reply')
+    local savedSmith=Scan.DB.characters['Smith-Realm'].parent_professions[164].scanning_enabled
+    Scan.DB.characters['Smith-Realm'].parent_professions[164].scanning_enabled=false
+    reloadConfig();reset();scan(text)
+    assert(countRows()==2 and response(ringID) and response('equipment:197:INVTYPE_CLOAK')
+        and not response('equipment:197:INVTYPE_WRIST') and not response('equipment:164:INVTYPE_WRIST'),
+        'missing smith dropped the ring or fell back to a tailor')
+    Scan.DB.characters['Smith-Realm'].parent_professions[164].scanning_enabled=savedSmith
+    reloadConfig()
+end
+print('Mixed-profession screenshot passed (three rows/crafters, explicit armor, manual greeting, link replacement, disabled crafter).')
+
 -- Less common weapon families are also recipe-driven so an expansion can
 -- move them between professions without generating a false craft claim.
 Scan.DB.characters['Leather-Realm'].professions[165].recipes[216]={scan_state=1,keywords=''}

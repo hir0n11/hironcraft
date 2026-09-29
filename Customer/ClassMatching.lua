@@ -330,7 +330,7 @@ end
 -- options.noTypos: exact aliases only. A short line in a running
 -- conversation ("caps", "ok") is small talk far more often than a
 -- misspelled slot.
-function M.GetContext(message, guid, sharedClass, options)
+local function GetSingleContext(message, guid, sharedClass, options)
     if IsSecret(message) or type(message) ~= 'string' then return nil end
     message = (strlower or string.lower)(message)
     -- Links are authoritative, including an unmonitored item/recipe link.
@@ -389,9 +389,116 @@ function M.GetContext(message, guid, sharedClass, options)
     return { class=class, armor=armor, parentProfID=professionByArmor[armor], slots=slots }
 end
 
+function M.GetContext(message, guid, sharedClass, options)
+    local whole=GetSingleContext(message,guid,sharedClass,options)
+    if not whole then return nil end
+    -- A profession/material belongs to its item group, not to every item in
+    -- the message: "ring crafter and plate wrist and tailor for cloak".
+    -- Keep the original path for unqualified lists and profession-only asks.
+    if not whole.explicitProfession and not whole.armor then return whole end
+    local lower=(strlower or string.lower)(message)
+    local separated=lower:gsub('[,;+/&]','\n'):gsub('%f[%a]and%f[%A]','\n')
+        :gsub('%s+и%s+','\n')
+    local parts, covered, modifiers={}, {}, {}
+    local validQualified=true
+    for text in separated:gmatch('[^\n]+') do
+        local matched=MatchAliases(text,options and options.noTypos)
+        if next(matched) then
+            local context=GetSingleContext(text,guid,sharedClass,options)
+            local words, profession, armor={}, nil, nil
+            for word in text:gmatch('[^%s%p]+') do
+                if explicitProfessions[word] or explicitArmor[word] then
+                    words[#words+1]=word
+                    profession=explicitProfessions[word] or profession
+                    armor=explicitArmor[word] or armor
+                    modifiers[(explicitProfessions[word] and 'p:' or 'a:')
+                        ..(explicitProfessions[word] or explicitArmor[word])]=true
+                end
+            end
+            for key in pairs(matched) do covered[key]=true end
+            local qualified=#words>0
+            if qualified and #M.GetRequests(context)==0 then validQualified=false end
+            parts[#parts+1]={text=text, matched=matched, context=context,
+                qualifier=qualified and table.concat(words,' ') or nil,
+                profession=profession, armor=armor}
+        end
+    end
+    if #parts<2 then return whole end
+    -- Splitting must not destroy a configured multi-word alias (including
+    -- one containing "and"), or create extra aliases from pieces of it.
+    local allMatched=MatchAliases(lower,options and options.noTypos)
+    for key in pairs(allMatched) do if not covered[key] then return whole end end
+    for key in pairs(covered) do if not allMatched[key] then return whole end end
+    local modifierCount=0
+    for _ in pairs(modifiers) do modifierCount=modifierCount+1 end
+    if modifierCount==0 or (modifierCount==1 and not validQualified) then return whole end
+
+    local result={parts={},slots={}}
+    local inherited
+    -- A sole qualifier can follow a uniform list ("wrist and hands tailor").
+    -- Fixed items below still reject incompatible inherited professions.
+    if modifierCount==1 then
+        for _,part in ipairs(parts) do
+            if part.qualifier then inherited=part; break end
+        end
+    end
+    for _,part in ipairs(parts) do
+        if part.qualifier then inherited=part end
+        local context=part.context
+        if not part.qualifier and inherited then
+            local compatible=true
+            local profession=inherited.profession or professionByArmor[inherited.armor]
+            for key in pairs(part.matched) do
+                local definition=weapons[key] or aliasByKey[key]
+                -- A ring/cloak/weapon keeps its own profession when another
+                -- group's armor crafter is incompatible. Enchant requests
+                -- stay restricted instead of becoming gear craft offers.
+                if definition.parentProfID and definition.parentProfID~=profession
+                    and profession~=333 then compatible=false end
+            end
+            if compatible then
+                context=GetSingleContext(inherited.qualifier..' '..part.text,guid,sharedClass,options)
+            end
+        end
+        if context then
+            result.parts[#result.parts+1]=context
+            result.parentProfID=result.parentProfID or context.parentProfID
+            result.unknownClass=result.unknownClass or context.unknownClass
+            for key in pairs(context.slots or {}) do result.slots[key]=true end
+            if context.weapons then
+                result.weapons=result.weapons or {}
+                for key in pairs(context.weapons) do result.weapons[key]=true end
+            end
+        end
+    end
+    return result
+end
+
 function M.GetRequests(context)
     local requests = {}
     if not context then return requests end
+    if context.parts then
+        local seen={}
+        for _,part in ipairs(context.parts) do
+            for _,request in ipairs(M.GetRequests(part)) do
+                local id=request.key..':'..request.parentProfID
+                if not seen[id] then
+                    local copy={}
+                    for key,value in pairs(request) do copy[key]=value end
+                    requests[#requests+1]=copy; seen[id]=copy
+                elseif seen[id].armor~=request.armor then
+                    -- Leather/mail can share a profession and row. Retain
+                    -- the slot/profession, but don't require only one armor.
+                    seen[id].armor=nil
+                end
+            end
+        end
+        table.sort(requests,function(a,b)
+            if a.key==b.key then return a.parentProfID<b.parentProfID end
+            return a.key<b.key
+        end)
+        return requests
+    end
     -- Without the class only an armor slot is unknown: everything with a
     -- profession of its own is still routed.
     local classUnknown = context.unknownClass == true
@@ -456,6 +563,12 @@ end
 
 function M.MatchesRecipe(context, recipeInfo)
     if not context then return true end
+    if context.parts then
+        for _,part in ipairs(context.parts) do
+            if M.MatchesRecipe(part,recipeInfo) then return true end
+        end
+        return false
+    end
     if context.unknownClass then return false end
     if context.explicitProfession and not context.armor then
         for slot in pairs(context.slots) do
