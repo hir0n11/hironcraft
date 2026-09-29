@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable analytics refresh and current calendar periods (0.4.83)
+
+- Background updates keep the displayed charts, totals and tables intact
+  until the next snapshot is ready; they no longer flash a blank chart or
+  the central loading message. Manual date changes retain the old view with
+  a small loading status, and obsolete results cannot replace a newer view.
+- Local notifications and linked-account batches share one pending refresh.
+  Updates arriving during a load request one follow-up instead of repeatedly
+  restarting it. No additional sync traffic is generated.
+- Tables reuse their provider and visible rows while ordered identities are
+  unchanged, updating values and hover data in place. Actual additions,
+  removals and reordering retain the scroll box's scroll-position behavior.
+- Selecting Week, Month or Year in the calendar dropdown always opens the
+  current period, clearing historical drill-down. Previous/next and Current
+  still work, and day/month drill-down remains available.
+
 ## Order income tooltips and useful year drill-down (0.4.82)
 
 - Every hour/day/month tooltip now includes gold received from orders in

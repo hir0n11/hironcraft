@@ -50,7 +50,13 @@ local function Mock(kind)
     function methods:GetChecked() return self.checked end
     function methods:SetChecked(on) self.checked = on end
     function methods:SetupMenu(fn) self.menu = fn end
+    function methods:GetFrames()
+        local frames = {}
+        for _, entry in ipairs(self.inited or {}) do frames[#frames+1] = entry.row end
+        return frames
+    end
     function methods:SetDataProvider(provider)
+        self.providerSetCount = (self.providerSetCount or 0) + 1
         self.provider = provider
         self.inited = {}
         local init = initializers[self]
@@ -469,6 +475,31 @@ assert(frame.HourChart.detailMonth==At(2025,2,1) and frame.HourChart.kind=='days
 W.MoveCalendar(1)
 assert(frame.HourChart.detailMonth==At(2026,9,1))
 
+-- Changing the bottom dropdown always starts at Current, even after a
+-- historical drill-down. Only the explicit arrows keep browsing history.
+local function SelectCalendarMode(mode)
+    local selected
+    frame.CalendarMode.menu(frame.CalendarMode, { CreateRadio=function(_,_,_,click,value)
+        if value==mode then selected=click end
+    end })
+    assert(selected, 'calendar mode missing: '..mode); selected()
+end
+for _, mode in ipairs({'week','month','year'}) do
+    W.SelectCalendarPeriod('year', At(2025,1,1))
+    ClickDay(2); ClickDetailDay(14)
+    SelectCalendarMode(mode)
+    local first, last=R.CalendarRange(mode,now)
+    assert(view.calendarMode==mode and view.preset==mode and view.yearDetailMonth==nil
+        and view.yearDetailDay==nil, 'calendar dropdown retained historical drill-down: '..mode)
+    assert(frame.DayChart.buckets[1].from==first
+        and frame.DayChart.buckets[#frame.DayChart.buckets].to==last,
+        'calendar dropdown did not open Current: '..mode)
+    W.MoveCalendar(-1)
+    assert(frame.DayChart.buckets[1].from<first, 'historical arrows stopped working: '..mode)
+    SelectCalendarMode(mode)
+    assert(frame.DayChart.buckets[1].from==first, 'reselecting the same mode did not return to Current')
+end
+
 -- Rapid navigation while loading: an older reply must not replace the new one.
 local originalLoad, pending = Log.LoadRange, {}
 W.Release() -- The earlier All time selection had cached every historical year.
@@ -571,6 +602,111 @@ assert(dumped:find(',diamond,',1,true),'CSV lost the diamond tier')
 view.tier=nil; W.Rebuild()
 CheckTiles()
 print('Diamond analytics UI passed (existing-average promotion, counters, filter, customer row, CSV).')
+
+-- The video regression: progress notifications must not erase a committed
+-- chart/table for a frame. Coalesce updates and reuse unchanged row identities.
+do
+    W.SelectCalendarPeriod('week',now)
+    RunTimers()
+    local loaded
+    originalLoad(0,now,nil,function(result) loaded=result end)
+    assert(loaded)
+    local requests={}
+    Log.LoadRange=function(from,to,progress,done)
+        local request={from=from,to=to,progress=progress,done=done}
+        requests[#requests+1]=request
+        return function() request.cancelled=true end
+    end
+    local hourInfos, dayInfos=frame.HourChart.infos,frame.DayChart.infos
+    local orders, status, sync=frame.Tiles.orders.value.text,frame.Status.text,frame.SyncText.text
+    local boxes={frame.Items.scrollBox,frame.Customers.scrollBox,frame.Returns.scrollBox}
+    local providers, rowFrames, providerCounts={},{},{}
+    for i,box in ipairs(boxes) do
+        providers[i],rowFrames[i],providerCounts[i]=box.provider,box:GetFrames(),box.providerSetCount
+    end
+    Log.Record({k='p',t=now-1,e=now,f='H'}) -- queues the slower local refresh
+    for _=1,12 do W.DataArrived() end -- supersedes it with one peer refresh
+    RunTimers()
+    assert(#requests==1,'a local/remote burst started redundant loads')
+    requests[1].progress(1,4)
+    assert(frame.HourChart.infos==hourInfos and frame.DayChart.infos==dayInfos
+        and frame.Tiles.orders.value.text==orders and frame.Status.text==status
+        and frame.SyncText.text==sync and frame.ExportButton.enabled,
+        'background loading cleared/relabelled the committed view')
+    for _=1,12 do W.DataArrived() end
+    RunTimers()
+    assert(#requests==1 and not requests[1].cancelled,'new data restarted an unfinished load')
+    requests[1].done(loaded)
+    for i,box in ipairs(boxes) do
+        assert(box.provider==providers[i] and box.providerSetCount==providerCounts[i],
+            'unchanged table replaced its provider')
+        for j,row in ipairs(box:GetFrames()) do
+            assert(row==rowFrames[i][j] and row.data==box.provider.list[j].row,
+                'value refresh recycled a visible row or left stale hover data')
+        end
+    end
+    RunTimers()
+    assert(#requests==2,'updates during loading did not produce one trailing refresh')
+    requests[2].done(loaded); RunTimers()
+    assert(#requests==2,'the refresh loop continued without new data')
+
+    -- Changing a value updates the same frame and its hover data; a new key
+    -- does replace the provider, retaining the normal scroll-box behavior.
+    local tableUI=frame.Customers
+    local oldRow=tableUI.scrollBox:GetFrames()[1]
+    local edited={}
+    for k,v in pairs(oldRow.data) do edited[k]=v end
+    edited.orders=(edited.orders or 0)+1
+    local rows={}
+    for i,row in ipairs(tableUI.rows) do rows[i]=row.key==edited.key and edited or row end
+    view.sort[2]={key='name',desc=false}
+    tableUI:SetRows(rows) -- establish a fixed name order
+    local provider=tableUI.scrollBox.provider
+    local keptFrame
+    for _,row in ipairs(tableUI.scrollBox:GetFrames()) do if row.data.key==edited.key then keptFrame=row end end
+    local nextRow={}
+    for k,v in pairs(edited) do nextRow[k]=v end
+    nextRow.orders=edited.orders+1
+    for i,row in ipairs(rows) do if row.key==nextRow.key then rows[i]=nextRow end end
+    tableUI:SetRows(rows)
+    assert(tableUI.scrollBox.provider==provider and keptFrame.data==nextRow
+        and keptFrame.cells[2].text==tostring(nextRow.orders),'changed count was not updated in place')
+    tableUI:SetRows({})
+    assert(tableUI.scrollBox.provider~=provider and #tableUI.scrollBox.provider.list==0,
+        'removed rows survived a structural refresh')
+
+    -- Navigation wins over background loads; old results cannot overwrite it.
+    W.DataArrived(); RunTimers()
+    assert(#requests==3)
+    W.SelectCalendarPeriod('year',At(2020,1,1))
+    assert(#requests==4 and requests[3].cancelled and not frame.ExportButton.enabled)
+    assert(frame.HourChart.infos~=nil and #frame.HourChart.infos>0,
+        'manual navigation erased the old chart before its replacement arrived')
+    local oldChart=frame.HourChart.infos
+    W.Rebuild()
+    assert(frame.HourChart.infos==oldChart,'foreground load rebuilt old data under a new date')
+    requests[4].done({})
+    local winningChart=frame.HourChart.infos
+    requests[3].done(loaded)
+    assert(frame.HourChart.infos==winningChart and frame.CalendarTitle.text:find('2020',1,true),
+        'late background data replaced the selected year')
+
+    -- Closing cancels work and invalidates timers, even if reopened before
+    -- those timers run. Late callbacks from the old session stay ignored.
+    W.DataArrived(); RunTimers()
+    local closing=requests[#requests]
+    W.DataArrived()
+    W.Toggle()
+    assert(closing.cancelled)
+    Log.LoadRange=originalLoad
+    W.Toggle()
+    local reopenedChart=frame.HourChart.infos
+    closing.done(loaded)
+    RunTimers()
+    assert(frame.HourChart.infos==reopenedChart,'a closed session changed the reopened view')
+    W.SelectCalendarPeriod('week',now)
+end
+print('Stable analytics refresh passed (silent progress, coalescing, trailing refresh, row reuse, changed values, navigation, close/reopen).')
 
 -- Moving actions to the toolbar must preserve their manual callbacks.
 local originalSync, syncClicks = Scan.AnalyticsSync.SyncNow, 0

@@ -19,11 +19,12 @@ local frame = nil
 local chunks, report = nil, nil
 local calendarReport, loadedFrom, loadedTo = nil, nil, nil
 local loading = false
+local backgroundLoad, refreshAfterLoad = false, false
 local cancelLoad = nil
 -- Resourcefulness on crafting orders, for the fourth tab.
 local returns = nil
 local loadToken = 0
-local rebuildPending = false
+local rebuildPending = nil
 local namesPending = false
 -- Redraws for names still on their way; a few, in case a load goes unanswered.
 local NAME_RETRIES, NAME_RETRY_SECONDS = 5, 2
@@ -347,9 +348,10 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
 
     local view = CreateScrollBoxListLinearView()
     view:SetElementExtent(ROW_HEIGHT)
-    view:SetElementInitializer('HironCraftAnalyticsRowTemplate', function(row, data)
+    local function Populate(row, data)
         -- First: a hover must never show the item this frame showed before.
         row.data = data.row
+        row.analyticsElement = data
         row:SetScript('OnEnter', function(self) if onEnter then onEnter(self, self.data) end end)
         row:SetScript('OnLeave', function() GameTooltip:Hide() end)
         row.Stripe:SetShown(data.index % 2 == 0)
@@ -366,9 +368,11 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
             cell:SetWidth(column.w)
             cell:SetJustifyH(column.align or 'RIGHT')
             local ok, text = pcall(CellText, column, data.row)
-            cell:SetText(ok and text or '?')
+            text = ok and text or '?'
+            if cell:GetText() ~= text then cell:SetText(text) end
         end
-    end)
+    end
+    view:SetElementInitializer('HironCraftAnalyticsRowTemplate', Populate)
     ScrollUtil.InitScrollBoxListWithScrollBar(tbl.scrollBox, tbl.scrollBar, view)
 
     function tbl:Refresh()
@@ -397,9 +401,27 @@ local function CreateTable(parent, columns, tabIndex, onEnter)
                 return a < b
             end)
         end
-        local list = {}
-        for index, row in ipairs(rows) do list[index] = { row = row, index = index } end
-        self.scrollBox:SetDataProvider(CreateDataProvider(list), ScrollBoxConstants.RetainScrollPosition)
+        -- Keep the provider/visible row frames when the ordered identities
+        -- are unchanged. Online checkpoints and item-name loads must not
+        -- recycle the entire table (or disturb scrolling/hover).
+        local list = self.elements
+        local sameOrder = list and #list == #rows
+        if sameOrder then
+            for index, row in ipairs(rows) do
+                if list[index].row.key ~= row.key then sameOrder = false; break end
+            end
+        end
+        if sameOrder then
+            for index, row in ipairs(rows) do list[index].row = row end
+            for _, row in pairs(self.scrollBox:GetFrames()) do
+                if row.analyticsElement then Populate(row, row.analyticsElement) end
+            end
+        else
+            list = {}
+            for index, row in ipairs(rows) do list[index] = { row = row, index = index } end
+            self.elements = list
+            self.scrollBox:SetDataProvider(CreateDataProvider(list), ScrollBoxConstants.RetainScrollPosition)
+        end
     end
 
     function tbl:SetRows(rows)
@@ -425,7 +447,7 @@ local function CreateChart(parent, count, labelOf)
         bar.selection:SetColorTexture(1, 0.82, 0.25, 0.12)
         bar.selection:Hide()
         bar:SetScript('OnClick', function(self)
-            if not loading and self.info and self.info.bucket then W.SelectCalendarBucket(self.info.bucket) end
+            if (not loading or backgroundLoad) and self.info and self.info.bucket then W.SelectCalendarBucket(self.info.bucket) end
         end)
         -- Under it, a thin gauge: how much of that time someone was online.
         bar.onlineTrack = bar:CreateTexture(nil, 'BACKGROUND')
@@ -767,7 +789,7 @@ local function YearDetail()
 end
 
 local function UpdateCharts()
-    if not report or not calendarReport then return end
+    if not report or not calendarReport or (loading and not backgroundLoad) then return end
     local metric = View().metric or 'orders'
     local function Infos(count, statsOf, titleOf)
         local values, infos, shares = {}, {}, {}
@@ -899,10 +921,10 @@ local function ReturnRows()
     return rows
 end
 
-local ScheduleNameRedraw
+local ScheduleNameRedraw, ScheduleRebuild
 
 local function Render()
-    if not frame or not report then return end
+    if not frame or not report or (loading and not backgroundLoad) then return end
     namesPending = false
     frame.Items:SetRows(ItemRows())
     frame.Customers:SetRows(CustomerRows())
@@ -938,7 +960,7 @@ function ScheduleNameRedraw(delay)
 end
 
 function W.Rebuild()
-    if not frame or not chunks then return end
+    if not frame or not chunks or (loading and not backgroundLoad) then return end
     nameRetries = 0
     local filters, context = Filters(), Context()
     report = Scan.AnalyticsReport.Build(chunks, filters, context)
@@ -956,31 +978,50 @@ function W.Rebuild()
     Render()
 end
 
-function W.Reload()
+function W.Reload(background)
     if not frame or not frame:IsShown() then return end
+    if background and loading then
+        -- Finish the current snapshot, then refresh once for the whole burst.
+        refreshAfterLoad = true
+        return
+    end
     if cancelLoad then cancelLoad(); cancelLoad = nil end
+    rebuildPending, refreshAfterLoad = nil, false
     loadToken = loadToken + 1
     local token = loadToken
     loading = true
-    chunks, report, calendarReport = nil, nil, nil
-    frame.HourChart:SetValues({})
-    frame.HourChart.buckets, frame.HourChart.detailMonth = nil, nil
-    frame.DetailBack:Hide()
-    frame.DayChart:SetValues({})
-    SetStatus(L('Loading analytics...'))
+    backgroundLoad = background == true and report ~= nil
+    -- Keep the committed view intact until the new snapshot is ready. Only
+    -- initial loading uses the central message; manual navigation uses the
+    -- small toolbar status, while background updates stay visually silent.
+    frame.ExportButton:SetEnabled(backgroundLoad)
+    local function Progress(text)
+        if backgroundLoad then return end
+        if report then frame.SyncText:SetText(text) else SetStatus(text) end
+    end
+    Progress(L('Loading analytics...'))
     local from, to = RequiredRange()
-    cancelLoad = Scan.AnalyticsLog.LoadRange(from, to, function(done, total)
+    local completed = false
+    local cancel = Scan.AnalyticsLog.LoadRange(from, to, function(done, total)
         if token == loadToken and frame:IsShown() then
-            SetStatus(string.format(L('Loading analytics %d / %d'), done, total))
+            Progress(string.format(L('Loading analytics %d / %d'), done, total))
         end
     end, function(loaded)
+        completed = true
         if token ~= loadToken or not frame:IsShown() then return end
         cancelLoad = nil
         chunks = loaded
-        loading = false
+        loading, backgroundLoad = false, false
+        local again = refreshAfterLoad
+        refreshAfterLoad = false
         loadedFrom, loadedTo = from, to
         W.Rebuild()
+        frame.ExportButton:SetEnabled(true)
+        if again then ScheduleRebuild(0.2) end
     end)
+    -- LoadRange may finish synchronously; don't resurrect its cancellation
+    -- handle after the completion callback has already committed the view.
+    if not completed and token == loadToken then cancelLoad = cancel end
 end
 
 local function RefreshSelection()
@@ -993,23 +1034,27 @@ local function RefreshSelection()
 end
 
 -- New events while the window is open: counted again a little later.
-local function ScheduleRebuild(delay)
-    if rebuildPending or not frame or not frame:IsShown() then return end
-    rebuildPending = true
+function ScheduleRebuild(delay)
+    if not frame or not frame:IsShown() then return end
+    local pending = { at = GetTime() + delay }
+    if rebuildPending and rebuildPending.at <= pending.at then return end
+    rebuildPending = pending
     C_Timer.After(delay, function()
-        rebuildPending = false
-        if frame and frame:IsShown() then W.Reload() end
+        if rebuildPending ~= pending then return end
+        rebuildPending = nil
+        if frame and frame:IsShown() then W.Reload(true) end
     end)
 end
 
--- A linked account's analytics has arrived: count it at once.
+-- Merge local notifications and linked-account batches into one refresh.
 function W.DataArrived()
-    if frame and frame:IsShown() then W.Reload() end
+    ScheduleRebuild(0.2)
 end
 
 function W.Release()
     if cancelLoad then cancelLoad(); cancelLoad = nil end
     loadToken = loadToken + 1
+    rebuildPending, refreshAfterLoad, backgroundLoad, nameRedrawAt = nil, false, false, nil
     chunks, report, returns, calendarReport = nil, nil, nil, nil
     loadedFrom, loadedTo, loading = nil, nil, false
     if Scan.AnalyticsLog then Scan.AnalyticsLog.ReleaseCache() end
@@ -1017,6 +1062,10 @@ function W.Release()
         frame.Items:SetRows({})
         frame.Customers:SetRows({})
         frame.Returns:SetRows({})
+        frame.HourChart:SetValues({})
+        frame.HourChart.buckets, frame.HourChart.detailMonth = nil, nil
+        frame.DayChart:SetValues({})
+        frame.DetailBack:Hide()
     end
 end
 
@@ -1114,7 +1163,7 @@ local function CSV(text)
 end
 
 local function ExportCSV()
-    if not report then return end
+    if not report or (loading and not backgroundLoad) then return end
     local lines = {}
     local tab = View().tab
     if tab == TAB_RETURNS then
@@ -1482,7 +1531,7 @@ local function Create()
     frame.DetailBack:SetText(L('Back to month days'))
     frame.DetailBack:SetScript('OnClick', function()
         local month = frame.HourChart.detailMonth
-        if not loading and month then
+        if (not loading or backgroundLoad) and month then
             local first, last = Scan.AnalyticsReport.CalendarRange('month', month)
             W.SelectCalendarBucket({ unit = 'month', from = first, to = last })
         end
@@ -1494,10 +1543,9 @@ local function Create()
     dayTitle:SetText(L('By day of week'))
     frame.CalendarMode = Dropdown(frame.Charts, 110, Entries(CALENDAR_MODES),
         function() return (CalendarState()) end, function(mode)
-            local _, anchor = CalendarState()
-            local selectedFrom = CurrentRange()
-            if selectedFrom > 0 then anchor = selectedFrom end
-            W.SelectCalendarPeriod(mode, anchor)
+            -- Changing the calendar granularity always starts at Current.
+            -- Historical browsing remains on the explicit previous/next keys.
+            W.SelectCalendarPeriod(mode, time())
         end)
     local function CalendarButton(text, width, action)
         local button = CreateFrame('Button', nil, frame.Charts, 'UIPanelButtonTemplate')
