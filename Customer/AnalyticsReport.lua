@@ -238,8 +238,10 @@ function M.Build(chunks, filters, context)
         rows = {}, customers = {},
         -- crafted: greeted conversations that ended in an order, by the time
         -- of the greeting, for the conversion of each hour and day.
-        hours = { requests = Hours(), greetings = Hours(), crafted = Hours(), orders = Hours() },
-        weekdays = { requests = Weekdays(), greetings = Weekdays(), crafted = Weekdays(), orders = Weekdays() },
+        hours = { requests = Hours(), greetings = Hours(), crafted = Hours(), orders = Hours(),
+            tips = Hours(), tipsEstimated = Hours(), tipsMissing = Hours() },
+        weekdays = { requests = Weekdays(), greetings = Weekdays(), crafted = Weekdays(), orders = Weekdays(),
+            tips = Weekdays(), tipsEstimated = Weekdays(), tipsMissing = Weekdays() },
         calendar = { days = {}, months = {} },
         totals = { requests = 0, greetings = 0, crafted = 0, orders = 0,
             declined = 0, tips = 0, tipped = 0 },
@@ -349,10 +351,11 @@ function M.Build(chunks, filters, context)
     local cutShare = cutFrom > 0 and cutSum / cutFrom or nil
     local function Received(order)
         if not order.tip then return nil end
+        if order.tip == 0 then return 0 end
         if order.cut then return math.max(0, order.tip - order.cut) end
         report.totals.tipsEstimated = true
-        if cutShare then return math.floor(order.tip * (1 - cutShare) + 0.5) end
-        return order.tip
+        if cutShare then return math.floor(order.tip * (1 - cutShare) + 0.5), true end
+        return order.tip, true
     end
 
     -- Every order delivered or declined in the period, conversation or not.
@@ -372,12 +375,16 @@ function M.Build(chunks, filters, context)
                     row.orders = row.orders + 1
                     report.totals.orders = report.totals.orders + 1
                     CountTime('orders', order.t)
-                    local tip = Received(order)
+                    local tip, estimated = Received(order)
                     if tip then
+                        CountTime('tips', order.t, tip)
+                        if estimated then CountTime('tipsEstimated', order.t) end
                         row.tips = row.tips + tip
                         row.tipped = row.tipped + 1
                         report.totals.tips = report.totals.tips + tip
                         report.totals.tipped = report.totals.tipped + 1
+                    else
+                        CountTime('tipsMissing', order.t)
                     end
                     if person then
                         person.orders = person.orders + 1

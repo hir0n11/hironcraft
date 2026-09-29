@@ -459,6 +459,7 @@ local function CreateChart(parent, count, labelOf)
     end
 
     function chart:SetValues(values, infos, shares, labels, selected)
+        self.infos = infos or {}
         local width, height = self:GetWidth(), self:GetHeight() - 40
         local visible = #values
         local slot = width / math.max(1, visible)
@@ -735,6 +736,36 @@ local function Duration(minutes)
     return string.format(L('%d min'), minutes)
 end
 
+-- The year stays visible below its detail. With no explicit selection, show
+-- this month for the current year, otherwise the latest active month (January
+-- for an empty year). Presence capacity alone is not activity.
+local function YearDetail()
+    local mode, anchor = CalendarState()
+    if mode ~= 'year' then return nil end
+    local model, view = Scan.AnalyticsReport, View()
+    local first, last = model.CalendarRange('year', anchor)
+    local month = tonumber(view.yearDetailMonth)
+    if not month or month < first or month > last or month > time() then
+        month = nil
+        if first == model.CalendarRange('year') then
+            month = model.CalendarRange('month')
+        else
+            for _, bucket in ipairs(model.CalendarBuckets('year', first)) do
+                local stats = calendarReport.calendar.months[bucket.key] or {}
+                if bucket.from <= time() and ((stats.requests or 0) > 0 or (stats.greetings or 0) > 0
+                    or (stats.orders or 0) > 0 or (stats.online or 0) > 0) then month = bucket.from end
+            end
+        end
+    end
+    month = model.CalendarRange('month', month or first)
+    local from, to = CurrentRange()
+    local day = tonumber(view.yearDetailDay)
+    if not day or day ~= from or day > time() or day < month
+        or day > select(2, model.CalendarRange('month', month))
+        or to > select(2, model.CalendarRange('day', day)) then day = nil end
+    return month, day
+end
+
 local function UpdateCharts()
     if not report or not calendarReport then return end
     local metric = View().metric or 'orders'
@@ -746,7 +777,8 @@ local function UpdateCharts()
             local greetings, crafted = stats.greetings or 0, stats.crafted or 0
             local online, possible = stats.online or 0, stats.possible or 0
             shares[index] = possible > 0 and online / possible or nil
-            infos[index] = { title = titleOf(index), lines = {
+            local estimated, missing = (stats.tipsEstimated or 0) > 0, (stats.tipsMissing or 0) > 0
+            infos[index] = { title = titleOf(index), stats = stats, lines = {
                 string.format('%s: %d', L('Requests'), stats.requests or 0),
                 string.format('%s: %d', L('Greetings'), greetings),
                 string.format('%s: %d', L('Crafted'), crafted),
@@ -755,20 +787,51 @@ local function UpdateCharts()
                 string.format('%s: %s', L('Conversion'), greetings > 0
                     and string.format('%s (%d / %d)', Percent(crafted / greetings), crafted, greetings)
                     or Percent(nil)),
+                L('Gold from orders') .. ': ' .. Gold(stats.tips or 0, true)
+                    .. ((estimated or missing) and ' |cffffb347*|r' or ''),
                 possible > 0 and string.format(L('Online: %s of %s (%s)'), Duration(online), Duration(possible),
                     Percent(online / possible)) or L('Online: not recorded yet'),
             } }
+            if estimated then infos[index].lines[#infos[index].lines + 1] = L('Order gold estimated') end
+            if missing then infos[index].lines[#infos[index].lines + 1] = L('Order gold incomplete') end
         end
         return values, infos, shares
     end
     local from, to = CurrentRange()
     local range = RangeLabel(from, to)
-    frame.HourTitle:SetText(L('By hour of day') .. ' — ' .. range)
-    frame.HourChart:SetValues(Infos(24, function(index)
-        local stats = {}
-        for key, slots in pairs(report.hours) do stats[key] = slots[index - 1] end
-        return stats
-    end, function(index) return range .. ' · ' .. string.format('%02d:00-%02d:59', index - 1, index - 1) end))
+    local detailMonth, detailDay = YearDetail()
+    frame.HourChart.detailMonth = detailMonth
+    frame.DetailBack:SetShown(detailMonth ~= nil and detailDay ~= nil)
+    if detailMonth and not detailDay then
+        local buckets = Scan.AnalyticsReport.CalendarBuckets('month', detailMonth)
+        local values, infos, shares = Infos(#buckets, function(index)
+            return calendarReport.calendar.days[buckets[index].key] or {}
+        end, function(index) return RangeLabel(buckets[index].from, buckets[index].to) end)
+        local labels = {}
+        for index, bucket in ipairs(buckets) do
+            labels[index] = date('%d', bucket.from)
+            infos[index].bucket, infos[index].period = bucket, bucket.key
+            infos[index].lines[#infos[index].lines + 1] = L('Click to view this day')
+        end
+        frame.HourChart.kind, frame.HourChart.buckets = 'days', buckets
+        frame.HourTitle:SetText(L('By day of month') .. ' — '
+            .. RangeLabel(detailMonth, select(2, Scan.AnalyticsReport.CalendarRange('month', detailMonth))))
+        frame.HourChart:SetValues(values, infos, shares, labels)
+    else
+        local values, infos, shares = Infos(24, function(index)
+            local stats = {}
+            for key, slots in pairs(report.hours) do stats[key] = slots[index - 1] end
+            return stats
+        end, function(index) return range .. ' · ' .. string.format('%02d:00-%02d:59', index - 1, index - 1) end)
+        local labels = {}
+        for index = 1, 24 do
+            labels[index] = tostring(index - 1)
+            infos[index].period = range .. ' ' .. string.format('%02d:00', index - 1)
+        end
+        frame.HourChart.kind, frame.HourChart.buckets = 'hours', nil
+        frame.HourTitle:SetText(L('By hour of day') .. ' — ' .. range)
+        frame.HourChart:SetValues(values, infos, shares, labels)
+    end
 
     local mode, anchor = CalendarState()
     local first, last = Scan.AnalyticsReport.CalendarRange(mode, anchor)
@@ -781,8 +844,9 @@ local function UpdateCharts()
     for index, bucket in ipairs(buckets) do
         labels[index] = mode == 'week' and (L(WEEKDAYS[index]) .. ' ' .. date('%d.%m', bucket.from))
             or date(mode == 'year' and '%m' or '%d', bucket.from)
-        selected[index] = from == bucket.from and to <= bucket.to
-        infos[index].bucket = bucket
+        selected[index] = (mode == 'year' and detailMonth == bucket.from)
+            or (mode ~= 'year' and from == bucket.from and to <= bucket.to)
+        infos[index].bucket, infos[index].period = bucket, bucket.key
         infos[index].lines[#infos[index].lines + 1] = L(bucket.unit == 'month'
             and 'Click to view this month' or 'Click to view this day')
     end
@@ -900,6 +964,8 @@ function W.Reload()
     loading = true
     chunks, report, calendarReport = nil, nil, nil
     frame.HourChart:SetValues({})
+    frame.HourChart.buckets, frame.HourChart.detailMonth = nil, nil
+    frame.DetailBack:Hide()
     frame.DayChart:SetValues({})
     SetStatus(L('Loading analytics...'))
     local from, to = RequiredRange()
@@ -975,10 +1041,19 @@ end
 function W.SelectCalendarBucket(bucket)
     if not bucket or bucket.from > time() then return end
     local view, model = View(), Scan.AnalyticsReport
+    local mode = CalendarState()
     if bucket.unit == 'month' then
-        view.calendarMode, view.calendarAnchor = 'month', bucket.from
+        if mode == 'year' then
+            view.yearDetailMonth, view.yearDetailDay = bucket.from, nil
+        else
+            view.calendarMode, view.calendarAnchor = 'month', bucket.from
+            view.yearDetailMonth, view.yearDetailDay = nil, nil
+        end
         view.preset = bucket.from == model.CalendarRange('month') and 'month' or 'custom'
     else
+        if mode == 'year' then
+            view.yearDetailMonth, view.yearDetailDay = model.CalendarRange('month', bucket.from), bucket.from
+        end
         local today = model.CalendarRange('day')
         local yesterday = model.ShiftCalendar('day', today, -1)
         view.preset = bucket.from == today and 'today' or bucket.from == yesterday and 'yesterday' or 'custom'
@@ -993,6 +1068,7 @@ function W.SelectCalendarPeriod(mode, anchor)
     local from, to = model.CalendarRange(mode, anchor)
     if from > time() or date('*t', from).year < 1970 then return end
     view.calendarMode, view.calendarAnchor = mode, from
+    view.yearDetailMonth, view.yearDetailDay = nil, nil
     view.preset = from == model.CalendarRange(mode) and mode or 'custom'
     view.from, view.to = from, to
     UpdateDateBoxes()
@@ -1008,6 +1084,7 @@ local function ResetCalendarForFilter()
     local view = View()
     view.calendarMode = (view.preset == 'year' or view.preset == 'month') and view.preset or 'week'
     view.calendarAnchor = nil
+    view.yearDetailMonth, view.yearDetailDay = nil, nil
 end
 
 local function SelectTab(index)
@@ -1057,21 +1134,15 @@ local function ExportCSV()
                 row.lastOrder and date('%Y-%m-%d %H:%M', row.lastOrder) or '' }, ',')
         end
     elseif tab == TAB_TIME then
-        lines[1] = 'period,requests,greetings,crafted,conversion,orders'
-        local function Line(period, group, slot)
-            local greetings, crafted = report[group].greetings[slot], report[group].crafted[slot]
-            return string.format('%s,%d,%d,%d,%s,%d', period, report[group].requests[slot], greetings, crafted,
-                greetings > 0 and string.format('%.2f', crafted / greetings) or '', report[group].orders[slot])
-        end
-        local from, to = CurrentRange()
-        for hour = 0, 23 do
-            lines[#lines + 1] = Line(CSV(RangeLabel(from, to) .. ' ' .. string.format('%02d:00', hour)), 'hours', hour)
-        end
-        for _, bucket in ipairs(frame.DayChart.buckets or {}) do
-            local stats = calendarReport.calendar[bucket.unit == 'month' and 'months' or 'days'][bucket.key] or {}
-            local greetings, crafted = stats.greetings or 0, stats.crafted or 0
-            lines[#lines + 1] = string.format('%s,%d,%d,%d,%s,%d', bucket.key, stats.requests or 0,
-                greetings, crafted, greetings > 0 and string.format('%.2f', crafted / greetings) or '', stats.orders or 0)
+        lines[1] = 'period,requests,greetings,crafted,conversion,orders,tips_gold,tips_estimated,orders_without_tip_data'
+        for _, chart in ipairs({ frame.HourChart, frame.DayChart }) do
+            for _, info in ipairs(chart.infos or {}) do
+                local stats = info.stats
+                local greetings, crafted = stats.greetings or 0, stats.crafted or 0
+                lines[#lines + 1] = table.concat({ CSV(info.period), stats.requests or 0, greetings, crafted,
+                    greetings > 0 and string.format('%.2f', crafted / greetings) or '', stats.orders or 0,
+                    PlainGold(stats.tips or 0), (stats.tipsEstimated or 0) > 0 and 1 or 0, stats.tipsMissing or 0 }, ',')
+            end
         end
     else
         lines[1] = 'item,item_id,profession,requests,greeted,ordered,order_rate,orders_done,declined,average_tip_gold'
@@ -1401,10 +1472,22 @@ local function Create()
     local legend = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
     legend:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 14, -28)
     legend:SetText(L('Grey behind a bar: the share of that time you were online.'))
-    frame.HourChart = CreateChart(frame.Charts, 24, function(index) return tostring(index - 1) end)
+    frame.HourChart = CreateChart(frame.Charts, 31, function() return '' end)
     frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -46)
     frame.HourChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
     frame.HourChart:SetHeight(184)
+    frame.DetailBack = CreateFrame('Button', nil, frame.Charts, 'UIPanelButtonTemplate')
+    frame.DetailBack:SetSize(136, 22)
+    frame.DetailBack:SetPoint('RIGHT', frame.MetricDropdown, 'LEFT', -8, 0)
+    frame.DetailBack:SetText(L('Back to month days'))
+    frame.DetailBack:SetScript('OnClick', function()
+        local month = frame.HourChart.detailMonth
+        if not loading and month then
+            local first, last = Scan.AnalyticsReport.CalendarRange('month', month)
+            W.SelectCalendarBucket({ unit = 'month', from = first, to = last })
+        end
+    end)
+    frame.DetailBack:Hide()
     local dayTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
     frame.CalendarTitle = dayTitle
     dayTitle:SetPoint('TOPLEFT', frame.HourChart, 'BOTTOMLEFT', 4, -14)

@@ -198,6 +198,10 @@ local noon = frame.HourChart.bars[13].info
 assert(noon and noon.lines[5] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[5]))
 assert(noon.lines[3] == 'Crafted: 1', 'the Ordered numerator is missing from the tooltip')
 assert(frame.HourChart.bars[12].info.lines[5]:find('-', 1, true), 'an hour without greetings shows a conversion')
+local paidHour=frame.HourChart.bars[tonumber(date('%H',now-30))+1].info
+assert(paidHour.lines[6]:find('Gold from orders: 6000|T',1,true)
+    and paidHour.lines[6]:find('*',1,true),'hour tooltip lost its income or estimated marker')
+assert(table.concat(paidHour.lines,'\n'):find('Order gold estimated',1,true), 'legacy commission estimate not explained')
 -- All metrics stay on one baseline. Spare width is distributed; long figures
 -- shrink/fill as one strip, never wrap or disappear behind the toolbar.
 local function CheckTiles(small, order)
@@ -352,7 +356,8 @@ local function At(y, m, d, h) return os.time({ year = y, month = m, day = d, hou
 Log.Record({ k = 'd', st = 'f', o = 901, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 15, 9) })
 Log.Record({ k = 'd', st = 'f', o = 902, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 19, 10) })
 Log.Record({ k = 'd', st = 'f', o = 903, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 8, 14) })
-Log.Record({ k = 'd', st = 'f', o = 904, c = 'Calendar', p = 197, f = 'H', t = At(2025, 2, 14, 15) })
+Log.Record({ k = 'd', st = 'f', o = 904, c = 'Calendar', p = 197, f = 'H', t = At(2025, 2, 14, 15),
+    tip=1500*10000,cut=150*10000 })
 frame.Tabs[3].scripts.OnClick(frame.Tabs[3])
 W.SelectCalendarPeriod('week', now)
 assert(view.preset == 'week' and #frame.DayChart.buckets == 7)
@@ -382,30 +387,87 @@ assert(view.preset == 'week' and not frame.CalendarNext.enabled)
 
 W.SelectCalendarPeriod('year', At(2025, 7, 1))
 assert(#frame.DayChart.buckets == 12 and frame.DayChart.bars[2].value.text == 1)
+assert(frame.HourChart.kind=='days' and #frame.HourChart.buckets==28
+    and frame.HourChart.detailMonth==At(2025,2,1),'past year did not default to its latest active month')
+assert(frame.DayChart.bars[2].selection.shown and not frame.DetailBack.shown)
 ClickDay(2)
-assert(view.calendarMode == 'month' and #frame.DayChart.buckets == 28 and date('%Y-%m', view.from) == '2025-02')
+assert(view.calendarMode == 'year' and #frame.DayChart.buckets == 12 and date('%Y-%m', view.from) == '2025-02')
 assert(view.preset == 'custom' and date('%d.%m', view.to) == '28.02')
-ClickDay(14)
-assert(view.calendarMode == 'month' and #frame.DayChart.buckets == 28)
-assert(frame.HourChart.bars[16].value.text == 1 and view.from == At(2025, 2, 14))
-assert(frame.DayChart.bars[14].selection.shown and not frame.DayChart.bars[29].shown)
+assert(frame.HourChart.bars[14].value.text==1 and frame.HourChart.bars[14].label.text=='14')
+assert(frame.HourChart.bars[14].info.lines[6]:find('Gold from orders: 1350|T',1,true)
+    and not frame.HourChart.bars[14].info.lines[6]:find('*',1,true),'daily income is not exact net gold')
+assert(frame.DayChart.bars[2].info.lines[6]:find('Gold from orders: 1350|T',1,true),'monthly income is missing')
 frame.ExportButton.scripts.OnClick(frame.ExportButton)
-assert(dumped:find('2025-02-14,', 1, true), 'calendar CSV exported aggregated weekdays')
+assert(dumped:find('tips_gold,tips_estimated,orders_without_tip_data',1,true)
+    and dumped:find('2025-02-14,0,0,0,,1,1350,0,0',1,true)
+    and not dumped:find('00:00,',1,true),'year detail CSV does not match the displayed days/income')
+local function ClickDetailDay(index)
+    local bar=frame.HourChart.bars[index]
+    bar.scripts.OnClick(bar)
+end
+ClickDetailDay(14)
+assert(view.calendarMode == 'year' and #frame.DayChart.buckets == 12 and frame.HourChart.kind=='hours')
+assert(frame.HourChart.bars[16].value.text == 1 and view.from == At(2025, 2, 14))
+assert(frame.DayChart.bars[2].selection.shown and not frame.HourChart.bars[25].shown and frame.DetailBack.shown)
+assert(frame.HourChart.bars[1].label.text=='0' and frame.HourChart.bars[16].label.text=='15',
+    'day labels survived the switch to hours')
+frame.ExportButton.scripts.OnClick(frame.ExportButton)
+assert(dumped:find('14.02.2025 15:00,0,0,0,,1,1350,0,0',1,true),'hourly CSV lost the selected day/income')
+-- Reopening retains the day inside the year. Back restores month days, not
+-- an aggregated hourly chart or a different year.
+W.Toggle(); W.Toggle()
+assert(view.calendarMode=='year' and frame.HourChart.kind=='hours' and frame.DetailBack.shown)
+frame.DetailBack.scripts.OnClick(frame.DetailBack)
+assert(frame.HourChart.kind=='days' and #frame.HourChart.buckets==28 and not frame.DetailBack.shown)
+assert(view.from==At(2025,2,1) and #frame.DayChart.buckets==12)
+ClickDay(1)
+assert(#frame.HourChart.buckets==31 and frame.HourChart.bars[14].value.text==''
+    and frame.HourChart.bars[14].info.lines[6]:find('Gold from orders: 0|T',1,true),'empty month retained old values')
 W.SelectCalendarPeriod('month', At(2024, 2, 10))
 assert(#frame.DayChart.buckets == 29 and frame.DayChart.bars[29].shown and not frame.DayChart.bars[30].shown)
+assert(frame.HourChart.kind=='hours' and not frame.DetailBack.shown,'standalone month lost its hourly breakdown')
+W.SelectCalendarPeriod('year',At(2024,1,1))
+assert(frame.HourChart.detailMonth==At(2024,1,1),'an empty past year did not default to January')
+ClickDay(2)
+assert(#frame.HourChart.buckets==29 and not frame.HourChart.bars[30].shown,'year detail lost leap day')
+ClickDetailDay(29)
+assert(view.from==At(2024,2,29) and frame.HourChart.kind=='hours' and frame.DetailBack.shown)
+frame.DetailBack.scripts.OnClick(frame.DetailBack)
+assert(#frame.HourChart.buckets==29 and #frame.DayChart.buckets==12)
 W.SelectCalendarPeriod('year', now)
 assert(view.preset == 'year')
+assert(frame.HourChart.kind=='days' and frame.HourChart.detailMonth==At(2026,9,1),
+    'current year did not open the current month')
 ClickDay(9)
-assert(view.preset == 'month' and view.calendarMode == 'month' and #frame.DayChart.buckets == 30)
+assert(view.preset == 'month' and view.calendarMode == 'year' and #frame.DayChart.buckets == 12)
 local previousFrom = view.from
-ClickDay(30) -- now is September 20: future dates cannot be selected.
-assert(view.from == previousFrom and not frame.DayChart.bars[30].enabled)
+ClickDetailDay(30) -- now is September 20: future dates cannot be selected.
+assert(view.from == previousFrom and not frame.HourChart.bars[30].enabled)
+ClickDay(12)
+assert(view.from==previousFrom and not frame.DayChart.bars[12].enabled,'a future month was selected')
 
 -- Common filters affect the calendar and the drill-down together.
 view.side = 'A'; W.Rebuild()
-assert(frame.DayChart.bars[15].value.text == '')
+assert(frame.HourChart.bars[15].value.text == '' and frame.DayChart.bars[9].value.text=='')
 view.side = nil; W.Rebuild()
-assert(frame.DayChart.bars[15].value.text == 1)
+assert(frame.HourChart.bars[15].value.text == 1 and frame.DayChart.bars[9].value.text>0)
+assert(table.concat(frame.HourChart.bars[15].info.lines,'\n'):find('Order gold incomplete',1,true),
+    'an order without stored tip data was displayed as known zero income')
+-- Explicit period filters leave year drill-down; no stale month/day may win.
+ClickDetailDay(15)
+local selectToday
+frame.Period.menu(frame.Period,{CreateRadio=function(_,_,_,click,value)
+    if value=='today' then selectToday=click end
+end})
+assert(selectToday); selectToday()
+assert(view.calendarMode=='week' and view.yearDetailMonth==nil and view.yearDetailDay==nil
+    and frame.HourChart.kind=='hours' and not frame.DetailBack.shown,'Today retained year detail state')
+W.SelectCalendarPeriod('year',now)
+W.MoveCalendar(-1)
+assert(frame.HourChart.detailMonth==At(2025,2,1) and frame.HourChart.kind=='days'
+    and view.yearDetailDay==nil,'year navigation retained stale detail from another year')
+W.MoveCalendar(1)
+assert(frame.HourChart.detailMonth==At(2026,9,1))
 
 -- Rapid navigation while loading: an older reply must not replace the new one.
 local originalLoad, pending = Log.LoadRange, {}
@@ -419,8 +481,11 @@ W.SelectCalendarPeriod('year', At(2022, 1, 1))
 W.SelectCalendarPeriod('year', At(2021, 1, 1))
 assert(#pending == 2 and pending[2].from == At(2021, 1, 1))
 assert(pending[1].cancelled, 'obsolete year kept unpacking after rapid navigation')
+assert(not frame.DetailBack.shown and #frame.HourChart.infos==0,'old detail remained actionable while loading')
 pending[2].done({ { { k = 'd', st = 'f', o = 1000, c = 'Older', t = At(2021, 3, 1) } } })
 assert(frame.DayChart.bars[3].value.text == 1)
+assert(frame.HourChart.kind=='days' and frame.HourChart.detailMonth==At(2021,3,1)
+    and frame.HourChart.bars[1].value.text==1,'new year detail did not follow the winning load')
 pending[1].done({})
 assert(frame.DayChart.bars[3].value.text == 1 and frame.CalendarTitle.text:find('2021', 1, true))
 Log.LoadRange = originalLoad

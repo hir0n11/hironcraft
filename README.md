@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order income tooltips and useful year drill-down (0.4.82)
+
+- Every hour/day/month tooltip now includes gold received from orders in
+  that interval, net of the recorded Consortium cut, using the same logic
+  as the summary total. Income follows delivery time and the active filters;
+  duplicate results and declined orders do not contribute. Legacy estimated
+  cuts and missing tip data are explicitly marked, not presented as exact.
+- In Year mode the lower chart stays on the year's twelve months. Above it
+  are the selected month's days; click a day for its hours, then use Month
+  days to return. Clicking another month updates the detail without losing
+  the year. The main date filter follows explicit month/day selections.
+- A newly opened current year starts with the current month; a past year
+  starts with its latest active month (January if empty). Standalone Month
+  and Week modes retain their hourly chart. Future dates cannot be selected.
+- The time CSV mirrors both displayed charts, including net income and flags
+  for estimated/incomplete amounts. No extra history or sync messages are
+  recorded for these views.
+
 ## Diamond customers (0.4.81)
 
 - Customers whose average tip across recorded completed orders is at least
