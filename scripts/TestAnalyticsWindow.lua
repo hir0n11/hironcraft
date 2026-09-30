@@ -33,6 +33,7 @@ local function Mock(kind)
     function methods:SetHeight(h) self.height = h end
     function methods:SetSize(w, h) self.width, self.height = w, h end
     function methods:SetScale(scale) self.scale = scale end
+    function methods:SetColorTexture(...) self.color = { ... } end
     function methods:SetText(text) self.text = text; texts[#texts + 1] = text end
     function methods:GetText() return self.text end
     function methods:GetStringWidth() return 50 end
@@ -172,6 +173,8 @@ Log.Record({ k = 'p', t = now - 90, e = now, f = 'H' })
 Log.Merge({ { k = 'p', t = now - 60, e = now, f = 'H' } }, 'peer')
 
 -- Opening it loads, counts and fills every tab.
+-- An existing saved single-metric choice migrates once to the comparison.
+Scan.DB.settings.analytics_view = { preset = '30d', tab = 1, metric = 'orders' }
 Scan.AnalyticsWindow.Toggle()
 local frame = _G.HironCraftAnalyticsFrame
 assert(frame and Scan.AnalyticsWindow.IsShown(), 'the window did not open')
@@ -208,6 +211,57 @@ local paidHour=frame.HourChart.bars[tonumber(date('%H',now-30))+1].info
 assert(paidHour.lines[6]:find('Gold from orders: 6000|T',1,true)
     and paidHour.lines[6]:find('*',1,true),'hour tooltip lost its income or estimated marker')
 assert(table.concat(paidHour.lines,'\n'):find('Order gold estimated',1,true), 'legacy commission estimate not explained')
+
+-- All three counts use their own heights on one scale. Ordered is part of
+-- Greeted; Requests may be larger OR smaller because their timestamps differ.
+assert(Scan.DB.settings.analytics_view.metric == 'overview'
+    and frame.HourChart.metric == 'overview' and frame.DayChart.metric == 'overview',
+    'the comparison did not become the default on both charts')
+assert(frame.ChartLegend.entries.greetings.shown and frame.ChartLegend.entries.crafted.shown
+    and frame.ChartLegend.entries.requests.shown and frame.ChartLegend.note.shown,
+    'the comparison legend is incomplete')
+for _, chart in ipairs({ frame.HourChart, frame.DayChart }) do
+    local stats = { greetings = 20, crafted = 8, requests = 30, orders = 100 }
+    chart:SetValues({ 8, 0, 2 }, { { stats = stats }, { stats = {} },
+        { stats = { greetings = 12, crafted = 2, requests = 1 } } }, { 0.5, 0, 0.25 },
+        { 'A', 'B', 'C' }, { true }, 'overview')
+    local bar, height = chart.bars[1], chart:GetHeight() - 40
+    assert(chart.maximum >= 30 and chart.maximum < 100, 'scale summed the stages or included tooltip-only orders')
+    assert(math.abs(bar.series.greetings.height / height - 20 / chart.maximum) < 0.001)
+    assert(math.abs(bar.series.crafted.height / height - 8 / chart.maximum) < 0.001)
+    assert(math.abs(bar.series.requests.height / height - 30 / chart.maximum) < 0.001)
+    assert(bar.series.crafted.x > 0 and bar.series.crafted.x + bar.series.crafted.width < bar.series.greetings.width,
+        'yellow no longer fits inside grey')
+    assert(bar.series.requests.x > bar.series.greetings.width, 'requests overlap the greeting count')
+    assert(chart.bars[3].series.requests.height < chart.bars[3].series.crafted.height,
+        'a smaller request count was incorrectly treated as an outer funnel')
+    assert(not chart.bars[2].series.greetings.shown and not chart.bars[2].series.crafted.shown
+        and not chart.bars[2].series.requests.shown, 'zero counts draw fake bars')
+    assert(bar.value.text == 8 and not bar.fill.shown and bar.selection.shown,
+        'the comparison label or calendar selection is wrong')
+    assert(bar.onlineFill.shown and math.abs(bar.onlineFill.width - bar.width * 0.5) < 0.001,
+        'the online gauge changed its units')
+    chart:SetValues({})
+    assert(not chart.bars[1].shown and not chart.bars[1].series.crafted.shown
+        and not chart.grid[1].label.shown, 'clearing the chart left old comparison marks')
+end
+local function SelectMetric(key)
+    local selected
+    frame.MetricDropdown.menu(frame.MetricDropdown, { CreateRadio = function(_, _, _, action, value)
+        if value == key then selected = action end
+    end })
+    assert(selected, 'missing metric choice: ' .. key)
+    selected()
+end
+SelectMetric('requests')
+Scan.AnalyticsWindow.Rebuild()
+assert(Scan.DB.settings.analytics_view.metric == 'requests' and frame.HourChart.metric == 'requests',
+    'rebuilding overwrote a chosen individual metric')
+assert(not frame.ChartLegend.entries.greetings.shown and frame.ChartLegend.entries.requests.shown
+    and not frame.ChartLegend.note.shown, 'single-metric view kept the comparison legend')
+SelectMetric('overview')
+assert(frame.HourChart.metric == 'overview' and frame.DayChart.metric == 'overview')
+print('Analytics comparison passed (default migration, independent scales, nesting, zero counts, legend, online time, metric choices).')
 -- All metrics stay on one baseline. Spare width is distributed; long figures
 -- shrink/fill as one strip, never wrap or disappear behind the toolbar.
 local function CheckTiles(small, order)
@@ -358,6 +412,8 @@ assert(frame.TileOrder.frame.shown and not frame.ReturnTileOrder.frame.shown, 'i
 -- Closing lets the data go.
 -- The lower chart is an independent calendar, not a sum of all Mondays.
 local W, R = Scan.AnalyticsWindow, Scan.AnalyticsReport
+-- Exercise the retained Orders done view throughout the existing calendar tests.
+SelectMetric('orders')
 local function At(y, m, d, h) return os.time({ year = y, month = m, day = d, hour = h or 0, min = 0, sec = 0 }) end
 Log.Record({ k = 'd', st = 'f', o = 901, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 15, 9) })
 Log.Record({ k = 'd', st = 'f', o = 902, c = 'Calendar', p = 197, f = 'H', t = At(2026, 9, 19, 10) })

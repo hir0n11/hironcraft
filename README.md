@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Compare requests, greetings and orders on the time charts (0.4.85)
+
+- Hourly and calendar charts open in All stages mode: a broad grey Greeted
+  bar contains a narrower yellow Ordered bar; a slim blue Requests bar
+  sits beside it. The series share a zero baseline and a count scale.
+  They are not added together: Ordered is part of Greeted, while requests
+  and greetings can fall in different hours or days.
+- Orders done remain in every hover tooltip, alongside conversion, order
+  income and online time. The green online gauge stays below each group.
+  In All stages, the number over the yellow bar is Ordered.
+- A shared legend and subtle numbered grid make both charts easier to
+  compare. Separate metric views remain in the dropdown and use consistent
+  colours. Existing installations start in All stages once, then retain
+  the chosen view. Calendar drill-down, filters and CSV contents are preserved.
+
 ## Independent profession qualifiers in equipment lists (0.4.84)
 
 - Mixed requests such as "LF loa Ring crafter and crafter for plate wrist

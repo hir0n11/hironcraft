@@ -14,6 +14,7 @@ local FRAME_NAME = 'HironCraftAnalyticsFrame'
 local ROW_HEIGHT = 20
 local GAP = 6
 local GOLD = 10000
+local unpack = unpack or table.unpack
 
 local frame = nil
 local chunks, report = nil, nil
@@ -68,6 +69,7 @@ local SIDES = {
 }
 
 local METRICS = {
+    { value = 'overview', label = 'All stages' },
     { value = 'requests', label = 'Requests' },
     { value = 'greetings', label = 'Greetings' },
     { value = 'crafted', label = 'Crafted' },
@@ -77,9 +79,13 @@ local METRICS = {
 local function View()
     local settings = Scan.DB.settings
     if type(settings.analytics_view) ~= 'table' then
-        settings.analytics_view = { preset = '30d', tab = TAB_ITEMS, metric = 'orders', sort = {} }
+        settings.analytics_view = { preset = '30d', tab = TAB_ITEMS, metric = 'overview', sort = {} }
     end
     local view = settings.analytics_view
+    -- Open the new comparison once for existing installations; retain later choices.
+    if not view.multiSeriesCharts then
+        view.metric, view.multiSeriesCharts = 'overview', true
+    end
     view.sort = type(view.sort) == 'table' and view.sort or {}
     -- Most ordered first, until a header is clicked.
     view.sort[TAB_ITEMS] = view.sort[TAB_ITEMS] or { key = 'orders', desc = true }
@@ -434,8 +440,57 @@ end
 
 -- Charts --------------------------------------------------------------------------
 
+local CHART_SERIES = {
+    greetings = { label = 'Greetings', color = { 0.43, 0.46, 0.50, 0.85 }, left = 0, width = 0.72 },
+    crafted = { label = 'Crafted', color = { 1, 0.78, 0.25, 0.95 }, left = 0.16, width = 0.40 },
+    requests = { label = 'Requests', color = { 0.30, 0.72, 0.87, 0.95 }, left = 0.86, width = 0.14 },
+    orders = { label = 'Crafted orders', color = { 0.76, 0.66, 0.94, 0.95 } },
+}
+local OVERVIEW_SERIES = { 'greetings', 'crafted', 'requests' }
+local ONLINE_COLOR = { 0.35, 0.85, 0.45, 0.9 }
+
+local function UpdateChartLegend(metric)
+    local legend = frame.ChartLegend
+    local visible = metric == 'overview' and OVERVIEW_SERIES or { metric }
+    for _, entry in pairs(legend.entries) do entry:Hide() end
+    local x = 0
+    for _, key in ipairs(visible) do
+        local entry = legend.entries[key]
+        entry:ClearAllPoints()
+        entry:SetPoint('LEFT', legend, 'LEFT', x, 0)
+        entry:Show()
+        x = x + entry.label:GetStringWidth() + 34
+    end
+    legend.online:ClearAllPoints()
+    legend.online:SetPoint('LEFT', legend, 'LEFT', x, 0)
+    legend.note:SetShown(metric == 'overview')
+end
+
+-- A shared count scale, with integer ticks, never a sum of overlapping stages.
+local function ChartScale(maximum)
+    local step = 1
+    if maximum > 4 then
+        local raw = maximum / 4
+        local magnitude = 10 ^ math.floor(math.log(raw) / math.log(10))
+        for _, factor in ipairs({ 1, 2, 5, 10 }) do
+            if magnitude * factor >= raw then step = magnitude * factor; break end
+        end
+    end
+    return math.max(1, math.ceil(maximum / step)) * step, step
+end
+
 local function CreateChart(parent, count, labelOf)
     local chart = CreateFrame('Frame', nil, parent)
+    chart.grid = {}
+    for index = 1, 5 do
+        local line = chart:CreateTexture(nil, 'BACKGROUND')
+        line:SetColorTexture(1, 1, 1, index == 1 and 0.13 or 0.055)
+        line:SetHeight(1)
+        local label = chart:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
+        label:SetJustifyH('RIGHT')
+        label:SetWidth(28)
+        chart.grid[index] = { line = line, label = label }
+    end
     chart.bars = {}
     for index = 1, count do
         local bar = CreateFrame('Button', nil, chart)
@@ -456,13 +511,20 @@ local function CreateChart(parent, count, labelOf)
         bar.onlineTrack:SetPoint('TOPRIGHT', bar, 'BOTTOMRIGHT', 0, -3)
         bar.onlineTrack:SetHeight(3)
         bar.onlineFill = bar:CreateTexture(nil, 'ARTWORK')
-        bar.onlineFill:SetColorTexture(0.35, 0.85, 0.45, 0.9)
+        bar.onlineFill:SetColorTexture(unpack(ONLINE_COLOR))
         bar.onlineFill:SetPoint('TOPLEFT', bar.onlineTrack, 'TOPLEFT')
         bar.onlineFill:SetHeight(3)
         bar.fill = bar:CreateTexture(nil, 'ARTWORK')
         bar.fill:SetColorTexture(1, 0.78, 0.25, 0.85)
         bar.fill:SetPoint('BOTTOMLEFT')
         bar.fill:SetPoint('BOTTOMRIGHT')
+        bar.series = {}
+        for layer, key in ipairs(OVERVIEW_SERIES) do
+            local texture = bar:CreateTexture(nil, 'ARTWORK', nil, layer)
+            texture:SetColorTexture(unpack(CHART_SERIES[key].color))
+            texture:Hide()
+            bar.series[key] = texture
+        end
         bar.value = bar:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         bar.value:SetPoint('BOTTOM', bar.fill, 'TOP', 0, 2)
         bar.label = chart:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
@@ -480,13 +542,36 @@ local function CreateChart(parent, count, labelOf)
         chart.bars[index] = bar
     end
 
-    function chart:SetValues(values, infos, shares, labels, selected)
+    function chart:SetValues(values, infos, shares, labels, selected, metric)
+        metric = metric or 'orders'
+        self.metric = metric
         self.infos = infos or {}
-        local width, height = self:GetWidth(), self:GetHeight() - 40
+        local axisWidth = 32
+        local width, height = math.max(1, self:GetWidth() - axisWidth), math.max(1, self:GetHeight() - 40)
         local visible = #values
         local slot = width / math.max(1, visible)
-        local max = 0
-        for index = 1, count do max = math.max(max, values[index] or 0) end
+        local maximum = 0
+        for index = 1, visible do
+            if metric == 'overview' then
+                local stats = infos and infos[index] and infos[index].stats or {}
+                for _, key in ipairs(OVERVIEW_SERIES) do maximum = math.max(maximum, stats[key] or 0) end
+            else
+                maximum = math.max(maximum, values[index] or 0)
+            end
+        end
+        local ceiling, step = ChartScale(maximum)
+        self.maximum = ceiling
+        for index, grid in ipairs(self.grid) do
+            local tick = (index - 1) * step
+            grid.line:SetShown(visible > 0 and tick <= ceiling)
+            grid.label:SetShown(visible > 0 and tick <= ceiling)
+            grid.line:ClearAllPoints()
+            grid.line:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', axisWidth, 24 + height * tick / ceiling)
+            grid.line:SetPoint('BOTTOMRIGHT', self, 'BOTTOMRIGHT', 0, 24 + height * tick / ceiling)
+            grid.label:ClearAllPoints()
+            grid.label:SetPoint('RIGHT', self, 'BOTTOMLEFT', axisWidth - 5, 24 + height * tick / ceiling)
+            grid.label:SetText(tick)
+        end
         for index, bar in ipairs(self.bars) do
             bar:SetShown(index <= visible)
             bar.label:SetShown(index <= visible)
@@ -494,10 +579,23 @@ local function CreateChart(parent, count, labelOf)
             if labels then bar.label:SetText(labels[index] or '') end
             local value = values[index] or 0
             bar:ClearAllPoints()
-            bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', (index - 1) * slot + slot * 0.15, 24)
+            bar:SetPoint('BOTTOMLEFT', self, 'BOTTOMLEFT', axisWidth + (index - 1) * slot + slot * 0.15, 24)
             bar:SetSize(slot * 0.7, math.max(1, height))
-            bar.fill:SetHeight(math.max(1, max > 0 and height * value / max or 1))
-            bar.fill:SetAlpha(value > 0 and 1 or 0.25)
+            bar.fill:SetShown(metric ~= 'overview' and value > 0)
+            bar.fill:SetHeight(math.max(1, height * value / ceiling))
+            bar.fill:SetColorTexture(unpack((CHART_SERIES[metric] or CHART_SERIES.orders).color))
+            local stats = infos and infos[index] and infos[index].stats or {}
+            for _, key in ipairs(OVERVIEW_SERIES) do
+                local texture, definition = bar.series[key], CHART_SERIES[key]
+                local amount = stats[key] or 0
+                texture:ClearAllPoints()
+                texture:SetPoint('BOTTOMLEFT', bar, 'BOTTOMLEFT', bar:GetWidth() * definition.left, 0)
+                texture:SetWidth(bar:GetWidth() * definition.width)
+                texture:SetHeight(math.max(1, height * amount / ceiling))
+                texture:SetShown(metric == 'overview' and amount > 0)
+            end
+            bar.value:ClearAllPoints()
+            bar.value:SetPoint('BOTTOM', metric == 'overview' and bar.series.crafted or bar.fill, 'TOP', 0, 2)
             bar.value:SetText(value > 0 and value or '')
             local share = shares and shares[index]
             bar.onlineTrack:SetShown(share ~= nil)
@@ -790,12 +888,14 @@ end
 
 local function UpdateCharts()
     if not report or not calendarReport or (loading and not backgroundLoad) then return end
-    local metric = View().metric or 'orders'
+    local metric = View().metric or 'overview'
+    if metric ~= 'overview' and not CHART_SERIES[metric] then metric = 'overview' end
+    UpdateChartLegend(metric)
     local function Infos(count, statsOf, titleOf)
         local values, infos, shares = {}, {}, {}
         for index = 1, count do
             local stats = statsOf(index)
-            values[index] = stats[metric] or 0
+            values[index] = stats[metric == 'overview' and 'crafted' or metric] or 0
             local greetings, crafted = stats.greetings or 0, stats.crafted or 0
             local online, possible = stats.online or 0, stats.possible or 0
             shares[index] = possible > 0 and online / possible or nil
@@ -838,7 +938,7 @@ local function UpdateCharts()
         frame.HourChart.kind, frame.HourChart.buckets = 'days', buckets
         frame.HourTitle:SetText(L('By day of month') .. ' — '
             .. RangeLabel(detailMonth, select(2, Scan.AnalyticsReport.CalendarRange('month', detailMonth))))
-        frame.HourChart:SetValues(values, infos, shares, labels)
+        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric)
     else
         local values, infos, shares = Infos(24, function(index)
             local stats = {}
@@ -852,7 +952,7 @@ local function UpdateCharts()
         end
         frame.HourChart.kind, frame.HourChart.buckets = 'hours', nil
         frame.HourTitle:SetText(L('By hour of day') .. ' — ' .. range)
-        frame.HourChart:SetValues(values, infos, shares, labels)
+        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric)
     end
 
     local mode, anchor = CalendarState()
@@ -873,7 +973,7 @@ local function UpdateCharts()
             and 'Click to view this month' or 'Click to view this day')
     end
     frame.DayChart.buckets = buckets
-    frame.DayChart:SetValues(values, infos, shares, labels, selected)
+    frame.DayChart:SetValues(values, infos, shares, labels, selected, metric)
     frame.CalendarTitle:SetText(RangeLabel(first, last))
     frame.CalendarNext:SetEnabled(last < time())
     frame.CalendarPrevious:SetEnabled(date('*t', first).year > 1970)
@@ -1518,9 +1618,31 @@ local function Create()
     frame.HourTitle = hourTitle
     hourTitle:SetPoint('TOPLEFT', 14, -10)
     hourTitle:SetText(L('By hour of day'))
-    local legend = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    legend:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 14, -28)
-    legend:SetText(L('Grey behind a bar: the share of that time you were online.'))
+    local legend = CreateFrame('Frame', nil, frame.Charts)
+    frame.ChartLegend = legend
+    legend:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 14, -29)
+    legend:SetPoint('TOPRIGHT', frame.Charts, 'TOPRIGHT', -14, -29)
+    legend:SetHeight(14)
+    legend.entries = {}
+    local function LegendEntry(label, color, markHeight)
+        local entry = CreateFrame('Frame', nil, legend)
+        entry:SetSize(16, 14)
+        entry.mark = entry:CreateTexture(nil, 'ARTWORK')
+        entry.mark:SetPoint('LEFT')
+        entry.mark:SetSize(12, markHeight or 8)
+        entry.mark:SetColorTexture(unpack(color))
+        entry.label = entry:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        entry.label:SetPoint('LEFT', entry.mark, 'RIGHT', 5, 0)
+        entry.label:SetText(L(label))
+        return entry
+    end
+    for key, definition in pairs(CHART_SERIES) do
+        legend.entries[key] = LegendEntry(definition.label, definition.color)
+    end
+    legend.online = LegendEntry('Online time', ONLINE_COLOR, 3)
+    legend.note = legend:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
+    legend.note:SetPoint('RIGHT', legend, 'RIGHT')
+    legend.note:SetText(L('Orders done: hover a bar'))
     frame.HourChart = CreateChart(frame.Charts, 31, function() return '' end)
     frame.HourChart:SetPoint('TOPLEFT', frame.Charts, 'TOPLEFT', 10, -46)
     frame.HourChart:SetPoint('RIGHT', frame.Charts, 'RIGHT', -10, 0)
