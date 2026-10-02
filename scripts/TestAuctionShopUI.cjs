@@ -12,6 +12,10 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+check(ui.includes('f.reagentPriceScanButton:SetPoint("RIGHT", f.priceScanButton, "LEFT", -8, 0)') &&
+  ui.includes('Scan.ReturnPrices.AttachScanButton(f.reagentPriceScanButton)'),
+  'targeted reagent scan is not accessible beside the full auction scan');
+
 check(ui.includes("local CLASSIC_BORDER"), "classic auction border is missing");
 check(
   ui.includes("Interface\\\\DialogFrame\\\\UI-DialogBox-Background"),

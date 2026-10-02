@@ -279,3 +279,21 @@ assert(not notice.materialsPending['lap-horde'] and notice.materialsPending['lap
     'material ACK was not scoped to its collector')
 print('Three-account rejection passed (independent recipients, cross-faction notice, material quantities and ACKs).')
 
+-- Chat rules use their own versioned payload on BULK and full links only.
+local merges=0
+Scan.ChatFilterSync={Merge=function(rules) assert(rules[1].id=='rule'); merges=merges+1 end}
+local packet={prefix='HIRONCRAFT_BULK',data={operation=op.ShareChatFilterRules,version=1,senderID='peer',
+    data={version=1,rules={{id='rule'}}}}}
+actAs('me','peer'); receive(packet,'Peer-Realm'); assert(merges==1)
+Scan.DB.realm.linked_accounts.peer.permissions={2}
+receive(packet,'Peer-Realm'); assert(merges==1, 'analytics-only peer changed chat rules')
+Scan.DB.realm.linked_accounts={}
+receive(packet,'Peer-Realm'); assert(merges==1, 'unlinked sender changed chat rules')
+actAs('me','peer'); packet.data.data.version=99
+receive(packet,'Peer-Realm'); assert(merges==1, 'unknown rule payload version was accepted')
+local records={}; for i=1,81 do records[i]={id='rule'..i,n=i,by='me'} end
+sent={};frames={};comm:ShareChatFilterRules(records,'Peer-Realm');flushFrames()
+assert(#sent==3 and #sent[1].data.data.rules==40 and #sent[3].data.data.rules==1)
+for _,p in ipairs(sent) do assert(p.priority=='BULK' and p.prefix=='HIRONCRAFT_BULK') end
+print('Chat rule transport passed (full links only, version validation, bulk priority and bounded batches).')
+

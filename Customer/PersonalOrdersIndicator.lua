@@ -26,16 +26,24 @@ function I.Position()
     frame:ClearAllPoints()
     frame:SetScale(tonumber(db.personal_order_scale) or 1)
     local pos = db.personal_order_position
+    local indicators = MinimapCluster and MinimapCluster.IndicatorFrame
     if pos and tonumber(pos.x) and tonumber(pos.y) then
+        frame:SetParent(UIParent)
+        frame.layoutIndex = nil
         frame:SetPoint('CENTER', UIParent, 'BOTTOMLEFT', pos.x, pos.y)
     else
-        frame:SetPoint('TOPRIGHT', Minimap, 'BOTTOMRIGHT', 0, -4)
+        -- Use Blizzard's indicator group (tracking/mail/crafting orders).
+        -- It follows Edit Mode and tracking-button changes automatically.
+        frame:SetParent(indicators or UIParent)
+        frame.layoutIndex = 2 -- the standard CraftingOrderFrame slot
+        if not indicators then frame:SetPoint('TOPRIGHT', Minimap, 'TOPLEFT', -3, 0) end
     end
+    if indicators and indicators.Layout then indicators:Layout() end
 end
 local function MakeFrame()
     if frame then return end
     frame = CreateFrame('Frame', 'HironCraftPersonalOrderIndicators', UIParent)
-    frame:SetSize(32, 32)
+    frame:SetSize(52, 24)
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
     frame:SetFrameStrata('MEDIUM')
@@ -72,30 +80,36 @@ function I.Update(silent)
     if not I.Enabled() then
         if frame then frame:Hide() end
         if original then original:SetShown(#rows > 0) end
+        local indicators = MinimapCluster and MinimapCluster.IndicatorFrame
+        if indicators and indicators.Layout then indicators:Layout() end
         return
     end
     if original then original:Hide() end
     MakeFrame()
     table.sort(rows, function(a, b) return a.profession < b.profession end)
+    local offset = 0
     for index, info in ipairs(rows) do
         local button = buttons[index]
         if not button then
             button = CreateFrame('Button', nil, frame)
             buttons[index] = button
-            button:SetSize(30, 30)
-            button:SetPoint('LEFT', frame, 'LEFT', (index - 1) * 34, 0)
+            button:SetSize(52, 24)
             button.icon = button:CreateTexture(nil, 'ARTWORK')
-            button.icon:SetAllPoints()
+            button.icon:SetSize(24, 24)
+            button.icon:SetPoint('LEFT', button, 'LEFT', 0, 0)
             button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
             button.count = button:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-            button.count:SetPoint('BOTTOMRIGHT', -1, 1)
+            button.count:SetPoint('LEFT', button.icon, 'RIGHT', 4, 0)
             button:RegisterForDrag('LeftButton')
             button:SetScript('OnDragStart', function() if IsShiftKeyDown() then frame:StartMoving() end end)
             button:SetScript('OnDragStop', function()
                 frame:StopMovingOrSizing()
                 local x, y = frame:GetCenter()
                 local db = SettingsDB()
-                if x and db then db.personal_order_position = { x = x, y = y } end
+                if x and db then
+                    db.personal_order_position = { x = x, y = y }
+                    I.Position()
+                end
             end)
             button:SetScript('OnEnter', function(self)
                 GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
@@ -109,11 +123,18 @@ function I.Update(silent)
         button.info = info
         button.icon:SetTexture(Icon(info.professionName) or 134400)
         button.count:SetText(info.numPersonalOrders)
+        local countWidth = button.count:GetStringWidth()
+        button:SetWidth(28 + math.max(12, countWidth))
+        button:ClearAllPoints()
+        button:SetPoint('LEFT', frame, 'LEFT', offset, 0)
+        offset = offset + button:GetWidth() + 8
         button:Show()
     end
     for index = #rows + 1, #buttons do buttons[index]:Hide() end
-    frame:SetWidth(math.max(30, #rows * 34 - 4))
+    frame:SetWidth(math.max(40, offset - 8))
     frame:SetShown(#rows > 0)
+    local indicators = MinimapCluster and MinimapCluster.IndicatorFrame
+    if indicators and indicators.Layout then indicators:Layout() end
 end
 local events = CreateFrame('Frame')
 for _, event in ipairs({ 'PLAYER_ENTERING_WORLD', 'SKILL_LINES_CHANGED',

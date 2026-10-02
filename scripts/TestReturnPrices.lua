@@ -7,7 +7,12 @@ CreateFrame = function()
     frames[#frames + 1] = f
     return f
 end
-C_Timer = { NewTicker = function() return { Cancel = function() end } end }
+local timers = {}
+C_Timer = { NewTicker = function(interval) assert(interval == 0.25); return { Cancel = function() end } end,
+    After = function(_, fn) timers[#timers+1] = fn end }
+local function Flush()
+    local list = timers; timers = {}; for _, fn in ipairs(list) do fn() end
+end
 hooksecurefunc = function(target, key, fn)
     local original = target[key]
     target[key] = function(...) local result = original(...); fn(...); return result end
@@ -44,8 +49,9 @@ ready = true
 AuctionHouseFrame = { CommoditiesBuyFrame={IsShown=function() return true end} }
 P.Tick()
 assert(#calls==0 and P.Status().paused, 'background scan ran inside an active purchase')
-AuctionHouseFrame = nil
+AuctionHouseFrame.CommoditiesBuyFrame.IsVisible = function() return false end
 P.Tick(); assert(calls[1] == 101)
+AuctionHouseFrame = nil
 P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', 777); assert(not P.GetPrice(101))
 C_AuctionHouse.SendBrowseQuery({})
 P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', 101)
@@ -76,3 +82,52 @@ assert(P.Status().total == 1, 'unpriced new reagent was missed')
 now = 50; P.Tick()
 assert(calls[#calls] == 103)
 print('Targeted return prices passed (catalogue, quality IDs, throttle, interruption, stale/late replies, expiry, no-listings, timeout, close).')
+
+-- Complete -> next request in the next frame, no fixed per-item wait.
+P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', 103)
+local button = {scripts={}}
+function button:SetText(text) self.text=text end
+function button:SetScript(key,fn) self.scripts[key]=fn end
+function button:HookScript(key,fn) self.scripts[key]=fn end
+Scan.LOCAL = {GetText=function(_,text) return text end}
+P.AttachScanButton(button)
+assert(button.text=='Scan reagent prices')
+local known, warm = {[101]=true, [102]=true}, {}
+C_AuctionHouse.GetItemKeyInfo = function(key)
+    warm[key.itemID]=true
+    return known[key.itemID] and {} or nil
+end
+button.scripts.OnClick()
+assert(warm[101] and warm[102] and warm[103], 'item keys were not prefetched')
+assert(button.text=='Scanning 0/3')
+Flush(); assert(calls[#calls]==101)
+amount = 350
+P.Results('COMMODITY_SEARCH_RESULTS_UPDATED',101)
+local first = #calls
+ready=false; Flush(); assert(#calls==first, 'event-driven scan ignored throttle')
+ready=true; event(nil,'AUCTION_HOUSE_THROTTLED_SYSTEM_READY'); Flush()
+assert(#calls==first+1 and calls[#calls]==102, 'ready event waited for a timer')
+P.Results('COMMODITY_SEARCH_RESULTS_UPDATED',102); Flush()
+assert(#calls==first+1, 'uncached item search was sent and would time out')
+known[103]=true; P.Tick(); assert(calls[#calls]==103)
+P.Results('COMMODITY_SEARCH_RESULTS_UPDATED',103); Flush()
+assert(not P.Status().running and button.text=='Scan reagent prices', 'button did not mirror completion')
+
+-- Manual selling owns the AH even when Blizzard's own sale panel is hidden.
+button.scripts.OnClick()
+HironCraftProfit = {ShoppingList={sell={scan={pending=true}}}}
+first=#calls; Flush(); assert(#calls==first and P.Status().paused)
+HironCraftProfit.ShoppingList.sell.scan.pending=false
+C_AuctionHouse.SendBrowseQuery({}); now=now+1; P.Tick(); assert(#calls==first)
+now=now+1.1; P.Tick(); assert(#calls==first+1, 'manual activity still imposes a 15-second delay')
+P.Results('COMMODITY_SEARCH_RESULTS_UPDATED',101)
+event(nil,'AUCTION_HOUSE_CLOSED'); Flush()
+assert(#calls==first+1 and button.text=='Scan reagent prices', 'queued work ran after AH close')
+
+-- One never-loaded item has a bounded wait and retains its last good price.
+HironCraftProfit=nil; known[101]=nil
+event(nil,'AUCTION_HOUSE_SHOW'); P.Start(true)
+now=now+4; Flush(); first=#calls
+now=now+5.1; P.Tick(); Flush()
+assert(calls[#calls]==102 and #calls==first+1 and P.GetPrice(101)==350)
+print('Fast reagent scan passed (button, prefetch, event-driven queue, throttling, manual priority, bounded cache wait, no stale callbacks).')

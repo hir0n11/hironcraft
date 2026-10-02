@@ -423,18 +423,24 @@ end
 
 -- The last lines' text by their ID, hidden ones too: the text selection
 -- tool reads a line from here when the game does not give its text back.
-local LINE_MEMORY = 200
-local lineTexts, lineOrder = {}, {}
+local LINE_MEMORY = 2000
+local lineTexts, lineOrder, lineCursor = {}, {}, 0
 
 function F.RememberLine(lineID, message)
+    if IsSecret(lineID) or IsSecret(message) then return end
+    lineID = tonumber(lineID)
+    if not lineID or lineID <= 0 or type(message) ~= 'string' or message == '' then return end
     if lineTexts[lineID] == nil then
-        lineOrder[#lineOrder + 1] = lineID
-        if #lineOrder > LINE_MEMORY then lineTexts[table.remove(lineOrder, 1)] = nil end
+        lineCursor = lineCursor % LINE_MEMORY + 1
+        local evicted = lineOrder[lineCursor]
+        if evicted then lineTexts[evicted] = nil end
+        lineOrder[lineCursor] = lineID
     end
     lineTexts[lineID] = message
 end
 
 function F.LineText(lineID)
+    if IsSecret(lineID) then return nil end
     return lineTexts[tonumber(lineID)]
 end
 
@@ -460,9 +466,9 @@ function F.MessageFilter(_, event, message, author, ...)
         if IsSecret(channelName) then channelName = nil end
         local key = LineKey(lineID)
         if key then
+            F.RememberLine(key, message)
             local known = cache[key]
             if known ~= nil then return known end
-            if type(message) == 'string' and not IsSecret(message) then F.RememberLine(key, message) end
         end
         local result = Evaluate(event, message, author, channelNumber, channelName)
         if key then Remember(key, result) end
@@ -492,7 +498,13 @@ if CreateFrame then
     watcher:RegisterEvent('PLAYER_GUILD_UPDATE')
     watcher:RegisterEvent('PLAYER_ENTERING_WORLD')
     watcher:RegisterEvent('PLAYER_LOGIN')
-    watcher:SetScript('OnEvent', function(_, event)
+    -- Independent of display-filter order, filter settings and chat tabs.
+    for _, event in ipairs(EVENTS) do watcher:RegisterEvent(event) end
+    watcher:SetScript('OnEvent', function(_, event, ...)
+        if event:match('^CHAT_MSG_') then
+            F.RememberLine(select(11, ...), (...))
+            return
+        end
         if event == 'PLAYER_LOGIN' then
             F.TakeOverAtLogin()
         elseif event == 'PLAYER_ENTERING_WORLD' then

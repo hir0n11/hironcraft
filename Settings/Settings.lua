@@ -250,7 +250,7 @@ HironCraftScan.Utils.onLoad(function()
             function() HironCraftScan.PersonalOrdersIndicator.Position() end)
         if CreateSettingsButtonInitializer then
             local initializer = CreateSettingsButtonInitializer(L('Personal order indicators'), L('Reset position'),
-                function() HironCraftScan.PersonalOrdersIndicator.Reset() end, L('Return the icons to the minimap.'))
+                function() HironCraftScan.PersonalOrdersIndicator.Reset() end, L('Return the icons to the minimap.'), true)
             layout:AddInitializer(initializer)
         end
     end

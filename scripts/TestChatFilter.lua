@@ -285,3 +285,17 @@ C_AddOns, GlobalIgnoreDB = nil, nil
 Fire('PLAYER_LOGIN')
 assert(printed[#printed]:find('no rules yet', 1, true), 'an empty filter did not say how to fill it')
 print('Chat filter passed (expressions, GIL import, rules, keys, ignore list, answers, NPC speech, online/offline, game list, invitations, take-over at login).')
+
+-- Raw-event capture is independent of the display-filter chain and its toggle.
+F.DB().enabled = false
+Fire('CHAT_MSG_CHANNEL', 'raw public line', 'Buyer', '', '', '', '', 0, 2, 'Trade', 0, 70001)
+assert(F.LineText(70001) == 'raw public line')
+for i = 1, 500 do F.RememberLine(71000+i, 'line '..i) end
+assert(F.LineText(70001) == 'raw public line', 'the old 200-line limit still loses visible lines')
+for i = 1, 2000 do F.RememberLine(80000+i, 'new '..i) end
+assert(not F.LineText(70001) and F.LineText(82000) == 'new 2000', 'line cache is not bounded')
+issecretvalue = function(value) return value == 'SECRET' end
+F.RememberLine(82001, 'SECRET'); F.RememberLine('SECRET', 'text')
+assert(not F.LineText(82001) and not F.LineText('SECRET'), 'secret chat entered the cache')
+issecretvalue = nil
+print('Chat text cache passed (independent events, disabled filter, long sessions, bounded memory, secret values).')

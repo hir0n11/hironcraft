@@ -14,6 +14,9 @@ local function Make(name)
     function f:SetScale(s) self.scale=s end
     function f:SetText(text) self.text=text end
     function f:SetTexture(icon) self.texture=icon end
+    function f:SetParent(parent) self.parent=parent end
+    function f:GetStringWidth() return #(tostring(self.text or '')) * 7 end
+    function f:GetWidth() return self.w end
     function f:SetPoint(...) self.point={...} end
     function f:CreateTexture() return Make() end
     function f:CreateFontString() return Make() end
@@ -42,12 +45,16 @@ assert(#iconRows==1 and iconRows[1].count.text==2 and iconRows[1].icon.texture==
 infos={{profession=1,professionName='Blacksmithing',numPersonalOrders=3},
     {profession=2,professionName='Tailoring',numPersonalOrders=1}}
 event(nil,'CRAFTINGORDERS_UPDATE_PERSONAL_ORDER_COUNTS')
-assert(sounds==1 and indicator.w==64)
+assert(sounds==1 and indicator.w==88)
+assert(iconRows[1].count.point[2]==iconRows[1].icon and iconRows[1].count.point[3]=='RIGHT',
+    'count still overlaps the profession icon')
+assert(indicator.parent==MinimapCluster.IndicatorFrame and indicator.layoutIndex==2,
+    'indicator did not use the stock crafting-order slot')
 event(nil,'CRAFTINGORDERS_UPDATE_PERSONAL_ORDER_COUNTS')
 assert(sounds==1,'duplicate count event sounded again')
 infos={{profession=2,professionName='Tailoring',numPersonalOrders=1}}
 event(nil,'CRAFTINGORDERS_UPDATE_PERSONAL_ORDER_COUNTS')
-assert(sounds==1 and indicator.w==30, 'fulfilled/rejected orders did not disappear')
+assert(sounds==1 and indicator.w==40, 'fulfilled/rejected orders did not disappear')
 Scan.DB.settings.personal_order_icons=false
 Scan.PersonalOrdersIndicator.Update(true)
 assert(original.shown and not indicator.shown,'stock indicator was not restored')
@@ -63,5 +70,8 @@ Scan.DB.settings.personal_order_scale=1.5
 Scan.PersonalOrdersIndicator.Position()
 assert(indicator.scale==1.5 and indicator.point[4]==123)
 Scan.PersonalOrdersIndicator.Reset()
-assert(not Scan.DB.settings.personal_order_position and indicator.point[2]==Minimap)
+assert(not Scan.DB.settings.personal_order_position and indicator.parent==MinimapCluster.IndicatorFrame)
+infos={{profession=1,professionName='Blacksmithing',numPersonalOrders=123}}
+Scan.PersonalOrdersIndicator.Update(true)
+assert(indicator.w==49, 'three-digit count was clipped or placed over the icon')
 print('Personal order indicators passed (current-character server counts, icons, zero counts, sound dedup, original hammer, position/scale).')

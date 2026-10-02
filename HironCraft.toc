@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.4.87
+## Version: 0.4.88
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -172,6 +172,7 @@ Customer\AnalyticsWindow.xml
 # Chat filter (replaces Global Ignore List)
 ChatFilter\FilterEngine.lua
 ChatFilter\ChatFilter.lua
+ChatFilter\RuleSync.lua
 ChatFilter\IgnoreList.lua
 ChatFilter\FilterWindow.lua
 

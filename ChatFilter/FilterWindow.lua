@@ -16,6 +16,7 @@ local TAB_RULES, TAB_KINDS, TAB_IGNORE, TAB_JOURNAL = 1, 2, 3, 4
 
 local frame = nil
 local selectedRule = nil
+local selectedDefinition = nil
 local selectedPlayer = nil
 
 local function F() return Scan.ChatFilter end
@@ -208,8 +209,24 @@ local HISTORY_COLUMNS = {
     { label = 'Message', fill = true, text = function(entry) return OneLine(entry.m) end },
 }
 
+local function Definition(rule)
+    return rule and {name=rule.name, key=rule.key, expr=rule.expr, whole=rule.whole == true, on=rule.on == true}
+end
+local function EditorIsStale(rule)
+    local current = Definition(rule)
+    if not current or not selectedDefinition then return false end
+    for _, key in ipairs({'name','key','expr','whole','on'}) do
+        if current[key] ~= selectedDefinition[key] then return true end
+    end
+    return false
+end
+local function WarnStaleEditor()
+    frame.Editor.Status:SetTextColor(1, 0.65, 0)
+    frame.Editor.Status:SetText(L('This rule changed on another account. Select it again before editing.'))
+end
 local function ShowRule(rule)
     selectedRule = rule and rule.id or nil
+    selectedDefinition = Definition(rule)
     local editor = frame.Editor
     editor.Name:SetText(rule and rule.name or '')
     editor.Text.EditBox:SetText(rule and (rule.expr or rule.key) or '')
@@ -233,6 +250,7 @@ end
 local function SaveRule()
     local rule = selectedRule and F().RuleByID(selectedRule)
     if not rule then return end
+    if EditorIsStale(rule) then WarnStaleEditor(); return end
     local editor = frame.Editor
     local text = editor.Text.EditBox:GetText() or ''
     if rule.expr then
@@ -592,6 +610,7 @@ function W.Refresh()
         local rule = selectedRule and F().RuleByID(selectedRule)
         frame.Rules:SetRows(F().Rules())
         frame.Editor.Empty:SetShown(rule == nil)
+        if EditorIsStale(rule) then WarnStaleEditor() end
         if not rule then
             for _, element in ipairs(frame.Editor.Elements) do element:Hide() end
             frame.Editor.Whole:Hide()

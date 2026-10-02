@@ -952,3 +952,6 @@ L["Temporarily replaces"] = "На время наведения заменяет
 L["Press a key combination, then Save. Escape cancels."] = "Нажмите сочетание клавиш, затем «Сохранить». Escape — отмена."
 L["Assign hotkey"] = "Назначить клавишу"
 L["Remove hotkey"] = "Убрать клавишу"
+L["Scan reagent prices"] = "Скан цен реагентов"
+L["This rule changed on another account. Select it again before editing."] = "Правило изменено на другом аккаунте. Выберите его заново перед редактированием."
+L["Chat text is temporarily restricted by the game. Try again after leaving combat or the instance."] = "Игра временно ограничила доступ к тексту чата. Попробуйте после выхода из боя или подземелья."

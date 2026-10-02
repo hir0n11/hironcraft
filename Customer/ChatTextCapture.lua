@@ -477,14 +477,49 @@ function Capture.Show(text)
     return true
 end
 
-function Capture.ShowForLine(lineID)
+local function PublicText(value)
+    if issecretvalue and issecretvalue(value) then return nil end
+    if type(value) == 'string' and value ~= '' then return value end
+end
+
+-- Chat lines can outlive the engine's GetChatLineText cache. Read only the
+-- exact line ID in an ordinary chat frame; never guess by author or content.
+function Capture.VisibleLine(lineID)
+    local frames, seen = {}, {}
+    for _, name in ipairs(CHAT_FRAMES or {}) do
+        local frame = rawget(_G, name)
+        if frame and not seen[frame] then frames[#frames+1] = frame; seen[frame] = true end
+    end
+    local default = rawget(_G, 'DEFAULT_CHAT_FRAME')
+    if default and not seen[default] then frames[#frames+1] = default end
+    for _, frame in ipairs(frames) do
+        if frame.GetNumMessages and frame.GetMessageInfo then
+            local ok, count = pcall(frame.GetNumMessages, frame)
+            if ok and not (issecretvalue and issecretvalue(count)) and type(count) == 'number' then
+                for index = count, math.max(1, count - 4999), -1 do
+                    local read, text, _, _, _, _, _, id = pcall(frame.GetMessageInfo, frame, index)
+                    if read and not (issecretvalue and issecretvalue(id)) and id == lineID then
+                        return PublicText(text)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function Capture.ShowForLine(lineID, snapshot)
     if issecretvalue and issecretvalue(lineID) then return false end
     if type(lineID) == 'string' then
         lineID = lineID:match('^%d+$') and tonumber(lineID) or nil
     end
     if type(lineID) ~= 'number' or lineID <= 0 then return false end
-    local text
-    if C_ChatInfo and C_ChatInfo.GetChatLineText then
+    if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown() then
+        local chat = rawget(_G, 'DEFAULT_CHAT_FRAME')
+        if chat then chat:AddMessage('|cffffd200HironCraft:|r ' .. L('Chat text is temporarily restricted by the game. Try again after leaving combat or the instance.')) end
+        return false
+    end
+    local text = PublicText(snapshot)
+    if not text and C_ChatInfo and C_ChatInfo.GetChatLineText then
         local ok, value = pcall(C_ChatInfo.GetChatLineText, lineID)
         if ok and not (issecretvalue and issecretvalue(value)) and type(value) == 'string' and value ~= '' then
             text = value
@@ -493,7 +528,8 @@ function Capture.ShowForLine(lineID)
     -- The game does not always give a line's text back; the chat filter
     -- keeps the last lines it saw.
     local filter = HironCraftScan.ChatFilter
-    if not text and filter and filter.LineText then text = filter.LineText(lineID) end
+    if not text and filter and filter.LineText then text = PublicText(filter.LineText(lineID)) end
+    if not text then text = Capture.VisibleLine(lineID) end
     if not text then
         local chat = rawget(_G, 'DEFAULT_CHAT_FRAME')
         if chat then chat:AddMessage('|cffffd200HironCraft:|r ' .. L('The game did not give the text of this line.')) end

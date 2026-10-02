@@ -1,3 +1,4 @@
+local _, Scan = ...
 local PT = HironCraftProfit
 if not PT then return end
 
@@ -3391,6 +3392,15 @@ function S:CreateWindow()
     end
     end
 
+    if Scan and Scan.ReturnPrices then
+        f.reagentPriceScanButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.reagentPriceScanButton:SetSize(164, SIDEBAR_TAB_H)
+        f.reagentPriceScanButton:SetPoint("RIGHT", f.priceScanButton, "LEFT", -8, 0)
+        f.reagentPriceScanButton:SetFrameLevel(f.priceScanButton:GetFrameLevel())
+        StyleClassicTextButton(f.reagentPriceScanButton)
+        Scan.ReturnPrices.AttachScanButton(f.reagentPriceScanButton)
+    end
+
     if IsFantasy() then
         f.sellExclusionsBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         f.sellExclusionsBtn:SetSize(120, 22)
@@ -4213,6 +4223,7 @@ function S:CreateWindow()
     }) do
         StyleClassicTextButton(button)
     end
+    if f.reagentPriceScanButton then StyleClassicTextButton(f.reagentPriceScanButton) end
     for _, tab in ipairs({ f.buyTab, f.sellTab, f.cancelTab, f.listsTab, f.historyTab }) do
         CenterButtonText(tab, 11, { 1, 0.82, 0.20, 1 })
     end

@@ -159,6 +159,17 @@ frame.Editor.Whole:SetChecked(true)
 frame.Editor.Name.scripts.OnEnterPressed(frame.Editor.Name)
 assert(F.Rules()[before + 1].key == 'Gamer-Choice.net' and F.Rules()[before + 1].whole, 'a key was not saved')
 
+-- Incoming sync must not be silently overwritten by an already-open editor.
+frame.Editor.Name:SetText('unsaved local edit')
+F.Rules()[before + 1].name='Remote name'; F.Changed()
+frame.Editor.Name.scripts.OnEnterPressed(frame.Editor.Name)
+assert(F.Rules()[before + 1].name=='Remote name' and frame.Editor.Name:GetText()=='unsaved local edit')
+assert(frame.Editor.Status:GetText():find('another account',1,true))
+row=frame.Rules.scrollBox.inited[before+1]; row.scripts.OnClick(row,'LeftButton')
+assert(frame.Editor.Name:GetText()=='Remote name')
+frame.Editor.Name:SetText('reviewed edit'); frame.Editor.Name.scripts.OnEnterPressed(frame.Editor.Name)
+assert(F.Rules()[before + 1].name=='reviewed edit')
+
 -- The ignore list tab: add and remove.
 frame.Tabs[3].scripts.OnClick(frame.Tabs[3])
 assert(#frame.Players.scrollBox.inited == 1, 'the ignore list is not listed')

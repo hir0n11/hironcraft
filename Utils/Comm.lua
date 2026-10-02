@@ -69,6 +69,7 @@ HironCraftScanComm.Operations = {
     ShareCustomGreeting = 'share_custom_greeting',
     ShareCustomExplanations = 'share_custom_explanations',
     ShareQuickReplies = 'share_quick_replies',
+    ShareChatFilterRules = 'share_filter_rules',
     ShareOrderStatus = 'share_order_status',
     OrderStatusAck = 'order_status_ack',
     OrderStatusRepair = 'order_status_repair',
@@ -434,6 +435,7 @@ local function ShareCharacterData_(state, target)
         greeting_revision = GreetingRevision(),
         explanations_revision = ExplanationsRevision(),
         quick_replies_revision = QuickRepliesRevision(),
+        filter_revisions = HironCraftScan.ChatFilterSync and HironCraftScan.ChatFilterSync.Revisions(),
         order_statuses = orderStatuses,
         order_completions = orderCompletions,
         order_outcomes = orderOutcomes,
@@ -673,6 +675,9 @@ local function ReceiveShareCharacterData(sender, data, senderID)
                 explanationsResponse,
                 quickRepliesResponse
             )
+        end
+        if HironCraftScan.ChatFilterSync and type(data.filter_revisions) == 'table' then
+            HironCraftScanComm:ShareChatFilterRules(HironCraftScan.ChatFilterSync.Delta(data.filter_revisions), sender)
         end
     end
 end
@@ -1021,6 +1026,19 @@ end
 
 local function ReceiveShareQuickReplies(sender, data, senderID)
     ReceiveShareQuickReplies_(data)
+end
+
+function HironCraftScanComm:ShareChatFilterRules(records, target)
+    if type(records) ~= 'table' or #records == 0 or not LinkedAccountsConfigured()
+        or (not target and not HaveTarget()) then return end
+    -- Small BULK batches cannot hold up the urgent order-status channel.
+    for first = 1, #records, 40 do
+        local batch = {}
+        for index = first, math.min(first + 39, #records) do batch[#batch+1] = records[index] end
+        local data = { version=1, rules=batch }
+        if target then self:Transmit(data, self.Operations.ShareChatFilterRules, target)
+        else TransmitToFullLinkedAccounts(data, self.Operations.ShareChatFilterRules) end
+    end
 end
 
 -- Queue delivery of a locally changed status or completion notice. Nothing is
@@ -2197,6 +2215,7 @@ local ALERT_OPERATIONS = {
 }
 
 local BULK_OPERATIONS = {
+    [HironCraftScanComm.Operations.ShareChatFilterRules] = true,
     [HironCraftScanComm.Operations.ShareCharacterData] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletionRepair] = true,
     [HironCraftScanComm.Operations.AnalyticsOffer] = true,
@@ -2559,6 +2578,9 @@ local function ReceiveDeserialized(msg, sender)
             ReceiveShareCustomExplanations(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareQuickReplies then
             ReceiveShareQuickReplies(sender, msg.data, msg.senderID)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareChatFilterRules
+            and HironCraftScan.ChatFilterSync and type(msg.data) == 'table' and msg.data.version == 1 then
+            HironCraftScan.ChatFilterSync.Merge(msg.data.rules)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderStatus then
             ReceiveShareOrderStatus(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderStatusAck then

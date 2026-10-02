@@ -1,10 +1,11 @@
 -- Low-priority, exact-item price queries for the resourcefulness catalogue.
 -- Historical AnalyticsLog events are never repriced.
 local _, Scan = ...
-local P = { freshFor = 900, retryAfter = 300, pauseFor = 15 }
+local P = { freshFor = 900, retryAfter = 300, pauseFor = 2 }
 Scan.ReturnPrices = P
 local listeners, queue, pending, sending = {}, {}, nil, false
 local open, pausedUntil, nextSend, total, finished = false, 0, 0, 0, 0
+local tickQueued, loadingSince = false, nil
 local function Now() return GetTime() end
 local function DB()
     HironCraftProfit_PriceDB = HironCraftProfit_PriceDB or {}
@@ -33,14 +34,56 @@ function P.OnChange(fn) listeners[#listeners + 1] = fn end
 local function Changed()
     for _, fn in ipairs(listeners) do pcall(fn) end
 end
+local function ScheduleTick()
+    if tickQueued or not open then return end
+    tickQueued = true
+    C_Timer.After(0, function()
+        tickQueued = false
+        P.Tick()
+    end)
+end
+function P.AttachScanButton(button)
+    local function L(text) return Scan.LOCAL:GetText(text) end
+    local function Update()
+        local status = P.Status()
+        local label = status.indexing and L('Reading reagent history') or L('Scan reagent prices')
+        if status.running then
+            label = string.format('%s %d/%d', L(status.paused and 'Paused' or 'Scanning'), status.finished, status.total)
+        end
+        button:SetText(label)
+    end
+    button:SetScript('OnClick', function()
+        if P.Status().open then P.Start(true)
+        else print('HironCraft: ' .. L('Open the auction house to update reagent prices.')) end
+    end)
+    button:SetScript('OnEnter', function(self)
+        GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+        GameTooltip:SetText(L('Scan reagent prices'))
+        GameTooltip:AddLine(L('Scans only reagents recorded in resource returns, across all dates and professions. Historical values do not change. Manual auction activity pauses the scan.'), 1, 1, 1, true)
+        local status = P.Status()
+        GameTooltip:AddLine(L('Reagents') .. ': ' .. status.catalog)
+        GameTooltip:AddLine(status.at and (L('Prices updated') .. ': ' .. date('%d.%m %H:%M', status.at)) or L('Prices not scanned yet'))
+        GameTooltip:Show()
+    end)
+    button:SetScript('OnLeave', function() GameTooltip:Hide() end)
+    button:HookScript('OnShow', Update)
+    P.OnChange(Update)
+    Update()
+end
 local function UserBusy()
     local shop = HironCraftProfit and HironCraftProfit.ShoppingList
     if shop and ((shop.scanAllState and shop.scanAllState.active) or shop.pendingSearchCommodityRow
-        or next(shop.pendingSearchItemPurchases or {})) then return true end
+        or next(shop.pendingSearchItemPurchases or {}) or shop._pendingSellScan
+        or (shop.sell and (shop.sell.pendingBuy or shop.sell.awaitingPost
+            or (shop.sell.scan and shop.sell.scan.pending)))) then return true end
     local ah = AuctionHouseFrame
     for _, key in ipairs({ 'CommoditiesBuyFrame', 'ItemBuyFrame', 'ItemSellFrame',
         'CommoditiesSellFrame', 'BuyDialog' }) do
-        if ah and ah[key] and ah[key]:IsShown() then return true end
+        local pane = ah and ah[key]
+        -- A child can remain "shown" underneath a hidden Blizzard tab while
+        -- HironCraft/Auctionator is visible. Only an actually visible pane owns it.
+        if pane and ((pane.IsVisible and pane:IsVisible())
+            or (not pane.IsVisible and pane:IsShown())) then return true end
     end
     return false
 end
@@ -56,7 +99,7 @@ function P.Suspend()
     if sending or not open then return end
     pausedUntil = Now() + P.pauseFor
     -- Keep this item queued, but discard the interrupted query's reply.
-    pending = nil
+    pending, loadingSince = nil, nil
     Changed()
 end
 local function Complete(price)
@@ -71,11 +114,12 @@ local function Complete(price)
         db.lastSuccess = time()
     end
     -- Empty results/timeouts deliberately retain the last successful price.
-    pending = nil
+    pending, loadingSince = nil, nil
     table.remove(queue, 1)
     finished = finished + 1
-    nextSend = Now() + 1
+    nextSend = Now()
     Changed()
+    ScheduleTick()
 end
 function P.Start(force)
     if not open then Changed(); return false end
@@ -90,9 +134,15 @@ function P.Start(force)
         if force or (stale and retry) then queue[#queue + 1] = id end
     end
     table.sort(queue)
+    -- Warm item-key data up front: the AH can silently ignore a search for
+    -- an uncached key, otherwise costing the whole result timeout per item.
+    if C_AuctionHouse and C_AuctionHouse.GetItemKeyInfo then
+        for _, id in ipairs(queue) do C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(id)) end
+    end
     total, finished = #queue, 0
-    nextSend = math.max(nextSend, Now() + 1)
+    loadingSince = nil
     Changed()
+    ScheduleTick()
     return true
 end
 function P.Tick()
@@ -112,6 +162,14 @@ function P.Tick()
     if not api or not api.SendSearchQuery or not api.IsThrottledMessageSystemReady() then return end
     local id = queue[1]
     local key = api.MakeItemKey(id)
+    if api.GetItemKeyInfo and not api.GetItemKeyInfo(key) then
+        loadingSince = loadingSince or Now()
+        if Now() - loadingSince < 5 then return end
+        pending = { id=id }
+        Complete(nil) -- don't stall the whole catalogue on one missing key
+        return
+    end
+    loadingSince = nil
     pending = { id = id, key = key, at = Now() }
     local sorts = {}
     if Enum and Enum.AuctionHouseSortOrder then
@@ -166,6 +224,7 @@ function P.IndexHistory()
 end
 local events = CreateFrame('Frame')
 for _, event in ipairs({ 'AUCTION_HOUSE_SHOW', 'AUCTION_HOUSE_CLOSED',
+    'AUCTION_HOUSE_THROTTLED_SYSTEM_READY',
     'COMMODITY_SEARCH_RESULTS_UPDATED', 'ITEM_SEARCH_RESULTS_UPDATED', 'PLAYER_LOGIN' }) do events:RegisterEvent(event) end
 events:SetScript('OnEvent', function(_, event, item)
     if event == 'PLAYER_LOGIN' then
@@ -174,11 +233,13 @@ events:SetScript('OnEvent', function(_, event, item)
         open, pausedUntil, nextSend = true, Now() + 3, Now() + 3
         P.IndexHistory()
         P.Start(false)
-        if not P.timer then P.timer = C_Timer.NewTicker(1, P.Tick) end
+        if not P.timer then P.timer = C_Timer.NewTicker(0.25, P.Tick) end
     elseif event == 'AUCTION_HOUSE_CLOSED' then
-        open, pending, queue = false, nil, {}
+        open, pending, queue, loadingSince = false, nil, {}, nil
         if P.timer then P.timer:Cancel(); P.timer = nil end
         Changed()
+    elseif event == 'AUCTION_HOUSE_THROTTLED_SYSTEM_READY' then
+        ScheduleTick()
     else P.Results(event, item) end
 end)
 -- These are observers, never automated purchases, sales, bids or cancellations.

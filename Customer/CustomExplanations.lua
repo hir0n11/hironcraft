@@ -640,8 +640,10 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 and HironCraftScan.ChatTextCapture
             then
                 subMenu:CreateDivider()
+                local filter = HironCraftScan.ChatFilter
+                local snapshot = filter and filter.LineText and filter.LineText(lineID)
                 subMenu:CreateButton(prefix .. L('Save chat text'), function()
-                    HironCraftScan.ChatTextCapture.ShowForLine(lineID)
+                    HironCraftScan.ChatTextCapture.ShowForLine(lineID, snapshot)
                 end)
             end
         end

@@ -258,6 +258,36 @@ assert(save, 'save-chat-text action missing')
 save.click()
 assert(chatReads == 2 and shown == 2, 'clicked action did not open the source message')
 
+-- Snapshot stays valid if the engine/local history rolls over with the menu open.
+buttons = {}
+Scan.ChatFilter = {LineText=function() return 'saved while opening' end}
+menus.MENU_UNIT_FRIEND(nil, root, {chatTarget='Buyer-Realm', lineID='44'})
+assert(chatReads == 2, 'menu opening queried the engine')
+Scan.ChatFilter = nil
+local captured
+Capture.Show = function(text) captured = text; return true end
+for _, button in ipairs(buttons) do
+    if button.label == 'HironCraftScan - Save chat text' then button.click() end
+end
+assert(captured == 'saved while opening' and chatReads == 2, 'menu lost its public snapshot')
+
+-- Broken/expired API cache recovers by exact chat-frame ID, never by author.
+C_ChatInfo = {GetChatLineText=function() error('unavailable') end}
+CHAT_FRAMES = {'TestChatFrame'}
+TestChatFrame = {GetNumMessages=function() return 2 end,
+    GetMessageInfo=function(_,i)
+        return i == 1 and 'visible original line' or 'different line', 1, 1, 1, 'SAY', 555, i == 1 and 44 or 45
+    end}
+assert(Capture.ShowForLine(44) and captured == 'visible original line')
+assert(not Capture.ShowForLine(46), 'used a different line when ID was absent')
+issecretvalue = function(value) return value == 'visible original line' end
+assert(not Capture.ShowForLine(44), 'copied secret frame text')
+issecretvalue = nil
+C_ChatInfo.InChatMessagingLockdown = function() return true end
+captured = nil
+assert(not Capture.ShowForLine(44, 'public snapshot') and not captured, 'ignored chat lockdown')
+C_ChatInfo, Capture.Show, CHAT_FRAMES, TestChatFrame = countingChat, countingShow, nil, nil
+
 -- Diamond is cleared by the existing unmark-generous action, without a
 -- send, an extra manual-gold assignment or a new automatic action on hover.
 time=function() return 1000 end

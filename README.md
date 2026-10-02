@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Chat tools, linked filters and faster reagent prices (0.4.88)
+
+- Save chat text keeps a bounded 2,000-line public-text cache independently of
+  display filters. Open menus retain a snapshot; expired API entries can fall
+  back to the exact line ID in chat history. Secret text and chat lockdown are
+  still respected; there is no approximate author/text matching.
+- Personal-order profession icons occupy the stock minimap indicator slot.
+  Counts sit outside each icon and accommodate multiple digits. Manual dragging,
+  scaling and reset remain available; disabling restores the stock hammer.
+- Chat-filter rule definitions, names, enabled/whole-word flags and deletions
+  sync across fully linked accounts. Initial libraries merge; per-rule revisions
+  and persistent deletion records reconcile offline changes on reconnect.
+  Concurrent changes converge deterministically. Logs, hit counts, ignore lists
+  and general filter switches stay local. Bulk batches do not use the urgent
+  order-status channel. Update all linked clients to use this feature.
+  An editor opened before a remote change requires reselecting the updated rule
+  before saving, preventing stale form values from silently undoing the change.
+- The auction footer has a separate Scan reagent prices button beside the full
+  price scan, using the same targeted catalogue/progress as Returns analytics.
+  Cached-key preloading avoids silently ignored searches. Requests advance on
+  results/server-ready events, without a fixed second per reagent; only one
+  search is outstanding. Manual activity yields for two seconds and waits for
+  active purchases/sales. The server's throttling, timeouts and old prices on
+  missing results are preserved. Historical return values are not repriced.
+- Fix Settings initialization: the indicator-reset button now supplies the
+  required Blizzard search-tag argument instead of causing an assertion.
+
 ## Order tools, notifications and targeted prices (0.4.87)
 
 - Public/Personal/Patron lists now use the page's own answered orders, scoped
