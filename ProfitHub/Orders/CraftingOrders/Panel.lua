@@ -1804,6 +1804,13 @@ function CO:UpdateTabActionButton(pageFrame)
         panel.shopButton:ClearAllPoints()
         panel.shopButton:SetPoint("RIGHT", isPatron and panel.knowledgeButton or panel.collapseButton, "LEFT", -8, 0)
     end
+    local remaining = pageFrame and pageFrame.BrowseFrame and pageFrame.BrowseFrame.OrdersRemainingDisplay
+    if remaining and panel.shopButton then
+        -- One horizontal chain, not independent absolute positions which
+        -- overlap when the sidebar is collapsed or the UI is scaled.
+        remaining:ClearAllPoints()
+        remaining:SetPoint("RIGHT", panel.shopButton, "LEFT", -12, 0)
+    end
     if panel.selectAllOrdersButton then panel.selectAllOrdersButton:SetShown((not isPatron) and true or false) end
 
     -- Close the vacated sidebar rows; other tabs still retain Select all.

@@ -25,6 +25,40 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order tools, notifications and targeted prices (0.4.87)
+
+- Public/Personal/Patron lists now use the page's own answered orders, scoped
+  to tab, profession and expansion, instead of the shared last-result cache.
+  Switching scope immediately hides old rows and cancels the previous callback.
+  Same-list refreshes keep the existing anti-flicker behaviour and selections.
+  Public's remaining-order count sits beside Shopping; knowledge is Patron-only.
+- Right-click the floating scanner portrait to open Analytics.
+- Personal-order icons beside the minimap show the current character's actual
+  server counts by profession. Shift-drag to move; Settings offers scale, reset
+  and the option to restore the standard hammer. Counts are not guessed for alts.
+- Settings now contains built-in Blizzard sounds with previews for whispers,
+  scanner alerts and new personal orders. Whisper alerts include Battle.net.
+  Alerts can temporarily enable muted/background audio and restore its previous
+  state, including overlapping alerts. Master volume is not changed.
+  Disable the separate WhisperAlert addon to use the integrated whisper sound:
+  HironCraft deliberately yields when that addon is loaded to avoid duplicates.
+  No external addon is deleted or disabled. SharedMedia sounds remain optional.
+- Opening the auction house refreshes missing or 15-minute-old prices only for
+  unique exact-quality reagents in the complete resource-return history,
+  including linked history and unpriced returns. The Returns tab has a manual
+  refresh button and progress/time. The scan yields to manual queries for
+  15 seconds and waits while a purchase/sale or shopping scan is active.
+  Server throttles, timeouts and closing the auction house are respected.
+  Missing listings retain the last successful price; they never write zero.
+  New returns freeze the latest successful HironCraft scan price. If none
+  exists they remain unpriced. Historical values are never recalculated.
+- Custom Explanations > message > Assign hotkey captures a combination such
+  as Shift+1, shows any overridden action and requires Save. The key works
+  only on the customer row under the cursor (including its child cells).
+  Tags use that exact row, not another order or the last whisper. No sends
+  while typing or in combat, no send on hover; repeated same messages have
+  a six-second cooldown. Rename preserves the key; delete/removal releases it.
+
 ## Preserve the customer before declining an order (0.4.86)
 
 - Capture an owned copy of customer/recipe identity when an order row is

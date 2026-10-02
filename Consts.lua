@@ -169,7 +169,14 @@ HironCraftScan.CONST.TEXT = {
 }
 
 HironCraftScan.CONST.DEFAULT_SETTINGS = {
-    ping_sound = '12867',
+    ping_sound = 'kit:TELL_MESSAGE',
+    whisper_alert_enabled = true,
+    whisper_alert_sound = 'kit:TELL_MESSAGE',
+    personal_order_sound_enabled = true,
+    personal_order_sound = 'kit:AUCTION_WINDOW_CLOSE',
+    alert_sound_when_muted = true,
+    personal_order_icons = true,
+    personal_order_scale = 1,
     banner_direction = HironCraftScan.CONST.RIGHT,
     customer_timeout = 10,
     banner_timeout = 20,

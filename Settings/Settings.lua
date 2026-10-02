@@ -200,20 +200,7 @@ HironCraftScan.Utils.onLoad(function()
 
     do
         local function GetOptions()
-            local container = Settings.CreateControlTextContainer()
-            local LSM = LibStub('LibSharedMedia-3.0', true)
-
-            if LSM then
-                local allSounds = LSM:List('sound')
-                for _, soundName in ipairs(allSounds) do
-                    local path = LSM:Fetch('sound', soundName)
-                    container:Add(tostring(path), soundName)
-                end
-            else
-                container:Add('12867', 'Default: Auction Ding')
-            end
-
-            return container:GetData()
+            return HironCraftScan.Notifications.GetOptions()
         end
 
         CreateDropdown(
@@ -224,9 +211,48 @@ HironCraftScan.Utils.onLoad(function()
             GetOptions,
             L(LID.PING_SOUND_TOOLTIP),
             function(path)
-                PlaySoundFile(path, 'Master')
+                HironCraftScan.Notifications.Play(path, true)
             end
         )
+    end
+    do
+        local function Checkbox(key, name, tip, default, changed)
+            local setting = Settings.RegisterProxySetting(category, 'HIRONCRAFT_SCAN_' .. key:upper(),
+                Settings.VarType.Boolean, L(name), default,
+                function()
+                    local value = HironCraftScan.DB.settings[key]
+                    if value == nil then return default end
+                    return value
+                end,
+                function(value)
+                    HironCraftScan.DB.settings[key] = value
+                    if changed then changed() end
+                end)
+            Settings.CreateCheckbox(category, setting, L(tip))
+        end
+        Checkbox('whisper_alert_enabled', 'Whisper alerts', 'Sound for every incoming whisper, including Battle.net. Disable the separate WhisperAlert addon to avoid duplicate alerts.', true)
+        Checkbox('alert_sound_when_muted', 'Alerts when sound is muted', 'Temporarily enable sound and background audio for alerts, then restore your settings. Master volume is not changed.', true)
+        Checkbox('personal_order_sound_enabled', 'New personal order sound', 'Play a sound when the current character receives a new personal order.', true)
+        for _, entry in ipairs({
+            { 'whisper_alert_sound', 'Whisper sound' },
+            { 'personal_order_sound', 'Personal order sound' },
+        }) do
+            CreateDropdown(category, 'HIRONCRAFT_SCAN_' .. entry[1]:upper(), entry[1], L(entry[2]),
+                HironCraftScan.Notifications.GetOptions, L('Select a sound to preview it.'),
+                function(value) HironCraftScan.Notifications.Play(value, true) end)
+        end
+        Checkbox('personal_order_icons', 'Personal order profession icons',
+            'Replace the minimap hammer with counts for the current character only. Disable to restore the standard indicator.', true,
+            function() HironCraftScan.PersonalOrdersIndicator.Update(true) end)
+        local options = Settings.CreateSliderOptions(0.6, 2, 0.1)
+        CreateSlider(category, 'HIRONCRAFT_SCAN_ORDER_ICON_SCALE', 'personal_order_scale',
+            L('Personal order icon scale'), options, L('Shift-drag the icons to move them.'),
+            function() HironCraftScan.PersonalOrdersIndicator.Position() end)
+        if CreateSettingsButtonInitializer then
+            local initializer = CreateSettingsButtonInitializer(L('Personal order indicators'), L('Reset position'),
+                function() HironCraftScan.PersonalOrdersIndicator.Reset() end, L('Return the icons to the minimap.'))
+            layout:AddInitializer(initializer)
+        end
     end
     do
         local function GetOptions()

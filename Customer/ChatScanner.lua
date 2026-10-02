@@ -1734,7 +1734,8 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
             end
         end
         if soundAlert and not (overrides and overrides.suppressBatchAlert) then
-            PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master')
+            if HironCraftScan.Notifications then HironCraftScan.Notifications.Alert('scanner')
+            else PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master') end
         end
         HironCraftScanCraftingOrderPage:ShowGeneric()
     end
@@ -2085,7 +2086,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
 
         if ppConfig.sound_alert_enabled and not isAlertFiltered
             and not (overrides and overrides.suppressBatchAlert) then
-            PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master')
+                if HironCraftScan.Notifications then HironCraftScan.Notifications.Alert('scanner')
+                else PlaySoundFile(HironCraftScan.Utils.GetSetting('ping_sound'), 'Master') end
         end
 
         if not (overrides and overrides.deferItemBatch) then

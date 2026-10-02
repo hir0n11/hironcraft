@@ -189,6 +189,11 @@ assert(#Scan.CustomExplanations:GetPendingResponses('Buyer')==0)
 assert(#Scan.CustomExplanations:GetPendingResponses('Buyer',true)==1)
 local rendered=Scan.CustomExplanations:Render('Order declined: {reagent_issues}','Buyer')
 assert(rendered and rendered:find("you're missing 5 Alloy",1,true),'paste chose fulfilled context instead of declined item')
+local pinned = Scan.CustomExplanations:Render('Order declined: {reagent_issues}', 'Buyer',
+    { customerName='Buyer', responseID=1 })
+assert(pinned == rendered, 'hovered order did not retain its audit context')
+assert(not Scan.CustomExplanations:Render('{reagent_issues}', 'Other',
+    { customerName='Buyer', responseID=1 }), 'hovered context crossed customers')
 statuses[1].status='fulfilled'
 assert(not Scan.CustomExplanations:Render('{reagent_issues}','Buyer'),'paste revived an obsolete rejection')
 print('Reagent custom paste context tests passed.')

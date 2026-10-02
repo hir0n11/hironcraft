@@ -753,6 +753,12 @@ function CL:RowsSignature(container)
 end
 
 function CL:GetOrders(pageFrame)
+    if pageFrame and pageFrame.ahuiScopedOrders then
+        local state = pageFrame.ahuiScopedOrders
+        if state.scope ~= self:ScopeKey(pageFrame) then return {} end
+        if pageFrame.ahuiCustomList and pageFrame.ahuiCustomList._freshSearchPending then return {} end
+        return state.orders
+    end
     if C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
         local ok, apiOrders = pcall(C_CraftingOrders.GetCrafterOrders)
         if ok and type(apiOrders) == "table" then
@@ -1635,6 +1641,50 @@ local function ListScopeKey(pageFrame)
     }, ":")
 end
 
+function CL:ScopeKey(pageFrame) return ListScopeKey(pageFrame) end
+
+local UnregisterRow
+function CL:ClearScope(pageFrame)
+    pageFrame.ahuiScopedOrders = { scope = ListScopeKey(pageFrame), orders = {} }
+    if pageFrame.requestCallback then
+        pageFrame.requestCallback:Cancel()
+        pageFrame.requestCallback = nil
+    end
+    local container = pageFrame.ahuiCustomList
+    if not container then return end
+    container._lastGoodOrders, container._lastGoodType, container._lastGoodScope = nil, nil, nil
+    container._actionOrders, container._actionHoldUntil = nil, nil
+    container._allowEmptyOnce = true
+    container._freshSearchPending = nil
+    for _, row in ipairs(container.rows or {}) do UnregisterRow(row); row:Hide() end
+end
+
+function CL:AcceptScopeAnswer(pageFrame, orders, offset)
+    local scope = ListScopeKey(pageFrame)
+    if pageFrame.ahuiRequestedScope and pageFrame.ahuiRequestedScope ~= scope then return end
+    local request = pageFrame.lastRequest
+    local profession = pageFrame.professionInfo and pageFrame.professionInfo.profession
+    if request and (request.orderType ~= pageFrame.orderType or request.profession ~= profession) then return end
+    local state = pageFrame.ahuiScopedOrders
+    if not state or state.scope ~= scope or not offset or offset == 0 then
+        state = { scope = scope, orders = {} }
+        pageFrame.ahuiScopedOrders = state
+    end
+    local seen = {}
+    for _, order in ipairs(state.orders) do seen[order.orderID] = true end
+    for _, order in ipairs(orders or {}) do
+        -- Public bucket summaries are NOT orders. Keep them in Blizzard's
+        -- recipe list; never fall back to GetCrafterOrders from another tab.
+        if order.orderID and not seen[order.orderID]
+            and (order.orderType == nil or order.orderType == pageFrame.orderType) then
+            local copy = {}
+            for key, value in pairs(order) do copy[key] = value end
+            state.orders[#state.orders + 1] = copy
+            seen[order.orderID] = true
+        end
+    end
+end
+
 local function CopyOrderList(orders)
     local copy = {}
     for index, order in ipairs(orders or {}) do copy[index] = order end
@@ -1704,7 +1754,7 @@ function CL:StabilizeOrdersDuringAction(container, orders)
     return merged
 end
 
-local function UnregisterRow(row)
+UnregisterRow = function(row)
     if not row then return end
     local action = row.action
     if action and CO.visibleRowButtons then CO.visibleRowButtons[action] = nil end
@@ -2093,7 +2143,53 @@ local function AttachHooks()
         end
     end
 
-    hooksecurefunc(ProfessionsCraftingOrderPageMixin, "ShowGeneric", HookAfter)
+    local function InstallScopeHooks(target)
+        if not target or target.ahuiScopedHooks then return end
+        target.ahuiScopedHooks = true
+        if target.SendOrderRequest then
+            local send = target.SendOrderRequest
+            target.SendOrderRequest = function(pageFrame, request, ...)
+                pageFrame.ahuiRequestedScope = ListScopeKey(pageFrame)
+                return send(pageFrame, request, ...)
+            end
+        end
+        if target.OrderRequestCallback then
+            local callback = target.OrderRequestCallback
+            target.OrderRequestCallback = function(pageFrame, ...)
+                if CO:IsEnabled() and pageFrame.ahuiRequestedScope
+                    and pageFrame.ahuiRequestedScope ~= ListScopeKey(pageFrame) then return end
+                return callback(pageFrame, ...)
+            end
+        end
+        hooksecurefunc(target, "ShowGeneric", function(pageFrame, orders, _, offset)
+            if not CO:IsEnabled() then return end
+            CL:AcceptScopeAnswer(pageFrame, orders, offset)
+            HookAfter(pageFrame)
+        end)
+        if target.SetCraftingOrderType then
+            hooksecurefunc(target, "SetCraftingOrderType", function(pageFrame)
+                if not CO:IsEnabled() then return end
+                local state = pageFrame.ahuiScopedOrders
+                if not state or state.scope ~= ListScopeKey(pageFrame) then CL:ClearScope(pageFrame) end
+                if CO.UpdateTabActionButton then CO:UpdateTabActionButton(pageFrame) end
+                QueueRefresh()
+            end)
+        end
+        if target.Init then
+            -- Invalidate before Blizzard's Init starts a search for a new
+            -- profession. Cancelling afterward would cancel that NEW request.
+            local original = target.Init
+            target.Init = function(pageFrame, info, ...)
+                local previous = pageFrame.professionInfo
+                if CO:IsEnabled() and (not previous or not info or previous.professionID ~= info.professionID) then
+                    CL:ClearScope(pageFrame)
+                end
+                return original(pageFrame, info, ...)
+            end
+        end
+    end
+    InstallScopeHooks(ProfessionsCraftingOrderPageMixin)
+    InstallScopeHooks(ProfessionsFrame and ProfessionsFrame.OrdersPage)
 
     -- Switching to a tab that sends no request (Public without favourites,
     -- an empty Guild tab) never reaches ShowGeneric or a data-provider change,
@@ -2139,6 +2235,7 @@ local function AttachHooks()
             if CO.ClearTemporaryBinding then CO:ClearTemporaryBinding() end
             CL._pollStamp = (CL._pollStamp or 0) + 1
             local pf = ProfessionsFrame.OrdersPage
+            if pf then pf.ahuiScopedOrders = { scope=ListScopeKey(pf), orders={} } end
             if pf and pf.ahuiCustomList then
                 pf.ahuiCustomList._lastOrderCount = 0
                 pf.ahuiCustomList._lastGoodOrders = nil

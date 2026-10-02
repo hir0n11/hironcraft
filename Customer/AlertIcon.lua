@@ -38,6 +38,7 @@ end
 function HironCraftScanPageButtonMixin:OnEnter()
     GameTooltip:SetOwner(self, "ANCHOR_TOP");
     GameTooltip:SetText(HironCraftScan.Utils.PopulateBinds(LID.TOGGLE_CHAT_TOOLTIP, "HIRONCRAFT_SCAN_TOGGLE"), 1, 1, 1);
+    GameTooltip:AddLine(L('Right click: Analytics'), 1, 0.82, 0)
     GameTooltip:Show();
     self.PortraitBorder:SetAtlas("Soulbinds_Tree_Ring");
     self.GlowUp:Show()
@@ -240,6 +241,10 @@ function HironCraftScanScannerMenuMixin:ClearAlert(order)
 end
 
 function HironCraftScanPageButtonMixin:OnClick(button)
+    if button == 'RightButton' then
+        if HironCraftScan.AnalyticsWindow then HironCraftScan.AnalyticsWindow.Toggle() end
+        return
+    end
     if HironCraftScan.Frames.OrdersPage:IsShown() then
         HideUIPanel(HironCraftScan.Frames.OrdersPage);
     else

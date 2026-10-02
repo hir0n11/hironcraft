@@ -150,6 +150,14 @@ local Scan = {
     NameAndRealmToName = function(name) return (name:gsub('%-.*', '')) end,
 }
 local function load(path) assert(loadfile(path))('HironCraft', Scan) end
+local priceScans, priceChanges = 0, nil
+Scan.ReturnPrices = {
+    Status = function() return {open=true, catalog=4, total=0, finished=0} end,
+    OnChange = function(fn) priceChanges=fn end,
+    Start = function(force) assert(force); priceScans=priceScans+1 end,
+    Observe = function() end,
+    GetPrice = function() return nil end,
+}
 load('Customer/GenerousCustomers.lua')
 load('Customer/AnalyticsLog.lua')
 load('Customer/AnalyticsReport.lua')
@@ -383,6 +391,13 @@ assert(dumped:find('00:00,', 1, true), 'the time CSV has no hours')
 unloaded[7001] = true
 Scan.AnalyticsWindow.Rebuild()
 frame.Tabs[4].scripts.OnClick(frame.Tabs[4])
+assert(frame.PriceScan:IsShown() and frame.PriceStatus:IsShown() and priceScans==0)
+assert(frame.PriceScan.points.TOPRIGHT.y==-111, 'price controls overlap the metric tiles')
+frame.PriceScan.scripts.OnClick()
+assert(priceScans==1, 'manual price refresh did not request a forced targeted scan')
+Scan.ReturnPrices.Status=function() return {open=true,catalog=4,total=4,finished=2,running=true,paused=true} end
+priceChanges()
+assert(frame.PriceScan:GetText()=='Paused 2/4', 'price progress is not visible')
 assert(#frame.Returns.rows == 1 and frame.Returns.rows[1].itemID == 7001, 'the returns table is off')
 local function ReagentCell()
     local inited = frame.Returns.scrollBox.inited

@@ -215,10 +215,21 @@ end
 -- Custom explanations are follow-up messages for the selected customer, so use
 -- the same order selection and substitution rules as contextual quick replies.
 -- Plain explanations continue to work even when the customer has no order.
-function CustomExplanations:Render(text, target)
+function CustomExplanations:Render(text, target, order)
     local raw = HironCraftScan.Config.SubstituteTags(text)
     if not raw:find('%b{}') then
         return raw
+    end
+    if order then
+        -- A hovered row pins every tag to THAT order, never a newer request
+        -- from the same customer or the last conversation.
+        if order.customerName ~= target then return nil end
+        local response = HironCraftScan.OrderToResponse(order)
+        local context = response and HironCraftScan.BuildResponseContext(response)
+        if not context then return nil end
+        local rendered = HironCraftScan.Utils.FString(raw, context)
+        if not rendered:find('%b{}') then return rendered end
+        return nil
     end
 
     local customerInfo = HironCraftScan.DB.customers and HironCraftScan.DB.customers[target]
@@ -272,8 +283,8 @@ function CustomExplanations:Render(text, target)
     return nil
 end
 
-function CustomExplanations:Send(text, target)
-    local rendered = self:Render(text, target)
+function CustomExplanations:Send(text, target, order)
+    local rendered = self:Render(text, target, order)
     if not rendered then
         print('|cffffd100HironCraftScan:|r ' .. L('Custom explanation context unavailable.'))
         return false
@@ -348,6 +359,7 @@ local function OnModify(label, text)
             explanations[label] = nil;
         end
         explanations[newLabel] = text;
+        if HironCraftScan.ExplanationBindings then HironCraftScan.ExplanationBindings.Rename(label, newLabel) end
         HironCraftScanComm:ShareCustomExplanations(explanations);
     end
 
@@ -389,6 +401,7 @@ end
 local function OnDelete(label)
     local explanations = HironCraftScan.DB.settings.explanations;
     explanations[label] = nil;
+    if HironCraftScan.ExplanationBindings then HironCraftScan.ExplanationBindings.Remove(label) end
     HironCraftScanComm:ShareCustomExplanations(explanations);
 end
 
@@ -417,12 +430,18 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         for _, entry in ipairs(explanations) do
             local label = entry.label;
             local text = entry.text;
-            local subMenu = rootDescription:CreateButton(label);
+            local bindings = HironCraftScan.ExplanationBindings
+            local key = bindings and bindings.Key(label)
+            local subMenu = rootDescription:CreateButton(label .. (key and ('  [' .. key .. ']') or ''));
             subMenu:SetTooltip(function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(text));
             end);
             subMenu:CreateButton(L("Modify"), function() OnModify(label, text) end);
             subMenu:CreateButton(L("Delete"), function() OnDelete(label) end);
+            if bindings then
+                subMenu:CreateButton(L('Assign hotkey'), function() bindings.Capture(label) end)
+                if key then subMenu:CreateButton(L('Remove hotkey'), function() bindings.Remove(label) end) end
+            end
         end
 
         rootDescription:CreateButton(L("Create"), OnCreate);

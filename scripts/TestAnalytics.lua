@@ -430,6 +430,10 @@ local claimed = { orderID = 77, spellID = 500, reagents = {
 C_CraftingOrders = { GetClaimedOrder = function() return claimed end }
 C_TradeSkillUI = { GetTradeSkillLineForRecipe = function() return 2907, 'Midnight Blacksmithing', 164 end }
 Auctionator = { API = { v1 = { GetAuctionPriceByItemID = function(_, itemID) return itemID == 9001 and 10000 or nil end } } }
+Scan.ReturnPrices = {
+    Observe = function() end,
+    GetPrice = function(itemID) return itemID == 9001 and 10000 or nil end,
+}
 TSM_API = { GetCustomPriceValue = function(_, key) return key == 'i:9002' and 5000 or nil end }
 Log.CraftResult({ operationID = 1, resourcesReturned = {
     { reagent = { itemID = 9001 }, quantity = 2 },
@@ -462,8 +466,10 @@ assert(Report.BuildReturns(all(), { ppID = 202 }).totals.crafts == 0, 'the profe
 assert(Report.BuildReturns(all(), { crafter = 'Other-Realm' }).totals.crafts == 0, 'the crafter filter is off')
 -- The price is the one of that moment: a later price does not change it.
 Auctionator.API.v1.GetAuctionPriceByItemID = function() return 99999 end
+Scan.ReturnPrices.GetPrice = function() return 99999 end
 assert(Report.BuildReturns(all(), {}).totals.value == 20000, 'the worth followed today\'s price')
 C_CraftingOrders, C_TradeSkillUI, Auctionator, TSM_API = nil, nil, nil, nil
+Scan.ReturnPrices = nil
 print('Analytics resource returns passed.')
 
 -- Time online: a mark per 5 minutes, merged with a linked account's, shown
@@ -524,3 +530,19 @@ assert(exact.totals.tips == 450 * 10000 and not exact.totals.tipsEstimated and e
 local event = Log.Outcome({ orderID = 904, status = 'fulfilled', customerName = 'C', tipAmount = 100, consortiumCut = 10, updatedAt = now })
 assert(event and event.tip == 100 and event.cut == 10, 'the cut was not recorded')
 print('Analytics tips as received passed.')
+
+-- The price catalogue streams closed stores and the live tail without date
+-- or profession filters, and never fills unknown historical valuations.
+as(newDB(), function()
+    Log.Record({ k='c', o=7001, p=164, rs={{i=701,n=2,c=1}} })
+    assert(Log.CloseOpenStore())
+    Log.Record({ k='c', o=7002, p=197, rs={{i=702,n=1,v=42,c=1}} })
+    local found, done = {}, false
+    Log.VisitReturnEvents(function(entry)
+        for _, reagent in ipairs(entry.rs or {}) do found[reagent.i]=true end
+    end, function() done=true end)
+    assert(done and found[701] and found[702], 'catalogue omitted a closed store or the live tail')
+    local totals=Report.BuildReturns(all(),{}).totals
+    assert(totals.value==42 and totals.unpriced==2, 'catalogue indexing altered historical valuations')
+end)
+print('Complete historical return catalogue passed.')

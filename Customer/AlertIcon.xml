@@ -15,7 +15,7 @@
             <Anchor point="CENTER" x="0" y="0"/>
         </Anchors>
         <Frames>
-            <Button name="$parentButton" parentKey="PageButton" mixin="HironCraftScanPageButtonMixin" movable="true" registerForClicks="LeftButtonUp">
+            <Button name="$parentButton" parentKey="PageButton" mixin="HironCraftScanPageButtonMixin" movable="true" registerForClicks="LeftButtonUp,RightButtonUp">
                 <Size x="53" y="53"/>
                 <KeyValues>
                     <KeyValue key="defaultWidth" value="53" type="number"/>

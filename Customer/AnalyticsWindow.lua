@@ -1245,6 +1245,10 @@ local function SelectTab(index)
     frame.Returns.frame:SetShown(index == TAB_RETURNS)
     -- Resourcefulness has figures of its own, and no side or coin to filter.
     local onReturns = index == TAB_RETURNS
+    if Scan.ReturnPrices then
+        frame.PriceScan:SetShown(onReturns)
+        frame.PriceStatus:SetShown(onReturns)
+    end
     frame.TileOrder.frame:SetShown(not onReturns)
     frame.ReturnTileOrder.frame:SetShown(onReturns)
     for _, tile in pairs(frame.Tiles) do tile:SetShown(not onReturns) end
@@ -1470,6 +1474,38 @@ local function Create()
     -- Row 2: a single full-width row of metrics, followed by customer counts.
     frame.Tiles, frame.TileOrder = CreateTiles(frame, 16, -68)
     frame.ReturnTiles, frame.ReturnTileOrder = CreateTiles(frame, 16, -68, RETURN_TILE_GROUPS)
+    if Scan.ReturnPrices then
+        local prices = Scan.ReturnPrices
+        frame.PriceScan = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+        frame.PriceScan:SetSize(185, 22)
+        frame.PriceScan:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -18, -111)
+        frame.PriceStatus = frame:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        frame.PriceStatus:SetPoint('RIGHT', frame.PriceScan, 'LEFT', -10, 0)
+        local function UpdatePrices()
+            local status = prices.Status()
+            local label = status.indexing and L('Reading reagent history') or L('Update reagent prices')
+            if status.running then
+                label = string.format('%s %d/%d', L(status.paused and 'Paused' or 'Scanning'), status.finished, status.total)
+            end
+            frame.PriceScan:SetText(label)
+            frame.PriceStatus:SetText(status.at and (L('Prices updated') .. ': ' .. date('%d.%m %H:%M', status.at)) or L('Prices not scanned yet'))
+        end
+        frame.PriceScan:SetScript('OnClick', function()
+            if not prices.Status().open then
+                print('HironCraft: ' .. L('Open the auction house to update reagent prices.'))
+            else prices.Start(true) end
+        end)
+        frame.PriceScan:SetScript('OnEnter', function(self)
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip:SetText(L('Update reagent prices'))
+            GameTooltip:AddLine(L('Scans only reagents recorded in resource returns, across all dates and professions. Historical values do not change. Manual auction activity pauses the scan.'), 1, 1, 1, true)
+            GameTooltip:AddLine(L('Reagents') .. ': ' .. prices.Status().catalog)
+            GameTooltip:Show()
+        end)
+        frame.PriceScan:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        prices.OnChange(UpdatePrices)
+        UpdatePrices()
+    end
     frame.Tiles.returnedValue:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
         GameTooltip_SetTitle(GameTooltip, L('Reagent returns value'))

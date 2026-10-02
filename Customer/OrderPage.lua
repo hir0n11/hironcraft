@@ -16,6 +16,7 @@ local function SetTooltipWithTitle(tooltip, title, text)
 end;
 
 function HironCraftScanCrafterOrderListElementMixin:Init(elementData)
+    self.hironExplanationRow = true
     self.order = elementData.order
     -- self.browseType = elementData.browseType;
     self.pageFrame = elementData.pageFrame;
@@ -171,6 +172,7 @@ end
 
 local chatTooltip = HironCraftScan.Utils.ChatHistoryTooltip:new();
 function HironCraftScanCrafterOrderListElementMixin:OnLineEnter()
+    if HironCraftScan.ExplanationBindings then HironCraftScan.ExplanationBindings.Refresh() end
     self.HighlightTexture:Show();
 
     -- Pop up a tooltip that looks like the chat window. We copy

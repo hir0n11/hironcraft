@@ -165,6 +165,7 @@ Settings = {
 SettingsPanel = { GetLayout=function() return {AddInitializer=noop} end }
 MinimalSliderWithSteppersMixin = {Label={Right=1}}
 Scan.CONST.AUTO_REPLIES_SUPPORTED = true -- Obsolete state must not restore the setting.
+Scan.Notifications = { GetOptions=noop, Play=noop }
 loadSource('Settings/Settings.lua')
 local login = frames[1]
 loggedIn = true

@@ -172,6 +172,7 @@ local function Append(event, source)
     local ends = event.k == 'p' and tonumber(event.e) or event.t
     open.to = math.max(open.to or event.t, event.t, ends or event.t)
     if event.q then open.maxQ = event.q end
+    if Scan.ReturnPrices then Scan.ReturnPrices.Observe(event) end
     Changed()
     return event
 end
@@ -572,28 +573,31 @@ function M.Startup()
     end
 end
 
--- What a reagent is worth now: Auctionator, else TSM, else ProfitHub's own
--- scans. Returns the price per unit in copper and where it came from.
+-- Stream the complete history once to build the unfiltered reagent catalogue.
+-- Unlike LoadRange this does not retain decompressed stores in the UI cache.
+function M.VisitReturnEvents(visit, done)
+    local root = M.Root()
+    if not root then done(); return end
+    local stores, index = {}, 0
+    for _, store in ipairs(root.stores) do stores[#stores + 1] = store end
+    local function Visit(events)
+        for _, event in ipairs(events or {}) do if event.k == 'c' then visit(event) end end
+    end
+    local function Step()
+        index = index + 1
+        local store = stores[index]
+        if not store then Visit(root.open.events); done(); return end
+        Visit(Decode(store.data))
+        if C_Timer and C_Timer.After then C_Timer.After(0, Step) else Step() end
+    end
+    Step()
+end
+
+-- Freeze the latest successful exact-quality HironCraft price at craft time.
+-- Unknown prices remain unknown, including after a later scan.
 local function ReagentPrice(itemID)
-    local function Try(source, fn)
-        local ok, price = pcall(fn)
-        price = ok and tonumber(price) or nil
-        if price and price > 0 then return math.floor(price + 0.5), source end
-        return nil
-    end
-    local price, source = nil, nil
-    local auctionator = Auctionator and Auctionator.API and Auctionator.API.v1
-    if auctionator and auctionator.GetAuctionPriceByItemID then
-        price, source = Try('a', function() return auctionator.GetAuctionPriceByItemID('HironCraft', itemID) end)
-    end
-    if not price and TSM_API and TSM_API.GetCustomPriceValue then
-        price, source = Try('t', function() return TSM_API.GetCustomPriceValue('DBMarket', 'i:' .. itemID) end)
-    end
-    local prices = HironCraftProfit and HironCraftProfit.Prices
-    if not price and prices and prices.GetPrice then
-        price, source = Try('p', function() return prices:GetPrice(itemID, 'phMarket') end)
-    end
-    return price, source
+    local price = Scan.ReturnPrices and Scan.ReturnPrices.GetPrice(itemID)
+    if price and price > 0 then return price, 'p' end
 end
 M.ReagentPrice = ReagentPrice
 

@@ -826,6 +826,44 @@ assert(#answered==1 and answered[1].orderID==301, 'the tab answer never reached 
 assert(not tabContainer._staleTabSignature, 'an answered tab kept withholding orders')
 tabContainer.rows={}
 assert(CL:RowsSignature(tabContainer)=='', 'an empty list must not withhold anything')
+-- Authoritative per-page answers: changing the GLOBAL API cache, including a
+-- changed subset with no orderType fields, must never leak Patron into Public.
+local scoped = { orderType=1, professionInfo={ profession=7 }, lastRequest={ orderType=1, profession=7 } }
+local cancelled = 0
+scoped.requestCallback = { Cancel=function() cancelled=cancelled+1 end }
+CL:ClearScope(scoped)
+apiOrders={{orderID=999}}
+assert(#RealGetOrders(CL,scoped)==0 and cancelled==1)
+CL:AcceptScopeAnswer(scoped,{{orderID=301}},0)
+assert(RealGetOrders(CL,scoped)[1].orderID==301)
+apiOrders={{orderID=888}}
+assert(RealGetOrders(CL,scoped)[1].orderID==301, 'unrelated API result replaced the scoped answer')
+scoped.orderType=4
+CL:ClearScope(scoped)
+CL:AcceptScopeAnswer(scoped,{{orderID=302}},0)
+assert(#RealGetOrders(CL,scoped)==0, 'late response from old tab was accepted')
+scoped.lastRequest={orderType=4,profession=7}
+CL:AcceptScopeAnswer(scoped,{{orderID=401}},0)
+scoped.professionInfo={profession=8}
+assert(#RealGetOrders(CL,scoped)==0, 'old profession cache leaked')
+CL:AcceptScopeAnswer(scoped,{{orderID=402}},0)
+assert(#RealGetOrders(CL,scoped)==0, 'late previous profession answer was accepted')
+scoped.lastRequest={orderType=4,profession=8}
+CL:AcceptScopeAnswer(scoped,{{orderID=501}},0)
+CL:AcceptScopeAnswer(scoped,{{orderID=501},{orderID=502}},1)
+assert(#RealGetOrders(CL,scoped)==2, 'pagination duplicated or lost orders')
+CL:AcceptScopeAnswer(scoped,{},0)
+assert(#RealGetOrders(CL,scoped)==0, 'real empty answer revived previous orders')
+scoped.ahuiRequestedScope='previous-expansion'
+CL:AcceptScopeAnswer(scoped,{{orderID=777}},0)
+assert(#RealGetOrders(CL,scoped)==0, 'late expansion response was accepted')
+page.BrowseFrame.OrdersRemainingDisplay = frame('Frame',page.BrowseFrame)
+page.BrowseFrame.OrdersRemainingDisplay:SetSize(175,30)
+page.orderType=Enum.CraftingOrderType.Public
+CO:UpdateTabActionButton(page)
+assert(not panel.knowledgeButton:IsShown())
+assert(page.BrowseFrame.OrdersRemainingDisplay.anchors.RIGHT[1]==panel.shopButton,
+    'Public remaining count has independent overlapping anchors')
 C_CraftingOrders.GetCrafterOrders=nil
 
 print('Classic orders UI tests passed.')
