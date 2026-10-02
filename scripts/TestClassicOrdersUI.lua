@@ -859,11 +859,50 @@ CL:AcceptScopeAnswer(scoped,{{orderID=777}},0)
 assert(#RealGetOrders(CL,scoped)==0, 'late expansion response was accepted')
 page.BrowseFrame.OrdersRemainingDisplay = frame('Frame',page.BrowseFrame)
 page.BrowseFrame.OrdersRemainingDisplay:SetSize(175,30)
+local remainingDisplay = page.BrowseFrame.OrdersRemainingDisplay
+-- Include the native atlas overhang, not just the narrower frame bounds.
+remainingDisplay.Background = frame('Texture', remainingDisplay)
+remainingDisplay.Background:SetSize(215,38)
+remainingDisplay.Background:SetPoint('CENTER', remainingDisplay, 'CENTER', 0, 0)
 page.orderType=Enum.CraftingOrderType.Public
 CO:UpdateTabActionButton(page)
 assert(not panel.knowledgeButton:IsShown())
-assert(page.BrowseFrame.OrdersRemainingDisplay.anchors.RIGHT[1]==panel.shopButton,
-    'Public remaining count has independent overlapping anchors')
+assert(remainingDisplay.anchors.BOTTOMRIGHT[1]==panel.shopButton,
+    'Public remaining count must follow Shopping above the tab row')
+local function disjoint(a, b)
+    local ax, ay, aw, ah = bounds(a)
+    local bx, by, bw, bh = bounds(b)
+    return ax+aw <= bx or bx+bw <= ax or ay+ah <= by or by+bh <= ay
+end
+local tabStrip = frame('Frame', page.BrowseFrame)
+tabStrip:SetSize(600,30)
+tabStrip:SetPoint('BOTTOMLEFT', anchor, 'TOPLEFT', -120, 0)
+-- Native BrowseFrame places OrderList 92px below the top of the page.
+anchor:SetPoint('TOPLEFT', 260, -92)
+panel.shopCostText:SetText('999k +?')
+for _, scale in ipairs({.6,1,1.5,2}) do
+    page:SetScale(scale)
+    for _, width in ipairs({600,792,1020}) do
+        anchor:SetWidth(width)
+        for _, collapsed in ipairs({true,false}) do
+            E.GetDB().panelCollapsed = collapsed
+            CO:AnchorControlPanelToOrderList(panel, page)
+            CO:UpdateTabActionButton(page)
+            for _, other in ipairs({tabStrip, panel.shopCostText, panel.shopButton,
+                panel.collapseButton, container.header}) do
+                assert(disjoint(remainingDisplay.Background, other),
+                    'Public remaining counter overlaps tabs, shopping or table header')
+            end
+            local _, y = bounds(remainingDisplay.Background)
+            assert(y >= 0, 'remaining counter escaped above the page')
+        end
+    end
+end
+page:SetScale(1)
+E.GetDB().panelCollapsed = false
+anchor:SetPoint('TOPLEFT', 260, -70)
+tabStrip:Hide()
+remainingDisplay:Hide() -- Blizzard hides the counter on non-Public tabs.
 C_CraftingOrders.GetCrafterOrders=nil
 
 print('Classic orders UI tests passed.')

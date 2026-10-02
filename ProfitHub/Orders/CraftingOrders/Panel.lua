@@ -1806,10 +1806,12 @@ function CO:UpdateTabActionButton(pageFrame)
     end
     local remaining = pageFrame and pageFrame.BrowseFrame and pageFrame.BrowseFrame.OrdersRemainingDisplay
     if remaining and panel.shopButton then
-        -- One horizontal chain, not independent absolute positions which
-        -- overlap when the sidebar is collapsed or the UI is scaled.
+        -- The tab row already contains the shopping total to the button's
+        -- left. Put the native claim counter above Shopping instead: moving
+        -- it farther left would run into the order-type tabs. Leave room for
+        -- its atlas background, which extends beyond the 175x30 frame.
         remaining:ClearAllPoints()
-        remaining:SetPoint("RIGHT", panel.shopButton, "LEFT", -12, 0)
+        remaining:SetPoint("BOTTOMRIGHT", panel.shopButton, "TOPRIGHT", 0, 10)
     end
     if panel.selectAllOrdersButton then panel.selectAllOrdersButton:SetShown((not isPatron) and true or false) end
 

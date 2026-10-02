@@ -25,6 +25,13 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Public-order counter layout (0.4.90)
+
+- Place the native Orders Remaining counter above Shopping, with clearance for
+  its decorative background. It no longer shares the shopping total's space or
+  pushes into the order-type tabs. Counter values and the recharge tooltip are
+  still managed by Blizzard; order and purchase behaviour is unchanged.
+
 ## SharedMedia sounds, minimap spacing and return tooltip (0.4.89)
 
 - The sound selectors include WhisperAlert's original `wisp.OGG`, bundled as
