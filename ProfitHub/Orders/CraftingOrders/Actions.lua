@@ -367,10 +367,67 @@ local function CopyRejectionIdentity(source, previous)
     local snapshot = {}
     for _, field in ipairs(REJECTION_IDENTITY_FIELDS) do
         local value = source and source[field]
+        if (issecretvalue and issecretvalue(value))
+            or (type(value) == "string" and not value:find("%S")) then value = nil end
         if value == nil and previous then value = previous[field] end
         snapshot[field] = value
     end
     return snapshot
+end
+
+-- GetEffectiveOrder can prefer a sparse claimed/rowState table over the full
+-- visible row. Keep an owned copy as soon as either supplies identity, not
+-- only when Decline is pressed; the game may retire those tables in between.
+function CO:RememberOrderIdentity(order)
+    if type(order) ~= "table" or (issecretvalue and issecretvalue(order.orderID)) then return end
+    local key = OrderKey(order.orderID)
+    if not key then return end
+    local now = GetTime and GetTime() or 0
+    self.rejectionReagentSnapshots = self.rejectionReagentSnapshots or {}
+    if not self.identitySweepAt or now - self.identitySweepAt >= 60 then
+        for id, cached in pairs(self.rejectionReagentSnapshots) do
+            if now - cached.time > 300 then self.rejectionReagentSnapshots[id] = nil end
+        end
+        self.identitySweepAt = now
+    end
+    local saved = self.rejectionReagentSnapshots[key]
+    if not saved or now - saved.time > 300 then saved = {} end
+    saved.order = CopyRejectionIdentity(order, saved.order)
+    saved.time = now
+    self.rejectionReagentSnapshots[key] = saved
+    return CopyRejectionIdentity(saved.order)
+end
+
+local function HasRejectionIdentity(order)
+    return type(order) == "table" and type(order.customerName) == "string"
+        and #order.customerName <= 128 and order.customerName:find("%S") ~= nil
+        and (tonumber(order.spellID) or 0) > 0
+end
+
+function CO:ResolveRejectionIdentity(order, claimed)
+    local orderID = order.orderID
+    local resolved = self:RememberOrderIdentity(order)
+    local function collect(candidate)
+        -- Never infer a customer from a recipe, a nearby row, or the last
+        -- claimed order. Multiple customers can request the same bracers.
+        if type(candidate) == "table" and not (issecretvalue and issecretvalue(candidate.orderID))
+            and SameOrderID(candidate.orderID, orderID) then
+            resolved = self:RememberOrderIdentity(candidate)
+        end
+    end
+    local state = self.rowStates and self.rowStates[orderID]
+    collect(state and state.order)
+    local button = self.rowButtonsByOrderID and self.rowButtonsByOrderID[OrderKey(orderID)]
+    collect(button and button.order)
+    collect(claimed)
+    if not HasRejectionIdentity(resolved) and C_CraftingOrders
+        and type(C_CraftingOrders.GetCrafterOrders) == "function" then
+        local ok, orders = pcall(C_CraftingOrders.GetCrafterOrders)
+        if ok and type(orders) == "table" then
+            for _, candidate in ipairs(orders) do collect(candidate) end
+        end
+    end
+    return resolved
 end
 
 function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
@@ -423,25 +480,29 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     end
 
     local claimed = self:GetClaimedOrder()
-    local auditKey = OrderKey(order.orderID)
-    self.rejectionReagentSnapshots = self.rejectionReagentSnapshots or {}
-    local auditNow = GetTime and GetTime() or 0
-    for id, cached in pairs(self.rejectionReagentSnapshots) do
-        if auditNow - cached.time > 300 then self.rejectionReagentSnapshots[id] = nil end
+    local rejectionOrder = self:ResolveRejectionIdentity(order, claimed)
+    local recordRejected = _G.HironCraft and _G.HironCraft.RecordRejectedCraftingOrder
+    -- Fail before the destructive API call: a rejected order disappears, so
+    -- its customer cannot be recovered afterwards. A refresh only updates
+    -- data; it must never retry Release/Reject without another player click.
+    if not HasRejectionIdentity(rejectionOrder) or type(recordRejected) ~= "function" then
+        self:SetStatus(T("COA_STATUS_REJECT_IDENTITY_LOADING",
+            "Order details are not ready. Nothing was declined; refresh the list and press Action again."))
+        self:RefreshVisibleRowsSoon()
+        return false
     end
-    local previous = self.rejectionReagentSnapshots[auditKey]
+    local auditKey = OrderKey(order.orderID)
     local fromClaim = claimed and SameOrderID(claimed.orderID, order.orderID)
-    local rejectionOrder = CopyRejectionIdentity(order, previous and previous.order)
-    if fromClaim then rejectionOrder = CopyRejectionIdentity(claimed, rejectionOrder) end
-    local saved = previous or {}
-    saved.order, saved.time = rejectionOrder, auditNow
-    self.rejectionReagentSnapshots[auditKey] = saved
+    local saved = self.rejectionReagentSnapshots[auditKey]
     local capture = _G.HironCraft and _G.HironCraft.CaptureCraftingOrderReagents
     if type(capture) == "function" then
         -- Capture before Release/Reject: Blizzard may clear order.reagents
         -- synchronously. Retain the authoritative pre-release snapshot if the
         -- next row refresh has only a partial listing of the same game order.
-        local source = fromClaim and claimed or order
+        local raw = fromClaim and claimed or order
+        local source = {}
+        for field, value in pairs(raw) do source[field] = value end
+        for _, field in ipairs(REJECTION_IDENTITY_FIELDS) do source[field] = rejectionOrder[field] end
         local ok, audit = pcall(capture, source, {
             reason=rejectionReason,
             quality=self.qualityRejectDetails and self.qualityRejectDetails[auditKey],
@@ -485,8 +546,6 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
 
     -- Persist/share the result before optional selection/UI cleanup, which
     -- must not be able to discard an otherwise successful rejection.
-    local recordRejected = _G.HironCraft
-        and _G.HironCraft.RecordRejectedCraftingOrder
     if type(recordRejected) == "function" then
         local callOK, recorded = pcall(
             recordRejected,
@@ -1550,6 +1609,7 @@ function CO:DecorateOrderRow(row, elementData)
 
     btn.orderID = order.orderID
     btn.order = order
+    self:RememberOrderIdentity(order)
     btn.pageFrame = row.pageFrame or (elementData and elementData.pageFrame)
 
     self:EnsureOrderColumnFrames(row, btn, order)

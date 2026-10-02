@@ -106,7 +106,7 @@ local CO={rowStates={},orderIssues={},selectedOrders={}}
 local claimed, quality, missing = nil, false, true
 local released, rejected, timers = 0,0,{}
 local page={}
-local order={orderID=7001,orderState='created'}
+local order={orderID=7001,orderState='created',customerName='Buyer-Realm',spellID=1237543}
 local OE=setmetatable({PT={},CO=CO,T=function(_,fallback) return fallback end,
     OrderKey=function(id) return id and tostring(id) end,
     SameOrderID=function(a,b) return a and b and tostring(a)==tostring(b) end,
@@ -123,6 +123,7 @@ HironCraftProfitCraftingOrdersEnv=OE
 SlashCmdList={}
 dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
 dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
+local realGetEffectiveOrder=CO.GetEffectiveOrder
 CO.CreateHotkeyProxy=noop; CO.HookBlizzardProfessions=noop; CO.ApplyEnabledState=noop
 dofile('ProfitHub/Orders/CraftingOrders/HooksEvents.lua')
 
@@ -193,6 +194,20 @@ assert(capturedRejection.orderID==7010 and capturedRejection.customerName=='Buye
 assert(capturedAudit.provided==17,'decline lost pre-submit materials')
 assert(capturedRejection and capturedRejection~=order,'rejection kept the mutable API table')
 
+-- A sparse rowState used to win over the visible row, losing the customer
+-- before the decline even took its snapshot (Hentihunter, order 1272696518).
+-- Remember identity when first seen; Blizzard may clear that table later.
+order={orderID=1272696518,orderState='created',spellID=1237543,provided=17}
+local visible={orderID=1272696518,customerName='Hentihunter',spellID=1237543,itemID=244584}
+CO.rowStates[order.orderID]={order=order}
+assert(realGetEffectiveOrder(CO,order.orderID,visible)==order)
+for key in pairs(visible) do visible[key]=nil end
+capturedRejection=nil
+OE.C_CraftingOrders.RejectOrder=noop
+assert(CO:RejectOrder(order,page))
+assert(capturedRejection.customerName=='Hentihunter' and capturedRejection.orderID==1272696518
+    and capturedRejection.spellID==1237543,'sparse row lost the previously visible customer identity')
+
 -- Release can leave a sparse list row for the second, explicit decline click.
 order={orderID=7012,orderState='created'}
 claimed={orderID=7012,orderState='claimed',customerName='Released-Realm',spellID=1230061,provided=17}
@@ -209,13 +224,13 @@ assert(capturedRejection.customerName=='Released-Realm' and capturedRejection.sp
     and capturedAudit.provided==17,'release lost the customer identity or supplied materials')
 
 -- A failed game call must never manufacture a rejected-order notice.
-order={orderID=7013,orderState='created',customerName='NotDeclined-Realm',provided=17}
+order={orderID=7013,orderState='created',customerName='NotDeclined-Realm',spellID=1237543,provided=17}
 capturedRejection=nil
 OE.C_CraftingOrders.RejectOrder=function() error('game call failed') end
 assert(not CO:RejectOrder(order,page) and not capturedRejection,'a failed game action was recorded as a decline')
 
 -- A normal Lua return of false is a failed recording, not a successful pcall.
-order={orderID=7011,orderState='created',customerName='Unrecorded-Realm',provided=17}
+order={orderID=7011,orderState='created',customerName='Unrecorded-Realm',spellID=1237543,provided=17}
 OE.C_CraftingOrders.RejectOrder=noop
 local rejectionErrors={}
 CO.DActionPrint=noop
@@ -224,6 +239,86 @@ HironCraft.RecordRejectedCraftingOrder=function() return false end
 assert(CO:RejectOrder(order,page),'game decline did not run')
 assert(#rejectionErrors==1 and tostring(rejectionErrors[1][2]):find('7011',1,true),
     'a failed rejection record was silently treated as success')
+
+-- Missing identity must fail *before* Release/Reject, without deselecting the
+-- row or scheduling the destructive action for a later event/timer.
+local identityDeclines, identityRecords = 0, 0
+OE.C_CraftingOrders.RejectOrder=function() identityDeclines=identityDeclines+1 end
+HironCraft.RecordRejectedCraftingOrder=function(source,reason,audit)
+    identityRecords=identityRecords+1
+    capturedRejection,capturedAudit=source,audit
+    return true
+end
+local otherOrder={orderID=7100,customerName='OtherBuyer',spellID=1237543}
+claimed=otherOrder
+OE.C_CraftingOrders.GetCrafterOrders=function() return {otherOrder} end
+order={orderID=7101,spellID=1237543,orderState='created',provided=0}
+CO.selectedOrders['7101']=true
+realGetEffectiveOrder(CO,7101,otherOrder)
+local beforeRelease, beforeTimers=released,#timers
+assert(not CO:RejectOrder(order,page), 'nameless order was declined')
+assert(identityDeclines==0 and identityRecords==0 and released==beforeRelease and #timers==beforeTimers,
+    'missing identity sent or scheduled an action')
+assert(CO.selectedOrders['7101'] and not CO.rejectedOrderIDs['7101'], 'blocked decline cleared/marked the row')
+assert(CO.lastStatus:find('Nothing was declined',1,true), 'blocked decline has no useful explanation')
+
+-- The exact live API order can repair sparse identity. Merely loading it
+-- must not send a decline; another hardware click is still required.
+local fullOrder={orderID=7101,customerName='LoadedBuyer',spellID=1237543,itemID=244584}
+OE.C_CraftingOrders.GetCrafterOrders=function() return {otherOrder,fullOrder} end
+realGetEffectiveOrder(CO,7101,fullOrder)
+for _,fn in ipairs(timers) do fn() end
+assert(identityDeclines==0 and identityRecords==0, 'identity arrival auto-declined an order')
+assert(CO:RejectOrder(order,page))
+assert(identityDeclines==1 and identityRecords==1 and capturedRejection.customerName=='LoadedBuyer'
+    and capturedRejection.orderID==7101 and capturedAudit.provided==0, 'wrong customer or materials after refresh')
+
+-- Direct API enrichment also supplies recipe identity to material capture;
+-- don't alter the original sparse row or substitute a neighbouring order.
+claimed=nil
+order={orderID=7102,orderState='created',provided=9}
+fullOrder={orderID=7102,customerName='ApiBuyer',spellID=1237543,itemID=244584}
+OE.C_CraftingOrders.GetCrafterOrders=function() return {otherOrder,fullOrder} end
+local oldCapture=HironCraft.CaptureCraftingOrderReagents
+HironCraft.CaptureCraftingOrderReagents=function(source,details)
+    assert(source.customerName=='ApiBuyer' and source.spellID==1237543 and source.provided==9,
+        'material capture did not receive the recovered identity with original reagents')
+    return oldCapture(source,details)
+end
+assert(CO:RejectOrder(order,page))
+assert(identityDeclines==2 and identityRecords==2 and capturedRejection.customerName=='ApiBuyer'
+    and capturedAudit.provided==9 and order.customerName==nil and order.spellID==nil)
+HironCraft.CaptureCraftingOrderReagents=oldCapture
+OE.C_CraftingOrders.GetCrafterOrders=function() return {} end
+
+-- Blank/secret names are absent, not usable recipients. Quality-based
+-- declines and already-claimed orders obey the same pre-action guard.
+for index,name in ipairs({'','   ','secret-name'}) do
+    order={orderID=7110+index,customerName=name,spellID=1237543}
+    OE.issecretvalue=function(value) return value=='secret-name' end
+    claimed=order;quality=true;missing=false
+    assert(not CO:RejectOrder(order,page,false,'insufficient_quality'))
+    assert(identityDeclines==2 and identityRecords==2 and released==beforeRelease and #timers==beforeTimers)
+end
+OE.issecretvalue=nil;claimed=nil;quality=false;missing=true
+order={orderID=7120,customerName='NoRecipe'}
+assert(not CO:RejectOrder(order,page), 'unmatchable recipe was declined')
+order={orderID=7121,customerName='NoBridge',spellID=1237543}
+local oldRecord=HironCraft.RecordRejectedCraftingOrder
+HironCraft.RecordRejectedCraftingOrder=nil
+assert(not CO:RejectOrder(order,page), 'decline submitted without its status recorder')
+HironCraft.RecordRejectedCraftingOrder=oldRecord
+
+-- Empty partial fields must not erase good identity, but old cached rows
+-- must expire instead of living indefinitely after a long tab/session gap.
+CO:RememberOrderIdentity({orderID=7122,customerName='CachedBuyer',spellID=1237543})
+order={orderID=7122,customerName=' ',spellID=1237543,provided=17}
+assert(CO:RejectOrder(order,page) and capturedRejection.customerName=='CachedBuyer')
+CO:RememberOrderIdentity({orderID=7123,customerName='ExpiredBuyer',spellID=1237543})
+now=now+301
+order={orderID=7123,spellID=1237543}
+assert(not CO:RejectOrder(order,page), 'expired identity was reused')
+assert(identityDeclines==3 and identityRecords==3)
 
 -- Even a manually requested craft must not send from a later item-cache event.
 local comm, whispers, packets, cacheCallbacks, cached = {}, 0, 0, {}, false

@@ -718,3 +718,41 @@ CraftScan.OrderFulfillment:SetStatus(linkedRow, "fulfilled", { craftingOrderID =
 assert(#recorded == 3, 'the same answer was recorded twice')
 CraftScan.AnalyticsLog = nil
 print('Analytics order results passed.')
+
+-- The Hentihunter decline used to stop before this bridge because its sparse
+-- row had lost customerName. With identity recovered by the action layer,
+-- persist the real, large order/recipe IDs and send the missing-material audit.
+do
+    now=now+10
+    local row={customerName='Hentihunter-Kazzak',responseID=1237543}
+    local rowKey=CraftScan.OrderToOrderID(row)
+    CraftScan.DB.listed_orders[rowKey]=row
+    CraftScan.DB.customers[row.customerName]={responses={[1237543]={recipeID=1237543,itemID=244584,
+        crafterFullName='Crafter-Realm',requestToken='hentihunter-request',time=now-60}}}
+    local shared
+    HironCraftScanComm={
+        PrepareOrderCompletionDelivery=function(_,entry) entry.deliveryPending={collector=true} end,
+        ShareOrderOutcome=function(_,entry) shared=copyEntry(entry) end,
+    }
+    local materials={version=1,orderID=1272696518,recipeID=1237543,capturedAt=now,complete=true,rows={
+        {itemID=238514,name='Void-Tempered Scales',required=100,known=true,maxQuality=2,supplied={}},
+    }}
+    assert(HironCraft.RecordRejectedCraftingOrder({orderID=1272696518,customerName='Hentihunter',
+        spellID=1237543,itemID=244584,parentProfessionID=165},'missing_customer_reagents',materials))
+    local status=CraftScan.OrderFulfillment:GetStatus(row)
+    assert(status.status=='rejected' and status.craftingOrderID==1272696518)
+    assert(shared and shared.orderID==1272696518 and shared.deliveryPending.collector
+        and shared.requestToken=='hentihunter-request' and shared.reagentAudit.complete
+        and shared.reagentAudit.rows[1].required==100 and #shared.reagentAudit.rows[1].supplied==0,
+        'recovered decline did not persist/share its customer, request and missing materials')
+    assert(CraftScan.OrderFulfillment:GetCompletionNotices()[CraftScan.OrderFulfillment:CompletionNoticeKey(shared)],
+        'recovered decline was not durable for replay after relog')
+    now=now+1
+    assert(CraftScan.OrderFulfillment:RecordCompletion({orderID=1272703124,customerName='Hentihunter',
+        spellID=1237543,itemID=244584,parentProfessionID=165},1272703124))
+    CraftScan.OrderFulfillment:ApplyRemoteCompletion(shared)
+    assert(CraftScan.OrderFulfillment:GetStatus(row).status=='fulfilled',
+        'late decline replay overwrote the replacement craft')
+    HironCraftScanComm=nil
+end
+print('Recovered decline bridge passed (Hentihunter, material audit, durable delivery, later completed order).')

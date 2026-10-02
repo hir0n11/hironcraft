@@ -1131,6 +1131,7 @@ end
 
 function CL:PopulateRow(row, order)
     row._order = order
+    if CO.RememberOrderIdentity then CO:RememberOrderIdentity(order) end
     self:ApplyRowLayout(row)
 
     local spellID = order.spellID

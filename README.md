@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Preserve the customer before declining an order (0.4.86)
+
+- Capture an owned copy of customer/recipe identity when an order row is
+  displayed, before sparse claimed/row-state data or a list refresh can erase
+  it. Restore missing fields only from the same exact crafting-order ID.
+- If identity or the status recorder is unavailable, leave the order intact
+  and selected with a clear retry message. Loading data never submits an
+  automatic decline: another player action is required.
+- Capture materials with the recovered identity before Release/Reject, then
+  use the existing durable status/audit delivery. Regression coverage includes
+  Hentihunter's bracers, neighbouring customers, relog replay and a later
+  successful replacement order. Previously unrecorded declines are not guessed
+  or retroactively inserted; current fulfilled marks remain unchanged.
+
 ## Compare requests, greetings and orders on the time charts (0.4.85)
 
 - Hourly and calendar charts open in All stages mode: a broad grey Greeted

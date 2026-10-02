@@ -888,13 +888,20 @@ function CO:GetClaimedOrder()
 end
 
 function CO:GetEffectiveOrder(orderID, fallback)
+    if self.RememberOrderIdentity and fallback and SameOrderID(fallback.orderID, orderID) then
+        self:RememberOrderIdentity(fallback)
+    end
     local claimed = self:GetClaimedOrder()
     if claimed and claimed.orderID == orderID then
+        if self.RememberOrderIdentity then self:RememberOrderIdentity(claimed) end
         return claimed
     end
 
     local state = self.rowStates and self.rowStates[orderID]
     if state and state.order then
+        if self.RememberOrderIdentity and SameOrderID(state.order.orderID, orderID) then
+            self:RememberOrderIdentity(state.order)
+        end
         return state.order
     end
 
