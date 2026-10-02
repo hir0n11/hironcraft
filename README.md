@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Cached profession links across linked accounts (0.4.92)
+
+- Cache the current character's server-issued trade links on login and skill/
+  profession updates. Log into each crafter and open their profession once after
+  updating both computers. Missing API data never replaces a good link with nil.
+- `{profession_link}` uses the selected crafter's full name/realm and base skill
+  line, including an alt or a crafter on a linked account. Validate complete links
+  and their owner GUID; never borrow the collector's profession. Until a link is
+  available, use the profession name. Existing custom substitution tags can refer
+  to `{profession_link}`; no saved message/tag text is rewritten automatically.
+- Cache changes share only parent-profession data via existing full-account links
+  and BULK transport. Unchanged captures send nothing; revision exchange repairs
+  missed updates after a relog. Parent-only first arrivals still request the full
+  recipe catalog, even at the same revision. Analytics-only links are excluded.
+- Pending greeting previews rebuild after a profession revision arrives. Quick
+  Replies and Custom Explanations reuse the same context; all chat stays manual.
+
 ## Profession links in greeting templates (0.4.91)
 
 - Allow `{profession}` and `{profession_link}` in item greetings for the current

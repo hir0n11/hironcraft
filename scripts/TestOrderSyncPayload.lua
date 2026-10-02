@@ -297,3 +297,74 @@ assert(#sent==3 and #sent[1].data.data.rules==40 and #sent[3].data.data.rules==1
 for _,p in ipairs(sent) do assert(p.priority=='BULK' and p.prefix=='HIRONCRAFT_BULK') end
 print('Chat rule transport passed (full links only, version validation, bulk priority and bounded batches).')
 
+-- Profession links ride on existing parent-profession revisions. Immediate
+-- changes exclude the recipe catalog; reconnect uses the normal delta repair.
+do
+    local crafter='Mavu-Realm'
+    local cached={crafter=crafter,guid='Player-1-ABC',
+        link='|cffffd000|Htrade:Player-1-ABC:45357:773|h[Inscription]|h|r'}
+    Scan.OnCrafterListModified=noop
+    Scan.ChatFilterSync=nil
+    Scan.DB={settings={my_uuid='pc-links'},realm={linked_accounts={}},
+        characters={[crafter]={sourceID='pc-links',parent_professions={[773]={rev=2,profession_link=cached}},
+            professions={[2828]={parentProfID=773,recipes={[1]={scan_state=1}}}}}},customers={},listed_orders={}}
+    local pc=Scan.DB
+    sent={};frames={};comm:ShareCharacterModification(crafter,773,true);flushFrames()
+    assert(#sent==0 and pc.characters[crafter].parent_professions[773].rev==3,
+        'offline link capture did not advance its durable revision')
+    pc.realm.linked_accounts['lap-links']={permissions={1}}
+    pc.realm.linked_accounts['analytics-only']={permissions={2}}
+    receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID='lap-links',data={state=2}}},'LaptopMin-Realm')
+    sent={};frames={};comm:ShareCharacterModification(crafter,773,true);flushFrames()
+    local update=only(op.ShareCharacterData)
+    assert(update.prefix=='HIRONCRAFT_BULK' and update.priority=='BULK')
+    local payload=update.data.data.characters[crafter]
+    assert(not payload.professions and payload.parent_professions[773].profession_link.link==cached.link,
+        'link update lost its cache or included recipes')
+    Scan.DB={settings={my_uuid='lap-links'},realm={linked_accounts={['pc-links']={permissions={1}}}},
+        characters={[crafter]={sourceID='pc-links',parent_professions={[773]={rev=2}},
+            professions={[2828]={parentProfID=773,recipes={[1]={scan_state=1}}}}}},customers={},listed_orders={}}
+    local laptop=Scan.DB
+    receive(update,'Mavu-Realm')
+    assert(laptop.characters[crafter].parent_professions[773].profession_link.link==cached.link)
+    assert(laptop.characters[crafter].professions[2828].recipes[1].scan_state==1,'parent-only link update erased recipes')
+    local stale=copy(update);stale.data.data.characters[crafter].parent_professions[773]={rev=3}
+    receive(stale,'Mavu-Realm')
+    assert(laptop.characters[crafter].parent_professions[773].profession_link.link==cached.link,'older profile erased link')
+    -- Both analytics-only and unknown peers must be excluded by transport.
+    laptop.characters[crafter].parent_professions[773]={rev=1}
+    laptop.realm.linked_accounts['pc-links'].permissions={2};receive(update,'Mavu-Realm')
+    assert(not laptop.characters[crafter].parent_professions[773].profession_link)
+    laptop.realm.linked_accounts={};receive(update,'Mavu-Realm')
+    assert(not laptop.characters[crafter].parent_professions[773].profession_link)
+    laptop.realm.linked_accounts['pc-links']={permissions={1}}
+    -- Miss the push, reconnect with the old revision, then receive the cache.
+    Scan.DB=pc
+    receive({prefix='HIRONCRAFT_BULK',data={operation=op.ShareCharacterData,version=1,senderID='lap-links',
+        data={state=2,revisions={[crafter]={[773]=1}},peers={'pc-links'}}}},'LaptopMin-Realm')
+    flushFrames() -- The reply serializes after the receive frame completed.
+    local repair=only(op.ShareCharacterData)
+    Scan.DB=laptop;receive(repair,'Mavu-Realm')
+    assert(laptop.characters[crafter].parent_professions[773].profession_link.link==cached.link,
+        'reconnect revision exchange did not repair a missed link')
+    -- A first small update may beat the full profile onto a fresh laptop.
+    laptop.characters={};receive(update,'Mavu-Realm')
+    assert(type(laptop.characters[crafter].professions)=='table')
+    receive({prefix='HIRONCRAFT_BULK',data={operation=op.ShareCharacterData,version=1,senderID='pc-links',
+        data={state=1,revisions={[crafter]={[773]=4}},peers={'lap-links'}}}},'Mavu-Realm')
+    flushFrames()
+    local inquiry=only(op.ShareCharacterData)
+    assert(inquiry.data.data.revisions[crafter][773]==-1,'parent-only profile claimed a complete recipe catalog')
+    Scan.DB=pc;receive(inquiry,'LaptopMin-Realm');flushFrames()
+    repair=only(op.ShareCharacterData)
+    Scan.DB=laptop;receive(repair,'Mavu-Realm')
+    assert(laptop.characters[crafter].professions[2828].recipes[1].scan_state==1,
+        'same-revision full snapshot did not complete the parent-only profile')
+    local noNewer=copy(update);noNewer.data.data.characters[crafter].parent_professions[773].profession_link=nil
+    noNewer.data.data.characters[crafter].parent_professions[773].rev=5
+    receive(noNewer,'Mavu-Realm')
+    assert(not laptop.characters[crafter].parent_professions[773].profession_link,
+        'removing a forgotten profession link did not sync')
+end
+print('Profession link transport passed (parent-only bulk push, offline revisions, stale packets, reconnect, permissions, deletion).')
+

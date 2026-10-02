@@ -337,12 +337,22 @@ local SharingState = {
 
 -- Filter our character list to only the revisions to send a small amount of
 -- data in our greeting to other accounts.
+local function HasChildProfession(character, parentID)
+    for _, profession in pairs(character.professions or {}) do
+        if profession.parentProfID == parentID then return true end
+    end
+    return false
+end
+
 local function CreateRevisions()
     local revisions = {}
     for char, charConfig in pairs(HironCraftScan.DB.characters) do
         for ppID, ppConfig in pairs(charConfig.parent_professions) do
             local ppRev = saved(revisions, char, {})
-            ppRev[ppID] = ppConfig.rev or 0
+            -- A small parent-only update may arrive before the initial recipe
+            -- catalog. Keep requesting it instead of claiming the full revision.
+            ppRev[ppID] = (ppConfig.character_disabled or HasChildProfession(charConfig, ppID))
+                and (ppConfig.rev or 0) or -1
         end
     end
     return revisions
@@ -386,6 +396,11 @@ end
 
 local function SendShareCharacterData(target, data)
     if HironCraftScan.CharacterRenames then data.character_renames = HironCraftScan.CharacterRenames.ExportOwn() end
+    if not target then
+        -- Parent-only link/config updates go only to currently linked full
+        -- peers, not every character left in the historical target cache.
+        return TransmitToFullLinkedAccounts(data, HironCraftScanComm.Operations.ShareCharacterData)
+    end
     HironCraftScanComm:Transmit(data, HironCraftScanComm.Operations.ShareCharacterData, target)
 end
 
@@ -518,18 +533,24 @@ local function ReceiveShareCharacterData(sender, data, senderID)
             end
 
             if not localCharConfig then
+                charConfig.professions = charConfig.professions or {}
                 HironCraftScan.DB.characters[char] = charConfig
             else
+                localCharConfig.professions = localCharConfig.professions or {}
                 if not localCharConfig.sourceID then
                     localCharConfig.sourceID = charConfig.sourceID
                 end
                 for ppID, ppConfig in pairs(charConfig.parent_professions) do
-                    if
+                    local importParent =
                         not localCharConfig.parent_professions[ppID]
                         or ((localCharConfig.parent_professions[ppID].rev or 0) < (ppConfig.rev or 0))
                         or ppConfig.character_disabled
-                    then
-                        localCharConfig.parent_professions[ppID] = ppConfig
+                    local completeChildren = not HasChildProfession(localCharConfig, ppID)
+                        and HasChildProfession(charConfig, ppID)
+                        and (ppConfig.rev or 0) >= (localCharConfig.parent_professions[ppID]
+                            and localCharConfig.parent_professions[ppID].rev or 0)
+                    if importParent or completeChildren then
+                        if importParent then localCharConfig.parent_professions[ppID] = ppConfig end
                         if ppConfig.character_disabled then
                             -- The other side can't send the lack of something
                             -- without a special payload, so we handle the
@@ -770,15 +791,13 @@ end
 -- A single modification to the profession. We don't get specific - if they
 -- changed anything, toss the whole profession across.
 function HironCraftScanComm:ShareCharacterModification(char, ppID, ppChangeOnly)
-    if not LinkedAccountsConfigured() then
-        return
-    end
-
     local charConfig = HironCraftScan.DB.characters[char]
     local ppConfig = charConfig.parent_professions[ppID]
     ppConfig.rev = (ppConfig.rev or 0) + 1
 
-    if not HaveTarget() then
+    -- Persist the revision even before accounts are linked, so a newly cached
+    -- profession link participates in the first/reconnected revision exchange.
+    if not LinkedAccountsConfigured() or not HaveTarget() then
         return
     end
 

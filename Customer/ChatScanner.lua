@@ -1428,34 +1428,6 @@ function HironCraftScan.GetCommissionForResponse(response)
     )
 end
 
-local function GetProfessionLink(profInfo)
-    if not profInfo then
-        return nil
-    end
-
-    -- A row made from a crafting order stores the base profession (755),
-    -- whose info has no parent of its own: it is its own parent.
-    local skillLineID = profInfo.parentProfessionID or profInfo.professionID
-    if type(skillLineID) ~= 'number' then
-        return nil
-    end
-    local spellSkillIndex = C_SpellBook.GetSkillLineIndexByID(skillLineID)
-    local skillLineInfo = spellSkillIndex
-        and C_SpellBook.GetSpellBookSkillLineInfo(spellSkillIndex)
-    if not skillLineInfo then
-        return nil
-    end
-
-    local skillSpellID = select(
-        2,
-        C_SpellBook.GetSpellBookItemType(
-            skillLineInfo.itemIndexOffset + 1,
-            Enum.SpellBookSpellBank.Player
-        )
-    )
-    return skillSpellID and C_Spell.GetSpellTradeSkillLink(skillSpellID) or nil
-end
-
 function HironCraftScan.Utils.GetReplyItemLink(itemID, originalLink)
     -- Reply with the cached base-item link, just like single-item requests.
     -- Customer recraft links can contain hundreds of bytes of modifiers/GUIDs.
@@ -1465,11 +1437,11 @@ end
 local function BuildResponseContext(crafterFullName, profID, itemID, itemLink, recipeID)
     local profInfo = C_TradeSkillUI.GetProfessionInfoBySkillLineID(profID)
     local crafter = HironCraftScan.NameAndRealmToName(crafterFullName)
-    local altCraft = crafter ~= HironCraftScan.GetPlayerName()
+    local altCraft = crafterFullName ~= HironCraftScan.GetPlayerName(true)
     local professionName = profInfo and (profInfo.parentProfessionName or profInfo.professionName) or nil
     local professionLink = professionName
-    if not altCraft then
-        professionLink = GetProfessionLink(profInfo) or professionName
+    if HironCraftScan.ProfessionLinks then
+        professionLink = HironCraftScan.ProfessionLinks.Get(crafterFullName, profID, profInfo) or professionName
     end
 
     return {
@@ -1569,15 +1541,18 @@ HironCraftScan.RebuildResponseMessage = function(order, force)
     if not character or not character.professions or not character.professions[response.professionID] then
         return -- Preserve a saved greeting if its crafter configuration was removed.
     end
-    local crafter = HironCraftScan.NameAndRealmToName(response.crafterFullName)
-    local currentAltCraft = crafter ~= HironCraftScan.GetPlayerName()
-    if not force and currentAltCraft == response.alt_craft then
+    local currentAltCraft = response.crafterFullName ~= HironCraftScan.GetPlayerName(true)
+    local linkRevision = HironCraftScan.ProfessionLinks
+        and HironCraftScan.ProfessionLinks.Revision(response.crafterFullName, response.professionID)
+    if not force and currentAltCraft == response.alt_craft
+        and linkRevision == response.profession_link_revision then
         return
     end
     local greeting, newAltCraft =
         BuildRawGreeting(response.crafterFullName, response.professionID, response.itemID, response.itemLink, response.recipeID)
     response.message = SplitResponse(greeting)
     response.alt_craft = newAltCraft
+    response.profession_link_revision = linkRevision
 end
 
 local function GenericAlertPreferences()

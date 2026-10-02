@@ -40,6 +40,7 @@ EnumUtil = {MakeEnum=function(...) local e={}; for i,k in ipairs({...}) do e[k]=
 StaticPopupDialogs, UISpecialFrames, UIPanelWindows = {}, {}, {}
 bit = {bxor=function() return 0 end, band=function() return 0 end}
 function UnitName() return 'Seller' end
+function UnitGUID() return 'Player-1-2' end
 function GetRealmName() return 'Realm' end
 function GetTime() return 100 end
 local now=1000
@@ -106,6 +107,7 @@ loadSource('Utils/WaitGroup.lua')
 loadSource('Utils/Utils.lua')
 Scan.Utils.onLoad = noop
 loadSource('Utils/FStrings.lua')
+loadSource('Utils/ProfessionLinks.lua')
 loadSource('Customer/ChatHistory.lua')
 loadSource('Customer/RequestTracking.lua')
 loadSource('Customer/GenerousCustomers.lua')
@@ -199,6 +201,24 @@ do
     local text=table.concat(response(101).message,' ')
     assert(text:find('Profession 164',1,true) and not text:find('|Htrade:',1,true)
         and not text:find('{profession_link}',1,true),'missing profession link had no name fallback')
+    -- The laptop already has a pending greeting when the crafter's cache
+    -- arrives. Both the preview and the eventual click must use the new link.
+    reset();scan(b)
+    Scan.RebuildResponseMessage(order(102))
+    local remoteParent=Scan.DB.characters['Tailor-Realm'].parent_professions[197]
+    local savedCache,savedRev=remoteParent.profession_link,remoteParent.rev
+    local remoteLink='|cffffd000|Htrade:Player-7-ABC:3908:197|h[Tailoring]|h|r'
+    remoteParent.profession_link={crafter='Tailor-Realm',guid='Player-7-ABC',link=remoteLink}
+    remoteParent.rev=(remoteParent.rev or 0)+1
+    Scan.RebuildResponseMessage(order(102))
+    text=table.concat(response(102).message,' ')
+    assert(text:find(remoteLink,1,true),'pending preview ignored a newly synced profession link')
+    assert(Scan.BuildResponseContext(response(102)).profession_link==remoteLink,
+        'quick reply/explanation context did not reuse the linked crafter cache')
+    assert(#sent==0,'receiving a profession link sent a greeting')
+    Scan.GreetCustomer('LeftButton',order(102))
+    assert(sent[1].message:find(remoteLink,1,true),'manual greeting did not use the remote profession link')
+    remoteParent.profession_link,remoteParent.rev=savedCache,savedRev
     Scan.DB.settings.greeting,Scan.State.isBusy=savedGreetings,savedBusy
     C_SpellBook,C_Spell,Enum=savedBook,savedSpell,savedEnum
     reset()
