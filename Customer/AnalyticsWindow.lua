@@ -801,8 +801,7 @@ local function UpdateSummary()
     tiles.tips.value:SetText(report and Gold(totals.tips) or '')
     tiles.averageTip.value:SetText(report and Gold(totals.averageTip) or '')
     local returned = returns and returns.totals
-    tiles.returnedValue.value:SetText(returned and (Gold(returned.value, true)
-        .. (returned.unpriced > 0 and ' |cffffb347*|r' or '')) or '')
+    tiles.returnedValue.value:SetText(returned and Gold(returned.value, true) or '')
     local minutes = math.floor(totals.online or 0)
     tiles.online.value:SetText(report and string.format('%d:%02d', math.floor(minutes / 60), minutes % 60) or '')
     LayoutTiles(frame.TileOrder)
@@ -1514,9 +1513,6 @@ local function Create()
         local totals = returns and returns.totals
         if totals then
             GameTooltip:AddDoubleLine(L('Reagents returned'), TileNumber(totals.quantity), 1, 1, 1, 1, 1, 1)
-            if totals.unpriced > 0 then
-                GameTooltip:AddLine(string.format(L('Without a price: %d'), totals.unpriced), 1, 0.5, 0.4, true)
-            end
         end
         GameTooltip:Show()
     end)

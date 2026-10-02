@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## SharedMedia sounds, minimap spacing and return tooltip (0.4.89)
+
+- The sound selectors include WhisperAlert's original `wisp.OGG`, bundled as
+  `Media/WhisperAlert.ogg`. It can be previewed and selected for scanner alerts,
+  incoming whispers or personal orders without WhisperAlert/LibSharedMedia.
+  Current selections are preserved; the separate addon is not disabled or
+  removed automatically. Disable it yourself to avoid duplicate whisper alerts.
+- Also includes 107 available WeakAuras SharedMedia sounds (106 bundled files
+  plus one Blizzard sound ID), with their original labels, licences and credits.
+  No fonts/textures/media library are required. Known old selected paths migrate
+  to the bundled copies; a still-loaded external library does not duplicate them.
+  Longer clips keep temporary unmute active until playback can finish.
+- The profession indicator now anchors beyond the mail icon's actual texture,
+  with a gap, rather than its narrower layout slot. Mail appearing/disappearing
+  repositions the default indicator; custom dragged positions remain unchanged.
+- Remove the red missing-price line and asterisk from the overall reagent-return
+  metric. Historical prices, including Auctionator records, remain unchanged;
+  quantities without a saved price remain inspectable in the detailed report/CSV.
+
 ## Chat tools, linked filters and faster reagent prices (0.4.88)
 
 - Save chat text keeps a bounded 2,000-line public-text cache independently of

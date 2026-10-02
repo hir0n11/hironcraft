@@ -27,16 +27,31 @@ function I.Position()
     frame:SetScale(tonumber(db.personal_order_scale) or 1)
     local pos = db.personal_order_position
     local indicators = MinimapCluster and MinimapCluster.IndicatorFrame
+    local mail = indicators and indicators.MailFrame
+    if mail and not mail.hironOrderSpacingHook then
+        mail.hironOrderSpacingHook = true
+        mail:HookScript('OnShow', I.Position)
+        mail:HookScript('OnHide', I.Position)
+    end
+    -- The mail atlas is wider than its 20px layout slot. Putting this group
+    -- in the next slot overlaps the actual envelope, especially when scaled.
+    -- Follow the stock area but anchor outside the mail texture's real edge.
+    frame.layoutIndex = nil
+    frame.ignoreInLayout = true
     if pos and tonumber(pos.x) and tonumber(pos.y) then
         frame:SetParent(UIParent)
-        frame.layoutIndex = nil
         frame:SetPoint('CENTER', UIParent, 'BOTTOMLEFT', pos.x, pos.y)
     else
         -- Use Blizzard's indicator group (tracking/mail/crafting orders).
         -- It follows Edit Mode and tracking-button changes automatically.
         frame:SetParent(indicators or UIParent)
-        frame.layoutIndex = 2 -- the standard CraftingOrderFrame slot
-        if not indicators then frame:SetPoint('TOPRIGHT', Minimap, 'TOPLEFT', -3, 0) end
+        if mail and mail:IsShown() then
+            frame:SetPoint('TOPLEFT', mail.MailIcon or MiniMapMailIcon or mail, 'TOPRIGHT', 8, 0)
+        elseif indicators then
+            frame:SetPoint('TOPLEFT', indicators, 'TOPLEFT', 0, 0)
+        else
+            frame:SetPoint('TOPRIGHT', Minimap, 'TOPLEFT', -3, 0)
+        end
     end
     if indicators and indicators.Layout then indicators:Layout() end
 end

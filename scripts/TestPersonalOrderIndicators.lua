@@ -7,7 +7,11 @@ local function Make(name)
     function f:SetScript(key, fn) self.scripts[key] = fn end
     function f:HookScript(key, fn) self.scripts[key] = fn end
     function f:Show() self.shown=true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
-    function f:Hide() self.shown=false end
+    function f:Hide()
+        local wasShown=self.shown; self.shown=false
+        if wasShown and self.scripts.OnHide then self.scripts.OnHide(self) end
+    end
+    function f:IsShown() return self.shown end
     function f:SetShown(on) if on then self:Show() else self:Hide() end end
     function f:SetSize(w,h) self.w,self.h=w,h end
     function f:SetWidth(w) self.w=w end
@@ -27,7 +31,12 @@ end
 CreateFrame=function(_,name) return Make(name) end
 UIParent, Minimap = {}, {}
 local original=Make()
-MinimapCluster={IndicatorFrame={CraftingOrderFrame=original}}
+local mail=Make()
+mail:SetSize(20,15)
+mail.MailIcon=Make()
+mail.MailIcon:SetSize(28,20)
+mail:Hide()
+MinimapCluster={IndicatorFrame={CraftingOrderFrame=original,MailFrame=mail}}
 GetProfessions=function() return 2,4 end
 GetProfessionInfo=function(index) if index==2 then return 'Blacksmithing',100 end return 'Tailoring',200 end
 local infos={{profession=1,professionName='Blacksmithing',numPersonalOrders=2}}
@@ -48,8 +57,14 @@ event(nil,'CRAFTINGORDERS_UPDATE_PERSONAL_ORDER_COUNTS')
 assert(sounds==1 and indicator.w==88)
 assert(iconRows[1].count.point[2]==iconRows[1].icon and iconRows[1].count.point[3]=='RIGHT',
     'count still overlaps the profession icon')
-assert(indicator.parent==MinimapCluster.IndicatorFrame and indicator.layoutIndex==2,
+assert(indicator.parent==MinimapCluster.IndicatorFrame and indicator.ignoreInLayout and not indicator.layoutIndex,
     'indicator did not use the stock crafting-order slot')
+assert(indicator.point[2]==MinimapCluster.IndicatorFrame)
+mail:Show()
+assert(indicator.point[2]==mail.MailIcon and indicator.point[3]=='TOPRIGHT' and indicator.point[4]>=8,
+    'profession icon still overlaps the mail atlas outside its layout slot')
+mail:Hide()
+assert(indicator.point[2]==MinimapCluster.IndicatorFrame, 'mail disappearing left a gap')
 event(nil,'CRAFTINGORDERS_UPDATE_PERSONAL_ORDER_COUNTS')
 assert(sounds==1,'duplicate count event sounded again')
 infos={{profession=2,professionName='Tailoring',numPersonalOrders=1}}
@@ -69,9 +84,18 @@ Scan.DB.settings.personal_order_position={x=123,y=456}
 Scan.DB.settings.personal_order_scale=1.5
 Scan.PersonalOrdersIndicator.Position()
 assert(indicator.scale==1.5 and indicator.point[4]==123)
+mail:Show(); mail:Hide()
+assert(indicator.parent==UIParent and indicator.point[4]==123, 'mail updates moved a manually placed indicator')
 Scan.PersonalOrdersIndicator.Reset()
 assert(not Scan.DB.settings.personal_order_position and indicator.parent==MinimapCluster.IndicatorFrame)
 infos={{profession=1,professionName='Blacksmithing',numPersonalOrders=123}}
 Scan.PersonalOrdersIndicator.Update(true)
 assert(indicator.w==49, 'three-digit count was clipped or placed over the icon')
+for _,scale in ipairs({0.6,1,1.5,2}) do
+    Scan.DB.settings.personal_order_scale=scale
+    Scan.PersonalOrdersIndicator.Position()
+    mail:Show()
+    assert(indicator.scale==scale and indicator.point[2]==mail.MailIcon and indicator.point[3]=='TOPRIGHT')
+    mail:Hide()
+end
 print('Personal order indicators passed (current-character server counts, icons, zero counts, sound dedup, original hammer, position/scale).')

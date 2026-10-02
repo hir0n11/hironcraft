@@ -594,22 +594,22 @@ Log.LoadRange = originalLoad
 print('Analytics calendar UI passed (day clicks, presets, navigation, year/month/day drill-down, filters, CSV, load races).')
 
 -- Summary metrics reuse the same historical returns and unioned presence as
--- the detailed reports. Missing prices are explicit; own reagents stay out.
+-- the detailed reports. The compact tile has no missing-price alert; own reagents stay out.
 view.preset = 'today'; view.side = nil; view.ppID = nil; view.crafter = nil; view.tier = nil
 Log.Record({ k = 'c', o = 3, r = 1, p = 197, x = 'Tailor-Realm', t = now - 10,
     rs = { { i = 7002, n = 3, c = 1 }, { i = 7003, n = 100, v = 90000 } } })
 W.Reload()
 assert(frame.Tiles.returnedValue.value.text:find('^6|T')
-    and frame.Tiles.returnedValue.value.text:find('*',1,true), 'unpriced/own reagents inflated returns or lacked a warning')
+    and not frame.Tiles.returnedValue.value.text:find('*',1,true), 'return value changed or the summary warning remained')
 assert(frame.Tiles.online.value.text=='0:01')
 local tooltipLines = {}
 GameTooltip.AddLine = function(_, text) tooltipLines[#tooltipLines+1] = text end
 GameTooltip.AddDoubleLine = function(_, left, right) tooltipLines[#tooltipLines+1] = left..': '..right end
 frame.Tiles.returnedValue.scripts.OnEnter(frame.Tiles.returnedValue)
-assert(tooltipLines[1]=='Reagents returned: 5' and tooltipLines[2]=='Without a price: 3',
-    'return tooltip lost reagent quantities or missing-price count')
+assert(tooltipLines[1]=='Reagents returned: 5' and #tooltipLines==1,
+    'return tooltip lost reagent quantities or still warns about missing prices')
 frame.Tiles.online.scripts.OnEnter(frame.Tiles.online)
-assert(tooltipLines[3]=='1 min 30 s','online tooltip lost precise seconds')
+assert(tooltipLines[2]=='1 min 30 s','online tooltip lost precise seconds')
 
 view.side = 'A'; W.Rebuild()
 assert(frame.Tiles.online.value.text=='0:00' and frame.Tiles.returnedValue.value.text:find('^6|T'),

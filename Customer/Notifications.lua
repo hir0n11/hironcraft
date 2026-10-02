@@ -1,4 +1,4 @@
--- Short Blizzard sound kits; no media addon or copied sound files required.
+-- Built-in kits and bundled alert sounds; no media addon required.
 local _, Scan = ...
 local N = {}
 Scan.Notifications = N
@@ -13,12 +13,32 @@ N.sounds = {
     { 'kit:AUCTION_WINDOW_CLOSE', 'Auction bell' },
     { 'kit:IG_MAINMENU_OPTION_CHECKBOX_ON', 'Soft click' },
     { 'kit:TELL_MESSAGE', 'Whisper' },
+    { 'Interface\\AddOns\\HironCraft\\Media\\WhisperAlert.ogg', 'WhisperAlert' },
 }
+local soundSettings = { 'ping_sound', 'whisper_alert_sound', 'personal_order_sound' }
+local aliases = { ['interface\\addons\\whisperalert\\wisp.ogg'] = N.sounds[5][1] }
+local durations = {}
+local mediaRoot = 'Interface\\AddOns\\HironCraft\\Media\\SharedMedia\\Sounds\\'
+for _, sound in ipairs(Scan.BundledAlertSounds or {}) do
+    local file, label, duration = sound[1], sound[2], sound[3]
+    local value = tonumber(file) and file or (mediaRoot .. file)
+    N.sounds[#N.sounds+1] = { value, label }
+    durations[value] = duration
+    if not tonumber(file) then
+        aliases[('Interface\\AddOns\\WeakAuras_SharedMedia\\Sounds\\' .. file):lower()] = value
+    end
+end
+function N.ResolveSound(value)
+    if value == nil then return nil end
+    return aliases[tostring(value):lower()] or value
+end
 local lease, changing, generation, last = nil, false, 0, {}
+local restoreAt
 local lastAlert
 local function Restore()
     local previous = lease
     lease = nil
+    restoreAt = nil
     for key, value in pairs(previous or {}) do
         if GetCVar(key) == '1' then
             changing = true
@@ -28,6 +48,7 @@ local function Restore()
     end
 end
 function N.Play(value, preview)
+    value = N.ResolveSound(value)
     if not value or value == 'none' or value == '1' then return false end
     local force = Setting('alert_sound_when_muted', true)
     if force and GetCVar and SetCVar then
@@ -43,7 +64,13 @@ function N.Play(value, preview)
         end
         generation = generation + 1
         local token = generation
-        C_Timer.After(2, function() if generation == token then Restore() end end)
+        -- Longer SharedMedia clips must finish before temporarily unmuted
+        -- audio is restored. A later short alert must not cut one off either.
+        local deadline = GetTime() + math.max(2, (durations[tostring(value)] or 0) + 0.25)
+        restoreAt = math.max(restoreAt or 0, deadline)
+        C_Timer.After(restoreAt - GetTime(), function()
+            if generation == token then Restore() end
+        end)
     end
     local kit = tostring(value):match('^kit:(.+)$')
     if kit then
@@ -74,6 +101,7 @@ function N.GetOptions()
     local container = Settings.CreateControlTextContainer()
     local found = {}
     local function Add(value, label)
+        value = N.ResolveSound(value)
         value = tostring(value)
         if not found[value] then container:Add(value, label); found[value] = true end
     end
@@ -86,7 +114,7 @@ function N.GetOptions()
         end
     end
     -- Keep an existing external selection visible even after removing its library.
-    for _, key in ipairs({ 'ping_sound', 'whisper_alert_sound', 'personal_order_sound' }) do
+    for _, key in ipairs(soundSettings) do
         local value = Setting(key)
         if value then Add(value, L('Saved sound') .. ': ' .. tostring(value)) end
     end
@@ -106,6 +134,10 @@ f:SetScript('OnEvent', function(_, event, name)
             end
         end
     elseif event == 'PLAYER_LOGIN' then
+        local settings = Scan.DB and Scan.DB.settings
+        for _, key in ipairs(soundSettings) do
+            if settings and settings[key] ~= nil then settings[key] = N.ResolveSound(settings[key]) end
+        end
         -- Do not disable another addon behind the user's back. It already owns
         -- these events: yield the whisper sound only, and explain how to switch.
         N.externalWhisper = C_AddOns and C_AddOns.IsAddOnLoaded('WhisperAlert')

@@ -468,6 +468,11 @@ assert(Report.BuildReturns(all(), { crafter = 'Other-Realm' }).totals.crafts == 
 Auctionator.API.v1.GetAuctionPriceByItemID = function() return 99999 end
 Scan.ReturnPrices.GetPrice = function() return 99999 end
 assert(Report.BuildReturns(all(), {}).totals.value == 20000, 'the worth followed today\'s price')
+local legacy=Report.BuildReturns({{{k='c',o=999,t=now,rs={
+    {i=9001,n=2,c=1,v=12345,s='a'}, {i=9002,n=3,c=1,v=9876,s='t'}
+}}}}, {})
+assert(legacy.totals.value==54318 and legacy.totals.unpriced==0,
+    'saved Auctionator/TSM prices were incorrectly treated as unpriced')
 C_CraftingOrders, C_TradeSkillUI, Auctionator, TSM_API = nil, nil, nil, nil
 Scan.ReturnPrices = nil
 print('Analytics resource returns passed.')
