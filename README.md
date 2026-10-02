@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Profession links in greeting templates (0.4.91)
+
+- Allow `{profession}` and `{profession_link}` in item greetings for the current
+  character and alts, the alt profession greeting/suffix, and the busy suffix.
+  The existing profession greeting, Quick Replies and Custom Explanations also
+  support the link. Unknown placeholders still block saving; the generic request
+  greeting has no profession context and does not accept profession placeholders.
+- Use the existing response context: the current crafter's clickable link when
+  available, otherwise the profession name (including another crafter's replies).
+  Tooltips explain the fallback and curly-brace syntax. Saved texts and manual
+  click/hotkey-to-send behaviour are unchanged.
+
 ## Public-order counter layout (0.4.90)
 
 - Place the native Orders Remaining counter above Shopping, with clearance for

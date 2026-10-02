@@ -155,3 +155,49 @@ for _,row in ipairs(aliases.Rows) do assert(row.width==300 and row.Reset:IsShown
 aliases:Init(false)
 assert(aliases.Description.height==54 and aliases.Rows[1].width==700)
 print('Reply/settings UI passed (real save/validation callbacks, rename/delete, pooled rows, compact/full layouts, alias reset).')
+
+-- Global greetings use the same real save callback as the other editors.
+Scan.CONST={TEXT=setmetatable({}, {__index=function(_,key) return key end})}
+Scan.Utils.Contains=function(list,value)
+    for _,entry in ipairs(list) do if entry==value then return true end end
+    return false
+end
+Scan.Config.AppendSubstitutionTagTooltip=noop
+local greetingShares=0
+HironCraftScanComm={ShareCustomGreeting=function() greetingShares=greetingShares+1 end}
+assert(loadfile('Config/GeneralConfigPanel.lua'))('HironCraft',Scan)
+local greetingPanel=setmetatable({Title=surface(),GetParent=function()
+    return {TabGroup=CreateTabGroup}
+end},{__index=HironCraftScanGreetingConfigPanelMixin})
+local greetingKeys={'GREETING_I_CAN_CRAFT_ITEM','GREETING_I_HAVE_PROF',
+    'GREETING_ALT_CAN_CRAFT_ITEM','GREETING_ALT_HAS_PROF','GREETING_ALT_SUFFIX','GREETING_BUSY'}
+local function greetingField(key)
+    local field=CreateFrame('Frame',nil,nil,'HironCraftScanTextInputTemplate')
+    field.Expression.ValidationIcon.Warning=function(self,callback)
+        self.error=nil;self.warning=callback
+    end
+    greetingPanel[key]=field
+end
+for _,key in ipairs(greetingKeys) do greetingField(key) end
+greetingField('GREETING_GENERIC_REQUEST')
+greetingPanel:Init()
+for _,key in ipairs(greetingKeys) do
+    local text='I have {profession_link}. You choose price.'
+    edit(greetingPanel[key],text)
+    assert(not greetingPanel[key].Expression.ValidationIcon.error,
+        key..' rejected the profession link')
+    assert(Scan.DB.settings.greeting[key]==text, key..' did not save the profession link')
+    edit(greetingPanel[key],'{profession}: {profession_link}')
+    assert(Scan.DB.settings.greeting[key]=='{profession}: {profession_link}')
+    edit(greetingPanel[key],'{profession_link_typo}')
+    assert(greetingPanel[key].Expression.ValidationIcon.error
+        and Scan.DB.settings.greeting[key]=='{profession}: {profession_link}',
+        'an invalid tag overwrote the saved greeting')
+end
+assert(greetingShares==#greetingKeys*2,'valid greetings were not shared exactly once')
+edit(greetingPanel.GREETING_GENERIC_REQUEST,'I have {profession_link}.')
+assert(greetingPanel.GREETING_GENERIC_REQUEST.Expression.ValidationIcon.error,
+    'generic request accepted a tag without profession context')
+edit(greetingPanel.GREETING_GENERIC_REQUEST,'Hello, what do you need?')
+assert(Scan.DB.settings.greeting.GREETING_GENERIC_REQUEST=='Hello, what do you need?')
+print('Greeting editor passed (profession links, actual save/share callbacks, invalid and generic tags).')

@@ -152,6 +152,58 @@ end
 local a,b,c=link(1001),link(1002),link(1003)
 reloadConfig()
 
+-- All profession-aware greetings use the real shared context and sender.
+do
+    local savedGreetings,savedBusy=Scan.DB.settings.greeting,Scan.State.isBusy
+    local savedBook,savedSpell,savedEnum=C_SpellBook,C_Spell,Enum
+    local tradeLink='|cffffd000|Htrade:Player-1-2:2018:164|h[Blacksmithing 100%]|h|r'
+    local linkCalls=0
+    C_SpellBook={
+        GetSkillLineIndexByID=function(id) assert(id==164); return 1 end,
+        GetSpellBookSkillLineInfo=function() return {itemIndexOffset=0} end,
+        GetSpellBookItemType=function() return 'SPELL',2018 end,
+    }
+    C_Spell={GetSpellTradeSkillLink=function()
+        linkCalls=linkCalls+1;return tradeLink
+    end}
+    Enum={SpellBookSpellBank={Player=0}}
+    Scan.DB.settings.greeting={
+        GREETING_I_CAN_CRAFT_ITEM=string.rep('Thanks ',25)..'{item}: {profession_link}.',
+        GREETING_I_HAVE_PROF='I have {profession_link}.',
+        GREETING_ALT_CAN_CRAFT_ITEM='{crafter} can craft {item}: {profession_link}.',
+        GREETING_ALT_HAS_PROF='{crafter} has {profession_link}.',
+        GREETING_ALT_SUFFIX='Alt: {profession_link}.',
+        GREETING_BUSY='Busy: {profession_link}.',
+    }
+    Scan.State.isBusy=true
+    for _,case in ipairs({{a,101,false},{b,102,true},{'lf bs',164,false},{'lf tailor',197,true}}) do
+        reset()
+        local before=linkCalls
+        scan(case[1]);flushTimers()
+        assert(response(case[2]) and #sent==0,'profession-link greeting sent without a click')
+        local expected=case[3] and 'Profession 197' or tradeLink
+        local text=table.concat(response(case[2]).message,' ')
+        assert(text:find(expected,1,true) and text:find('Busy: '..expected,1,true)
+            and not text:find('{profession_link}',1,true),'profession link was not expanded')
+        if case[3] then
+            assert(linkCalls==before and text:find('Alt: Profession 197',1,true),
+                'alt greeting used the current character\'s profession link')
+        end
+        Scan.GreetCustomer('LeftButton',order(case[2]))
+        local outgoing={};for _,message in ipairs(sent) do outgoing[#outgoing+1]=message.message end
+        assert(table.concat(outgoing,' ')==text,'sending changed the expanded greeting')
+        if case[2]==101 then assert(#sent>1,'long greeting did not exercise hyperlink splitting') end
+    end
+    C_SpellBook.GetSkillLineIndexByID=function() return nil end
+    reset();scan(a)
+    local text=table.concat(response(101).message,' ')
+    assert(text:find('Profession 164',1,true) and not text:find('|Htrade:',1,true)
+        and not text:find('{profession_link}',1,true),'missing profession link had no name fallback')
+    Scan.DB.settings.greeting,Scan.State.isBusy=savedGreetings,savedBusy
+    C_SpellBook,C_Spell,Enum=savedBook,savedSpell,savedEnum
+    reset()
+end
+
 -- Unsolicited service replies must not become new requests or quick replies.
 do
     local isAd=Scan.Scanner.IsCrafterAdvertisement

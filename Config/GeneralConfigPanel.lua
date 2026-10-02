@@ -59,14 +59,22 @@ function HironCraftScanGreetingConfigPanelMixin:Init()
     self.Title:SetText(L('Customer Greetings'))
     self.greetings = {
         ['GREETING_GENERIC_REQUEST'] = { placeholders = {} },
-        ['GREETING_I_CAN_CRAFT_ITEM'] = { placeholders = { '{crafter}', '{item}' } },
+        ['GREETING_I_CAN_CRAFT_ITEM'] = {
+            placeholders = { '{crafter}', '{item}', '{profession}', '{profession_link}' },
+        },
         ['GREETING_I_HAVE_PROF'] = {
             placeholders = { '{crafter}', '{profession}', '{profession_link}' },
         },
-        ['GREETING_ALT_CAN_CRAFT_ITEM'] = { placeholders = { '{crafter}', '{item}' } },
-        ['GREETING_ALT_HAS_PROF'] = { placeholders = { '{crafter}', '{profession}' } },
-        ['GREETING_ALT_SUFFIX'] = { placeholders = { '{crafter}' } },
-        ['GREETING_BUSY'] = { placeholders = {} },
+        ['GREETING_ALT_CAN_CRAFT_ITEM'] = {
+            placeholders = { '{crafter}', '{item}', '{profession}', '{profession_link}' },
+        },
+        ['GREETING_ALT_HAS_PROF'] = {
+            placeholders = { '{crafter}', '{profession}', '{profession_link}' },
+        },
+        ['GREETING_ALT_SUFFIX'] = {
+            placeholders = { '{crafter}', '{profession}', '{profession_link}' },
+        },
+        ['GREETING_BUSY'] = { placeholders = { '{profession}', '{profession_link}' } },
     }
 
     for _, key in ipairs({
@@ -79,6 +87,11 @@ function HironCraftScanGreetingConfigPanelMixin:Init()
         'GREETING_BUSY',
     }) do
         HironCraftScan.SetupTextInput(self, self[key], key)
+        if key ~= 'GREETING_GENERIC_REQUEST' and self[key].Info then
+            self[key].Info.ExtendTooltip = function()
+                HironCraftScan.GameTooltip_AddWhite(L('Profession link greeting help'))
+            end
+        end
     end
 end
 
@@ -108,7 +121,7 @@ function HironCraftScanGreetingConfigPanelMixin:IncludeContextInAutoComplete(key
 end
 
 function HironCraftScanGreetingConfigPanelMixin:Validate(keyword, user_value, reporter)
-    value = HironCraftScan.Config.SubstituteTags(user_value)
+    local value = HironCraftScan.Config.SubstituteTags(user_value)
 
     local extra_placeholders = {}
     local num_extra_placeholders = 0
