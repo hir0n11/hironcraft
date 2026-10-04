@@ -112,6 +112,7 @@ L["SKINNING_RECIPE_NOT_FOUND"] = "Рецепт приманки не найде�
 L["SKINNING_TARGETS_TITLE"] = "Шкуропроверятель — отслеживаемые цели"
 --UI.lua
 L["PROF_WINDOW_TITLE"] = "Очки знаний"
+L["KNOWLEDGE_BAR_LABEL"] = "Очки знаний"
 L["CATCHUP_REQUIREMENTS"] = "Требования для Catch-Up:"
 L["REQUIREMENTS"] = "Требования:"
 L["REQUIRES_PROFESSION_SKILL_25"] = "Требуется навык профессии 25"

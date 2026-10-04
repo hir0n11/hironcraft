@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Knowledge points bar (0.4.93)
+
+- The Specializations page shows `Knowledge Points  earned / total` for the whole
+  profession, in the free strip above the tabs on the right. The total is what
+  every path of every tab takes; unlock tiers are not points, as on the dials.
+- The solid part of the bar is spent, the pale part is earned and not spent yet.
+  Staged purchases move points from pale to solid; the number does not change
+  until more knowledge is earned.
+- A profession without specializations has no bar.
+
 ## Cached profession links across linked accounts (0.4.92)
 
 - Cache the current character's server-issued trade links on login and skill/

@@ -121,6 +121,7 @@ L["SKINNING_RECIPE_NOT_FOUND"] = "Lure recipe not found: %s"
 L["SKINNING_TARGETS_TITLE"] = "Skinning Check — tracked targets"
 --UI.lua
 L["PROF_WINDOW_TITLE"] = "Knowledge Points"
+L["KNOWLEDGE_BAR_LABEL"] = "Knowledge Points"
 L["CATCHUP_REQUIREMENTS"] = "Catch-Up unlock requirements:"
 L["REQUIREMENTS"] = "Requirements:"
 L["REQUIRES_PROFESSION_SKILL_25"] = "Requires profession skill 25"
