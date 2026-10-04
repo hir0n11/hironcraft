@@ -26,6 +26,18 @@ local function SameCrafter(filter, name)
     return BaseKey(filter) == BaseKey(name)
 end
 
+-- Whether an event counts for a crafter pool profile (AnalyticsProfiles.lua):
+-- by the character that recorded it. Orders and crafts from before recorders
+-- were kept go by their crafter; anything else that old counts only for the
+-- profile that took over the earlier history.
+local function InProfile(profile, event)
+    local who = event.w
+    if who == nil and (event.k == 'd' or event.k == 'c') then who = event.x end
+    if who ~= nil then return profile.chars[who] == true end
+    return profile.legacy == true
+end
+M.InProfile = InProfile
+
 -- Which row of the item table an event belongs to.
 local function Subject(event)
     if event.i then return 'item:' .. event.i, { kind = 'item', itemID = event.i, ppID = event.p } end
@@ -127,7 +139,8 @@ function M.CalendarBuckets(mode, anchor)
 end
 
 -- filters: from, to, ppID, crafter, tier ('diamond' / 'generous' / 'regular' /
--- 'stingy' / 'none'), side ('H' / 'A').
+-- 'stingy' / 'none'), side ('H' / 'A'), profile ({ chars, legacy }: only the
+-- events of that profile exist for the report).
 -- context.markOf(customer) gives the customer's coin, context.itemProf(itemID)
 -- the profession that makes an item.
 function M.Build(chunks, filters, context)
@@ -140,9 +153,10 @@ function M.Build(chunks, filters, context)
     local requests, replacedBy, greeted, links, orders, tokenOrders = {}, {}, {}, {}, {}, {}
     -- Time online: 5-minute slots of any account, each counted once.
     local online, firstOnline = {}, nil
+    local profile = filters.profile
     for _, events in ipairs(chunks or {}) do
         for _, event in ipairs(events) do
-            local kind = event.k
+            local kind = (not profile or InProfile(profile, event)) and event.k or nil
             if kind == 'r' and event.id then
                 local seen = requests[event.id]
                 if not seen or event.t < seen.t then requests[event.id] = event end
@@ -489,6 +503,7 @@ function M.BuildReturns(chunks, filters)
     for _, events in ipairs(chunks or {}) do
         for _, event in ipairs(events) do
             if event.k == 'c' and event.t >= from and event.t <= to
+                and (not filters.profile or InProfile(filters.profile, event))
                 and (not filters.ppID or event.p == filters.ppID)
                 and (not filters.crafter or SameCrafter(filters.crafter, event.x)) then
                 -- The same craft once, also when it came twice through an exchange.

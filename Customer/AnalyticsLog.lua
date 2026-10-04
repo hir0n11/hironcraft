@@ -22,6 +22,8 @@ local Scan = select(2, ...)
 --   t  time;  q  own sequence number (events made here; merged ones have m)
 --   p (kind) online: [t, e) in seconds; without e, a historical 5-minute mark
 --   m  the linked account an event came from
+--   w  the character that recorded it, "Name-Realm" (since 0.4.95; profiles
+--      count by it, see AnalyticsProfiles.lua)
 --   c  customer;  f  side, 'H' or 'A';  id  request token
 --   i  item;  r  recipe;  p  profession;  s  slot;  lb  slot label
 --   x  crafter;  g  general request;  o  crafting order;  st  'f' / 'r'
@@ -45,6 +47,18 @@ local LibDeflate = LibStub and LibStub('LibDeflate', true)
 
 local function Clock()
     return (GetTime and GetTime()) or time()
+end
+
+-- The character playing here, and whether what it does is recorded: once a
+-- realm has crafter pool profiles, a character outside all of them is not.
+local function Who()
+    local profiles = Scan.AnalyticsProfiles
+    return profiles and profiles.Current() or nil
+end
+
+local function MayRecord()
+    local profiles = Scan.AnalyticsProfiles
+    return not profiles or profiles.MayRecord()
 end
 
 function M.Root()
@@ -267,6 +281,12 @@ local function Append(event, source)
     else
         root.seq = root.seq + 1
         event.q = root.seq
+        if event.w == nil then event.w = Who() end
+    end
+    -- Everyone who ever recorded here can be put into a profile.
+    if type(event.w) == 'string' then
+        if type(root.recorders) ~= 'table' then root.recorders = {} end
+        root.recorders[event.w] = true
     end
     local open = root.open
     open.events[#open.events + 1] = event
@@ -280,7 +300,7 @@ local function Append(event, source)
 end
 
 function M.Record(event)
-    if not M.IsEnabled() or type(event) ~= 'table' then return nil end
+    if not M.IsEnabled() or type(event) ~= 'table' or not MayRecord() then return nil end
     -- A greeting sent or an order crafted here: the player is at work.
     if event.k == 'g' or event.k == 'c' then M.NoteActivity() end
     return Append(event)
@@ -343,30 +363,41 @@ local presenceRunning, presenceTicker = false, nil
 local function CommitPresence(root)
     local pending = root.presencePending
     root.presencePending = nil
-    if pending and pending.e > pending.t then
-        return M.Record({ k = 'p', t = pending.t, e = pending.e, f = pending.f })
+    if pending and pending.e > pending.t and M.IsEnabled() then
+        -- Not through Record: the time was spent on the character it names,
+        -- which was recorded then, whoever is playing now.
+        return Append({ k = 'p', t = pending.t, e = pending.e, f = pending.f, w = pending.w })
     end
 end
 
 function M.NotePresence(now)
     if not M.IsEnabled() or not M.Root() then return nil end
     now = now or time()
-    local root, side = M.Root(), PlayerSide()
+    local root, side, who = M.Root(), PlayerSide(), Who()
+    if not MayRecord() then
+        -- A character outside every profile is not at work.
+        if root.presencePending then
+            CommitPresence(root)
+            Changed()
+        end
+        return nil
+    end
     local pending = root.presencePending
-    if pending and (now < pending.e or now - pending.e > PRESENCE_MAX_GAP or pending.f ~= side) then
+    if pending and (now < pending.e or now - pending.e > PRESENCE_MAX_GAP or pending.f ~= side
+        or pending.w ~= who) then
         -- A suspended client or disconnected/loading gap is not proof of
         -- continuous online time. Preserve only the last observed endpoint.
         CommitPresence(root)
         pending = nil
     end
     if not pending then
-        root.presencePending = { t = now, e = now, f = side }
+        root.presencePending = { t = now, e = now, f = side, w = who }
     else
         if now == pending.e then return nil end
         pending.e = now
         if now - pending.t >= PRESENCE_FLUSH then
             CommitPresence(root)
-            root.presencePending = { t = now, e = now, f = side }
+            root.presencePending = { t = now, e = now, f = side, w = who }
         end
     end
     Changed()
@@ -481,8 +512,11 @@ function M.Backfill()
     root.backfilled = 1
     local myID = Scan.DB.settings and Scan.DB.settings.my_uuid
     local notices = Scan.DB.settings and Scan.DB.settings.order_completion_notices
+    -- The order journal is kept for the whole account: only the orders of
+    -- this realm's crafters belong in this realm's analytics.
+    local profiles = Scan.AnalyticsProfiles
     for _, notice in pairs(type(notices) == 'table' and notices or {}) do
-        if type(notice) == 'table' then
+        if type(notice) == 'table' and (not profiles or profiles.IsLocal(notice.crafterFullName)) then
             local own = notice.origin == nil or notice.origin == myID
             M.Outcome(notice, not own and 'notice' or nil)
         end
@@ -644,7 +678,7 @@ function M.LoadRange(from, to, progress, done)
         local pending = current.presencePending
         if pending and pending.e > pending.t then
             -- A snapshot, not the mutable saved table or a sync-able record.
-            chunks[#chunks + 1] = { { k = 'p', t = pending.t, e = pending.e, f = pending.f } }
+            chunks[#chunks + 1] = { { k = 'p', t = pending.t, e = pending.e, f = pending.f, w = pending.w } }
         end
         done(chunks)
     end

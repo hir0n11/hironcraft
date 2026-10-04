@@ -162,6 +162,7 @@ load('Customer/GenerousCustomers.lua')
 load('Customer/AnalyticsLog.lua')
 load('Customer/AnalyticsReport.lua')
 load('Customer/AnalyticsSync.lua')
+load('Customer/AnalyticsProfiles.lua')
 load('Customer/AnalyticsWindow.lua')
 local Log = Scan.AnalyticsLog
 Log.synchronous = true
@@ -792,6 +793,117 @@ frame.GatherCheck:SetChecked(true)
 frame.GatherCheck.scripts.OnClick(frame.GatherCheck)
 assert(Log.IsEnabled(), 'the relocated collection checkbox cannot resume recording')
 print('Analytics single-row header passed (long values/labels, stable tabs, separate toolbar, manual actions).')
+
+-- Crafter pool profiles: the list on the toolbar picks and edits them.
+do
+    local Profiles = Scan.AnalyticsProfiles
+    local view = Scan.DB.settings.analytics_view
+    local dropdown = frame.ProfileDropdown
+    assert(dropdown and dropdown.menu, 'no profile list on the toolbar')
+    assert(frame.SyncText.points.RIGHT.relative == dropdown, 'the status text runs under the profile list')
+    MenuResponse = { Refresh = 'refresh' }
+    Scan.GetPlayerName = function() return 'Tailor-Realm' end
+    local asked
+    Scan.Dialog = { Element = { EditBox = 1, Text = 2 }, Show = function(config) asked = config end }
+    local generated = 0
+    function dropdown:GenerateMenu() generated = generated + 1 end
+
+    local function Menu()
+        local function Node(text, kind)
+            local node = { text = text, kind = kind, children = {} }
+            local function Add(child) node.children[#node.children + 1] = child return child end
+            function node:CreateRadio(label, isSelected, setSelected)
+                local child = Add(Node(label, 'radio'))
+                child.selected, child.click = isSelected, setSelected
+                return child
+            end
+            function node:CreateCheckbox(label, isSelected, setSelected)
+                local child = Add(Node(label, 'checkbox'))
+                child.selected, child.click = isSelected, setSelected
+                return child
+            end
+            function node:CreateButton(label, callback)
+                local child = Add(Node(label, 'button'))
+                child.click = callback
+                return child
+            end
+            function node:CreateTitle(label) return Add(Node(label, 'title')) end
+            function node:CreateDivider() return Add(Node(nil, 'divider')) end
+            function node:Find(label)
+                for _, child in ipairs(self.children) do
+                    if child.text == label then return child end
+                end
+            end
+            return node
+        end
+        local root = Node('root', 'root')
+        dropdown.menu(dropdown, root)
+        return root
+    end
+    local function Tile(key) return frame.Tiles[key].value.text end
+
+    -- Without profiles: everything, and a way to make one.
+    local root = Menu()
+    assert(root:Find('All characters').selected(), 'all characters is the choice without profiles')
+    assert(root:Find('New profile...'), 'no way to make a profile')
+    local requestsBefore, ordersBefore = Tile('requests'), Tile('orders')
+
+    -- The first profile takes every known character and the earlier history: the counts stay.
+    root:Find('New profile...').click()
+    assert(asked and asked.key == 'analytics_profile_new', 'the name was not asked for')
+    asked.OnAccept('Main pool')
+    local pool = Profiles.List()[1]
+    assert(pool and pool.name == 'Main pool' and view.profile == pool.id, 'the new profile was not selected')
+    assert(generated > 0, 'the list was not rebuilt')
+    assert(Tile('requests') == requestsBefore and Tile('orders') == ordersBefore, 'the first profile changed the counts')
+    root = Menu()
+    assert(root:Find('Main pool').selected() and not root:Find('All characters').selected(), 'the profile is not shown as chosen')
+    local edit = root:Find('Profile characters: Main pool')
+    assert(edit and edit:Find('Tailor'), 'the profile\'s characters cannot be ticked')
+    assert(edit:Find('Tailor').selected(), 'a known crafter did not start in the first profile')
+
+    -- A second, empty profile counts nothing; back to everything restores the counts.
+    root:Find('New profile...').click()
+    asked.OnAccept('Empty')
+    local empty = Profiles.List()[2]
+    assert(view.profile == empty.id and Tile('requests') ~= requestsBefore, 'an empty profile still counted requests')
+    root = Menu()
+    root:Find('All characters').click()
+    assert(view.profile == nil and Tile('requests') == requestsBefore, 'all characters did not restore the counts')
+
+    -- Ticking keeps the menu open and changes the profile.
+    edit = root:Find('Profile characters: Empty')
+    assert(not edit:Find('Tailor').selected(), 'a later profile did not start empty')
+    assert(edit:Find('Tailor').click() == 'refresh', 'ticking closed the menu')
+    assert(Profiles.Has(empty, 'Tailor-Realm') and edit:Find('Tailor').selected(), 'ticking did not add the character')
+    edit:Find('Tailor').click()
+    assert(not Profiles.Has(empty, 'Tailor-Realm'), 'unticking did not remove the character')
+
+    -- A typed character, with the realm completed.
+    edit:Find('Add character...').click()
+    assert(asked.key == 'analytics_profile_character', 'the character was not asked for')
+    asked.OnAccept(' Scout ')
+    assert(Profiles.Has(empty, 'Scout-Realm'), 'the typed character was not added')
+    asked.OnAccept('')
+    edit:Find('Rename profile...').click()
+    asked.OnAccept('Side pool')
+    assert(empty.name == 'Side pool' and Menu():Find('Side pool'), 'the profile was not renamed')
+
+    -- Deleting the chosen profile goes back to everything.
+    view.profile = empty.id
+    W.Rebuild()
+    Menu():Find('Profile characters: Side pool'):Find('Delete profile').click()
+    assert(#Profiles.List() == 1 and view.profile == nil, 'the deleted profile stayed chosen')
+    assert(Tile('requests') == requestsBefore, 'the counts did not come back after deleting')
+    -- A profile that no longer exists counts everything.
+    view.profile = 'gone:9'
+    W.Rebuild()
+    assert(Tile('requests') == requestsBefore and Menu():Find('All characters').selected(), 'an unknown profile hid the data')
+    view.profile = nil
+    Profiles.Delete(pool.id)
+    Scan.GetPlayerName, Scan.Dialog, MenuResponse = nil, nil, nil
+end
+print('Analytics profiles in the window passed (list, first profile, empty profile, ticking, typed names, rename, delete).')
 
 Scan.AnalyticsWindow.Toggle()
 assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')

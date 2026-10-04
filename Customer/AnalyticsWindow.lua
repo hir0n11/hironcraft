@@ -613,7 +613,8 @@ end
 local function Filters()
     local view = View()
     local from, to = CurrentRange()
-    return { from = from, to = to, ppID = view.ppID, crafter = view.crafter, side = view.side, tier = view.tier }
+    return { from = from, to = to, ppID = view.ppID, crafter = view.crafter, side = view.side, tier = view.tier,
+        profile = Scan.AnalyticsProfiles and Scan.AnalyticsProfiles.Filter(view.profile) or nil }
 end
 
 local function Context()
@@ -1071,7 +1072,7 @@ function W.Rebuild()
         calendarReport = report
     else
         local calendarFilters = { from = from, to = to, ppID = filters.ppID,
-            crafter = filters.crafter, side = filters.side, tier = filters.tier }
+            crafter = filters.crafter, side = filters.side, tier = filters.tier, profile = filters.profile }
         calendarReport = Scan.AnalyticsReport.Build(chunks, calendarFilters, context)
     end
     returns = Scan.AnalyticsReport.BuildReturns(chunks, Filters())
@@ -1378,6 +1379,77 @@ local function FilterChanged()
     W.Rebuild()
 end
 
+-- Crafter pool profiles (AnalyticsProfiles.lua): the list picks whose work is
+-- counted; each profile's characters are ticked in its own submenu.
+local function AskText(key, title, prompt, onAccept)
+    if not (Scan.Dialog and Scan.Dialog.Show) then return end
+    Scan.Dialog.Show({
+        key = key, title = title, submit = title, OnAccept = onAccept,
+        elements = {
+            { type = Scan.Dialog.Element.Text, text = prompt },
+            { type = Scan.Dialog.Element.EditBox },
+        },
+    })
+end
+
+-- The list's own text follows a new, renamed or deleted profile. Not while
+-- its menu is open for ticking characters: that would close it.
+local function ProfilesChanged()
+    local dropdown = frame and frame.ProfileDropdown
+    if dropdown and dropdown.GenerateMenu then dropdown:GenerateMenu() end
+    FilterChanged()
+end
+
+local function ProfileMenu(_, root)
+    local profiles = Scan.AnalyticsProfiles
+    root:CreateRadio(L('All characters'), function() return profiles.Get(View().profile) == nil end,
+        function() View().profile = nil FilterChanged() end)
+    for _, profile in ipairs(profiles.List()) do
+        local id = profile.id
+        root:CreateRadio(profile.name, function() return View().profile == id end,
+            function() View().profile = id FilterChanged() end, id)
+    end
+    root:CreateDivider()
+    for _, profile in ipairs(profiles.List()) do
+        local id = profile.id
+        local edit = root:CreateButton(string.format(L('Profile characters: %s'), profile.name))
+        edit:CreateTitle(L('Counted in this profile'))
+        for _, character in ipairs(profiles.Candidates()) do
+            edit:CreateCheckbox(profiles.DisplayName(character),
+                function() return profiles.Has(profiles.Get(id), character) end,
+                function()
+                    profiles.SetMember(id, character, not profiles.Has(profiles.Get(id), character))
+                    return MenuResponse and MenuResponse.Refresh or nil
+                end)
+        end
+        edit:CreateDivider()
+        edit:CreateButton(L('Add character...'), function()
+            AskText('analytics_profile_character', L('Add character...'), L('Profile character prompt'), function(text)
+                local character = profiles.FullName(text)
+                if character then profiles.SetMember(id, character, true) end
+            end)
+        end)
+        edit:CreateButton(L('Rename profile...'), function()
+            AskText('analytics_profile_rename', L('Rename profile...'), L('Profile name prompt'), function(text)
+                if profiles.Rename(id, text) then ProfilesChanged() end
+            end)
+        end)
+        edit:CreateButton(L('Delete profile'), function()
+            if View().profile == id then View().profile = nil end
+            if profiles.Delete(id) then ProfilesChanged() end
+        end)
+    end
+    root:CreateButton(L('New profile...'), function()
+        AskText('analytics_profile_new', L('New profile...'), L('Profile name prompt'), function(text)
+            local profile = profiles.Create(text)
+            if profile then
+                View().profile = profile.id
+                ProfilesChanged()
+            end
+        end)
+    end)
+end
+
 local function Create()
     frame = CreateFrame('Frame', FRAME_NAME, UIParent, 'ButtonFrameTemplate')
     ButtonFrameTemplate_HidePortrait(frame)
@@ -1593,6 +1665,25 @@ local function Create()
     sync:SetScript('OnLeave', function() GameTooltip:Hide() end)
     frame.SyncButton = sync
 
+    if Scan.AnalyticsProfiles then
+        local profile = CreateFrame('DropdownButton', nil, toolbar, 'WowStyle1DropdownTemplate')
+        profile:SetWidth(170)
+        profile:SetPoint('RIGHT', sync, 'LEFT', -8, 0)
+        profile:SetupMenu(ProfileMenu)
+        profile:SetScript('OnEnter', function(self)
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip_SetTitle(GameTooltip, L('Crafter pool profiles'))
+            GameTooltip_AddNormalLine(GameTooltip, L('Profile tooltip'))
+            GameTooltip:Show()
+        end)
+        profile:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        frame.ProfileDropdown = profile
+        -- Characters ticked one after another are counted once, a moment later.
+        Scan.AnalyticsProfiles.OnChange(function()
+            if frame:IsShown() then ScheduleRebuild(0.5) end
+        end)
+    end
+
     -- Search by name: items on the item tab, customers on the customer tab.
     local search = CreateFrame('EditBox', nil, toolbar, 'SearchBoxTemplate')
     search:SetSize(236, 20)
@@ -1625,7 +1716,7 @@ local function Create()
 
     frame.SyncText = toolbar:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
     frame.SyncText:SetPoint('LEFT', gather.text, 'RIGHT', 20, 0)
-    frame.SyncText:SetPoint('RIGHT', sync, 'LEFT', -16, 0)
+    frame.SyncText:SetPoint('RIGHT', frame.ProfileDropdown or sync, 'LEFT', -16, 0)
     frame.SyncText:SetJustifyH('LEFT')
     frame.SyncText:SetWordWrap(false)
 

@@ -25,6 +25,26 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Crafter pool profiles (0.4.95)
+
+- A profile is a named list of characters, this account's and the linked
+  accounts', whose work is counted together. Profiles belong to a realm (its
+  connected realms included) and live in that realm's analytics journal. The
+  list on the analytics toolbar picks one or `All characters`, makes, renames
+  and deletes profiles, and ticks each profile's characters (known crafters,
+  linked accounts' characters, everyone who has recorded, or a typed name).
+- While a realm has no profile nothing changes. Once it has one, a character
+  in none of them records nothing: no time online, no requests, no greetings,
+  no orders. What linked accounts send is still kept.
+- Every recorded event names its character (`w`). A profile counts the events
+  its characters recorded. Events from before 0.4.95 have no recorder: orders
+  and crafts go by their crafter, everything else counts for the first profile
+  made on the realm, which also starts with every known character.
+- A realm's journal no longer takes the account-wide order journal of other
+  realms' crafters on the first login there.
+- Not yet: profiles are set per account (they are not sent to linked accounts),
+  and another realm's profile cannot be opened from this one.
+
 ## Faster analytics window (0.4.94)
 
 - Unpacked journal stores stay in memory until the interface is reloaded (the
