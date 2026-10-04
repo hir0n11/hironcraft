@@ -25,6 +25,29 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Faster analytics window (0.4.94)
+
+- Unpacked journal stores stay in memory until the interface is reloaded (the
+  most recently used, up to 40,000 events, roughly 25 MB): opening the window
+  again unpacks nothing, and a range that is wholly in memory is answered at
+  once instead of over a dozen frames.
+- Stores are packed by the game's own encoder (CBOR, deflate, base64) instead
+  of LibSerialize + LibDeflate. A store is written that way only when unpacking
+  it gives back exactly what went in; otherwise, and where the encoder is
+  missing, the libraries are used as before. Older stores are repacked the
+  first time they are unpacked, the rest one at a time while the window is
+  open. An older HironCraft cannot read repacked stores: after a downgrade
+  their history is not shown, though nothing is deleted.
+- Mention events (item links in chat, not recorded or shown since 0.4.65) are
+  removed from the journal as its stores are unpacked; a store of nothing else
+  disappears. Mentions sent by an older linked account are not taken. Data
+  that cannot be read is never removed.
+- The report asks the clock once per quarter of an hour instead of four times
+  per event; unpacking is paced by time (10 ms a frame) and reuses its frame.
+- `analytics.perf` in the saved variables keeps what the last load cost:
+  stores, how many were unpacked, how many are in the game's format, and the
+  milliseconds spent unpacking and counting.
+
 ## Knowledge points bar (0.4.93)
 
 - The Specializations page shows `Knowledge Points  earned / total` for the whole

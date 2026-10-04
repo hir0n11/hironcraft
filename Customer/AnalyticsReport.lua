@@ -75,6 +75,23 @@ local function Hour(t)
     return tonumber(date('%H', t)) or 0
 end
 
+-- The local hour, weekday and calendar keys of a moment, asked from the clock
+-- once per quarter of an hour (every time zone offset and every change of the
+-- clocks falls on one) instead of four times per counted event.
+local slots, slotCount = {}, 0
+local function Slot(t)
+    local key = math.floor(t / 900)
+    local slot = slots[key]
+    if not slot then
+        if slotCount >= 50000 then slots, slotCount = {}, 0 end
+        local at = key * 900
+        slot = { hour = Hour(at), weekday = Weekday(at), day = date('%Y-%m-%d', at), month = date('%Y-%m', at) }
+        slots[key] = slot
+        slotCount = slotCount + 1
+    end
+    return slot
+end
+
 -- Construct local calendar boundaries, never assuming a day has 86400 seconds
 -- (DST), or that every month has the same number of days.
 local function Midnight(year, month, day)
@@ -251,15 +268,16 @@ function M.Build(chunks, filters, context)
     local function CountTime(metric, t, amount)
         if t < from or t > to then return end
         amount = amount or 1
-        local hour, weekday = Hour(t), Weekday(t)
-        report.hours[metric][hour] = (report.hours[metric][hour] or 0) + amount
-        report.weekdays[metric][weekday] = (report.weekdays[metric][weekday] or 0) + amount
-        for group, format in pairs({ days = '%Y-%m-%d', months = '%Y-%m' }) do
-            local key = date(format, t)
-            local calendar = report.calendar[group]
-            calendar[key] = calendar[key] or {}
-            calendar[key][metric] = (calendar[key][metric] or 0) + amount
-        end
+        local slot = Slot(t)
+        local hours, weekdays = report.hours[metric], report.weekdays[metric]
+        hours[slot.hour] = (hours[slot.hour] or 0) + amount
+        weekdays[slot.weekday] = (weekdays[slot.weekday] or 0) + amount
+        local days, months = report.calendar.days, report.calendar.months
+        local day, month = days[slot.day], months[slot.month]
+        if not day then day = {} days[slot.day] = day end
+        if not month then month = {} months[slot.month] = month end
+        day[metric] = (day[metric] or 0) + amount
+        month[metric] = (month[metric] or 0) + amount
     end
     local function Row(key, info)
         if not rows[key] then rows[key] = NewRow(key, info) end

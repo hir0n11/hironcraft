@@ -4,15 +4,21 @@ local Scan = select(2, ...)
 -- and which orders were crafted, as a list of small events.
 --
 -- Kept the way Journalator keeps its logs. Events are written to one open
--- store; full stores are closed into a compressed string (LibSerialize +
--- LibDeflate) that costs next to nothing to keep and is only unpacked when the
--- analytics window asks for its dates. Writing an event is a table insert,
--- nothing is counted until the window is open.
+-- store; full stores are closed into a compressed string that costs next to
+-- nothing to keep and is only unpacked when the analytics window asks for its
+-- dates. What is unpacked stays in memory until the interface is reloaded, so
+-- the window opens at once the second time. Writing an event is a table
+-- insert, nothing is counted until the window is open.
+--
+-- A store is { from, to, n, maxQ, data, f }. With f = 'n' the data was packed
+-- by the game's own encoder (CBOR, deflate, base64), which is many times
+-- faster than the Lua libraries; without f it is LibSerialize + LibDeflate,
+-- as everything was before 0.4.94 and still is where the encoder is missing.
 --
 -- Event fields (short, they are stored by the thousand):
---   k  kind: m mention in chat, r request to us, g greeting sent,
+--   k  kind: r request to us, g greeting sent,
 --      d order result, l a request row got its order result, x a request row
---      replaced by a narrower one
+--      replaced by a narrower one (m, a mention in chat, is no longer kept)
 --   t  time;  q  own sequence number (events made here; merged ones have m)
 --   p (kind) online: [t, e) in seconds; without e, a historical 5-minute mark
 --   m  the linked account an event came from
@@ -29,6 +35,10 @@ Scan.AnalyticsLog = M
 
 M.STORE_LIMIT = 2000
 M.QUIET_SECONDS = 3 * 60
+-- Unpacked events kept in memory at most (about 0.6 KB each).
+M.CACHE_EVENTS = 40000
+-- Unpacking goes on within one frame for this long before the next frame.
+M.FRAME_BUDGET_MS = 10
 
 local LibSerialize = LibStub and LibStub('LibSerialize', true)
 local LibDeflate = LibStub and LibStub('LibDeflate', true)
@@ -127,8 +137,79 @@ local function Decode(data)
 end
 M.Decode = Decode
 
+local function Native()
+    local util = C_EncodingUtil
+    if type(util) == 'table' and util.SerializeCBOR and util.DeserializeCBOR and util.CompressString
+        and util.DecompressString and util.EncodeBase64 and util.DecodeBase64 then
+        return util
+    end
+    return nil
+end
+
+local function NativeDecode(data)
+    local util = Native()
+    if not util or type(data) ~= 'string' then return nil end
+    local ok, events = pcall(function()
+        return util.DeserializeCBOR(util.DecompressString(util.DecodeBase64(data)))
+    end)
+    return ok and type(events) == 'table' and events or nil
+end
+
+local function Same(lhs, rhs)
+    if lhs == rhs then return true end
+    if type(lhs) ~= 'table' or type(rhs) ~= 'table' then return false end
+    for key, value in pairs(lhs) do
+        if not Same(value, rhs[key]) then return false end
+    end
+    for key in pairs(rhs) do
+        if lhs[key] == nil then return false end
+    end
+    return true
+end
+
+-- Packed by the game's encoder, but only when unpacking it gives back exactly
+-- what went in: a journal is never trusted to an encoder that changes it.
+local function NativeEncode(events)
+    local util = Native()
+    if not util then return nil end
+    local ok, data = pcall(function()
+        return util.EncodeBase64(util.CompressString(util.SerializeCBOR(events)))
+    end)
+    if not ok or type(data) ~= 'string' or data == '' then return nil end
+    local back = NativeDecode(data)
+    return back and Same(events, back) and data or nil
+end
+
+local function Pack(events)
+    local data = NativeEncode(events)
+    if data then return data, 'n' end
+    return Encode(events), nil
+end
+
+-- A store's events, or nil when its data cannot be read.
+local function Unpack(store)
+    if store.f == 'n' then return NativeDecode(store.data) end
+    return Decode(store.data)
+end
+M.Unpack = Unpack
+
 local function Month(t)
     return date('%Y-%m', t)
+end
+
+local function WithoutMentions(events)
+    local kept
+    for index, event in ipairs(events) do
+        if type(event) == 'table' and event.k == 'm' then
+            if not kept then
+                kept = {}
+                for earlier = 1, index - 1 do kept[earlier] = events[earlier] end
+            end
+        elseif kept then
+            kept[#kept + 1] = event
+        end
+    end
+    return kept
 end
 
 -- Close the open store into a compressed one.
@@ -136,18 +217,39 @@ function M.CloseOpenStore()
     local root = M.Root()
     local open = root and root.open
     if not open or #open.events == 0 then return false end
-    root.stores[#root.stores + 1] = {
-        from = open.from, to = open.to, n = #open.events, maxQ = open.maxQ,
-        data = Encode(open.events),
-    }
+    local events = WithoutMentions(open.events) or open.events
+    if #events > 0 then
+        local data, format = Pack(events)
+        root.stores[#root.stores + 1] = {
+            from = open.from, to = open.to, n = #events, maxQ = open.maxQ,
+            data = data, f = format,
+        }
+    end
     root.open = { events = {} }
     return true
+end
+
+-- Stores emptied by Tidy are taken out of the list.
+local function PruneEmpty(root)
+    local kept
+    for index, store in ipairs(root.stores) do
+        if store.n == 0 and store.data == nil then
+            if not kept then
+                kept = {}
+                for earlier = 1, index - 1 do kept[earlier] = root.stores[earlier] end
+            end
+        elseif kept then
+            kept[#kept + 1] = store
+        end
+    end
+    if kept then root.stores = kept end
 end
 
 -- Closing costs a moment of compression: done behind the loading screen, when
 -- a month is over or the store is full.
 function M.Maintain()
     local root = M.Root()
+    if root then PruneEmpty(root) end
     local open = root and root.open
     if not open or #open.events == 0 then return end
     if #open.events >= M.STORE_LIMIT or (open.from and Month(open.from) ~= Month(time())) then
@@ -189,7 +291,8 @@ function M.Merge(events, source)
     if type(events) ~= 'table' then return 0 end
     local count = 0
     for _, event in ipairs(events) do
-        if type(event) == 'table' and type(event.k) == 'string' and tonumber(event.t) then
+        -- An older HironCraft on the other account may still send mentions.
+        if type(event) == 'table' and type(event.k) == 'string' and event.k ~= 'm' and tonumber(event.t) then
             Append(event, source or 'peer')
             count = count + 1
         end
@@ -408,63 +511,137 @@ function M.Backfill()
     return true
 end
 
--- The chat counter kept before 0.4.41 (seen_items), as mention events in one
--- closed store. Done once, the first time the window opens.
+-- The chat counter kept before 0.4.41 (seen_items) held mentions of items in
+-- chat, which are no longer counted: only which profession makes an item is
+-- taken from it. Done once, the first time the window opens.
 function M.MigrateLegacy()
     local root = M.Root()
     if not root or type(root.seen_items) ~= 'table' then return false end
     local known, unknown = ItemProfessions(root)
-    local events = {}
     for itemID, info in pairs(root.seen_items) do
         itemID = tonumber(itemID)
         if itemID and type(info) == 'table' then
             local ppID = tonumber(info.ppID)
             if ppID then known[itemID] = ppID elseif not known[itemID] then unknown[itemID] = true end
-            for _, entry in ipairs(type(info.times) == 'table' and info.times or {}) do
-                local t = type(entry) == 'table' and tonumber(entry.t) or tonumber(entry)
-                if t then
-                    events[#events + 1] = { k = 'm', t = t, i = itemID, p = ppID,
-                        c = type(entry) == 'table' and entry.customer or nil, L = 1 }
-                end
-            end
         end
-    end
-    table.sort(events, function(lhs, rhs) return lhs.t < rhs.t end)
-    for first = 1, #events, M.STORE_LIMIT * 5 do
-        local chunk = {}
-        for index = first, math.min(#events, first + M.STORE_LIMIT * 5 - 1) do chunk[#chunk + 1] = events[index] end
-        root.stores[#root.stores + 1] = { from = chunk[1].t, to = chunk[#chunk].t, n = #chunk, data = Encode(chunk) }
     end
     root.seen_items = nil
     return true
 end
 
--- Unpacked stores stay here while the window is open.
-local unpacked = {}
+-- Mentions of items in chat left the window in 0.4.65 and are not recorded
+-- any more. The first time an older store is unpacked they are taken out of
+-- it and the store is packed again, by the game's encoder when it is there.
+-- A store that held nothing else is left empty for PruneEmpty.
+local function Tidy(store, events)
+    local kept = WithoutMentions(events)
+    if kept then
+        events = kept
+        if #events == 0 then
+            store.data, store.f, store.n = nil, nil, 0
+        else
+            local data = NativeEncode(events)
+            store.data, store.f, store.n = data or Encode(events), data and 'n' or nil, #events
+        end
+    elseif store.f ~= 'n' and store.tidy ~= 1 and #events > 0 then
+        local data = NativeEncode(events)
+        if data then store.data, store.f = data, 'n' end
+    end
+    store.tidy = store.f ~= 'n' and store.data ~= nil and 1 or nil
+    return events
+end
+
+-- Unpacked stores, kept until the interface is reloaded: the most recently
+-- used ones, up to CACHE_EVENTS events.
+local unpacked = setmetatable({}, { __mode = 'k' })
+local usedAt, useClock = setmetatable({}, { __mode = 'k' }), 0
+-- What the last LoadRange cost, for reading in the saved variables.
+local unpackedCount, unpackedMs = 0, 0
+
+local function Events(store)
+    local events = unpacked[store]
+    if not events then
+        local started = debugprofilestop and debugprofilestop()
+        events = Unpack(store)
+        -- Data that cannot be read is left exactly as it is.
+        events = events and Tidy(store, events) or {}
+        unpacked[store] = events
+        unpackedCount = unpackedCount + 1
+        if started then unpackedMs = unpackedMs + (debugprofilestop() - started) end
+    end
+    useClock = useClock + 1
+    usedAt[store] = useClock
+    return events
+end
 
 function M.ReleaseCache()
-    unpacked = {}
+    unpacked = setmetatable({}, { __mode = 'k' })
+    usedAt = setmetatable({}, { __mode = 'k' })
+end
+
+-- Lets go of the least recently used stores beyond the limit.
+function M.TrimCache(limit)
+    limit = limit or M.CACHE_EVENTS
+    local stores = {}
+    for store in pairs(unpacked) do stores[#stores + 1] = store end
+    table.sort(stores, function(lhs, rhs) return (usedAt[lhs] or 0) > (usedAt[rhs] or 0) end)
+    local held = 0
+    for _, store in ipairs(stores) do
+        held = held + #unpacked[store]
+        if held > limit then unpacked[store], usedAt[store] = nil, nil end
+    end
 end
 
 local function Overlaps(store, from, to)
     return (store.to or math.huge) >= from and (store.from or 0) <= to
 end
 
--- Every store that overlaps [from, to], unpacked one per frame so a long range
+-- One frame runs a load's steps for FRAME_BUDGET_MS; frames are reused.
+local idleDrivers = {}
+local function Drive(step, finish)
+    local driver = table.remove(idleDrivers) or CreateFrame('Frame')
+    local function Stop()
+        if not driver then return end
+        driver:SetScript('OnUpdate', nil)
+        idleDrivers[#idleDrivers + 1] = driver
+        driver = nil
+    end
+    driver:SetScript('OnUpdate', function()
+        if not step() then
+            Stop()
+            finish()
+        end
+    end)
+    return Stop
+end
+
+-- Every store that overlaps [from, to]. What is already unpacked is taken at
+-- once; the rest is unpacked a few milliseconds per frame, so a long range
 -- never freezes the game. progress(done, total); done(chunks) gets a list of
--- event arrays, the open store last.
+-- event arrays, the open store last. Returns a function that cancels the
+-- load, or nothing when it finished before returning.
 function M.LoadRange(from, to, progress, done)
     local root = M.Root()
     if not root then done({}) return end
     M.MigrateLegacy()
     local wanted = {}
-    for index, store in ipairs(root.stores) do
-        if Overlaps(store, from or 0, to or math.huge) then wanted[#wanted + 1] = index end
+    for _, store in ipairs(root.stores) do
+        if Overlaps(store, from or 0, to or math.huge) then wanted[#wanted + 1] = store end
     end
     local chunks, step = {}, 0
+    unpackedCount, unpackedMs = 0, 0
     local function Finish()
-        chunks[#chunks + 1] = M.Root().open.events
-        local pending = M.Root().presencePending
+        local current = M.Root()
+        PruneEmpty(current)
+        local native = 0
+        for _, store in ipairs(wanted) do
+            if store.f == 'n' then native = native + 1 end
+        end
+        current.perf = current.perf or {}
+        current.perf.at, current.perf.stores, current.perf.native = time(), #wanted, native
+        current.perf.unpacked, current.perf.unpackMs = unpackedCount, math.floor(unpackedMs + 0.5)
+        chunks[#chunks + 1] = current.open.events
+        local pending = current.presencePending
         if pending and pending.e > pending.t then
             -- A snapshot, not the mutable saved table or a sync-able record.
             chunks[#chunks + 1] = { { k = 'p', t = pending.t, e = pending.e, f = pending.f } }
@@ -473,11 +650,9 @@ function M.LoadRange(from, to, progress, done)
     end
     local function Next()
         step = step + 1
-        local index = wanted[step]
-        if not index then return false end
-        local store = M.Root().stores[index]
-        if not unpacked[store] then unpacked[store] = Decode(store.data) or {} end
-        chunks[#chunks + 1] = unpacked[store]
+        local store = wanted[step]
+        if not store then return false end
+        chunks[#chunks + 1] = Events(store)
         if progress then progress(step, #wanted) end
         return true
     end
@@ -486,14 +661,51 @@ function M.LoadRange(from, to, progress, done)
         Finish()
         return
     end
-    local frame = CreateFrame('Frame')
-    frame:SetScript('OnUpdate', function(self)
-        if not Next() then
-            self:SetScript('OnUpdate', nil)
-            Finish()
+    local function Slice()
+        local started = debugprofilestop and debugprofilestop()
+        while true do
+            local store = wanted[step + 1]
+            local cached = store and unpacked[store] ~= nil
+            if not Next() then return false end
+            if not cached and (not started or debugprofilestop() - started >= M.FRAME_BUDGET_MS) then
+                return true
+            end
         end
-    end)
-    return function() frame:SetScript('OnUpdate', nil) end
+    end
+    if not Slice() then
+        Finish()
+        return
+    end
+    return Drive(Slice, Finish)
+end
+
+-- How long the window took to count what LoadRange gave it.
+function M.NoteBuild(milliseconds)
+    local root = M.Root()
+    if not root or not milliseconds then return end
+    root.perf = root.perf or {}
+    root.perf.buildMs = math.floor(milliseconds + 0.5)
+end
+
+-- Once: every store from before 0.4.94 is tidied (see Tidy), also the ones
+-- nobody looks at. One store per call, off the cache; false when none is left.
+function M.TidyStep()
+    local root = M.Root()
+    if not root or root.tidied == 1 then return false end
+    for _, store in ipairs(root.stores) do
+        if store.f ~= 'n' and store.tidy ~= 1 and store.data ~= nil then
+            if unpacked[store] then
+                store.tidy = 1
+            else
+                local events = Unpack(store)
+                if events then Tidy(store, events) else store.tidy = 1 end
+            end
+            return true
+        end
+    end
+    PruneEmpty(root)
+    root.tidied = 1
+    return false
 end
 
 -- Own events newer than a linked account has, oldest first, at most limit,
@@ -512,11 +724,9 @@ function M.OwnSince(from, limit, skip)
         end
     end
     for _, store in ipairs(root.stores) do
-        if (tonumber(store.maxQ) or 0) > from then
-            if not unpacked[store] then unpacked[store] = Decode(store.data) or {} end
-            Collect(unpacked[store])
-        end
+        if (tonumber(store.maxQ) or 0) > from then Collect(Events(store)) end
     end
+    M.TrimCache()
     Collect(root.open.events)
     table.sort(found, function(lhs, rhs) return lhs.q < rhs.q end)
     local batch = {}
@@ -587,7 +797,7 @@ function M.VisitReturnEvents(visit, done)
         index = index + 1
         local store = stores[index]
         if not store then Visit(root.open.events); done(); return end
-        Visit(Decode(store.data))
+        Visit(unpacked[store] or Unpack(store))
         if C_Timer and C_Timer.After then C_Timer.After(0, Step) else Step() end
     end
     Step()

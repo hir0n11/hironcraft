@@ -1060,6 +1060,7 @@ end
 
 function W.Rebuild()
     if not frame or not chunks or (loading and not backgroundLoad) then return end
+    local started = debugprofilestop and debugprofilestop()
     nameRetries = 0
     local filters, context = Filters(), Context()
     report = Scan.AnalyticsReport.Build(chunks, filters, context)
@@ -1074,6 +1075,7 @@ function W.Rebuild()
         calendarReport = Scan.AnalyticsReport.Build(chunks, calendarFilters, context)
     end
     returns = Scan.AnalyticsReport.BuildReturns(chunks, Filters())
+    if started and Scan.AnalyticsLog.NoteBuild then Scan.AnalyticsLog.NoteBuild(debugprofilestop() - started) end
     Render()
 end
 
@@ -1150,13 +1152,28 @@ function W.DataArrived()
     ScheduleRebuild(0.2)
 end
 
+-- Stores from before 0.4.94 are tidied one at a time while the window is
+-- open (AnalyticsLog.TidyStep): unpacking an old one takes a moment each.
+local tidyToken = 0
+local function TidyOlderStores()
+    tidyToken = tidyToken + 1
+    local token = tidyToken
+    local function Step()
+        if token ~= tidyToken or not frame or not frame:IsShown() then return end
+        if loading or Scan.AnalyticsLog.TidyStep() then C_Timer.After(0.5, Step) end
+    end
+    C_Timer.After(1, Step)
+end
+
 function W.Release()
     if cancelLoad then cancelLoad(); cancelLoad = nil end
     loadToken = loadToken + 1
+    tidyToken = tidyToken + 1
     rebuildPending, refreshAfterLoad, backgroundLoad, nameRedrawAt = nil, false, false, nil
     chunks, report, returns, calendarReport = nil, nil, nil, nil
     loadedFrom, loadedTo, loading = nil, nil, false
-    if Scan.AnalyticsLog then Scan.AnalyticsLog.ReleaseCache() end
+    -- What was unpacked stays for the next opening, within the journal's limit.
+    if Scan.AnalyticsLog then Scan.AnalyticsLog.TrimCache() end
     if frame then
         frame.Items:SetRows({})
         frame.Customers:SetRows({})
@@ -1753,6 +1770,7 @@ local function Create()
         UpdateDateBoxes()
         SelectTab(View().tab or TAB_ITEMS)
         W.Reload()
+        TidyOlderStores()
     end)
     frame:SetScript('OnHide', function() W.Release() end)
     frame:SetScript('OnEvent', function(_, event)
