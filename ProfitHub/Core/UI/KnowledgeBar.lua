@@ -153,8 +153,11 @@ local function Build()
     overlay:SetFrameLevel(level + 3)
     label = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("CENTER", 0, 0)
-    local font, size = label:GetFont()
-    if font then label:SetFont(font, size, "OUTLINE") end
+    -- The addon's own font: the label follows the addon's language, and the
+    -- game's font on an English client has no Cyrillic.
+    local font = label:GetFont()
+    font = PT.FONT or font
+    if font then label:SetFont(font, 11, "OUTLINE") end
     holder:Hide()
 
     for _, event in ipairs({

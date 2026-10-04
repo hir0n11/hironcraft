@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Updating from GitHub (0.4.96)
+
+- `Update-HironCraft.cmd` in the addon folder (double-click it; it runs
+  `Update-HironCraft.ps1`) compares the installed version with the one on
+  GitHub, downloads the newer one and copies it over the installed files.
+  Settings live in the game's `WTF` folder and are not touched. Restart the
+  game afterwards. From a command line:
+  `powershell -ExecutionPolicy Bypass -File "<AddOns>\HironCraft\Update-HironCraft.ps1"`.
+- Nothing is changed unless the download is complete (every file the `.toc`
+  lists is there); the `.toc` is written last, so an interrupted update is
+  simply done again. A newer installed version is not downgraded, and a git
+  checkout is never overwritten. `-Force` reinstalls the same version,
+  `-Clean` also deletes files the new version does not have, `-Source` takes
+  a `.zip` or a folder instead of GitHub.
+- The knowledge points bar is drawn with the addon's own font: its label is
+  in the addon's language, and the game's font on an English client has no
+  Cyrillic.
+
 ## Crafter pool profiles (0.4.95)
 
 - A profile is a named list of characters, this account's and the linked

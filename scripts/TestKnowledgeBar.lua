@@ -45,7 +45,7 @@ C_Traits = {
     end,
 }
 
-HironCraftProfit = { L = { KNOWLEDGE_BAR_LABEL = 'Knowledge Points' } }
+HironCraftProfit = { L = { KNOWLEDGE_BAR_LABEL = 'Knowledge Points' }, FONT = 'Addon/default.ttf' }
 
 -- Frames: just enough to build the bar and read back what it shows.
 local frames, events = {}, {}
@@ -73,7 +73,7 @@ local function NewFrame(kind, _, parent)
         local text = {}
         function text:SetPoint() end
         function text:GetFont() return 'Fonts/FRIZQT__.TTF', 10 end
-        function text:SetFont(_, _, flags) self.flags = flags end
+        function text:SetFont(path, _, flags) self.font, self.flags = path, flags end
         function text:SetText(value) self.text = value end
         frame.fontString = text
         return text
@@ -194,6 +194,8 @@ eq(earned.value, 55, 'pale part: earned')
 local overlay = frames[before + 5]
 eq(overlay.fontString.text, 'Knowledge Points  55 / 80', 'label')
 eq(overlay.fontString.flags, 'OUTLINE', 'readable over the fill')
+-- The label can be Russian on an English client, whose own font has no Cyrillic.
+eq(overlay.fontString.font, 'Addon/default.ttf', 'drawn with the addon\'s font')
 
 -- Nothing is recounted until something changes.
 local calls = 0
