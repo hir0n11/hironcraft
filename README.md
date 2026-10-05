@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One-block skill panel, crests (0.4.101)
+
+- The skill panel is one block now. The part that repeated the game's own
+  Crafting Details (difficulty, skill, the comparison rows) is gone; what the
+  panel adds stays on top: the scale with every quality's threshold, a line
+  with skill, quality and what is missing for the top one, concentration and
+  the reagents' cost. Below it are the reagents and the `+/-` skill to try.
+  It starts as the craft is set up in the window, so nothing is lost, and a
+  recount is one question to the game instead of three or four.
+- The scale follows what is tried, including another skill. Quality names are
+  above the bar and the skill each needs below it, so close thresholds no
+  longer run into each other.
+- Crests and other currency reagents can be chosen in the lists (`Infuse with
+  Power` used to offer only `as in the window` and `empty`). They are not
+  priced, and that is not counted as a missing price.
+- The presets for all quality slots are labelled `Quality of all reagents`:
+  `As in window`, `Highest`, `Lowest`.
+
 ## Skill button by Create, shorter reagent lists (0.4.100)
 
 - The `Skill` button sits inside the profession window, right above `Create`,

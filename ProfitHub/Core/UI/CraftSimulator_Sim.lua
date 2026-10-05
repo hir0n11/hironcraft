@@ -3,25 +3,24 @@ local S = PT and PT.CraftSimulator
 local UI = S and S.UI
 if not UI then return end
 
--- The lower part of the skill panel: a craft tried with other reagents and
--- another skill, without spending or owning anything. Switched on by its
--- button; while it is off, nothing here is built or asked.
+-- What the skill panel shows: the selected recipe tried with any reagents and
+-- another skill, without spending or owning anything. It starts as the craft
+-- is set up in the window; the game's own window already shows skill and
+-- difficulty, so the panel adds what that does not: where every quality's
+-- threshold lies, what is missing for the top one, and what other reagents
+-- or more skill would change.
 --
--- One question to the game per change of reagents; a change of the "+N
--- skill" is arithmetic on the last answer.
-local Text, T, Tier, Saved = UI.Text, UI.T, UI.Tier, UI.Saved
+-- One question to the game per recount or change of reagents; another skill
+-- is arithmetic on the last answer; what each optional reagent does is asked
+-- only when its list is opened.
+local Text, T, Tier = UI.Text, UI.T, UI.Tier
 local INNER, GOLD, GREEN, GREY, WHITE = UI.INNER, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE
 
-local panel, section
+local panel, body
 -- The choices made for the recipe they belong to.
 local choice = { tiers = {}, items = {}, extraSkill = 0 }
 local recipeOf, basics, windowReagents
 local simulation
-
-local function IsOn()
-    return Saved().simulation == true
-end
-UI.IsSimulationOn = IsOn
 
 -- An item's name; asked from the server once when the game does not have it.
 local requested = {}
@@ -33,6 +32,17 @@ local function ItemName(itemID)
         pcall(C_Item.RequestLoadItemDataByID, itemID)
     end
     return "#" .. tostring(itemID)
+end
+
+-- A reagent's name: an item, or a currency such as a crest.
+local function ReagentName(option)
+    if type(option) ~= "table" then return ItemName(option) end
+    if option.itemID then return ItemName(option.itemID) end
+    if option.currencyID then
+        local info = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(option.currencyID)
+        return type(info) == "table" and info.name or ("#" .. tostring(option.currencyID))
+    end
+    return "?"
 end
 
 local function OptionItem(option)
@@ -58,52 +68,6 @@ local function SlotLabel(slot, fallback)
     return fallback
 end
 
-local function ShowOutcome()
-    local outcome = S.Outcome(simulation, choice.extraSkill)
-    if not outcome then
-        section.result:SetText(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-        section.concentration:SetText("")
-        section.cost:SetText("")
-        section.fill:Hide()
-        return
-    end
-    local text
-    if (outcome.missingToMax or 0) > 0 then
-        text = string.format(T("CRAFTSIM_RESULT_MISSING", "%d, %s (%s needs %d more)"),
-            outcome.skill, Tier(outcome.quality), Tier(outcome.maxQuality), outcome.missingToMax)
-        section.result:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-    else
-        text = string.format(T("CRAFTSIM_RESULT_MAX", "%d, %s"), outcome.skill, Tier(outcome.quality))
-        section.result:SetTextColor(GREEN[1], GREEN[2], GREEN[3])
-    end
-    section.result:SetText(T("CRAFTSIM_OUTCOME", "Result") .. ": " .. text)
-
-    local concentration
-    if outcome.quality and outcome.quality >= outcome.maxQuality then
-        concentration = T("CRAFTSIM_CONC_NONE", "not needed")
-    elseif choice.extraSkill ~= 0 then
-        -- The game prices it for the real skill only.
-        concentration = T("CRAFTSIM_CONC_REAL_ONLY", "known for your real skill only")
-    elseif outcome.concentrationCost then
-        concentration = string.format(T("CRAFTSIM_CONC_COST", "%d for %s"), outcome.concentrationCost, Tier(outcome.nextQuality))
-    else
-        concentration = "-"
-    end
-    section.concentration:SetText(T("CRAFTSIM_CONCENTRATION", "Concentration") .. ": " .. concentration)
-    section.cost:SetText(T("CRAFTSIM_COST", "Reagents") .. ": " .. Money(simulation.cost, simulation.costComplete))
-
-    -- What the chosen reagents lack for the top quality, one click away.
-    local real = S.Outcome(simulation, 0)
-    local missing = real and real.missingToMax or 0
-    if missing > 0 then
-        section.fill.amount = missing
-        section.fill.label:SetText(string.format("+%d", missing))
-        section.fill:Show()
-    else
-        section.fill:Hide()
-    end
-end
-
 -- What a row of an optional or finishing slot says: the slot and its choice.
 local function ChoiceText(row)
     local value = choice.items[row.slot.dataSlotIndex]
@@ -113,16 +77,18 @@ local function ChoiceText(row)
     elseif value == false then
         text = T("CRAFTSIM_EMPTY", "empty")
     else
-        text = ItemName(value)
+        text = ReagentName(value)
     end
     return row.label .. ": " .. text
 end
 
--- The reagent quality all of a group's items share, if they do.
+-- The reagent quality all of a group's reagents share, if they do.
 local function SharedQuality(group)
     if not (C_TradeSkillUI and C_TradeSkillUI.GetItemReagentQualityByItemInfo) then return nil end
     local shared
-    for _, itemID in ipairs(group.items) do
+    for _, option in ipairs(group.options) do
+        local itemID = OptionItem(option)
+        if not itemID then return nil end
         local ok, quality = pcall(C_TradeSkillUI.GetItemReagentQualityByItemInfo, itemID)
         quality = ok and tonumber(quality) or nil
         if not quality or (shared and shared ~= quality) then return nil end
@@ -134,9 +100,9 @@ end
 -- One line for reagents that do the same to the craft:
 -- "Missive of the Aurora and 5 more (quality 1): difficulty +25".
 local function GroupText(group)
-    local text = ItemName(group.items[1])
-    if #group.items > 1 then
-        text = string.format(T("CRAFTSIM_GROUP_MORE", "%s and %d more"), text, #group.items - 1)
+    local text = ReagentName(group.options[1])
+    if #group.options > 1 then
+        text = string.format(T("CRAFTSIM_GROUP_MORE", "%s and %d more"), text, #group.options - 1)
     end
     local quality = SharedQuality(group)
     if quality then text = text .. " (" .. string.format(T("CRAFTSIM_GROUP_QUALITY", "quality %d"), quality) .. ")" end
@@ -152,8 +118,87 @@ local function GroupText(group)
     return text .. ": " .. table.concat(parts, ", ")
 end
 
+-- The bar: filled up to the skill, a tick for each quality with its name
+-- above and the skill it needs below.
+local function UpdateScale(outcome)
+    local scale, thresholds = body.scale, outcome.thresholds
+    if not thresholds then
+        scale:Hide()
+        return
+    end
+    local range = math.max(outcome.difficulty, outcome.skill, 1)
+    local width = scale.bar:GetWidth()
+    scale.fill:SetWidth(math.max(1, math.min(width, width * math.max(0, outcome.skill) / range)))
+    for quality = 2, 5 do
+        local tick, name, need = scale.ticks[quality], scale.names[quality], scale.needs[quality]
+        local threshold = thresholds[quality]
+        if threshold and quality <= outcome.maxQuality then
+            local x = math.min(width, width * threshold / range)
+            local color = outcome.skill >= threshold and GREEN or GREY
+            tick:ClearAllPoints()
+            tick:SetPoint("TOP", scale.bar, "TOPLEFT", x, 2)
+            tick:SetColorTexture(color[1], color[2], color[3], 1)
+            tick:Show()
+            name:ClearAllPoints()
+            name:SetPoint("BOTTOM", scale.bar, "TOPLEFT", x, 3)
+            name:SetText(Tier(quality))
+            name:SetTextColor(color[1], color[2], color[3])
+            name:Show()
+            need:ClearAllPoints()
+            need:SetPoint("TOP", scale.bar, "BOTTOMLEFT", x, -3)
+            need:SetText(tostring(threshold))
+            need:SetTextColor(color[1], color[2], color[3])
+            need:Show()
+        else
+            tick:Hide()
+            name:Hide()
+            need:Hide()
+        end
+    end
+    scale:Show()
+end
+
+local function ShowOutcome()
+    local outcome = S.Outcome(simulation, choice.extraSkill)
+    if not outcome then return end
+    UpdateScale(outcome)
+    if (outcome.missingToMax or 0) > 0 then
+        body.status:SetText(string.format(T("CRAFTSIM_STATUS_MISSING", "Skill %d: %s, %s needs %d more"),
+            outcome.skill, Tier(outcome.quality), Tier(outcome.maxQuality), outcome.missingToMax))
+        body.status:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+    else
+        body.status:SetText(string.format(T("CRAFTSIM_STATUS_MAX", "Skill %d: %s"), outcome.skill, Tier(outcome.quality)))
+        body.status:SetTextColor(GREEN[1], GREEN[2], GREEN[3])
+    end
+
+    local concentration
+    if outcome.quality and outcome.quality >= outcome.maxQuality then
+        concentration = T("CRAFTSIM_CONC_NONE", "not needed")
+    elseif choice.extraSkill ~= 0 then
+        -- The game prices it for the real skill only.
+        concentration = T("CRAFTSIM_CONC_REAL_ONLY", "known for your real skill only")
+    elseif outcome.concentrationCost then
+        concentration = string.format(T("CRAFTSIM_CONC_COST", "%d for %s"), outcome.concentrationCost, Tier(outcome.nextQuality))
+    else
+        concentration = "-"
+    end
+    body.concentration:SetText(T("CRAFTSIM_CONCENTRATION", "Concentration") .. ": " .. concentration)
+    body.cost:SetText(T("CRAFTSIM_COST", "Reagents") .. ": " .. Money(simulation.cost, simulation.costComplete))
+
+    -- What the chosen reagents lack for the top quality, one click away.
+    local real = S.Outcome(simulation, 0)
+    local missing = real and real.missingToMax or 0
+    if missing > 0 then
+        body.fill.amount = missing
+        body.fill.label:SetText(string.format("+%d", missing))
+        body.fill:Show()
+    else
+        body.fill:Hide()
+    end
+end
+
 local function UpdateControls()
-    for _, row in ipairs(section.slotRows) do
+    for _, row in ipairs(body.slotRows) do
         if row.shown then
             local chosen = choice.tiers[row.dataSlotIndex] or 0
             for tier, button in pairs(row.buttons) do
@@ -162,22 +207,25 @@ local function UpdateControls()
             end
         end
     end
-    for _, row in ipairs(section.choiceRows) do
+    for _, row in ipairs(body.choiceRows) do
         if row.shown then row.text:SetText(ChoiceText(row)) end
     end
 end
 
+-- After a change of the reagents chosen here: one question to the game.
 function UI.RefreshSimulation()
-    if not section or not IsOn() or not basics or not recipeOf then return end
-    simulation = S.Simulate(recipeOf, basics, windowReagents, choice)
+    if not body or not basics or not recipeOf then return end
+    local fresh = S.Simulate(recipeOf, basics, windowReagents, choice)
+    if not fresh then return end
+    simulation = fresh
     UpdateControls()
     ShowOutcome()
 end
 
 local function SlotRow(index)
-    local row = section.slotRows[index]
+    local row = body.slotRows[index]
     if row then return row end
-    row = CreateFrame("Frame", nil, section)
+    row = CreateFrame("Frame", nil, body)
     row:SetSize(INNER, 20)
     row.name = Text(row, 11, "LEFT")
     row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
@@ -197,7 +245,7 @@ local function SlotRow(index)
         end)
         row.buttons[tier] = button
     end
-    section.slotRows[index] = row
+    body.slotRows[index] = row
     return row
 end
 
@@ -222,40 +270,52 @@ local function OpenChoiceMenu(row)
         -- Reagents that do the same to the craft are one line.
         for _, group in ipairs(S.OptionGroups(recipeOf, basics, windowReagents, choice, slot)) do
             root:CreateRadio(GroupText(group), function()
-                for _, itemID in ipairs(group.items) do
-                    if choice.items[dataSlotIndex] == itemID then return true end
+                local chosen = S.OptionKey(choice.items[dataSlotIndex])
+                for _, key in ipairs(group.keys) do
+                    if key == chosen then return true end
                 end
                 return false
-            end, Pick(group.items[1]))
+            end, Pick(group.options[1]))
         end
     end)
 end
 
 local function ChoiceRow(index)
-    local row = section.choiceRows[index]
+    local row = body.choiceRows[index]
     if row then return row end
-    row = CreateFrame("Button", nil, section, "UIPanelButtonTemplate")
+    row = CreateFrame("Button", nil, body, "UIPanelButtonTemplate")
     row:SetSize(INNER, 20)
     row.text = Text(row, 10, "LEFT", WHITE)
     row.text:SetPoint("LEFT", row, "LEFT", 8, 0)
     row.text:SetWidth(INNER - 16)
     row:SetScript("OnClick", OpenChoiceMenu)
-    section.choiceRows[index] = row
+    body.choiceRows[index] = row
     return row
 end
 
--- Rows for the recipe's slots, top to bottom; returns the section's height.
+-- Everything top to bottom for the recipe's slots; returns the height used.
 local function Layout()
     local y = 0
     local function Put(frame, height, gap)
         frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", section, "TOPLEFT", 0, -y)
+        frame:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
         frame:Show()
         y = y + height + (gap or 2)
     end
-    Put(section.presets, 20, 6)
+    Put(body.recipe, 16, 4)
+    Put(body.scale, 36, 6)
+    Put(body.status, 14, 2)
+    Put(body.concentration, 13, 2)
+    Put(body.cost, 13, 10)
 
     local used = 0
+    if #(basics.basicSlots or {}) > 0 then
+        Put(body.presetLabel, 12, 3)
+        Put(body.presets, 20, 4)
+    else
+        body.presetLabel:Hide()
+        body.presets:Hide()
+    end
     for _, slot in ipairs(basics.basicSlots or {}) do
         used = used + 1
         local row = SlotRow(used)
@@ -265,12 +325,11 @@ local function Layout()
         for tier = 1, 3 do row.buttons[tier]:SetShown(tier <= slot.qualityCount) end
         Put(row, 20)
     end
-    for index = used + 1, #section.slotRows do
-        section.slotRows[index].shown = false
-        section.slotRows[index]:Hide()
+    for index = used + 1, #body.slotRows do
+        body.slotRows[index].shown = false
+        body.slotRows[index]:Hide()
     end
-    section.presets:SetShown(used > 0)
-    if used == 0 then y = 0 end
+    if used > 0 then y = y + 4 end
 
     used = 0
     for _, group in ipairs({
@@ -287,89 +346,90 @@ local function Layout()
             end
         end
     end
-    for index = used + 1, #section.choiceRows do
-        section.choiceRows[index].shown = false
-        section.choiceRows[index]:Hide()
+    for index = used + 1, #body.choiceRows do
+        body.choiceRows[index].shown = false
+        body.choiceRows[index]:Hide()
     end
+    if used > 0 then y = y + 4 end
 
-    y = y + 4
-    Put(section.extraRow, 20, 6)
-    Put(section.result, 14, 2)
-    Put(section.concentration, 14, 2)
-    Put(section.cost, 14, 0)
+    Put(body.extraRow, 20, 0)
     return y
-end
-
--- The panel's own height, the button's row and, when open, the section.
-local function Resize()
-    local height = (panel.baseHeight or 0) + 28
-    if section:IsShown() then height = height + section.height + 8 end
-    panel:SetHeight(height)
 end
 
 -- Names that have arrived are put in without asking the game about the craft.
 local function Relabel()
-    if not section:IsShown() or not basics then return end
-    for _, row in ipairs(section.slotRows) do
+    if not body:IsShown() or not basics then return end
+    for _, row in ipairs(body.slotRows) do
         if row.shown and row.firstItem then row.name:SetText(ItemName(row.firstItem)) end
     end
-    for _, row in ipairs(section.choiceRows) do
+    for _, row in ipairs(body.choiceRows) do
         if row.shown then row.text:SetText(ChoiceText(row)) end
     end
 end
 
-function UI.HideSimulation()
-    if not section then return end
-    section:Hide()
-    panel.simulationToggle:Hide()
-end
-
--- Called after every recount of the panel with the recipe on screen.
-function UI.UpdateSimulation(recipeID, recipeBasics, reagents)
-    if not section then return end
-    panel.simulationToggle:Show()
-    panel.simulationToggle.label:SetText(T(IsOn() and "CRAFTSIM_SIM_HIDE" or "CRAFTSIM_SIM_SHOW",
-        IsOn() and "Hide simulation" or "Simulate other reagents and skill"))
-    if not IsOn() then
-        section:Hide()
-        Resize()
-        return
-    end
+-- Called on every recount of the panel with the recipe on screen. Returns
+-- false when the game gives no answer for it.
+function UI.ShowCraft(recipeID, recipeBasics, reagents, name)
+    if not body then return false end
     -- Another recipe: its own choices, starting from the window's.
     if recipeOf ~= recipeID then
         choice.tiers, choice.items, choice.extraSkill = {}, {}, 0
-        section.extra:SetText("")
+        body.extra:SetText("")
     end
     recipeOf, basics, windowReagents = recipeID, recipeBasics, reagents
-    section:Show()
-    section.height = Layout()
-    section:SetHeight(section.height)
-    UI.RefreshSimulation()
-    Resize()
+    simulation = S.Simulate(recipeOf, basics, windowReagents, choice)
+    if not simulation then return false end
+    body.recipe:SetText(name or "")
+    local height = Layout()
+    body:SetHeight(height)
+    panel:SetHeight(32 + height + 14)
+    UpdateControls()
+    ShowOutcome()
+    return true
 end
 
-function UI.BuildSimulation(owner)
-    panel = owner
-    local toggle = CreateFrame("Button", nil, panel.body, "UIPanelButtonTemplate")
-    toggle:SetSize(INNER, 20)
-    toggle:SetPoint("TOPLEFT", panel.concentration, "BOTTOMLEFT", 0, -8)
-    toggle.label = Text(toggle, 11, "CENTER", GOLD)
-    toggle.label:SetPoint("CENTER", 0, 0)
-    toggle:SetScript("OnClick", function()
-        UI.DB().simulation = not IsOn()
-        UI.MarkDirty()
-    end)
-    panel.simulationToggle = toggle
+function UI.BuildCraft(owner)
+    panel, body = owner, owner.body
+    body.slotRows, body.choiceRows = {}, {}
 
-    section = CreateFrame("Frame", nil, panel.body)
-    section:SetPoint("TOPLEFT", toggle, "BOTTOMLEFT", 0, -8)
-    section:SetSize(INNER, 10)
-    section.slotRows, section.choiceRows, section.height = {}, {}, 0
-    section:Hide()
-    panel.simulation = section
+    body.recipe = Text(body, 13, "LEFT", GOLD)
+    body.recipe:SetWidth(INNER)
+
+    -- The scale: quality names above the bar, the skill each needs below it.
+    local scale = CreateFrame("Frame", nil, body)
+    scale:SetSize(INNER, 36)
+    scale.bar = CreateFrame("Frame", nil, scale)
+    scale.bar:SetSize(INNER, 10)
+    scale.bar:SetPoint("TOPLEFT", scale, "TOPLEFT", 0, -13)
+    local background = scale.bar:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0, 0, 0, 0.7)
+    scale.fill = scale.bar:CreateTexture(nil, "ARTWORK")
+    scale.fill:SetPoint("TOPLEFT", scale.bar, "TOPLEFT", 0, 0)
+    scale.fill:SetPoint("BOTTOMLEFT", scale.bar, "BOTTOMLEFT", 0, 0)
+    scale.fill:SetColorTexture(0.78, 0.58, 0.12, 1)
+    scale.ticks, scale.names, scale.needs = {}, {}, {}
+    for quality = 2, 5 do
+        local tick = scale.bar:CreateTexture(nil, "OVERLAY")
+        tick:SetSize(2, 14)
+        scale.ticks[quality] = tick
+        scale.names[quality] = Text(scale, 9, "CENTER", GREY)
+        scale.needs[quality] = Text(scale, 9, "CENTER", GREY)
+    end
+    body.scale = scale
+
+    body.status = Text(body, 12, "LEFT", GOLD)
+    body.status:SetWidth(INNER)
+    body.concentration = Text(body, 11, "LEFT", GREY)
+    body.concentration:SetWidth(INNER)
+    body.cost = Text(body, 11, "LEFT", GREY)
+    body.cost:SetWidth(INNER)
 
     -- Every quality slot at once.
-    local presets = CreateFrame("Frame", nil, section)
+    body.presetLabel = Text(body, 11, "LEFT", GREY)
+    body.presetLabel:SetWidth(INNER)
+    body.presetLabel:SetText(T("CRAFTSIM_PRESET_LABEL", "Quality of all reagents"))
+    local presets = CreateFrame("Frame", nil, body)
     presets:SetSize(INNER, 20)
     presets.buttons = {}
     local function Preset(index, key, fallback, pick)
@@ -389,14 +449,14 @@ function UI.BuildSimulation(owner)
         presets.buttons[index] = button
     end
     Preset(1, "CRAFTSIM_PRESET_WINDOW", "As in window", function() return nil end)
-    Preset(2, "CRAFTSIM_PRESET_BEST", "Best", function(slot) return slot.qualityCount end)
-    Preset(3, "CRAFTSIM_PRESET_PLAIN", "Plain", function() return 1 end)
-    section.presets = presets
+    Preset(2, "CRAFTSIM_PRESET_BEST", "Highest", function(slot) return slot.qualityCount end)
+    Preset(3, "CRAFTSIM_PRESET_PLAIN", "Lowest", function() return 1 end)
+    body.presets = presets
 
     -- "+N skill": what if the skill were different.
-    local extraRow = CreateFrame("Frame", nil, section)
+    local extraRow = CreateFrame("Frame", nil, body)
     extraRow:SetSize(INNER, 20)
-    local extraLabel = Text(extraRow, 12, "LEFT", GREY)
+    local extraLabel = Text(extraRow, 12, "LEFT", WHITE)
     extraLabel:SetPoint("LEFT", extraRow, "LEFT", 0, 0)
     extraLabel:SetText(T("CRAFTSIM_EXTRA_SKILL", "Skill +/-"))
     local extra = CreateFrame("EditBox", nil, extraRow, "InputBoxTemplate")
@@ -413,7 +473,7 @@ function UI.BuildSimulation(owner)
     end)
     extra:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     extra:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    section.extra, section.extraRow = extra, extraRow
+    body.extra, body.extraRow = extra, extraRow
     -- Puts in what the chosen reagents lack for the top quality.
     local fill = CreateFrame("Button", nil, extraRow, "UIPanelButtonTemplate")
     fill:SetSize(58, 20)
@@ -424,20 +484,13 @@ function UI.BuildSimulation(owner)
         if self.amount then extra:SetText(tostring(self.amount)) end
     end)
     fill:Hide()
-    section.fill = fill
-
-    section.result = Text(section, 12, "LEFT", GOLD)
-    section.result:SetWidth(INNER)
-    section.concentration = Text(section, 11, "LEFT", GREY)
-    section.concentration:SetWidth(INNER)
-    section.cost = Text(section, 11, "LEFT", GREY)
-    section.cost:SetWidth(INNER)
+    body.fill = fill
 
     -- Item names arrive from the server a moment after they are first asked:
     -- the ones asked for here are put in, several at once.
     local pending = false
-    section:RegisterEvent("ITEM_DATA_LOAD_RESULT")
-    section:SetScript("OnEvent", function(_, _, itemID, success)
+    body:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    body:SetScript("OnEvent", function(_, _, itemID, success)
         if not requested[itemID] or not success or pending then return end
         pending = true
         local function Later()

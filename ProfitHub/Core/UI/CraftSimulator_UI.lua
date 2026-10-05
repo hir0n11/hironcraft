@@ -1,10 +1,9 @@
 local PT = HironCraftProfit
 if not PT or not PT.CraftSimulator then return end
 
--- The skill panel beside the profession window (CraftEngine/Simulator.lua
--- does the counting): the skill the selected recipe needs for each quality,
--- what the reagents in the window give, and what the best and the plainest
--- ones would.
+-- The skill panel beside the profession window: its frame, its button above
+-- Create, and when it recounts. What it shows is in CraftSimulator_Sim.lua;
+-- the counting is in CraftEngine/Simulator.lua.
 --
 -- It must never make the profession window slow. Nothing is built or asked
 -- until the panel is first shown; while it is hidden the hooks only set a
@@ -70,128 +69,19 @@ local function Text(parent, size, justify, color)
     return text
 end
 
--- A label on the left and its value on the right, on one line.
-local function Row(parent, label)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(INNER, 16)
-    row.label = Text(row, 12, "LEFT", GREY)
-    row.label:SetPoint("LEFT", row, "LEFT", 0, 0)
-    row.label:SetText(label)
-    row.value = Text(row, 12, "RIGHT")
-    row.value:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    return row
-end
-
 local function Tier(quality)
     return "T" .. tostring(quality)
 end
 
--- For the simulation part of the panel.
-UI.Text, UI.T, UI.Tier, UI.Saved = Text, T, Tier, Saved
-UI.INNER, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, GOLD, GREEN, GREY, WHITE
-
--- "430, T4 (T5 needs 20 more)" for one set of reagents.
-local function ResultText(result)
-    if not result then return "-" end
-    if (result.missingToMax or 0) > 0 then
-        return string.format(T("CRAFTSIM_RESULT_MISSING", "%d, %s (%s needs %d more)"),
-            result.skill, Tier(result.quality), Tier(result.maxQuality), result.missingToMax)
-    end
-    return string.format(T("CRAFTSIM_RESULT_MAX", "%d, %s"), result.skill, Tier(result.quality))
-end
-
--- The bar: filled up to the skill, a tick and a name for each quality.
-local function UpdateScale(scale, result)
-    local thresholds = result.thresholds
-    if not thresholds then
-        scale:Hide()
-        return
-    end
-    local range = math.max(result.difficulty, result.skill, 1)
-    local width = scale:GetWidth()
-    scale.fill:SetWidth(math.max(1, math.min(width, width * result.skill / range)))
-    for quality = 2, 5 do
-        local tick, name = scale.ticks[quality], scale.names[quality]
-        local need = thresholds[quality]
-        if need and quality <= result.maxQuality then
-            local x = math.min(width, width * need / range)
-            local reached = result.skill >= need
-            local color = reached and GREEN or GREY
-            tick:ClearAllPoints()
-            tick:SetPoint("TOP", scale, "TOPLEFT", x, 2)
-            tick:SetColorTexture(color[1], color[2], color[3], 1)
-            tick:Show()
-            name:ClearAllPoints()
-            -- The last name stays inside the bar's width.
-            if quality == result.maxQuality then
-                name:SetPoint("TOPRIGHT", scale, "BOTTOMLEFT", x, -3)
-            else
-                name:SetPoint("TOP", scale, "BOTTOMLEFT", x, -3)
-            end
-            name:SetText(string.format("%s %d", Tier(quality), need))
-            name:SetTextColor(color[1], color[2], color[3])
-            name:Show()
-        else
-            tick:Hide()
-            name:Hide()
-        end
-    end
-    scale:Show()
-end
+-- For the part of the panel that shows the craft.
+UI.Text, UI.T, UI.Tier = Text, T, Tier
+UI.INNER, UI.PAD, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, PAD, GOLD, GREEN, GREY, WHITE
 
 local function ShowMessage(text)
     panel.message:SetText(text)
     panel.message:Show()
     panel.body:Hide()
-    panel.baseHeight = 36 + 34
-    panel:SetHeight(panel.baseHeight)
-    if UI.HideSimulation then UI.HideSimulation() end
-end
-
-local function ShowSummary(summary, name)
-    local current = summary.current
-    panel.message:Hide()
-    panel.body:Show()
-    panel.recipe:SetText(name or "")
-    panel.difficulty.value:SetText(tostring(current.difficulty))
-    panel.skill.value:SetText(tostring(current.skill))
-    if current.ownSkill and current.reagentSkill then
-        panel.parts:SetText(string.format(T("CRAFTSIM_SKILL_PARTS", "own %d + reagents %d"),
-            current.ownSkill, current.reagentSkill))
-    else
-        panel.parts:SetText("")
-    end
-    UpdateScale(panel.scale, current)
-
-    if (current.missingToMax or 0) > 0 then
-        panel.status:SetText(string.format(T("CRAFTSIM_NOW_MISSING", "Now %s. %s needs %d more skill."),
-            Tier(current.quality), Tier(current.maxQuality), current.missingToMax))
-        panel.status:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-    else
-        panel.status:SetText(string.format(T("CRAFTSIM_NOW_MAX", "%s is reached."), Tier(current.maxQuality)))
-        panel.status:SetTextColor(GREEN[1], GREEN[2], GREEN[3])
-    end
-
-    local hasChoice = summary.best ~= nil
-    panel.best:SetShown(hasChoice)
-    panel.plain:SetShown(hasChoice)
-    if hasChoice then
-        panel.best.value:SetText(ResultText(summary.best))
-        panel.plain.value:SetText(ResultText(summary.plain))
-    end
-
-    if current.quality and current.quality >= current.maxQuality then
-        panel.concentration.value:SetText(T("CRAFTSIM_CONC_NONE", "not needed"))
-    elseif current.concentrationCost then
-        panel.concentration.value:SetText(string.format(T("CRAFTSIM_CONC_COST", "%d for %s"),
-            current.concentrationCost, Tier(current.nextQuality)))
-    else
-        panel.concentration.value:SetText("-")
-    end
-    panel.concentration:ClearAllPoints()
-    panel.concentration:SetPoint("TOPLEFT", hasChoice and panel.plain or panel.status, "BOTTOMLEFT", 0, hasChoice and -6 or -10)
-    panel.baseHeight = hasChoice and 232 or 190
-    panel:SetHeight(panel.baseHeight)
+    panel:SetHeight(36 + 34)
 end
 
 -- The reagents chosen in the window, as the game wants them.
@@ -221,16 +111,17 @@ function UI.Refresh()
     if basicsOf ~= recipeID then
         basicsOf, basics = recipeID, CE:GetRecipeBasics(recipeID)
     end
-    local reagents = WindowReagents(form)
-    local summary, reason = S.Summary(recipeID, reagents, basics)
-    if summary then
-        ShowSummary(summary, recipeInfo.name)
-        -- The simulation below it (CraftSimulator_Sim.lua), when switched on.
-        if UI.UpdateSimulation then UI.UpdateSimulation(recipeID, basics, reagents) end
-    elseif reason == "no_quality" then
+    if type(basics) ~= "table" then
+        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+    elseif (tonumber(basics.maxQuality) or 0) < 2 then
         ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
     else
-        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+        -- Shown first: the craft sizes the panel around its rows.
+        panel.message:Hide()
+        panel.body:Show()
+        if not UI.ShowCraft(recipeID, basics, WindowReagents(form), recipeInfo.name) then
+            ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+        end
     end
     if started then DB().lastMs = math.floor((debugprofilestop() - started) * 100 + 0.5) / 100 end
 end
@@ -244,7 +135,7 @@ end
 local function BuildPanel()
     local page = Page()
     panel = CreateFrame("Frame", "HironCraftCraftSimulator", page, "BackdropTemplate")
-    panel:SetSize(WIDTH, 232)
+    panel:SetSize(WIDTH, 120)
     panel:SetFrameStrata("HIGH")
     panel:SetClampedToScreen(true)
     panel:SetMovable(true)
@@ -291,52 +182,9 @@ local function BuildPanel()
 
     local body = CreateFrame("Frame", nil, panel)
     body:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -32)
-    body:SetSize(INNER, 190)
+    body:SetSize(INNER, 80)
     panel.body = body
-
-    panel.recipe = Text(body, 13, "LEFT", GOLD)
-    panel.recipe:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
-    panel.recipe:SetWidth(INNER)
-
-    panel.difficulty = Row(body, T("CRAFTSIM_DIFFICULTY", "Recipe difficulty"))
-    panel.difficulty:SetPoint("TOPLEFT", panel.recipe, "BOTTOMLEFT", 0, -8)
-    panel.skill = Row(body, T("CRAFTSIM_SKILL", "Skill"))
-    panel.skill:SetPoint("TOPLEFT", panel.difficulty, "BOTTOMLEFT", 0, -2)
-    panel.parts = Text(body, 10, "RIGHT", GREY)
-    panel.parts:SetPoint("TOPRIGHT", panel.skill, "BOTTOMRIGHT", 0, 0)
-    panel.parts:SetWidth(INNER)
-
-    local scale = CreateFrame("Frame", nil, body)
-    scale:SetSize(INNER, 10)
-    scale:SetPoint("TOPLEFT", panel.skill, "BOTTOMLEFT", 0, -20)
-    local background = scale:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
-    background:SetColorTexture(0, 0, 0, 0.7)
-    scale.fill = scale:CreateTexture(nil, "ARTWORK")
-    scale.fill:SetPoint("TOPLEFT", scale, "TOPLEFT", 0, 0)
-    scale.fill:SetPoint("BOTTOMLEFT", scale, "BOTTOMLEFT", 0, 0)
-    scale.fill:SetColorTexture(0.78, 0.58, 0.12, 1)
-    scale.ticks, scale.names = {}, {}
-    for quality = 2, 5 do
-        local tick = scale:CreateTexture(nil, "OVERLAY")
-        tick:SetSize(2, 14)
-        scale.ticks[quality] = tick
-        scale.names[quality] = Text(scale, 9, "CENTER", GREY)
-    end
-    panel.scale = scale
-
-    panel.status = Text(body, 12, "LEFT", GOLD)
-    panel.status:SetPoint("TOPLEFT", scale, "BOTTOMLEFT", 0, -22)
-    panel.status:SetWidth(INNER)
-
-    panel.best = Row(body, T("CRAFTSIM_BEST", "Best reagents"))
-    panel.best:SetPoint("TOPLEFT", panel.status, "BOTTOMLEFT", 0, -10)
-    panel.plain = Row(body, T("CRAFTSIM_PLAIN", "Plain reagents"))
-    panel.plain:SetPoint("TOPLEFT", panel.best, "BOTTOMLEFT", 0, -2)
-    panel.concentration = Row(body, T("CRAFTSIM_CONCENTRATION", "Concentration"))
-    panel.concentration:SetPoint("TOPLEFT", panel.plain, "BOTTOMLEFT", 0, -6)
-
-    if UI.BuildSimulation then UI.BuildSimulation(panel) end
+    UI.BuildCraft(panel)
 
     panel:SetScript("OnShow", MarkDirty)
     panel:SetScript("OnUpdate", function()
@@ -396,7 +244,8 @@ local function BuildToggle()
         if not tooltip then return end
         tooltip:Clear()
         tooltip:AddLine(T("CRAFTSIM_TITLE", "Skill for quality"), 13, 1, 1, 1)
-        tooltip:AddLine(T("CRAFTSIM_TOGGLE_TIP", "The skill the selected recipe needs for each quality, and what your reagents give."),
+        tooltip:AddLine(T("CRAFTSIM_TOGGLE_TIP",
+            "The skill each quality of the selected recipe needs, tried with any reagents and skill."),
             11, 0.8, 0.8, 0.8)
         tooltip:ShowCursorRightOrBelow()
     end)

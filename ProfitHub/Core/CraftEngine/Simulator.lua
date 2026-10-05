@@ -47,12 +47,9 @@ function S.Describe(maxQuality, answer, extraSkill)
     if type(answer) ~= "table" or not tonumber(answer.skill) or not tonumber(answer.difficulty) then return nil end
     maxQuality = tonumber(maxQuality) or 0
     extraSkill = tonumber(extraSkill) or 0
-    local raw = type(answer.raw) == "table" and answer.raw or {}
     local result = {
         maxQuality = maxQuality,
         difficulty = answer.difficulty,
-        ownSkill = tonumber(raw.baseSkill),
-        reagentSkill = tonumber(raw.bonusSkill),
         extraSkill = extraSkill,
         skill = answer.skill + extraSkill,
     }
@@ -91,32 +88,37 @@ function S.Describe(maxQuality, answer, extraSkill)
     return result
 end
 
--- The reagents of the window with every quality reagent replaced by one
--- quality: pickTier(slot) gives it per slot. Optional and finishing reagents
--- stay as they are in the window.
-function S.Reagents(basics, current, pickTier)
-    local out, quality = {}, {}
-    for _, slot in ipairs(basics.basicSlots or {}) do quality[slot.dataSlotIndex] = true end
-    for _, entry in ipairs(type(current) == "table" and current or {}) do
-        if type(entry) == "table" and not quality[entry.dataSlotIndex] then out[#out + 1] = entry end
-    end
-    for _, entry in ipairs(CE:MakeReagents(basics, pickTier)) do out[#out + 1] = entry end
-    return out
+-- A reagent the way the game describes it: { itemID = n } for an item,
+-- { currencyID = n } for a currency (crests are currencies, not items).
+local function AsOption(option)
+    if type(option) == "table" then return option end
+    local itemID = tonumber(option)
+    return itemID and { itemID = itemID } or nil
 end
 
--- The option of a slot that is a given item, as the schematic has it.
-local function OptionOf(slot, itemID)
+-- What tells two reagents apart: "i123" for an item, "c45" for a currency.
+function S.OptionKey(option)
+    option = AsOption(option)
+    if not option then return nil end
+    if option.itemID then return "i" .. tostring(option.itemID) end
+    if option.currencyID then return "c" .. tostring(option.currencyID) end
+    return nil
+end
+
+-- The option of a slot that a choice means, as the schematic has it.
+local function OptionOf(slot, value)
+    local key = S.OptionKey(value)
     for _, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
-        if type(option) == "table" and option.itemID == itemID then return option end
-        if option == itemID then return { itemID = itemID } end
+        if S.OptionKey(option) == key then return AsOption(option) end
     end
-    return { itemID = itemID }
+    return AsOption(value)
 end
 
 -- The window's reagents with a simulation's choices put in:
 --   choice.tiers[dataSlotIndex] = the quality for a quality slot;
---   choice.items[dataSlotIndex] = the item for an optional or finishing slot,
---   false to leave it empty.
+--   choice.items[dataSlotIndex] = the reagent for an optional or finishing
+--   slot (an item's ID or the slot's option, which may be a currency), false
+--   to leave it empty.
 -- A slot without a choice stays as it is in the window.
 function S.SimulatedReagents(basics, current, choice)
     local tiers = type(choice) == "table" and type(choice.tiers) == "table" and choice.tiers or {}
@@ -131,21 +133,19 @@ function S.SimulatedReagents(basics, current, choice)
         local tier = tonumber(tiers[slot.dataSlotIndex])
         if tier then
             tier = math.max(1, math.min(slot.qualityCount, tier))
-            local option = slot.options and slot.options[tier]
+            local option = AsOption(slot.options and slot.options[tier])
             if option and (slot.quantity or 0) > 0 then
-                out[#out + 1] = {
-                    reagent = type(option) == "table" and option or { itemID = option },
-                    dataSlotIndex = slot.dataSlotIndex, quantity = slot.quantity,
-                }
+                out[#out + 1] = { reagent = option, dataSlotIndex = slot.dataSlotIndex, quantity = slot.quantity }
             end
         end
     end
     for _, group in ipairs({ basics.optionalSlots or {}, basics.finishingSlots or {} }) do
         for _, slot in ipairs(group) do
-            local itemID = items[slot.dataSlotIndex]
-            if itemID then
+            local value = items[slot.dataSlotIndex]
+            local reagent = value and OptionOf(slot, value)
+            if reagent then
                 out[#out + 1] = {
-                    reagent = OptionOf(slot, itemID), dataSlotIndex = slot.dataSlotIndex,
+                    reagent = reagent, dataSlotIndex = slot.dataSlotIndex,
                     quantity = math.max(1, tonumber(slot.quantity) or 1),
                 }
             end
@@ -156,11 +156,12 @@ end
 
 -- What the reagents of a craft cost by HironCraft's prices: the given ones
 -- plus the recipe's reagents that have no choice. The second value is false
--- when a price is not known and the sum is therefore too low.
+-- when a price is not known and the sum is therefore too low. Currencies
+-- (crests) are not bought and are left out.
 function S.Cost(basics, reagents)
     local total, complete = 0, true
     local function Add(itemID, quantity)
-        local price = itemID and CE:DefaultPrice(itemID)
+        local price = type(itemID) == "number" and CE:DefaultPrice(itemID) or nil
         if price and price > 0 then
             total = total + price * (quantity or 1)
         else
@@ -168,7 +169,8 @@ function S.Cost(basics, reagents)
         end
     end
     for _, entry in ipairs(reagents or {}) do
-        Add(type(entry.reagent) == "table" and entry.reagent.itemID, entry.quantity)
+        local reagent = type(entry.reagent) == "table" and entry.reagent or {}
+        if reagent.itemID or not reagent.currencyID then Add(reagent.itemID, entry.quantity) end
     end
     for _, fixed in ipairs(basics.fixedReagents or {}) do Add(fixed.itemID, fixed.quantity) end
     return total, complete
@@ -176,10 +178,11 @@ end
 
 -- A simulated craft: the game's answer for the chosen reagents (one
 -- question), kept so that another skill can be tried without asking again.
+-- nil when the game does not answer for the recipe.
 function S.Simulate(recipeID, basics, current, choice)
     local reagents = S.SimulatedReagents(basics, current, choice)
     local answer = CE:Evaluate(recipeID, reagents, { useConcentration = false })
-    if not answer then return nil end
+    if not answer or not tonumber(answer.skill) or not tonumber(answer.difficulty) then return nil end
     local cost, complete = S.Cost(basics, reagents)
     return { answer = answer, reagents = reagents, cost = cost, costComplete = complete,
         maxQuality = tonumber(basics.maxQuality) or 0 }
@@ -192,8 +195,8 @@ function S.Outcome(simulation, extraSkill)
 end
 
 -- What each reagent of an optional or finishing slot does to the craft, per
--- recipe: { difficulty = change, skill = change }, false when the game did
--- not answer. Asked once and kept for the session.
+-- recipe and reagent: { difficulty = change, skill = change }, false when the
+-- game did not answer. Asked once and kept for the session.
 local effects = {}
 
 function S.ForgetEffects()
@@ -203,9 +206,11 @@ end
 -- The reagents of one optional or finishing slot gathered by what they do:
 -- those that change difficulty and skill by the same amounts are one group
 -- (a dozen missives that differ only in the stats they give become one line
--- per quality). Returns a list of { items = { itemID, ... }, effect = { difficulty, skill } }
--- in the slot's own order. The first time for a recipe this asks the game
--- once per reagent and once for the slot left empty; later it asks nothing.
+-- per quality). Returns a list of
+--   { options = { reagent, ... }, keys = { key, ... }, effect = { difficulty, skill } }
+-- in the slot's own order; effect is nil when the game did not answer. The
+-- first time for a recipe this asks the game once per reagent and once for
+-- the slot left empty; later it asks nothing.
 function S.OptionGroups(recipeID, basics, current, choice, slot)
     local known = effects[recipeID]
     if not known then
@@ -224,56 +229,31 @@ function S.OptionGroups(recipeID, basics, current, choice, slot)
     end
     local empty, asked = nil, false
     local groups, byEffect = {}, {}
-    for _, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
-        local itemID = type(option) == "table" and option.itemID or tonumber(option)
-        if itemID then
-            local effect = known[itemID]
+    for _, raw in ipairs(type(slot.options) == "table" and slot.options or {}) do
+        local option = AsOption(raw)
+        local key = S.OptionKey(option)
+        if key then
+            local effect = known[key]
             if effect == nil then
                 if not asked then
                     empty, asked = With(false), true
                 end
-                local answer = empty and With(itemID)
+                local answer = empty and With(option)
                 effect = answer and tonumber(answer.difficulty) and tonumber(answer.skill)
+                    and tonumber(empty.difficulty) and tonumber(empty.skill)
                     and { difficulty = answer.difficulty - empty.difficulty, skill = answer.skill - empty.skill } or false
-                known[itemID] = effect
+                known[key] = effect
             end
-            local key = effect and (effect.difficulty .. ":" .. effect.skill) or "?"
-            local group = byEffect[key]
+            local effectKey = effect and (effect.difficulty .. ":" .. effect.skill) or "?"
+            local group = byEffect[effectKey]
             if not group then
-                group = { items = {}, effect = effect or nil }
-                byEffect[key] = group
+                group = { options = {}, keys = {}, effect = effect or nil }
+                byEffect[effectKey] = group
                 groups[#groups + 1] = group
             end
-            group.items[#group.items + 1] = itemID
+            group.options[#group.options + 1] = option
+            group.keys[#group.keys + 1] = key
         end
     end
     return groups
-end
-
-local function Best(slot) return slot.qualityCount end
-local function Plain() return 1 end
-
-local function Ask(recipeID, maxQuality, reagents)
-    return S.Describe(maxQuality, CE:Evaluate(recipeID, reagents, { useConcentration = false }))
-end
-
--- Everything the skill panel shows for a recipe: with the window's reagents,
--- with the best and with the plainest ones. Returns nil and a reason
--- ("no_quality", "no_data") when there is nothing to show.
-function S.Summary(recipeID, currentReagents, basics)
-    recipeID = tonumber(recipeID)
-    if not recipeID then return nil, "no_data" end
-    basics = basics or CE:GetRecipeBasics(recipeID)
-    if type(basics) ~= "table" then return nil, "no_data" end
-    local maxQuality = tonumber(basics.maxQuality) or 0
-    if maxQuality < 2 then return nil, "no_quality" end
-    currentReagents = type(currentReagents) == "table" and currentReagents or {}
-    local current = Ask(recipeID, maxQuality, currentReagents)
-    if not current then return nil, "no_data" end
-    local summary = { recipeID = recipeID, maxQuality = maxQuality, current = current, basics = basics }
-    if #(basics.basicSlots or {}) > 0 then
-        summary.best = Ask(recipeID, maxQuality, S.Reagents(basics, currentReagents, Best))
-        summary.plain = Ask(recipeID, maxQuality, S.Reagents(basics, currentReagents, Plain))
-    end
-    return summary
 end
