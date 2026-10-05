@@ -25,6 +25,29 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Skill needed for each quality (0.4.98)
+
+- The `Skill` button outside the profession window's right edge opens a panel
+  for the selected recipe: its difficulty (the skill the top quality needs),
+  your skill split into your own and what the reagents add, a scale with the
+  threshold of every quality, and how much is missing for the top one.
+- Three sets of reagents are compared: the ones chosen in the window, the best
+  and the plainest quality in every slot (optional and finishing reagents stay
+  as chosen). The panel also shows what concentration costs for the next
+  quality.
+- Skill, difficulty, quality and concentration come from the game for each set
+  of reagents (three questions per recount); the thresholds are shares of the
+  difficulty (20/50/80/100% for five qualities, 50/100% for three), replaced
+  by the game's own numbers where it reports them. Current character only.
+- Built not to slow the profession window: nothing is created or asked until
+  the panel is first opened, a closed panel costs nothing, an open one
+  recounts the selected recipe at most once a frame and only after a change.
+  The time of the last recount is kept in the saved variables
+  (`HironCraftProfit_DB.craftSimulator.lastMs`). The panel can be dragged; its
+  place and whether it is open are remembered.
+- The idea comes from CraftSim's recipe info; no CraftSim code or data is
+  included.
+
 ## Shared profiles, a key for Open All (0.4.97)
 
 - Crafter pool profiles are the same on every linked account (full or

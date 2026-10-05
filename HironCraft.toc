@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.4.97
+## Version: 0.4.98
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -32,6 +32,7 @@ ProfitHub\Core\Core\EscClose.lua
 ProfitHub\Core\CraftEngine\Engine.lua
 ProfitHub\Core\CraftEngine\EnchantData.lua
 ProfitHub\Core\CraftEngine\SpecCal.lua
+ProfitHub\Core\CraftEngine\Simulator.lua
 
 ProfitHub\Core\Locales\enUS.lua
 ProfitHub\Core\Locales\ruRU.lua
@@ -61,6 +62,7 @@ ProfitHub\Core\UI\AccountOverview_UI.lua
 ProfitHub\Core\UI\FirstCraft.lua
 ProfitHub\Core\UI\KnowledgeBar.lua
 ProfitHub\Core\UI\MailOpenAll.lua
+ProfitHub\Core\UI\CraftSimulator_UI.lua
 ProfitHub\Core\UI\UI.lua
 ProfitHub\Core\UI\AtlasGallery.lua
 ProfitHub\Core\UI\SkinningCheck_UI.lua
