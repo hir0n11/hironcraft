@@ -25,6 +25,35 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Specialization ranks to try, panel in English (0.4.105)
+
+- The `Specialization` view tries other ranks the way `Simulation` tries
+  other reagents. Each node has a box with its rank: type another one (`-`
+  for a node not unlocked) and everything is counted with it in place of the
+  character's own. `Your ranks` returns every node to what the character
+  has, `All maxed` maxes every node of the recipe. A tried rank is gold.
+- On top of the view is the craft itself, as `Simulation` has it (the same
+  scale and the line with skill, quality and what the top quality still
+  needs), at the skill the tried ranks would give. Below it: `Tried: +50
+  skill, +10 points (3 unspent)`, the change of skill, the knowledge points
+  it takes more (or fewer, to see where points could have been saved) and
+  the points the character has left. Unlocking a node counts as free; a
+  rank is one point.
+- The stats show what is tried against the maximum, with the change in
+  brackets: `80 (+50) / 85`.
+- A node's tooltip tells where its skill comes from: what each rank gives
+  and what is gained at which rank (`Rank 25: +40 Skill`), green when the
+  rank shown has reached it. Only what counts for the selected recipe is
+  listed, so it shows which ranks are worth reaching and which are not.
+- The ranks tried stay with their nodes from recipe to recipe until `Your
+  ranks` is pressed or the game is reloaded, and they count in `Simulation`
+  as well, which says so (`With the ranks tried: +50 skill`): reagents and
+  ranks can be tried together.
+- Not modelled: that a node needs points in its parent before it opens, and
+  nodes that do not affect the selected recipe. The game's own page has the
+  last word on what can be bought.
+- The whole panel is in English now, whatever the addon's language is.
+
 ## Required slots with a choice of reagents (0.4.104)
 
 - Fixed the skill panel breaking on a recipe with a required slot that takes

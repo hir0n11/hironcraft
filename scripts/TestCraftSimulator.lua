@@ -1,8 +1,8 @@
 -- The craft simulator: the skill a recipe needs for each quality, what any
 -- reagents or another skill would give, and the panel that shows it without
 -- costing anything while it is closed. The panel's other view, what the
--- specializations give the recipe, is at the end; its counting has a test
--- of its own (TestSpecInfo.lua).
+-- specializations give the recipe and what other ranks would, is further
+-- down; its counting has a test of its own (TestSpecInfo.lua).
 local function eq(actual, expected, what)
     if actual ~= expected then
         error((what or 'value') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual), 2)
@@ -890,7 +890,8 @@ local bladesRank = 16 -- as the game counts: one more than the ranks
 C_TradeSkillUI.GetProfessionChildSkillLineID = function() return 2900 end
 C_ProfSpecs = {
     GetConfigIDForSkillLine = function(skillLine) return skillLine == 2900 and 7 or 0 end,
-    GetUnlockRankForPerk = function(perkID) return perkID == 12 and 10 or 0 end,
+    GetUnlockRankForPerk = function(perkID) return ({ [12] = 10, [14] = 25 })[perkID] or 0 end,
+    GetCurrencyInfoForSkillLine = function() return { numAvailable = 3 } end,
 }
 C_Traits = {
     GetNodeInfo = function(_, nodeID)
@@ -905,16 +906,17 @@ C_Traits = {
 PT.SpecStats = {
     nodes = {
         [10] = { 10, 30, { skill = 1 } }, [11] = { 10, 1, { skill = 5 } }, [12] = { 10, 1, { skill = 10 } },
-        [13] = { 10, 1, { multicraft = 20 } },
+        [13] = { 10, 1, { multicraft = 20 } }, [14] = { 10, 1, { skill = 40 } },
         [20] = { 20, 20, {} }, [21] = { 20, 1, { reduceconcentrationcost = 4 } },
     },
-    recipes = { [100] = { 10, 20, 11, 12, 13, 21 }, [200] = { 10, 11 } },
+    recipes = { [100] = { 10, 20, 11, 12, 13, 14, 21 }, [200] = { 10, 11 } },
     icons = { [10] = 111 },
 }
 
 selected, allocation = 100, window
 eq(Recount(), 1, 'the craft view counts as before')
 eq(traitCalls, 0, 'the specializations were asked while the other view is shown')
+eq(body.specNote.shown, false, 'no ranks are tried')
 local tabs, spec = panel.tabs, panel.spec
 assert(tabs and tabs.craft and tabs.spec, 'no tabs for the two views')
 eq(tabs.craft.label.text, 'Simulation', 'first tab')
@@ -932,42 +934,163 @@ panel.scripts.OnUpdate(panel)
 eq(spec.shown, true, 'the specialization view is shown')
 eq(body.shown, false, 'instead of the craft')
 eq(panel.message.shown, false, 'without a message')
-eq(calls.operation, 1, 'one question: which stats the recipe has')
+eq(calls.operation, 2, 'two questions the first time: which stats the recipe has, and the craft')
 eq(spec.recipe.text, 'Blade', 'recipe name')
 eq(spec.recipe.font, 'Addon/default.ttf', 'the addon\'s font')
+-- The craft as the other view has it.
+eq(spec.scale.shown, true, 'the scale of the craft')
+eq(spec.scale.needs[5].text, '400', 'with the top quality\'s threshold')
+eq(spec.status.text, 'Skill 345: T4, T5 needs 55 more', 'and what the craft comes to')
+eq(spec.note.text, 'Change a rank below to try it', 'a hint while nothing is tried')
 eq(spec.statRows[1].label.text, 'Skill', 'first stat')
-eq(spec.statRows[1].value.text, '30 / 45', 'now and with everything maxed')
-eq(spec.statRows[1].value.color[1], 1, 'not all of it yet')
+eq(spec.statRows[1].value.text, '30 / 85', 'now and with everything maxed')
+eq(spec.statRows[1].value.color[2], 1, 'not all of it yet')
 eq(spec.statRows[2].label.text, 'Less concentration use', 'a percent stat')
 eq(spec.statRows[2].value.text, '0% / 4%', 'as percents')
 eq(spec.statRows[3], nil, 'no multicraft for a recipe without it')
-eq(spec.nodeRows[1].name.text, 'Blades', 'the node furthest along')
-eq(spec.nodeRows[1].rank.text, '15 / 30', 'its rank')
-eq(spec.nodeRows[2].name.text, 'Hilts', 'a node not unlocked')
-eq(spec.nodeRows[2].rank.text, '- / 20', 'has no rank')
-eq(spec.nodeRows[2].name.color[1], 0.62, 'and is greyed')
+local blades, hilts = spec.nodeRows[1], spec.nodeRows[2]
+eq(blades.name.text, 'Blades', 'the node furthest along')
+eq(blades.box.text, '15', 'its rank in a box')
+eq(blades.max.text, '/ 30', 'out of how many')
+eq(blades.box.color[2], 1, 'the character\'s own rank')
+eq(hilts.name.text, 'Hilts', 'a node not unlocked')
+eq(hilts.box.text, '-', 'has no rank')
+eq(hilts.name.color[1], 0.62, 'and is greyed')
 eq(spec.more.shown, false, 'nothing left out')
-assert(panel.height > 58 + 60, 'the panel is not sized around the view')
-eq(Recount(), 0, 'a recount asks nothing about the craft')
+assert(panel.height > 58 + 120, 'the panel is not sized around the view')
+eq(Recount(), 1, 'a recount asks once, about the craft')
 
--- Ranks gained: the view follows.
+-- What a node gives and where.
+tips = {}
+blades.scripts.OnEnter(blades)
+eq(tips[1], 'Blades  15 / 30', 'the node and its rank')
+eq(tips[2], 'Each rank: +1 Skill', 'what a rank gives')
+eq(tips[3], 'Rank 0: +5 Skill', 'what is gained at which rank')
+eq(tips[4], 'Rank 10: +10 Skill', 'in order')
+eq(tips[5], 'Rank 25: +40 Skill', 'the one not reached yet too')
+eq(#tips, 6, 'and how to try a rank; nothing about stats the recipe does not have')
+
+-- A rank typed in the box is tried in place of the character's own.
+local function Type(row, text)
+    row.box.text = text
+    row.box.scripts.OnTextChanged(row.box, true)
+    panel.scripts.OnUpdate(panel)
+end
+Type(blades, '25')
+eq(spec.statRows[1].value.text, '80 (+50) / 85', 'the skill with the rank tried')
+eq(spec.statRows[1].value.color[2], 0.82, 'marked as tried')
+eq(spec.status.text, 'Skill 395: T4, T5 needs 5 more', 'the craft with that skill')
+eq(spec.scale.names[4].color[2] > 0.8, true, 'the scale follows')
+eq(spec.note.text, 'Tried: +50 skill, +10 points (3 unspent)', 'what is tried and what it takes')
+eq(blades.box.text, '25', 'the box keeps the rank')
+eq(blades.box.color[2], 0.82, 'marked as tried')
+tips = {}
+blades.scripts.OnEnter(blades)
+eq(tips[1], 'Blades  25 / 30', 'the tooltip shows the rank tried')
+eq(tips[2], 'Your rank: 15', 'and the character\'s own')
+Type(blades, '30')
+eq(spec.status.text, 'Skill 400: T5', 'enough ranks for the top quality')
+eq(spec.statRows[1].value.text, '85 (+55) / 85', 'all the skill')
+eq(spec.statRows[1].value.color[1], 0.35, 'marked as all of it')
+eq(spec.note.text, 'Tried: +55 skill, +15 points (3 unspent)', 'for this many points')
+eq(blades.name.color[1], 0.35, 'the node shown as maxed')
+Type(blades, '99')
+eq(blades.box.text, '30', 'no more ranks than the node has')
+-- A box emptied to type another rank changes nothing, and gets its rank back.
+blades.box.text = ''
+blades.box.scripts.OnTextChanged(blades.box, true)
+panel.scripts.OnUpdate(panel)
+eq(spec.status.text, 'Skill 400: T5', 'an empty box is not a rank')
+blades.box.scripts.OnEditFocusLost(blades.box)
+panel.scripts.OnUpdate(panel)
+eq(blades.box.text, '30', 'the rank is put back')
+Type(blades, 'x')
+eq(spec.status.text, 'Skill 400: T5', 'nor is nonsense')
+
+-- A node unlocked for a try costs no points; "-" locks it again.
+Type(hilts, '0')
+eq(spec.statRows[2].value.text, '4% (+4%) / 4%', 'what unlocking gives')
+eq(spec.note.text, 'Tried: +55 skill, +15 points (3 unspent)', 'for free')
+eq(hilts.name.color[2], 1, 'no longer greyed')
+Type(hilts, '-')
+eq(spec.statRows[2].value.text, '0% / 4%', 'locked again')
+eq(hilts.box.color[2], 1, 'which is how it is')
+
+-- Fewer ranks than the character has: where points could have been saved.
+Type(blades, '9')
+eq(spec.status.text, 'Skill 329: T4, T5 needs 71 more', 'the craft with fewer ranks')
+eq(spec.note.text, 'Tried: -16 skill, -6 points', 'what it would save')
+
+-- The ranks tried count in the craft view too.
+Type(blades, '25')
+tabs.craft.scripts.OnClick(tabs.craft)
+traitCalls = 0
+panel.scripts.OnUpdate(panel)
+eq(body.shown, true, 'the craft view')
+eq(body.status.text, 'Skill 395: T4, T5 needs 5 more', 'with the ranks tried')
+eq(body.specNote.shown, true, 'and it says so')
+eq(body.specNote.text, 'With the ranks tried: +50 skill', 'by how much')
+eq(body.concentration.text, 'Concentration: known for your real skill only', 'no price for a skill that is not real')
+eq(body.fill.label.text, '+5', 'the offer counts from the tried skill')
+assert(traitCalls > 0, 'the ranks were not read')
+body.extra:SetText('5')
+eq(body.status.text, 'Skill 400: T5', 'more skill on top of the ranks')
+tabs.spec.scripts.OnClick(tabs.spec)
+panel.scripts.OnUpdate(panel)
+eq(spec.status.text, 'Skill 400: T5', 'which the other view counts as well')
+tabs.craft.scripts.OnClick(tabs.craft)
+panel.scripts.OnUpdate(panel)
+body.extra:SetText('')
+tabs.spec.scripts.OnClick(tabs.spec)
+panel.scripts.OnUpdate(panel)
+eq(spec.status.text, 'Skill 395: T4, T5 needs 5 more', 'back to the ranks alone')
+
+-- All of the recipe's nodes at once, and back.
+local specPresets = spec.presets.buttons
+eq(specPresets[1].label.text, 'Your ranks', 'first preset')
+eq(specPresets[2].label.text, 'All maxed', 'second preset')
+specPresets[2].scripts.OnClick(specPresets[2])
+panel.scripts.OnUpdate(panel)
+eq(blades.box.text, '30', 'every node maxed')
+eq(hilts.box.text, '20', 'the locked one too')
+eq(spec.note.text, 'Tried: +55 skill, +35 points (3 unspent)', 'and what that takes')
+eq(spec.status.text, 'Skill 400: T5', 'the craft with everything')
+specPresets[1].scripts.OnClick(specPresets[1])
+panel.scripts.OnUpdate(panel)
+eq(blades.box.text, '15', 'the character\'s own ranks again')
+eq(hilts.box.text, '-', 'locked as it is')
+eq(spec.note.text, 'Change a rank below to try it', 'nothing tried')
+eq(spec.statRows[1].value.text, '30 / 85', 'the stats as they are')
+eq(spec.status.text, 'Skill 345: T4, T5 needs 55 more', 'and the craft')
+tabs.craft.scripts.OnClick(tabs.craft)
+traitCalls = 0
+panel.scripts.OnUpdate(panel)
+eq(body.specNote.shown, false, 'nothing tried in the craft view either')
+eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'the craft as it is')
+eq(traitCalls, 0, 'and the specializations are not asked')
+tabs.spec.scripts.OnClick(tabs.spec)
+panel.scripts.OnUpdate(panel)
+
+-- Ranks gained for real: the view follows.
 bladesRank = 31
 fire('TRAIT_CONFIG_UPDATED')
 panel.scripts.OnUpdate(panel)
-eq(spec.statRows[1].value.text, '45 / 45', 'all the skill')
+eq(spec.statRows[1].value.text, '85 / 85', 'all the skill')
 eq(spec.statRows[1].value.color[1], 0.35, 'marked as reached')
-eq(spec.nodeRows[1].rank.text, '30 / 30', 'the node maxed')
-eq(spec.nodeRows[1].rank.color[1], 0.35, 'and marked')
+eq(blades.box.text, '30', 'the node maxed')
+eq(blades.max.color[1], 0.35, 'and marked')
 bladesRank = 16
 
--- Quality does not matter here.
+-- Quality does not matter here: without it there is no craft to show.
 selected = 200
 Recount()
 eq(spec.shown, true, 'a recipe without quality has specializations too')
 eq(spec.recipe.text, 'Bandage', 'its name')
+eq(spec.scale.shown, false, 'no scale')
+eq(spec.status.shown, false, 'and no craft')
 eq(spec.statRows[1].value.text, '20 / 35', 'its skill')
 eq(spec.statRows[2].shown, false, 'rows it does not have are hidden')
-eq(spec.nodeRows[2].shown, false, 'nodes too')
+eq(hilts.shown, false, 'nodes too')
 
 -- A long list is cut short and says so.
 do
@@ -986,6 +1109,12 @@ do
     eq(spec.more.shown, true, 'the rest is mentioned')
     eq(spec.more.text, 'and 4 more', 'by number')
     eq(spec.statRows[1].value.text, '20 / 220', 'but all of them are counted')
+    -- The preset reaches the ones not listed as well.
+    specPresets[2].scripts.OnClick(specPresets[2])
+    panel.scripts.OnUpdate(panel)
+    eq(spec.statRows[1].value.text, '220 (+200) / 220', 'every node maxed, listed or not')
+    eq(spec.note.text, 'Tried: +200 skill, +200 points (3 unspent)', 'and what it takes')
+    specPresets[1].scripts.OnClick(specPresets[1])
     C_Traits.GetNodeInfo = nodeInfo
     PT.SpecStats.recipes[200] = { 10, 11 }
 end
@@ -1014,7 +1143,22 @@ eq(calls.operation, 1, 'one question for the craft')
 eq(traitCalls, 0, 'the specializations were asked for the craft view')
 eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'the craft as it was')
 
-print('Specialization view passed (tabs, stats now and maxed, nodes, long lists, messages, counted only when shown).')
+print('Specialization view passed (tabs, the craft, stats, nodes, ranks tried in both views, presets, tooltip, long lists, messages, counted only when shown).')
+
+-- The panel is in English whatever the addon's language is.
+do
+    local function Slurp(path)
+        local file = assert(io.open(path, 'rb'))
+        local text = file:read('*a')
+        file:close()
+        return text
+    end
+    assert(not Slurp('ProfitHub/Core/Locales/ruRU.lua'):find('L%["CRAFTSIM_'), 'the panel has Russian strings again')
+    local english = Slurp('ProfitHub/Core/Locales/enUS.lua')
+    for _, key in ipairs({ 'CRAFTSIM_TITLE', 'CRAFTSIM_TAB_SPEC', 'CRAFTSIM_SPEC_TRIED', 'CRAFTSIM_SPEC_OWN' }) do
+        assert(english:find('L["' .. key .. '"]', 1, true), key .. ' is missing from the English strings')
+    end
+end
 
 -- A recipe with a required slot that takes one of several reagents ---------------------
 

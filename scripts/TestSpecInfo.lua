@@ -1,5 +1,6 @@
 -- What a recipe gets from the specializations: counted from CraftSim's data
--- and the character's ranks, the way CraftSim counts it.
+-- and the character's ranks, the way CraftSim counts it, and what it would
+-- get with other ranks tried in their place.
 local function eq(actual, expected, what)
     if actual ~= expected then
         error((what or 'value') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual), 2)
@@ -27,6 +28,7 @@ C_ProfSpecs = {
         asked.threshold = asked.threshold + 1
         return thresholds[perkID]
     end,
+    GetCurrencyInfoForSkillLine = function(line) return line == SKILL_LINE and { numAvailable = 4 } or nil end,
 }
 C_Traits = {
     GetNodeInfo = function(configID, nodeID)
@@ -133,6 +135,100 @@ eq(Nodes(info), '20:40/40 10:30/30 60:5/10 30:0/20 40:0/10', 'and the order foll
 ranks[10] = { 16, 31 }
 ranks[30] = { 0, 21 }
 
+-- Other ranks tried in place of the character's own -----------------------------------
+
+do
+    local function Stat(tryInfo, key)
+        for _, stat in ipairs(tryInfo.stats) do
+            if stat.key == key then return stat end
+        end
+    end
+    local function NodeOf(tryInfo, nodeID)
+        for _, node in ipairs(tryInfo.nodes) do
+            if node.nodeID == nodeID then return node end
+        end
+    end
+    local own = I.For(1000)
+    eq(I.AnyTried(), false, 'nothing tried at first')
+    eq(own.anyTried, false, 'nor for this recipe')
+    eq(own.points, 0, 'no points')
+    eq(own.skillChange, 0, 'no change of skill')
+    eq(own.unspent, 4, 'the knowledge points left')
+    eq(Stat(own, 'skill').tried, 37, 'what is tried is what there is')
+    eq(NodeOf(own, 10).tried, nil, 'no rank tried for a node')
+    -- What a node gives and at which ranks.
+    local blades = NodeOf(own, 10)
+    eq(blades.perRank.skill, 1, 'what each rank gives')
+    eq(#blades.steps, 3, 'and its three perks')
+    eq(blades.steps[1].rank .. ':' .. blades.steps[1].stats.skill, '0:5', 'in the order of their ranks')
+    eq(blades.steps[2].rank .. ':' .. blades.steps[2].stats.skill, '10:10', 'the second')
+    eq(blades.steps[2].stats.reduceconcentrationcost, 3, 'with everything it gives')
+    eq(blades.steps[3].rank .. ':' .. blades.steps[3].stats.multicraft, '20:20', 'the third')
+    eq(NodeOf(own, 30).perRank, nil, 'a node whose ranks give nothing by themselves')
+    eq(NodeOf(own, 60).perRank.multicraft, 4, 'another node\'s ranks')
+
+    -- More ranks in one node: its ranks and the perk they reach.
+    asked.node = 0
+    eq(I.SkillChange(1000), 0, 'no skill from nothing tried')
+    eq(asked.node, 0, 'and nothing asked for it')
+    I.Try(10, 25)
+    eq(I.AnyTried(), true, 'a rank is tried')
+    local more = I.For(1000)
+    eq(more.anyTried, true, 'for this recipe')
+    eq(Stat(more, 'skill').current, 37, 'the skill now is what it was')
+    eq(Stat(more, 'skill').tried, 47, 'ten more ranks, ten more skill')
+    eq(Stat(more, 'skill').max, 52, 'the most is what it was')
+    eq(Stat(more, 'multicraft').tried, 50, 'the perk the ranks reach')
+    eq(Stat(more, 'additionalitemscraftedwithmulticraft').tried, 25, 'with all it gives')
+    eq(Stat(more, 'resourcefulness').tried, 80, 'other nodes as they are')
+    eq(more.skillChange, 10, 'the change of skill')
+    eq(more.points, 10, 'for ten points')
+    eq(I.SkillChange(1000), 10, 'asked by itself')
+    eq(Nodes(more), '20:40/40 10:15/30 60:5/10 40:0/10 30:-/20', 'the rows stay where they were')
+    eq(NodeOf(more, 10).tried, 25, 'the node has its tried rank')
+    eq(NodeOf(more, 10).rank, 15, 'beside its own')
+
+    -- Unlocking a node takes no points.
+    I.Try(30, 0)
+    local unlocked = I.For(1000)
+    eq(Stat(unlocked, 'ingenuity').tried, 12, 'what unlocking gives')
+    eq(Stat(unlocked, 'ingenuity').current, 0, 'which is not there now')
+    eq(unlocked.points, 10, 'for no points more')
+    eq(NodeOf(unlocked, 30).tried, 0, 'unlocked, without ranks')
+
+    -- Fewer ranks than the character has, and a node locked.
+    I.Try(20, 3)
+    I.Try(60, -1)
+    local fewer = I.For(1000)
+    eq(Stat(fewer, 'resourcefulness').tried, 6, 'three ranks of forty')
+    eq(Stat(fewer, 'reagentssavedfromresourcefulness').tried, 0, 'short of the perk')
+    eq(Stat(fewer, 'craftingspeed').tried, 0, 'and all of it')
+    eq(Stat(fewer, 'multicraft').tried, 20, 'nothing from the locked node')
+    eq(NodeOf(fewer, 60).tried, -1, 'which is marked as locked')
+    eq(fewer.points, 10 - 37 - 5, 'the points that would be saved')
+
+    -- Kept within what a node has.
+    I.Try(10, 99)
+    eq(NodeOf(I.For(1000), 10).tried, 30, 'no more ranks than the node has')
+    I.Try(10, -7)
+    eq(NodeOf(I.For(1000), 10).tried, -1, 'and no less than locked')
+    I.Try(10, 15)
+    eq(NodeOf(I.For(1000), 10).tried, nil, 'the character\'s own rank is not a try')
+    I.Try(10, 25)
+    I.Try(10, nil)
+    eq(NodeOf(I.For(1000), 10).tried, nil, 'a try taken back')
+    eq(I.AnyTried(), true, 'the others stay')
+
+    -- A try stays with its node for every recipe, until forgotten.
+    eq(NodeOf(I.For(1001), 20).tried, 3, 'another recipe of the same node')
+    I.ForgetTried()
+    eq(I.AnyTried(), false, 'all forgotten')
+    local again = I.For(1000)
+    eq(again.anyTried, false, 'nothing tried again')
+    eq(Stat(again, 'skill').tried, 37, 'and the numbers as they are')
+    eq(again.points, 0, 'no points')
+end
+
 -- A recipe without multicraft: what gives only that does not count -----------------
 
 info = I.For(1001)
@@ -171,7 +267,7 @@ C_Traits = traits
 C_Traits.GetNodeInfo = function() error('boom') end
 eq(I.For(1000), nil, 'the game failing')
 
-print('Specialization info passed (stats now and maxed, perks by rank, recipe stats, order, caches, nothing to show).')
+print('Specialization info passed (stats now and maxed, perks by rank, ranks tried, recipe stats, order, caches, nothing to show).')
 
 -- The data generated from CraftSim ---------------------------------------------------
 
@@ -236,6 +332,7 @@ for recipeID in pairs(data.recipes) do
         counted = counted + 1
         for _, stat in ipairs(maxed.stats) do
             eq(stat.current, stat.max, 'recipe ' .. recipeID .. ' maxed: ' .. stat.key)
+            eq(stat.tried, stat.max, 'recipe ' .. recipeID .. ' maxed, nothing tried: ' .. stat.key)
         end
         for _, node in ipairs(maxed.nodes) do
             eq(node.rank, node.maxRank, 'recipe ' .. recipeID .. ' maxed: node ' .. node.nodeID)

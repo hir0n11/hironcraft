@@ -4,8 +4,10 @@ if not PT or not PT.CraftSimulator then return end
 -- The skill panel beside the profession window: its frame, its button above
 -- Create, its two views and when it recounts. The views are the craft tried
 -- with other reagents and skill (CraftSimulator_Sim.lua, counted by
--- CraftEngine/Simulator.lua) and what the specializations give the recipe
--- (CraftSimulator_Spec.lua, counted by CraftEngine/SpecInfo.lua).
+-- CraftEngine/Simulator.lua) and what the specializations give the recipe,
+-- with other ranks tried (CraftSimulator_Spec.lua, counted by
+-- CraftEngine/SpecInfo.lua). Both show the same craft: the reagents chosen in
+-- one and the ranks tried in the other count in both.
 --
 -- It must never make the profession window slow. Nothing is built or asked
 -- until the panel is first shown; while it is hidden the hooks only set a
@@ -80,6 +82,80 @@ end
 UI.Text, UI.T, UI.Tier = Text, T, Tier
 UI.INNER, UI.PAD, UI.TOP, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, PAD, TOP, GOLD, GREEN, GREY, WHITE
 
+-- The line under the scale: the skill, the quality it gives and what the top
+-- quality still lacks. Returns the text and its color.
+function UI.Status(outcome)
+    if (outcome.missingToMax or 0) > 0 then
+        return string.format(T("CRAFTSIM_STATUS_MISSING", "Skill %d: %s, %s needs %d more"),
+            outcome.skill, Tier(outcome.quality), Tier(outcome.maxQuality), outcome.missingToMax), GOLD
+    end
+    return string.format(T("CRAFTSIM_STATUS_MAX", "Skill %d: %s"), outcome.skill, Tier(outcome.quality)), GREEN
+end
+
+-- The scale both views have: a bar filled up to the skill, a tick for each
+-- quality with its name above and the skill it needs below.
+function UI.NewScale(parent)
+    local scale = CreateFrame("Frame", nil, parent)
+    scale:SetSize(INNER, 36)
+    scale.bar = CreateFrame("Frame", nil, scale)
+    scale.bar:SetSize(INNER, 10)
+    scale.bar:SetPoint("TOPLEFT", scale, "TOPLEFT", 0, -13)
+    local background = scale.bar:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0, 0, 0, 0.7)
+    scale.fill = scale.bar:CreateTexture(nil, "ARTWORK")
+    scale.fill:SetPoint("TOPLEFT", scale.bar, "TOPLEFT", 0, 0)
+    scale.fill:SetPoint("BOTTOMLEFT", scale.bar, "BOTTOMLEFT", 0, 0)
+    scale.fill:SetColorTexture(0.78, 0.58, 0.12, 1)
+    scale.ticks, scale.names, scale.needs = {}, {}, {}
+    for quality = 2, 5 do
+        local tick = scale.bar:CreateTexture(nil, "OVERLAY")
+        tick:SetSize(2, 14)
+        scale.ticks[quality] = tick
+        scale.names[quality] = Text(scale, 9, "CENTER", GREY)
+        scale.needs[quality] = Text(scale, 9, "CENTER", GREY)
+    end
+
+    function scale:Update(outcome)
+        local thresholds = outcome and outcome.thresholds
+        if not thresholds then
+            self:Hide()
+            return
+        end
+        local range = math.max(outcome.difficulty, outcome.skill, 1)
+        local width = self.bar:GetWidth()
+        self.fill:SetWidth(math.max(1, math.min(width, width * math.max(0, outcome.skill) / range)))
+        for quality = 2, 5 do
+            local tick, name, need = self.ticks[quality], self.names[quality], self.needs[quality]
+            local threshold = thresholds[quality]
+            if threshold and quality <= outcome.maxQuality then
+                local x = math.min(width, width * threshold / range)
+                local color = outcome.skill >= threshold and GREEN or GREY
+                tick:ClearAllPoints()
+                tick:SetPoint("TOP", self.bar, "TOPLEFT", x, 2)
+                tick:SetColorTexture(color[1], color[2], color[3], 1)
+                tick:Show()
+                name:ClearAllPoints()
+                name:SetPoint("BOTTOM", self.bar, "TOPLEFT", x, 3)
+                name:SetText(Tier(quality))
+                name:SetTextColor(color[1], color[2], color[3])
+                name:Show()
+                need:ClearAllPoints()
+                need:SetPoint("TOP", self.bar, "BOTTOMLEFT", x, -3)
+                need:SetText(tostring(threshold))
+                need:SetTextColor(color[1], color[2], color[3])
+                need:Show()
+            else
+                tick:Hide()
+                name:Hide()
+                need:Hide()
+            end
+        end
+        self:Show()
+    end
+    return scale
+end
+
 -- The view left open last time.
 local function Tab()
     return Saved().tab == "spec" and "spec" or "craft"
@@ -128,35 +204,41 @@ function UI.Refresh()
         ShowMessage(T("CRAFTSIM_NO_RECIPE", "Select a recipe."))
         return
     end
-    if Tab() == "spec" then
-        -- Counted only while it is the view shown. Shown first: it sizes the
-        -- panel around its rows.
-        panel.message:Hide()
-        panel.body:Hide()
-        panel.spec:Show()
-        if not Safely(UI.ShowSpec, recipeID, recipeInfo.name) then
-            ShowMessage(T("CRAFTSIM_SPEC_NONE", "No specialization of yours affects this recipe."))
-        end
-    elseif recipeInfo.isRecraft then
-        -- A recraft is counted from the item being recrafted, which is not asked here.
-        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-    else
-        -- The recipe's slots do not change: looked up once per recipe.
+    -- What the craft is counted from. A recraft is counted from the item being
+    -- recrafted, which is not asked here. The recipe's slots do not change:
+    -- looked up once per recipe.
+    local known = false
+    if not recipeInfo.isRecraft then
         if basicsOf ~= recipeID then
             basicsOf, basics = recipeID, CE:GetRecipeBasics(recipeID)
         end
-        if type(basics) ~= "table" then
+        known = type(basics) == "table"
+    end
+    local hasQuality = known and (tonumber(basics.maxQuality) or 0) >= 2
+    if Tab() == "spec" then
+        -- Counted only while it is the view shown. Shown first: it sizes the
+        -- panel around its rows. A recipe without quality has no craft to
+        -- show, but its specializations all the same.
+        panel.message:Hide()
+        panel.body:Hide()
+        panel.spec:Show()
+        local reagents = hasQuality and WindowReagents(form) or nil
+        if not Safely(UI.ShowSpec, recipeID, recipeInfo.name, hasQuality and basics or nil, reagents) then
+            ShowMessage(T("CRAFTSIM_SPEC_NONE", "No specialization of yours affects this recipe."))
+        end
+    elseif not known then
+        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+    elseif not hasQuality then
+        ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
+    else
+        -- Shown first: the craft sizes the panel around its rows.
+        panel.message:Hide()
+        panel.spec:Hide()
+        panel.body:Show()
+        -- The ranks tried in the other view count here too.
+        local specSkill = PT.SpecInfo and PT.SpecInfo.SkillChange(recipeID) or 0
+        if not Safely(UI.ShowCraft, recipeID, basics, WindowReagents(form), recipeInfo.name, specSkill) then
             ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-        elseif (tonumber(basics.maxQuality) or 0) < 2 then
-            ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
-        else
-            -- Shown first: the craft sizes the panel around its rows.
-            panel.message:Hide()
-            panel.spec:Hide()
-            panel.body:Show()
-            if not Safely(UI.ShowCraft, recipeID, basics, WindowReagents(form), recipeInfo.name) then
-                ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-            end
         end
     end
     if started then DB().lastMs = math.floor((debugprofilestop() - started) * 100 + 0.5) / 100 end

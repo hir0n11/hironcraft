@@ -14,7 +14,7 @@ if not UI then return end
 -- is arithmetic on the last answer; what each optional reagent does is asked
 -- only when its list is opened.
 local Text, T, Tier = UI.Text, UI.T, UI.Tier
-local INNER, GOLD, GREEN, GREY, WHITE = UI.INNER, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE
+local INNER, GOLD, GREY, WHITE = UI.INNER, UI.GOLD, UI.GREY, UI.WHITE
 
 local panel, body
 -- The choices made for the recipe they belong to.
@@ -124,63 +124,22 @@ local function GroupText(group)
     return text .. ": " .. table.concat(parts, ", ")
 end
 
--- The bar: filled up to the skill, a tick for each quality with its name
--- above and the skill it needs below.
-local function UpdateScale(outcome)
-    local scale, thresholds = body.scale, outcome.thresholds
-    if not thresholds then
-        scale:Hide()
-        return
-    end
-    local range = math.max(outcome.difficulty, outcome.skill, 1)
-    local width = scale.bar:GetWidth()
-    scale.fill:SetWidth(math.max(1, math.min(width, width * math.max(0, outcome.skill) / range)))
-    for quality = 2, 5 do
-        local tick, name, need = scale.ticks[quality], scale.names[quality], scale.needs[quality]
-        local threshold = thresholds[quality]
-        if threshold and quality <= outcome.maxQuality then
-            local x = math.min(width, width * threshold / range)
-            local color = outcome.skill >= threshold and GREEN or GREY
-            tick:ClearAllPoints()
-            tick:SetPoint("TOP", scale.bar, "TOPLEFT", x, 2)
-            tick:SetColorTexture(color[1], color[2], color[3], 1)
-            tick:Show()
-            name:ClearAllPoints()
-            name:SetPoint("BOTTOM", scale.bar, "TOPLEFT", x, 3)
-            name:SetText(Tier(quality))
-            name:SetTextColor(color[1], color[2], color[3])
-            name:Show()
-            need:ClearAllPoints()
-            need:SetPoint("TOP", scale.bar, "BOTTOMLEFT", x, -3)
-            need:SetText(tostring(threshold))
-            need:SetTextColor(color[1], color[2], color[3])
-            need:Show()
-        else
-            tick:Hide()
-            name:Hide()
-            need:Hide()
-        end
-    end
-    scale:Show()
-end
+-- The skill the ranks tried in the other view add to the craft.
+local specSkill = 0
 
 local function ShowOutcome()
-    local outcome = S.Outcome(simulation, choice.extraSkill)
+    local extra = choice.extraSkill + specSkill
+    local outcome = S.Outcome(simulation, extra)
     if not outcome then return end
-    UpdateScale(outcome)
-    if (outcome.missingToMax or 0) > 0 then
-        body.status:SetText(string.format(T("CRAFTSIM_STATUS_MISSING", "Skill %d: %s, %s needs %d more"),
-            outcome.skill, Tier(outcome.quality), Tier(outcome.maxQuality), outcome.missingToMax))
-        body.status:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-    else
-        body.status:SetText(string.format(T("CRAFTSIM_STATUS_MAX", "Skill %d: %s"), outcome.skill, Tier(outcome.quality)))
-        body.status:SetTextColor(GREEN[1], GREEN[2], GREEN[3])
-    end
+    body.scale:Update(outcome)
+    local status, color = UI.Status(outcome)
+    body.status:SetText(status)
+    body.status:SetTextColor(color[1], color[2], color[3])
 
     local concentration
     if outcome.quality and outcome.quality >= outcome.maxQuality then
         concentration = T("CRAFTSIM_CONC_NONE", "not needed")
-    elseif choice.extraSkill ~= 0 then
+    elseif extra ~= 0 then
         -- The game prices it for the real skill only.
         concentration = T("CRAFTSIM_CONC_REAL_ONLY", "known for your real skill only")
     elseif outcome.concentrationCost then
@@ -191,8 +150,9 @@ local function ShowOutcome()
     body.concentration:SetText(T("CRAFTSIM_CONCENTRATION", "Concentration") .. ": " .. concentration)
     body.cost:SetText(T("CRAFTSIM_COST", "Reagents") .. ": " .. Money(simulation.cost, simulation.costComplete))
 
-    -- What the chosen reagents lack for the top quality, one click away.
-    local real = S.Outcome(simulation, 0)
+    -- What the chosen reagents (with the ranks tried) lack for the top
+    -- quality, one click away.
+    local real = S.Outcome(simulation, specSkill)
     local missing = real and real.missingToMax or 0
     if missing > 0 then
         body.fill.amount = missing
@@ -367,6 +327,12 @@ local function Layout()
     Put(body.recipe, 16, 4)
     Put(body.scale, 36, 6)
     Put(body.status, 14, 2)
+    if specSkill ~= 0 then
+        body.specNote:SetText(string.format(T("CRAFTSIM_SPEC_COUNTED", "With the ranks tried: %+d skill"), specSkill))
+        Put(body.specNote, 13, 2)
+    else
+        body.specNote:Hide()
+    end
     Put(body.concentration, 13, 2)
     Put(body.cost, 13, 10)
 
@@ -455,18 +421,34 @@ local function Relabel()
     end
 end
 
--- Called on every recount of the panel with the recipe on screen. Returns
--- false when the game gives no answer for it.
-function UI.ShowCraft(recipeID, recipeBasics, reagents, name)
-    if not body then return false end
-    -- Another recipe: its own choices, starting from the window's.
+-- The recipe on screen with the window's reagents, asked from the game (one
+-- question). Another recipe starts with its own choices, from the window's.
+-- False when the game gives no answer.
+local function Adopt(recipeID, recipeBasics, reagents)
     if recipeOf ~= recipeID then
         choice.mixes, choice.items, choice.extraSkill = {}, {}, 0
         body.extra:SetText("")
     end
     recipeOf, basics, windowReagents = recipeID, recipeBasics, reagents
     simulation = S.Simulate(recipeOf, basics, windowReagents, choice)
-    if not simulation then return false end
+    return simulation ~= nil
+end
+
+-- For the other view: what the craft comes to as it is tried here (the
+-- window's reagents with the choices and the +/- skill of this view) at a
+-- skill changed by "skill" more. nil when the game gives no answer.
+function UI.CraftOutcome(recipeID, recipeBasics, reagents, skill)
+    if not body or not Adopt(recipeID, recipeBasics, reagents) then return nil end
+    return S.Outcome(simulation, choice.extraSkill + (tonumber(skill) or 0))
+end
+
+-- Called on every recount of the panel with the recipe on screen; "skill" is
+-- what the ranks tried in the other view add. Returns false when the game
+-- gives no answer for the recipe.
+function UI.ShowCraft(recipeID, recipeBasics, reagents, name, skill)
+    if not body then return false end
+    specSkill = tonumber(skill) or 0
+    if not Adopt(recipeID, recipeBasics, reagents) then return false end
     body.recipe:SetText(name or "")
     local height = Layout()
     body:SetHeight(height)
@@ -483,28 +465,10 @@ function UI.BuildCraft(owner)
     body.recipe = Text(body, 13, "LEFT", GOLD)
     body.recipe:SetWidth(INNER)
 
-    -- The scale: quality names above the bar, the skill each needs below it.
-    local scale = CreateFrame("Frame", nil, body)
-    scale:SetSize(INNER, 36)
-    scale.bar = CreateFrame("Frame", nil, scale)
-    scale.bar:SetSize(INNER, 10)
-    scale.bar:SetPoint("TOPLEFT", scale, "TOPLEFT", 0, -13)
-    local background = scale.bar:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
-    background:SetColorTexture(0, 0, 0, 0.7)
-    scale.fill = scale.bar:CreateTexture(nil, "ARTWORK")
-    scale.fill:SetPoint("TOPLEFT", scale.bar, "TOPLEFT", 0, 0)
-    scale.fill:SetPoint("BOTTOMLEFT", scale.bar, "BOTTOMLEFT", 0, 0)
-    scale.fill:SetColorTexture(0.78, 0.58, 0.12, 1)
-    scale.ticks, scale.names, scale.needs = {}, {}, {}
-    for quality = 2, 5 do
-        local tick = scale.bar:CreateTexture(nil, "OVERLAY")
-        tick:SetSize(2, 14)
-        scale.ticks[quality] = tick
-        scale.names[quality] = Text(scale, 9, "CENTER", GREY)
-        scale.needs[quality] = Text(scale, 9, "CENTER", GREY)
-    end
-    body.scale = scale
+    body.scale = UI.NewScale(body)
+    body.specNote = Text(body, 11, "LEFT", GOLD)
+    body.specNote:SetWidth(INNER)
+    body.specNote:Hide()
 
     body.status = Text(body, 12, "LEFT", GOLD)
     body.status:SetWidth(INNER)
