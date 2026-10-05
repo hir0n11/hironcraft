@@ -260,6 +260,34 @@ do
     eq(made(window, { items = { [4] = 42, [5] = 51 } }), '1:i12x10 2:i21x5 4:i42x1 5:i51x1', 'optional and finishing reagents chosen')
     eq(made(window, { items = { [4] = false } }), '1:i12x10 2:i21x5', 'an optional slot emptied')
     eq(made(nil, { tiers = { [1] = 1 } }), '1:i11x10', 'nothing in the window')
+    -- A slot filled partly at one quality and partly at another.
+    eq(made(window, { mixes = { [1] = { [1] = 6, [2] = 4 } } }), '1:i11x6 1:i12x4 2:i21x5 4:i41x1', 'a slot at two qualities')
+    eq(made(window, { mixes = { [2] = { [3] = 9 } } }), '1:i12x10 2:i23x5 4:i41x1', 'no more than the slot holds')
+    eq(made(window, { mixes = { [2] = { [1] = 0, [2] = 0, [3] = 0 } } }), '1:i12x10 4:i41x1', 'a slot left empty by its mix')
+    eq(outcome(window, { mixes = { [1] = { [1] = 6, [2] = 4 } } }).skill, 327, 'part of a slot counts for its part')
+
+    -- How the window fills a slot, and a slot kept full when one quality is set.
+    local mix, allocated = S.WindowMix(basics100.basicSlots[1], window)
+    eq(mix[2], 10, 'the window\'s quality')
+    eq(mix[1], nil, 'none of the other')
+    eq(allocated, 10, 'the whole slot chosen in the window')
+    mix, allocated = S.WindowMix(basics100.basicSlots[1], { { reagent = { itemID = 11 }, dataSlotIndex = 1, quantity = 3 },
+        { reagent = { itemID = 12 }, dataSlotIndex = 1, quantity = 4 }, { reagent = { itemID = 23 }, dataSlotIndex = 2, quantity = 5 } })
+    eq(mix[1] .. '+' .. mix[2], '3+4', 'a mix in the window')
+    eq(allocated, 7, 'not all of the slot chosen')
+    eq(select(2, S.WindowMix(basics100.basicSlots[2], nil)), 0, 'nothing in the window')
+    local function balanced(old, qualities, total, tier, value)
+        local new, parts = S.Rebalance(old, qualities, total, tier, value), {}
+        for quality = 1, qualities do parts[quality] = tostring(new[quality]) end
+        return table.concat(parts, '/')
+    end
+    eq(balanced({ [1] = 10 }, 2, 10, 2, 4), '6/4', 'two qualities: the other takes the rest')
+    eq(balanced({ [1] = 3, [3] = 2 }, 3, 5, 2, 2), '1/2/2', 'three qualities: the highest keeps its own')
+    eq(balanced({ [1] = 1, [2] = 2, [3] = 2 }, 3, 5, 2, 5), '0/5/0', 'a whole slot at the edited quality')
+    eq(balanced({ [3] = 5 }, 3, 5, 2, 2), '0/2/3', 'the highest gives way only as far as needed')
+    eq(balanced({ [2] = 10 }, 2, 10, 1, 99), '10/0', 'no more than the slot holds')
+    eq(balanced({ [2] = 10 }, 2, 10, 2, -3), '10/0', 'and no less than none')
+    eq(balanced(nil, 2, 10, 2, 3), '7/3', 'from nothing')
     -- A crest: a currency, in the amount its slot asks for.
     eq(made(window, { items = { [6] = { currencyID = 3001 } } }), '1:i12x10 2:i21x5 4:i41x1 6:c3001x30', 'a currency reagent')
     eq(S.OptionKey(41), 'i41', 'an item\'s key')
@@ -550,16 +578,50 @@ do
     eq(body.choiceRows[3].label, 'Finishing', 'the finishing slot')
     eq(body.choiceRows[1].text.text, 'Optional: as in the window', 'the button names its slot and choice')
 
-    -- One reagent at another quality: one question.
+    -- Each quality has a button and a box; the boxes start as the window is filled.
+    local first, second = body.slotRows[1], body.slotRows[2]
+    eq(first.buttons[0], nil, 'no button per slot for "as in the window"')
+    eq(first.boxes[1].text .. '/' .. first.boxes[2].text, '0/10', 'the first slot as in the window')
+    eq(second.boxes[1].text .. '/' .. second.boxes[2].text .. '/' .. second.boxes[3].text, '5/0/0', 'the second slot')
+    eq(first.boxes[3].shown, false, 'no third box for a two-quality reagent')
+    eq(first.buttons[2].label.color[1], 1, 'the quality a whole slot is at is marked')
+    eq(first.buttons[1].label.color[1] < 1, true, 'the other is not')
+
+    -- A whole slot at another quality: one question.
     calls.operation = 0
-    local third = body.slotRows[2].buttons[3]
+    local third = second.buttons[3]
     third.scripts.OnClick(third)
     eq(calls.operation, 1, 'one question per change')
     eq(body.status.text, 'Skill 365: T4, T5 needs 35 more', 'better reagent in the second slot')
     eq(body.cost.text, 'Reagents: 193g', 'and what it costs')
     eq(third.label.color[1], 1, 'the chosen quality is marked')
-    eq(body.slotRows[2].buttons[0].label.color[1] < 1, true, 'the others are not')
+    eq(second.buttons[1].label.color[1] < 1, true, 'the others are not')
+    eq(second.boxes[1].text .. '/' .. second.boxes[2].text .. '/' .. second.boxes[3].text, '0/0/5', 'the boxes follow')
     eq(body.scale.needs[5].text, '400', 'the scale follows')
+
+    -- Part of a slot at another quality: typed into a box.
+    local function Type(box, text)
+        box.text = text
+        box.scripts.OnTextChanged(box, true)
+    end
+    calls.operation = 0
+    Type(first.boxes[2], '4')
+    eq(calls.operation, 1, 'one question for a typed number')
+    eq(first.boxes[1].text, '6', 'the rest of the slot stays at the other quality')
+    eq(body.status.text, 'Skill 347: T4, T5 needs 53 more', 'four of ten at the better quality')
+    eq(body.cost.text, 'Reagents: 169g', 'and their cost')
+    eq(first.buttons[2].label.color[1] < 1, true, 'a mixed slot marks no quality')
+    Type(second.boxes[2], '2')
+    eq(second.boxes[1].text .. '/' .. second.boxes[2].text .. '/' .. second.boxes[3].text, '0/2/3', 'three qualities share a slot')
+    eq(body.status.text, 'Skill 343: T4, T5 needs 57 more', 'counted by their shares')
+    Type(second.boxes[1], '99')
+    eq(second.boxes[1].text, '5', 'no more than the slot holds')
+    eq(second.boxes[2].text .. '/' .. second.boxes[3].text, '0/0', 'the others give way')
+    eq(body.status.text, 'Skill 327: T4, T5 needs 73 more', 'the second slot at its lowest quality')
+    -- The panel filling its own boxes is not the player typing.
+    calls.operation = 0
+    first.boxes[1]:SetText('1')
+    eq(calls.operation, 0, 'a box filled by the panel asked the game')
 
     -- Every slot at once.
     local presets = body.presets.buttons
@@ -572,6 +634,7 @@ do
     eq(body.status.text, 'Skill 365: T4, T5 needs 35 more', 'highest qualities')
     presets[1].scripts.OnClick(presets[1])
     eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'back to the window')
+    eq(first.boxes[1].text .. '/' .. first.boxes[2].text, '0/10', 'the boxes show the window again')
 
     -- Optional and finishing reagents from their lists.
     local function Menu(row)

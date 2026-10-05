@@ -114,24 +114,80 @@ local function OptionOf(slot, value)
     return AsOption(value)
 end
 
+-- How a quality slot is filled in the window: mix[quality] = how many, and
+-- how many in all (fewer than the slot holds when not all are chosen there).
+function S.WindowMix(slot, current)
+    local mix, allocated = {}, 0
+    for _, entry in ipairs(type(current) == "table" and current or {}) do
+        if type(entry) == "table" and entry.dataSlotIndex == slot.dataSlotIndex then
+            local key = S.OptionKey(entry.reagent)
+            for tier, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
+                if S.OptionKey(option) == key then
+                    local quantity = tonumber(entry.quantity) or 0
+                    mix[tier] = (mix[tier] or 0) + quantity
+                    allocated = allocated + quantity
+                end
+            end
+        end
+    end
+    return mix, allocated
+end
+
+-- A slot's mix after one quality was set to a number: the slot stays full.
+-- The other qualities keep what they had, the highest first, and the lowest
+-- of them takes what is left.
+function S.Rebalance(mix, qualityCount, total, tier, value)
+    total = math.max(0, math.floor(tonumber(total) or 0))
+    value = math.max(0, math.min(total, math.floor(tonumber(value) or 0)))
+    local new, rest, others = { [tier] = value }, total - value, {}
+    for other = qualityCount, 1, -1 do
+        if other ~= tier then others[#others + 1] = other end
+    end
+    for index, other in ipairs(others) do
+        if index == #others then
+            new[other] = rest
+        else
+            local keep = math.min(math.max(0, tonumber(type(mix) == "table" and mix[other]) or 0), rest)
+            new[other] = keep
+            rest = rest - keep
+        end
+    end
+    return new
+end
+
 -- The window's reagents with a simulation's choices put in:
---   choice.tiers[dataSlotIndex] = the quality for a quality slot;
+--   choice.tiers[dataSlotIndex] = the quality for a whole quality slot;
+--   choice.mixes[dataSlotIndex] = { [quality] = how many } for a slot filled
+--   with several qualities at once;
 --   choice.items[dataSlotIndex] = the reagent for an optional or finishing
 --   slot (an item's ID or the slot's option, which may be a currency), false
 --   to leave it empty.
 -- A slot without a choice stays as it is in the window.
 function S.SimulatedReagents(basics, current, choice)
     local tiers = type(choice) == "table" and type(choice.tiers) == "table" and choice.tiers or {}
+    local mixes = type(choice) == "table" and type(choice.mixes) == "table" and choice.mixes or {}
     local items = type(choice) == "table" and type(choice.items) == "table" and choice.items or {}
     local out, replaced = {}, {}
     for dataSlotIndex in pairs(tiers) do replaced[dataSlotIndex] = true end
+    for dataSlotIndex in pairs(mixes) do replaced[dataSlotIndex] = true end
     for dataSlotIndex in pairs(items) do replaced[dataSlotIndex] = true end
     for _, entry in ipairs(type(current) == "table" and current or {}) do
         if type(entry) == "table" and not replaced[entry.dataSlotIndex] then out[#out + 1] = entry end
     end
     for _, slot in ipairs(basics.basicSlots or {}) do
-        local tier = tonumber(tiers[slot.dataSlotIndex])
-        if tier then
+        local tier, mix = tonumber(tiers[slot.dataSlotIndex]), mixes[slot.dataSlotIndex]
+        if type(mix) == "table" then
+            -- No more than the slot holds, the higher qualities first.
+            local left = tonumber(slot.quantity) or 0
+            for quality = slot.qualityCount, 1, -1 do
+                local count = math.min(left, math.max(0, math.floor(tonumber(mix[quality]) or 0)))
+                local option = AsOption(slot.options and slot.options[quality])
+                if count > 0 and option then
+                    out[#out + 1] = { reagent = option, dataSlotIndex = slot.dataSlotIndex, quantity = count }
+                    left = left - count
+                end
+            end
+        elseif tier then
             tier = math.max(1, math.min(slot.qualityCount, tier))
             local option = AsOption(slot.options and slot.options[tier])
             if option and (slot.quantity or 0) > 0 then

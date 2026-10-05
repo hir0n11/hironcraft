@@ -18,7 +18,7 @@ local INNER, GOLD, GREEN, GREY, WHITE = UI.INNER, UI.GOLD, UI.GREEN, UI.GREY, UI
 
 local panel, body
 -- The choices made for the recipe they belong to.
-local choice = { tiers = {}, items = {}, extraSkill = 0 }
+local choice = { mixes = {}, items = {}, extraSkill = 0 }
 local recipeOf, basics, windowReagents
 local simulation
 
@@ -197,16 +197,37 @@ local function ShowOutcome()
     end
 end
 
+-- How a quality slot is filled in what is tried: the mix chosen here, or the
+-- window's. Units not chosen in the window are shown as the lowest quality,
+-- which is what they count as.
+local function SlotMix(slot)
+    local mix = choice.mixes[slot.dataSlotIndex]
+    if mix then return mix end
+    local window, allocated = S.WindowMix(slot, windowReagents)
+    local shown = {}
+    for tier = 1, slot.qualityCount do shown[tier] = window[tier] or 0 end
+    shown[1] = shown[1] + math.max(0, (tonumber(slot.quantity) or 0) - allocated)
+    return shown
+end
+
+-- Text put into a box by the panel itself is not the player typing.
+local filling = false
+
 local function UpdateControls()
+    filling = true
     for _, row in ipairs(body.slotRows) do
         if row.shown then
-            local chosen = choice.tiers[row.dataSlotIndex] or 0
-            for tier, button in pairs(row.buttons) do
-                local color = tier == chosen and GOLD or GREY
-                button.label:SetTextColor(color[1], color[2], color[3])
+            local mix, total = SlotMix(row.slot), tonumber(row.slot.quantity) or 0
+            for tier = 1, row.slot.qualityCount do
+                local count = mix[tier] or 0
+                row.boxes[tier]:SetText(tostring(count))
+                -- The whole slot at one quality is marked on that quality's button.
+                local color = (total > 0 and count == total) and GOLD or GREY
+                row.buttons[tier].label:SetTextColor(color[1], color[2], color[3])
             end
         end
     end
+    filling = false
     for _, row in ipairs(body.choiceRows) do
         if row.shown then row.text:SetText(ChoiceText(row)) end
     end
@@ -222,6 +243,24 @@ function UI.RefreshSimulation()
     ShowOutcome()
 end
 
+local PAIR = 54 -- a quality's button and the box with how many of it
+
+local function Tip(owner, key, fallback, quality)
+    owner:SetScript("OnEnter", function()
+        local tooltip = PT.Tooltip
+        if not tooltip then return end
+        tooltip:Clear()
+        tooltip:AddLine(string.format(T(key, fallback), quality), 11, 1, 1, 1)
+        tooltip:ShowCursorRightOrBelow()
+    end)
+    owner:SetScript("OnLeave", function()
+        if PT.Tooltip then PT.Tooltip:Clear() end
+    end)
+end
+
+-- A quality slot: its reagent's name, and for each quality a button (the
+-- whole slot at that quality) and a box (how many of the slot are of it), so
+-- a slot can be tried partly at one quality and partly at another.
 local function SlotRow(index)
     local row = body.slotRows[index]
     if row then return row end
@@ -229,21 +268,37 @@ local function SlotRow(index)
     row:SetSize(INNER, 20)
     row.name = Text(row, 11, "LEFT")
     row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
-    row.name:SetWidth(INNER - 100)
-    row.buttons = {}
-    -- "=" keeps what is in the window; the numbers are the reagent's qualities.
-    for tier = 0, 3 do
+    row.buttons, row.boxes = {}, {}
+    for tier = 1, 3 do
         local button = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        button:SetSize(22, 18)
-        button:SetPoint("LEFT", row, "LEFT", INNER - 94 + tier * 24, 0)
+        button:SetSize(20, 18)
         button.label = Text(button, 10, "CENTER", GREY)
         button.label:SetPoint("CENTER", 0, 0)
-        button.label:SetText(tier == 0 and "=" or tostring(tier))
+        button.label:SetText(tostring(tier))
         button:SetScript("OnClick", function()
-            choice.tiers[row.dataSlotIndex] = tier > 0 and tier or nil
+            choice.mixes[row.dataSlotIndex] = { [tier] = tonumber(row.slot.quantity) or 0 }
             UI.RefreshSimulation()
         end)
+        Tip(button, "CRAFTSIM_ALL_OF_QUALITY", "The whole slot at quality %d", tier)
         row.buttons[tier] = button
+
+        local box = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+        box:SetSize(26, 18)
+        box:SetAutoFocus(false)
+        box:SetNumeric(true)
+        box:SetMaxLetters(3)
+        box:SetJustifyH("CENTER")
+        box:SetScript("OnTextChanged", function(self, userInput)
+            if filling or not userInput then return end
+            local slot = row.slot
+            choice.mixes[slot.dataSlotIndex] = S.Rebalance(SlotMix(slot), slot.qualityCount, slot.quantity,
+                tier, tonumber(self:GetText()) or 0)
+            UI.RefreshSimulation()
+        end)
+        box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+        box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        Tip(box, "CRAFTSIM_COUNT_OF_QUALITY", "How many of the slot are quality %d", tier)
+        row.boxes[tier] = box
     end
     body.slotRows[index] = row
     return row
@@ -319,10 +374,24 @@ local function Layout()
     for _, slot in ipairs(basics.basicSlots or {}) do
         used = used + 1
         local row = SlotRow(used)
-        row.dataSlotIndex, row.shown = slot.dataSlotIndex, true
+        row.slot, row.dataSlotIndex, row.shown = slot, slot.dataSlotIndex, true
         row.firstItem = OptionItem(slot.options and slot.options[1])
         row.name:SetText(ItemName(row.firstItem))
-        for tier = 1, 3 do row.buttons[tier]:SetShown(tier <= slot.qualityCount) end
+        -- The pairs keep to the right; the name has what is left of the row.
+        local left = INNER - slot.qualityCount * PAIR
+        row.name:SetWidth(left - 4)
+        for tier = 1, 3 do
+            local used = tier <= slot.qualityCount
+            row.buttons[tier]:SetShown(used)
+            row.boxes[tier]:SetShown(used)
+            if used then
+                local x = left + (tier - 1) * PAIR
+                row.buttons[tier]:ClearAllPoints()
+                row.buttons[tier]:SetPoint("LEFT", row, "LEFT", x, 0)
+                row.boxes[tier]:ClearAllPoints()
+                row.boxes[tier]:SetPoint("LEFT", row, "LEFT", x + 26, 0)
+            end
+        end
         Put(row, 20)
     end
     for index = used + 1, #body.slotRows do
@@ -373,7 +442,7 @@ function UI.ShowCraft(recipeID, recipeBasics, reagents, name)
     if not body then return false end
     -- Another recipe: its own choices, starting from the window's.
     if recipeOf ~= recipeID then
-        choice.tiers, choice.items, choice.extraSkill = {}, {}, 0
+        choice.mixes, choice.items, choice.extraSkill = {}, {}, 0
         body.extra:SetText("")
     end
     recipeOf, basics, windowReagents = recipeID, recipeBasics, reagents
@@ -440,9 +509,10 @@ function UI.BuildCraft(owner)
         button.label:SetPoint("CENTER", 0, 0)
         button.label:SetText(T(key, fallback))
         button:SetScript("OnClick", function()
-            choice.tiers = {}
+            choice.mixes = {}
             for _, slot in ipairs(basics and basics.basicSlots or {}) do
-                choice.tiers[slot.dataSlotIndex] = pick(slot)
+                local tier = pick(slot)
+                if tier then choice.mixes[slot.dataSlotIndex] = { [tier] = tonumber(slot.quantity) or 0 } end
             end
             UI.RefreshSimulation()
         end)

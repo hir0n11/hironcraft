@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Part of a slot at another quality (0.4.102)
+
+- Each quality reagent row has, per quality, a button and a box: the button
+  puts the whole slot at that quality, the box says how many of the slot are
+  of it. Typing a number tries a slot partly at one quality and partly at
+  another; the slot stays full (the other qualities keep what they had, the
+  highest first, and the lowest takes the rest), and no more than the slot
+  holds can be entered. The boxes start as the slot is filled in the window.
+- The `=` button per row is gone; `As in window` above the rows returns all
+  of them to the window's reagents.
+
 ## One-block skill panel, crests (0.4.101)
 
 - The skill panel is one block now. The part that repeated the game's own
