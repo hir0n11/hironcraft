@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## What the specializations give a recipe (0.4.103)
+
+- The skill panel has two views now, chosen by the tabs under its title:
+  `Simulation` (the craft tried with other reagents and skill, as before) and
+  `Specialization`. The view left open is remembered.
+- `Specialization` shows, for the selected recipe, what its specialization
+  nodes give now against what they would give when maxed: skill, multicraft
+  and its extra items, resourcefulness and its extra items, ingenuity and its
+  refund, less concentration use, crafting speed. Only the stats the nodes of
+  this recipe can give are listed, and multicraft, resourcefulness and
+  ingenuity only for a recipe that has that stat (a piece of gear cannot be
+  multicrafted). A stat already at its maximum is green.
+- Below are the nodes that give this recipe something, each with its icon,
+  name and rank: the maxed ones first (green), then by rank, the ones not
+  unlocked yet last (grey, no rank). The view does not need a recipe with
+  quality, and it works for a recraft too.
+- Which nodes and perks affect a recipe and what each gives is CraftSim's
+  data for Midnight (MIT, `LICENSE-CraftSim.txt`), converted by
+  `scripts/ImportCraftSimSpecData.lua` and counted the way CraftSim counts
+  it, so the numbers should match its Specialization Info. After CraftSim
+  updates its data for a patch, run the script again:
+  `lua5.1 scripts/ImportCraftSimSpecData.lua "<AddOns>/CraftSim"`. Recipes of
+  earlier expansions have no data and say so.
+- It costs nothing while the other view is shown or the panel is closed. Shown,
+  a recount reads the ranks of the recipe's nodes (a handful); names, perk
+  ranks and the recipe's stats are asked once.
+
 ## Part of a slot at another quality (0.4.102)
 
 - Each quality reagent row has, per quality, a button and a box: the button

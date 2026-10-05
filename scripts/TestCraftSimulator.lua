@@ -1,6 +1,8 @@
 -- The craft simulator: the skill a recipe needs for each quality, what any
 -- reagents or another skill would give, and the panel that shows it without
--- costing anything while it is closed.
+-- costing anything while it is closed. The panel's other view, what the
+-- specializations give the recipe, is at the end; its counting has a test
+-- of its own (TestSpecInfo.lua).
 local function eq(actual, expected, what)
     if actual ~= expected then
         error((what or 'value') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual), 2)
@@ -101,6 +103,7 @@ C_TradeSkillUI = {
             baseDifficulty = recipe.difficulty, bonusDifficulty = bonusDifficulty,
             craftingQuality = quality, quality = quality, isQualityCraft = maxQuality > 1,
             lowerSkillThreshold = lower, upperSkillTreshold = upper or difficulty, concentrationCost = cost,
+            bonusStats = { { bonusStatName = 'Ingenuity', bonusStatValue = 10 } },
         }
     end,
 }
@@ -119,6 +122,7 @@ HironCraftProfit = { L = {}, FONT = 'Addon/default.ttf',
 SlashCmdList = {}
 assert(loadfile('ProfitHub/Core/CraftEngine/Engine.lua'))()
 assert(loadfile('ProfitHub/Core/CraftEngine/Simulator.lua'))()
+assert(loadfile('ProfitHub/Core/CraftEngine/SpecInfo.lua'))()
 local PT = HironCraftProfit
 local S, CE = PT.CraftSimulator, PT.CraftEngine
 assert(S and CE and CE.Evaluate, 'the engine or the simulator did not load')
@@ -430,6 +434,7 @@ assert(loadfile('ProfitHub/Core/UI/CraftSimulator_UI.lua'))()
 local UI = S.UI
 eq(#frames, before + 1, 'only the event frame exists after loading')
 assert(loadfile('ProfitHub/Core/UI/CraftSimulator_Sim.lua'))()
+assert(loadfile('ProfitHub/Core/UI/CraftSimulator_Spec.lua'))()
 eq(#frames, before + 1, 'what the panel shows builds nothing at load')
 eq(HironCraftProfit_DB, nil, 'saved variables created at load')
 local events = frames[#frames]
@@ -821,3 +826,136 @@ toggle.scripts.OnShow(toggle)
 eq(panel.shown, true, 'not reopened with the crafting page')
 
 print('Craft simulator panel passed (lazy build, idle cost, messages, moving, closing).')
+
+-- The other view: what the specializations give the recipe -------------------------
+
+local traitCalls = 0
+local bladesRank = 16 -- as the game counts: one more than the ranks
+C_TradeSkillUI.GetProfessionChildSkillLineID = function() return 2900 end
+C_ProfSpecs = {
+    GetConfigIDForSkillLine = function(skillLine) return skillLine == 2900 and 7 or 0 end,
+    GetUnlockRankForPerk = function(perkID) return perkID == 12 and 10 or 0 end,
+}
+C_Traits = {
+    GetNodeInfo = function(_, nodeID)
+        traitCalls = traitCalls + 1
+        if nodeID == 10 then return { activeRank = bladesRank, maxRanks = 31, entryIDs = { 1 } } end
+        if nodeID == 20 then return { activeRank = 0, maxRanks = 21, entryIDs = { 2 } } end
+        return { activeRank = 0, maxRanks = 0 }
+    end,
+    GetEntryInfo = function(_, entryID) return { definitionID = entryID } end,
+    GetDefinitionInfo = function(definitionID) return { overrideName = definitionID == 1 and 'Blades' or 'Hilts' } end,
+}
+PT.SpecStats = {
+    nodes = {
+        [10] = { 10, 30, { skill = 1 } }, [11] = { 10, 1, { skill = 5 } }, [12] = { 10, 1, { skill = 10 } },
+        [13] = { 10, 1, { multicraft = 20 } },
+        [20] = { 20, 20, {} }, [21] = { 20, 1, { reduceconcentrationcost = 4 } },
+    },
+    recipes = { [100] = { 10, 20, 11, 12, 13, 21 }, [200] = { 10, 11 } },
+    icons = { [10] = 111 },
+}
+
+selected, allocation = 100, window
+eq(Recount(), 1, 'the craft view counts as before')
+eq(traitCalls, 0, 'the specializations were asked while the other view is shown')
+local tabs, spec = panel.tabs, panel.spec
+assert(tabs and tabs.craft and tabs.spec, 'no tabs for the two views')
+eq(tabs.craft.label.text, 'Simulation', 'first tab')
+eq(tabs.spec.label.text, 'Specialization', 'second tab')
+eq(tabs.craft.label.color[2], 0.82, 'the view shown is marked')
+eq(tabs.spec.label.color[2], 0.62, 'the other is not')
+eq(spec.shown, false, 'the other view is hidden')
+
+tabs.spec.scripts.OnClick(tabs.spec)
+eq(saved.tab, 'spec', 'the view is remembered')
+eq(tabs.spec.label.color[2], 0.82, 'the tab is marked')
+eq(tabs.craft.label.color[2], 0.62, 'and the other unmarked')
+calls.operation = 0
+panel.scripts.OnUpdate(panel)
+eq(spec.shown, true, 'the specialization view is shown')
+eq(body.shown, false, 'instead of the craft')
+eq(panel.message.shown, false, 'without a message')
+eq(calls.operation, 1, 'one question: which stats the recipe has')
+eq(spec.recipe.text, 'Blade', 'recipe name')
+eq(spec.recipe.font, 'Addon/default.ttf', 'the addon\'s font')
+eq(spec.statRows[1].label.text, 'Skill', 'first stat')
+eq(spec.statRows[1].value.text, '30 / 45', 'now and with everything maxed')
+eq(spec.statRows[1].value.color[1], 1, 'not all of it yet')
+eq(spec.statRows[2].label.text, 'Less concentration use', 'a percent stat')
+eq(spec.statRows[2].value.text, '0% / 4%', 'as percents')
+eq(spec.statRows[3], nil, 'no multicraft for a recipe without it')
+eq(spec.nodeRows[1].name.text, 'Blades', 'the node furthest along')
+eq(spec.nodeRows[1].rank.text, '15 / 30', 'its rank')
+eq(spec.nodeRows[2].name.text, 'Hilts', 'a node not unlocked')
+eq(spec.nodeRows[2].rank.text, '- / 20', 'has no rank')
+eq(spec.nodeRows[2].name.color[1], 0.62, 'and is greyed')
+eq(spec.more.shown, false, 'nothing left out')
+assert(panel.height > 58 + 60, 'the panel is not sized around the view')
+eq(Recount(), 0, 'a recount asks nothing about the craft')
+
+-- Ranks gained: the view follows.
+bladesRank = 31
+fire('TRAIT_CONFIG_UPDATED')
+panel.scripts.OnUpdate(panel)
+eq(spec.statRows[1].value.text, '45 / 45', 'all the skill')
+eq(spec.statRows[1].value.color[1], 0.35, 'marked as reached')
+eq(spec.nodeRows[1].rank.text, '30 / 30', 'the node maxed')
+eq(spec.nodeRows[1].rank.color[1], 0.35, 'and marked')
+bladesRank = 16
+
+-- Quality does not matter here.
+selected = 200
+Recount()
+eq(spec.shown, true, 'a recipe without quality has specializations too')
+eq(spec.recipe.text, 'Bandage', 'its name')
+eq(spec.statRows[1].value.text, '20 / 35', 'its skill')
+eq(spec.statRows[2].shown, false, 'rows it does not have are hidden')
+eq(spec.nodeRows[2].shown, false, 'nodes too')
+
+-- A long list is cut short and says so.
+do
+    local many = {}
+    for index = 1, 20 do
+        PT.SpecStats.nodes[1000 + index] = { 1000 + index, 10, { skill = 1 } }
+        PT.SpecStats.nodes[2000 + index] = { 1000 + index, 1, { skill = 1 } }
+        many[#many + 1] = 1000 + index
+    end
+    for index = 1, 20 do many[#many + 1] = 2000 + index end
+    PT.SpecStats.recipes[200] = many
+    local nodeInfo = C_Traits.GetNodeInfo
+    C_Traits.GetNodeInfo = function(_, nodeID) return { activeRank = 1, maxRanks = 11, entryIDs = { nodeID } } end
+    Recount()
+    eq(#spec.nodeRows, 16, 'no more rows than fit')
+    eq(spec.more.shown, true, 'the rest is mentioned')
+    eq(spec.more.text, 'and 4 more', 'by number')
+    eq(spec.statRows[1].value.text, '20 / 220', 'but all of them are counted')
+    C_Traits.GetNodeInfo = nodeInfo
+    PT.SpecStats.recipes[200] = { 10, 11 }
+end
+
+-- Nothing to show says so.
+selected = 300
+Recount()
+eq(panel.message.shown, true, 'a message for a recipe the specializations do not affect')
+eq(panel.message.text, 'No specialization of yours affects this recipe.', 'which says so')
+eq(spec.shown, false, 'the view is hidden')
+eq(body.shown, false, 'and so is the craft')
+selected = nil
+Recount()
+eq(panel.message.text, 'Select a recipe.', 'nothing selected')
+
+-- Back to the craft: the specializations are not asked.
+selected = 100
+tabs.craft.scripts.OnClick(tabs.craft)
+eq(saved.tab, 'craft', 'the craft view is remembered')
+traitCalls, calls.operation = 0, 0
+panel.scripts.OnUpdate(panel)
+eq(body.shown, true, 'the craft is back')
+eq(spec.shown, false, 'the specialization view is hidden')
+eq(panel.message.shown, false, 'no message')
+eq(calls.operation, 1, 'one question for the craft')
+eq(traitCalls, 0, 'the specializations were asked for the craft view')
+eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'the craft as it was')
+
+print('Specialization view passed (tabs, stats now and maxed, nodes, long lists, messages, counted only when shown).')

@@ -451,7 +451,7 @@ function UI.ShowCraft(recipeID, recipeBasics, reagents, name)
     body.recipe:SetText(name or "")
     local height = Layout()
     body:SetHeight(height)
-    panel:SetHeight(32 + height + 14)
+    panel:SetHeight(UI.TOP + height + 14)
     UpdateControls()
     ShowOutcome()
     return true

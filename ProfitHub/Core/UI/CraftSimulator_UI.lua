@@ -2,8 +2,10 @@ local PT = HironCraftProfit
 if not PT or not PT.CraftSimulator then return end
 
 -- The skill panel beside the profession window: its frame, its button above
--- Create, and when it recounts. What it shows is in CraftSimulator_Sim.lua;
--- the counting is in CraftEngine/Simulator.lua.
+-- Create, its two views and when it recounts. The views are the craft tried
+-- with other reagents and skill (CraftSimulator_Sim.lua, counted by
+-- CraftEngine/Simulator.lua) and what the specializations give the recipe
+-- (CraftSimulator_Spec.lua, counted by CraftEngine/SpecInfo.lua).
 --
 -- It must never make the profession window slow. Nothing is built or asked
 -- until the panel is first shown; while it is hidden the hooks only set a
@@ -15,6 +17,7 @@ S.UI = UI
 
 local WIDTH, PAD = 270, 12
 local INNER = WIDTH - 2 * PAD
+local TOP = 58 -- where a view starts: under the title and the two tabs
 local GOLD = { 1, 0.82, 0 }
 local GREEN = { 0.35, 0.9, 0.45 }
 local GREY = { 0.62, 0.62, 0.62 }
@@ -75,13 +78,27 @@ end
 
 -- For the part of the panel that shows the craft.
 UI.Text, UI.T, UI.Tier = Text, T, Tier
-UI.INNER, UI.PAD, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, PAD, GOLD, GREEN, GREY, WHITE
+UI.INNER, UI.PAD, UI.TOP, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, PAD, TOP, GOLD, GREEN, GREY, WHITE
+
+-- The view left open last time.
+local function Tab()
+    return Saved().tab == "spec" and "spec" or "craft"
+end
+
+local function MarkTabs()
+    local tab = Tab()
+    for id, button in pairs(panel.tabs) do
+        local color = id == tab and GOLD or GREY
+        button.label:SetTextColor(color[1], color[2], color[3])
+    end
+end
 
 local function ShowMessage(text)
     panel.message:SetText(text)
     panel.message:Show()
     panel.body:Hide()
-    panel:SetHeight(36 + 34)
+    panel.spec:Hide()
+    panel:SetHeight(TOP + 38)
 end
 
 -- The reagents chosen in the window, as the game wants them.
@@ -102,25 +119,35 @@ function UI.Refresh()
         ShowMessage(T("CRAFTSIM_NO_RECIPE", "Select a recipe."))
         return
     end
-    -- A recraft is counted from the item being recrafted, which is not asked here.
-    if recipeInfo.isRecraft then
-        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-        return
-    end
-    -- The recipe's slots do not change: looked up once per recipe.
-    if basicsOf ~= recipeID then
-        basicsOf, basics = recipeID, CE:GetRecipeBasics(recipeID)
-    end
-    if type(basics) ~= "table" then
-        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
-    elseif (tonumber(basics.maxQuality) or 0) < 2 then
-        ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
-    else
-        -- Shown first: the craft sizes the panel around its rows.
+    if Tab() == "spec" then
+        -- Counted only while it is the view shown. Shown first: it sizes the
+        -- panel around its rows.
         panel.message:Hide()
-        panel.body:Show()
-        if not UI.ShowCraft(recipeID, basics, WindowReagents(form), recipeInfo.name) then
+        panel.body:Hide()
+        panel.spec:Show()
+        if not UI.ShowSpec(recipeID, recipeInfo.name) then
+            ShowMessage(T("CRAFTSIM_SPEC_NONE", "No specialization of yours affects this recipe."))
+        end
+    elseif recipeInfo.isRecraft then
+        -- A recraft is counted from the item being recrafted, which is not asked here.
+        ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+    else
+        -- The recipe's slots do not change: looked up once per recipe.
+        if basicsOf ~= recipeID then
+            basicsOf, basics = recipeID, CE:GetRecipeBasics(recipeID)
+        end
+        if type(basics) ~= "table" then
             ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+        elseif (tonumber(basics.maxQuality) or 0) < 2 then
+            ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
+        else
+            -- Shown first: the craft sizes the panel around its rows.
+            panel.message:Hide()
+            panel.spec:Hide()
+            panel.body:Show()
+            if not UI.ShowCraft(recipeID, basics, WindowReagents(form), recipeInfo.name) then
+                ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
+            end
         end
     end
     if started then DB().lastMs = math.floor((debugprofilestop() - started) * 100 + 0.5) / 100 end
@@ -176,15 +203,37 @@ local function BuildPanel()
     close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
     close:SetScript("OnClick", function() UI.SetShown(false) end)
 
+    -- The two views of the selected recipe.
+    panel.tabs = {}
+    local function TabButton(index, id, key, fallback)
+        local width = (INNER - 4) / 2
+        local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        button:SetSize(width, 20)
+        button:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD + (index - 1) * (width + 4), -30)
+        button.label = Text(button, 11, "CENTER", GREY)
+        button.label:SetPoint("CENTER", 0, 0)
+        button.label:SetText(T(key, fallback))
+        button:SetScript("OnClick", function()
+            DB().tab = id
+            MarkTabs()
+            MarkDirty()
+        end)
+        panel.tabs[id] = button
+    end
+    TabButton(1, "craft", "CRAFTSIM_TAB_CRAFT", "Simulation")
+    TabButton(2, "spec", "CRAFTSIM_TAB_SPEC", "Specialization")
+    MarkTabs()
+
     panel.message = Text(panel, 12, "CENTER", GREY)
-    panel.message:SetPoint("TOP", panel, "TOP", 0, -40)
+    panel.message:SetPoint("TOP", panel, "TOP", 0, -(TOP + 10))
     panel.message:SetWidth(INNER)
 
     local body = CreateFrame("Frame", nil, panel)
-    body:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -32)
+    body:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD, -TOP)
     body:SetSize(INNER, 80)
     panel.body = body
     UI.BuildCraft(panel)
+    UI.BuildSpec(panel)
 
     panel:SetScript("OnShow", MarkDirty)
     panel:SetScript("OnUpdate", function()
