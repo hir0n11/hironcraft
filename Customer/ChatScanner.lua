@@ -54,15 +54,58 @@ local function ParseStringList(list)
     return items
 end
 
+-- The count that leads a link at the end of a text ("... with T2, 5 T1" before
+-- "[item]"): the text without it and the count, '' when there is none.
+local function IsCountWord(word)
+    return word:match('^%d+$') or word:match('^[Tx]%d+$') or word == 'шт.'
+end
+local function TrailingCount(text)
+    local cut, position = #text, #text
+    while position > 0 do
+        local first = text:sub(1, position):find('%S+$')
+        if not first or not IsCountWord(text:sub(first, position)) then break end
+        cut = first - 1
+        position = first - 1
+        while position > 0 and text:sub(position, position):match('%s') do position = position - 1 end
+    end
+    if cut == #text then return text, '' end
+    return (text:sub(1, cut):gsub('%s+$', '')), text:sub(cut + 1)
+end
+
+-- Words after which a clause ends, like a comma does.
+local CONJUNCTIONS = { ['and'] = true, ['or'] = true, ['и'] = true, ['или'] = true }
+-- How far past a link a message may end before the link's phrase is moved on.
+local LINK_PHRASE_BYTES = 24
+
 -- Hyperlinks (including their quality atlas and color) are indivisible. A
--- whitespace inside [an item name] is not a safe chat-message boundary.
+-- whitespace inside [an item name] is not a safe chat-message boundary. A
+-- link is not parted from the words that belong to it either, as far as that
+-- can be told: its count goes with it, and a message does not end a word or
+-- two after it ("... 12 T1 [item] with" / "T2, please?").
 local function SplitResponse(raw_response)
     local result = {}
     for _, line in ipairs({ strsplit('\n', raw_response) }) do
         local response, space, position = '', '', 1
+        -- Where the last clause of the message so far ended.
+        local boundary = 0
         local function Flush()
             if response ~= '' then result[#result + 1] = response end
             response = ''
+            boundary = 0
+        end
+        -- The message would end shortly after a link: it ends at the clause
+        -- before instead, and the link's phrase starts the next one whole.
+        local function MoveLinkPhrase(token)
+            if boundary <= 0 or boundary >= #response then return false end
+            local tail = response:sub(boundary + 1):gsub('^%s+', '')
+            local after = tail:match('.*|h(.*)$')
+            if not after then return false end
+            after = after:gsub('^|r', '')
+            if #after > LINK_PHRASE_BYTES or #tail + #space + #token > 255 then return false end
+            response = response:sub(1, boundary)
+            Flush()
+            response = tail
+            return true
         end
         while position <= #line do
             local tail = line:sub(position)
@@ -93,7 +136,20 @@ local function SplitResponse(raw_response)
                     end
                 end
                 local token = line:sub(position, ending)
-                if #response + #space + #token > 255 then Flush() end
+                if #response + #space + #token > 255 then
+                    local head, count = response, ''
+                    if atomic then head, count = TrailingCount(response) end
+                    if count ~= '' and head ~= '' and #count + #space + #token <= 255 then
+                        -- A link that starts the next message takes its count
+                        -- with it: "5 T1" left at the end of this one would
+                        -- say nothing.
+                        response = head
+                        Flush()
+                        response = count
+                    elseif not MoveLinkPhrase(token) then
+                        Flush()
+                    end
+                end
                 -- Never cut a UTF-8 character in an unusually long plain word.
                 while not atomic and #token > 255 do
                     local cut = 255
@@ -103,6 +159,7 @@ local function SplitResponse(raw_response)
                     token = token:sub(cut + 1)
                 end
                 response = response .. (response ~= '' and space or '') .. token
+                if not atomic and (token:find('[,.;:!?]$') or CONJUNCTIONS[token]) then boundary = #response end
                 space = ''
                 position = ending + 1
             end
@@ -1473,7 +1530,9 @@ function HironCraftScan.BuildResponseContext(response)
     context.profession = response.professionName or context.profession
     context.profession_link = context.profession_link or context.profession
     if HironCraftScan.ReagentAudit then
-        context.reagent_issues = HironCraftScan.ReagentAudit.Issues(HironCraftScan.ReagentAudit.ForResponse(response))
+        -- Goes to chat: items are their links there.
+        context.reagent_issues = HironCraftScan.ReagentAudit.Issues(
+            HironCraftScan.ReagentAudit.ForResponse(response), nil, true)
     end
     return context
 end

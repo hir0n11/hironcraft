@@ -35,6 +35,28 @@ local function ItemName(id)
         if ok then return Plain(name) end
     end
 end
+-- The game's own link for an item, to stand in a reply where its name would.
+-- It is made here from the item's number alone: a snapshot never carries a
+-- link. nil until the game has the item's data, which is then asked for
+-- (once), and for a link too long to leave room for the sentence around it.
+local MAX_LINK_BYTES = 200
+local linkRequested = {}
+local function ItemLink(id)
+    local fn = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    if not fn or not id then return nil end
+    local ok, _, link = pcall(fn, id)
+    if ok and not (issecretvalue and issecretvalue(link)) and type(link) == 'string' then
+        if #link <= MAX_LINK_BYTES and link:find('|Hitem:', 1, true) and link:find('|h%[.-%]|h') then
+            return link
+        end
+        return nil
+    end
+    if not linkRequested[id] and C_Item and C_Item.RequestLoadItemDataByID then
+        linkRequested[id] = true
+        pcall(C_Item.RequestLoadItemDataByID, id)
+    end
+    return nil
+end
 local function Quality(id)
     local fn = C_TradeSkillUI and C_TradeSkillUI.GetItemReagentQualityByItemInfo
     if fn and id then
@@ -112,7 +134,7 @@ function Audit.Sanitize(snapshot)
         if i > MAX_ROWS then result.complete=false; break end
         -- Also drops sparks from snapshots saved or sent by older versions.
         if type(row) == 'table' and not IsSparkRow(row) then
-            local clean = {itemID=Number(row.itemID), name=Plain(row.name),
+            local clean = {itemID=Number(row.itemID), bestItemID=Number(row.bestItemID), name=Plain(row.name),
                 required=Number(row.required), known=row.known == true,
                 optional=row.optional == true, maxQuality=Number(row.maxQuality,10), supplied={}}
             for j, item in ipairs(type(row.supplied)=='table' and row.supplied or {}) do
@@ -212,7 +234,13 @@ function Audit.Capture(order, details)
             if not choice.quality then allRanked=false end
             maxQuality=math.max(maxQuality,choice.quality or 0)
         end
-        if not row.optional and allRanked and maxQuality>0 then row.maxQuality=maxQuality end
+        if not row.optional and allRanked and maxQuality>0 then
+            row.maxQuality=maxQuality
+            -- The item of that quality: what a reply links when it is missing.
+            for _, choice in ipairs(candidate.choices) do
+                if choice.quality==maxQuality then row.bestItemID=choice.itemID end
+            end
+        end
         for _, supplied in ipairs(row.supplied) do
             if not row.optional then supplied.maxQuality=row.maxQuality
             elseif supplied.name and supplied.quality then
@@ -407,8 +435,15 @@ function Audit.QualityProblem(snapshot, localized)
     end
     return message
 end
-function Audit.Issues(snapshot, localized)
+-- What is wrong with the customer's materials, as a sentence or two. With
+-- "linked" (a reply that goes to chat) an item is its link instead of its
+-- name wherever the game has one: the item to replace, and for a missing one
+-- the item of the quality that is needed.
+function Audit.Issues(snapshot, localized, linked)
     local function text(key) return localized and L(key) or key end
+    local function shown(item, itemID)
+        return linked and ItemLink(itemID) or Name(item)
+    end
     local function join(items)
         if #items<2 then return items[1] or '' end
         return table.concat(items,', ',1,#items-1)..text(' and ')..items[#items]
@@ -420,12 +455,15 @@ function Audit.Issues(snapshot, localized)
         for _, row in ipairs(snapshot.rows) do
             local _,missing,replacements=Audit.Analyze(row)
             if missing and missing>0 then
-                missingItems[#missingItems+1]=string.format('%d %s',missing,Name(row))
+                -- A snapshot from before the needed item was recorded has only
+                -- the lowest quality's number, which would link the wrong item.
+                local needed=row.bestItemID or (not row.maxQuality and row.itemID) or nil
+                missingItems[#missingItems+1]=string.format('%d %s',missing,shown(row,needed))
                     ..(row.maxQuality and (' (T'..row.maxQuality..')') or '')
             end
             for _, item in ipairs(replacements) do
                 replacementItems[#replacementItems+1]=string.format(text('%d T%d %s with T%d'),
-                    item.quantity,item.quality,Name(item),item.maxQuality)
+                    item.quantity,item.quality,shown(item,item.itemID),item.maxQuality)
             end
         end
     end

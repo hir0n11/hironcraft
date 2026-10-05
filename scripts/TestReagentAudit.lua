@@ -26,6 +26,10 @@ local order={orderID=7001,spellID=123,isRecraft=true,reagents={reagent(101,20,1)
     reagent(103,5,1,2),reagent(201,1,2),reagent(401,1,3)}}
 local audit=A.Capture(order)
 assert(audit.complete and #audit.rows==3)
+-- The item of the needed quality is recorded for a reply to link.
+assert(audit.rows[1].bestItemID==103,'the item of the highest quality was not recorded')
+assert(audit.rows[2].bestItemID==nil and audit.rows[2].itemID==201,'a reagent without qualities got a quality item')
+assert(audit.rows[3].bestItemID==nil,'an optional slot got a needed item')
 local modern=A.Sanitize({version=1,orderID=7002,recipeID=1230061,capturedAt=time(),rows={}})
 assert(modern.recipeID==1230061,'a Midnight recipe ID was silently discarded from the saved material snapshot')
 local total,missing,replace=A.Analyze(audit.rows[1])

@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Item links in the reply about materials (0.4.106)
+
+- `{reagent_issues}` (the reply to a declined order, `I checked your order.
+  Could you replace 5 T1 Glimmering Gemdust with T2, please?`) writes an item
+  as its link instead of its name: the item to replace, and for a missing
+  one the item of the quality that is needed. The words around it are the
+  same.
+- A link is made on the spot from the item's number when the game has the
+  item's data; until then the name is used and the data is asked for, so the
+  next time it is a link. A snapshot saved before this version does not know
+  which item is the one needed and keeps the name for missing items.
+- A link is about 110 bytes of the 255 a whisper holds, so one item fits one
+  whisper and several take more. They are split so that every item stays
+  whole: its count goes with its link, and a whisper does not end a word or
+  two after a link (`... 12 T1 [item] with` / `T2, please?` no longer
+  happens). Plain text is split as before.
+- The short label of a reply (on the card that offers it) shows the name
+  without the link's color and quality icon.
+
 ## Specialization ranks to try, panel in English (0.4.105)
 
 - The `Specialization` view tries other ranks the way `Simulation` tries
