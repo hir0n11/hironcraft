@@ -717,18 +717,13 @@ end
 local toastPool = {}
 local popupSerial = 0
 
--- A reply as a short label: links become their names, without the colors and
--- the quality icon a link carries (a label cut short must not end inside one).
 local function DisplayText(text)
     return text
         :gsub('|c%x%x%x%x%x%x%x%x', '')
-        :gsub('|cn[%w_]+:', '')
         :gsub('|r', '')
         :gsub('|H.-|h(.-)|h', '%1')
-        :gsub('%s*|A.-|a', '')
         :gsub('|T.-|t', '')
 end
-QuickReplies.DisplayText = function(text) return (DisplayText(text)) end
 
 local function Shorten(text, maxBytes)
     if #text <= maxBytes then
