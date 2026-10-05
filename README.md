@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Shared profiles, a key for Open All (0.4.97)
+
+- Crafter pool profiles are the same on every linked account (full or
+  analytics link), so each account records and counts by the same lists. They
+  travel inside the analytics offer: a change goes at once to the accounts
+  that are online, busy or not, and an account that was offline is brought up
+  to date within a minute of being online. Each profile is whichever side
+  changed it last; a deleted profile stays deleted. Another realm's profiles
+  are not taken. An older HironCraft on the other account ignores them.
+- The history from before recorders were kept counts for the oldest profile,
+  the same one on every account. If two accounts had each made a profile
+  before this version, both appear on both; delete the one not wanted.
+- A new profile says in chat who is in it.
+- Mailbox: the small button left of `Open All` assigns a key (or a side mouse
+  button) that presses `Open All`; Shift + right click clears it. The key is
+  an override binding that exists only while `Open All` is on screen, so it
+  keeps its usual meaning elsewhere and the game's key bindings are not
+  touched. Saved for the account.
+
 ## Updating from GitHub (0.4.96)
 
 - `Update-HironCraft.cmd` in the addon folder (double-click it; it runs

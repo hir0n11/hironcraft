@@ -3,7 +3,8 @@
 local now = os.time({ year = 2026, month = 10, day = 4, hour = 12 })
 function time(t) if t then return os.time(t) end return now end
 date = os.date
-function GetTime() return 1000 end
+local clock = 1000
+function GetTime() return clock end
 function InCombatLockdown() return false end
 function UnitFactionGroup() return 'Horde' end
 function GetNormalizedRealmName() return 'Draenor' end
@@ -29,7 +30,12 @@ local function load(path) assert(loadfile(path))('HironCraft', Scan) end
 load('Customer/AnalyticsLog.lua')
 load('Customer/AnalyticsReport.lua')
 load('Customer/AnalyticsProfiles.lua')
-local Log, Report, Profiles = Scan.AnalyticsLog, Scan.AnalyticsReport, Scan.AnalyticsProfiles
+function Scan.Utils.Contains(list, value)
+    for _, entry in ipairs(list or {}) do if entry == value then return true end end
+    return false
+end
+load('Customer/AnalyticsSync.lua')
+local Log, Report, Profiles, Sync = Scan.AnalyticsLog, Scan.AnalyticsReport, Scan.AnalyticsProfiles, Scan.AnalyticsSync
 Log.synchronous = true
 
 local function eq(actual, expected, what)
@@ -90,7 +96,8 @@ local pool = Profiles.Create('  Draenor pool ')
 assert(pool and Profiles.Any(), 'profile created')
 eq(pool.name, 'Draenor pool', 'trimmed name')
 eq(pool.id, 'abcdef12:1', 'id from the account and a counter')
-eq(pool.legacy, true, 'the first profile takes the earlier history')
+eq(Profiles.IsLegacy(pool), true, 'the first profile takes the earlier history')
+assert(pool.n == 1 and pool.by == 'abcdef12-3456', 'a change is stamped with the clock and the account')
 for _, name in ipairs({ 'Scout-Draenor', 'Smith-Draenor', 'Spare-Draenor', 'Tailor-Draenor' }) do
     assert(Profiles.Has(pool, name), name .. ' starts in the first profile')
 end
@@ -227,7 +234,8 @@ do
     changes = 0
     local one = Profiles.Create('One')
     local two = Profiles.Create('Two')
-    eq(two.legacy, nil, 'later profiles do not take the earlier history')
+    eq(Profiles.IsLegacy(two), false, 'later profiles do not take the earlier history')
+    eq(Profiles.IsLegacy(one), true, 'the oldest one does')
     eq(next(two.chars), nil, 'and start empty')
     eq(two.id, 'abcdef12:2', 'ids go on')
     Profiles.SetMember(two.id, 'Main-Draenor', true)
@@ -242,7 +250,7 @@ do
     -- Deleting the legacy profile hands the earlier history to the next one.
     assert(Profiles.Delete(one.id), 'deleted')
     eq(#Profiles.List(), 1, 'one profile left')
-    eq(Profiles.Get(two.id).legacy, true, 'the history moved on')
+    eq(Profiles.IsLegacy(Profiles.Get(two.id)), true, 'the history moved on')
     eq(Profiles.Delete(one.id), false, 'not twice')
     assert(Profiles.Delete(two.id), 'deleted the last one')
     eq(Profiles.Any(), false, 'no profiles')
@@ -271,4 +279,179 @@ do
     eq(orders[11], nil, 'another realm\'s order was not')
 end
 
-print('Analytics profiles passed (gate, recorders, presence, attribution, legacy history, editing, realms, backfill).')
+-- Sharing with linked accounts ----------------------------------------------------
+
+do
+    local dbA, dbB = newDB(), newDB()
+    dbA.settings.my_uuid, dbB.settings.my_uuid = 'aaaaaaaa-1', 'bbbbbbbb-2'
+    dbA.realm.linked_accounts = { ['bbbbbbbb-2'] = { permissions = { 1 }, last_active_char = 'Scout-Draenor' } }
+    dbB.realm.linked_accounts = { ['aaaaaaaa-1'] = { permissions = { 2 }, last_active_char = 'Smith-Draenor' } }
+    local outbox, online = {}, true
+    HironCraftScanComm = {
+        Permissions = { Full = 1, Analytics = 2 },
+        Transmit = function(_, data, operation, target) outbox[#outbox + 1] = { data = data, op = operation, to = target } end,
+        FreshTarget = function(_, accountID)
+            if not online then return nil end
+            return accountID == 'bbbbbbbb-2' and 'CharB' or 'CharA'
+        end,
+    }
+    local function as(db, fn) local saved = Scan.DB; Scan.DB = db; Log.ReleaseCache(); fn(); Scan.DB = saved end
+    local function deliver()
+        local guard = 0
+        while #outbox > 0 do
+            guard = guard + 1
+            assert(guard < 50, 'the accounts keep answering each other')
+            local message = table.remove(outbox, 1)
+            if message.to == 'CharB' then
+                as(dbB, function() Sync.Receive(message.op, 'CharA', message.data, 'aaaaaaaa-1') end)
+            else
+                as(dbA, function() Sync.Receive(message.op, 'CharB', message.data, 'bbbbbbbb-2') end)
+            end
+        end
+    end
+    local function names(db)
+        local list = {}
+        as(db, function()
+            for _, profile in ipairs(Profiles.List()) do
+                list[#list + 1] = profile.name .. '=' .. table.concat(Profiles.Members(profile), '+')
+            end
+        end)
+        return table.concat(list, ' | ')
+    end
+
+    -- Both are busy (nobody is quiet): a new profile still reaches the other account at once.
+    local id
+    as(dbA, function() id = Profiles.Create('Pool').id end)
+    assert(#outbox == 1 and outbox[1].op == 'an_offer' and outbox[1].data.profiles, 'a new profile was not sent')
+    eq(outbox[1].data.profiles.realm, 'Draenor', 'profiles name their realm')
+    deliver()
+    eq(names(dbB), 'Pool=Scout-Draenor+Smith-Draenor+Tailor-Draenor', 'the other account has the profile')
+    as(dbB, function()
+        eq(Profiles.Get(id).by, 'aaaaaaaa-1', 'with its stamp')
+        eq(Profiles.MayRecord('Main-Draenor'), false, 'and stops recording outside it')
+        eq(Profiles.MayRecord('Scout-Draenor'), true, 'while its members record')
+    end)
+    eq(#outbox, 0, 'what was received is not sent on')
+
+    -- A change over there comes back.
+    as(dbB, function() Profiles.SetMember(id, 'Tailor-Draenor', false) end)
+    deliver()
+    eq(names(dbA), 'Pool=Scout-Draenor+Smith-Draenor', 'a change made on the other account arrived')
+
+    -- Up to date: the minute tick sends nothing, busy or not.
+    as(dbA, function() Sync.Tick() end)
+    as(dbB, function() Sync.Tick() end)
+    deliver()
+    as(dbA, function() Sync.Tick() end)
+    eq(#outbox, 0, 'profiles were sent again without a change')
+
+    -- Offline: nothing is sent now. Once the account is back, the next tick
+    -- brings it up to date without waiting for a quiet moment.
+    online = false
+    as(dbA, function() Profiles.Rename(id, 'Main pool') end)
+    as(dbA, function() Sync.Tick() end)
+    eq(#outbox, 0, 'sent to an account that is not online')
+    online = true
+    as(dbA, function() Sync.Tick() end)
+    assert(#outbox == 1 and outbox[1].data.profiles, 'the account that came back was not brought up to date')
+    deliver()
+    eq(names(dbB), 'Main pool=Scout-Draenor+Smith-Draenor', 'the tick carried the profiles')
+    as(dbA, function() Sync.Tick() end)
+    as(dbB, function() Sync.Tick() end)
+    deliver()
+    as(dbA, function() Sync.Tick() end)
+    as(dbB, function() Sync.Tick() end)
+    eq(#outbox, 0, 'the accounts keep telling each other the same thing')
+
+    -- Both changed it while apart: the later change wins on both, whoever speaks first.
+    online = false
+    as(dbA, function() Profiles.Rename(id, 'From A') end)
+    as(dbB, function() Profiles.Rename(id, 'From B') Profiles.SetMember(id, 'Main-Draenor', true) end)
+    online = true
+    as(dbA, function() Sync.PushProfiles() end)
+    deliver()
+    as(dbB, function() Sync.PushProfiles() end)
+    deliver()
+    eq(names(dbA), names(dbB), 'the accounts agree')
+    eq(names(dbA), 'From B=Main-Draenor+Scout-Draenor+Smith-Draenor', 'on the later change')
+    -- Changed the same number of times: the same side wins on both.
+    online = false
+    as(dbA, function() Profiles.Rename(id, 'Tie A') end)
+    as(dbB, function() Profiles.Rename(id, 'Tie B') end)
+    online = true
+    as(dbB, function() Sync.PushProfiles() end)
+    deliver()
+    as(dbA, function() Sync.PushProfiles() end)
+    deliver()
+    eq(names(dbA), names(dbB), 'a tie is settled the same way on both')
+
+    -- A deleted profile stays deleted, also when an account that missed it speaks up.
+    local stale
+    as(dbB, function() stale = Profiles.Export() end)
+    online = false
+    as(dbA, function() Profiles.Delete(id) end)
+    as(dbA, function() eq(Profiles.Merge(stale), false, 'an old copy brought a deleted profile back') end)
+    eq(names(dbA), '', 'still deleted')
+    online = true
+    as(dbA, function() Sync.PushProfiles() end)
+    deliver()
+    eq(names(dbB), '', 'deleted on the other account too')
+    as(dbB, function() eq(Profiles.MayRecord('Main-Draenor'), true, 'everyone records again there') end)
+    -- Told twice, nothing happens twice.
+    as(dbA, function() eq(Profiles.Merge(Profiles.Export()), false, 'the same state changed something') end)
+
+    -- Each account had made its own first profile before they were shared:
+    -- both stay, and the older one takes the earlier history on both accounts.
+    local old, young
+    as(dbA, function() old = Profiles.Create('Mine') old.at, old.n = now - 500, nil end)
+    as(dbB, function() young = Profiles.Create('Theirs') young.at = now - 100 end)
+    outbox = {}
+    as(dbA, function() Sync.PushProfiles() end)
+    deliver()
+    as(dbB, function() Sync.PushProfiles() end)
+    deliver()
+    eq(names(dbA), names(dbB), 'both first profiles are on both accounts')
+    as(dbA, function()
+        eq(#Profiles.List(), 2, 'two profiles')
+        eq(Profiles.List()[1].name, 'Mine', 'oldest first')
+        assert(old.n, 'a profile from before sharing got its stamp')
+        eq(Profiles.Filter(old.id).legacy, true, 'the older one takes the earlier history')
+        eq(Profiles.Filter(young.id).legacy, false, 'the younger one does not')
+    end)
+    as(dbB, function()
+        eq(Profiles.Filter(old.id).legacy, true, 'the same on the other account')
+        eq(Profiles.Filter(young.id).legacy, false, 'for both profiles')
+    end)
+
+    -- Another realm's profiles are not for this journal; nonsense is ignored.
+    as(dbA, function()
+        local before = names(dbA)
+        eq(Profiles.Merge({ realm = 'Silvermoon', list = { { id = 'x:1', name = 'Far', chars = {}, n = 99, by = 'x' } } }), false,
+            'another realm\'s profile was taken')
+        eq(Profiles.Merge(nil), false, 'nothing')
+        eq(Profiles.Merge({ list = { 5, { id = 7 }, { id = 'y:1', name = '  ', chars = {}, n = 1 }, { id = 'y:2', name = 'No stamp', chars = {} } },
+            gone = { 'x', { id = 9 } } }), false, 'nonsense')
+        eq(names(dbA), before, 'nothing changed')
+        -- A connected realm is this journal's realm.
+        eq(Profiles.Merge({ realm = 'Frostwhisper', list = { { id = 'z:1', name = 'Connected', chars = { 'Alt-Frostwhisper' }, n = 1, by = 'z', at = now } } }),
+            true, 'a connected realm\'s profile was refused')
+    end)
+
+    -- Several ticks in a row go out as one message.
+    local timers = {}
+    C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+    outbox = {}
+    as(dbA, function()
+        Profiles.SetMember(old.id, 'One-Draenor', true)
+        Profiles.SetMember(old.id, 'Two-Draenor', true)
+        Profiles.SetMember(old.id, 'Three-Draenor', true)
+    end)
+    eq(#timers, 1, 'one send is waiting')
+    eq(#outbox, 0, 'nothing sent before the pause is over')
+    as(dbA, function() timers[1]() end)
+    eq(#outbox, 1, 'one message for three ticks')
+    C_Timer = nil
+    HironCraftScanComm = nil
+end
+
+print('Analytics profiles passed (gate, recorders, presence, attribution, legacy history, editing, realms, backfill, sharing).')

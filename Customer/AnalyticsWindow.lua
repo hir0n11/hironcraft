@@ -1445,6 +1445,16 @@ local function ProfileMenu(_, root)
             if profile then
                 View().profile = profile.id
                 ProfilesChanged()
+                -- Who is in it is not left to be found out later.
+                local members = {}
+                for _, character in ipairs(profiles.Members(profile)) do
+                    members[#members + 1] = profiles.DisplayName(character)
+                end
+                local text = #members > 0 and string.format(L('Profile created with: %s'), profile.name,
+                    table.concat(members, ', ')) or string.format(L('Profile created empty'), profile.name)
+                if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                    DEFAULT_CHAT_FRAME:AddMessage('|cffffd200HironCraft:|r ' .. text)
+                end
             end
         end)
     end)
@@ -1679,7 +1689,9 @@ local function Create()
         profile:SetScript('OnLeave', function() GameTooltip:Hide() end)
         frame.ProfileDropdown = profile
         -- Characters ticked one after another are counted once, a moment later.
-        Scan.AnalyticsProfiles.OnChange(function()
+        -- What a linked account changed also shows in the list's own text.
+        Scan.AnalyticsProfiles.OnChange(function(isLocal)
+            if not isLocal and profile.GenerateMenu then profile:GenerateMenu() end
             if frame:IsShown() then ScheduleRebuild(0.5) end
         end)
     end

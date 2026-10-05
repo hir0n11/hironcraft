@@ -113,6 +113,13 @@ L["SKINNING_TARGETS_TITLE"] = "Шкуропроверятель — отслеж
 --UI.lua
 L["PROF_WINDOW_TITLE"] = "Очки знаний"
 L["KNOWLEDGE_BAR_LABEL"] = "Очки знаний"
+L["MAIL_OPENALL_BIND_TITLE"] = "Клавиша для «Открыть все»"
+L["MAIL_OPENALL_BIND_SCOPE"] = "Работает только пока открыты входящие."
+L["MAIL_OPENALL_BIND_CURRENT"] = "Назначена клавиша: %s"
+L["MAIL_OPENALL_BIND_NONE"] = "не назначена"
+L["MAIL_OPENALL_BIND_HINT"] = "Щелчок — назначить клавишу."
+L["MAIL_OPENALL_BIND_CLEAR"] = "Shift + правый щелчок — снять."
+L["MAIL_OPENALL_BIND_CAPTURE"] = "Нажмите клавишу или боковую кнопку мыши (Button4/Button5) для «Открыть все».\nEsc или левый/правый щелчок — отмена."
 L["CATCHUP_REQUIREMENTS"] = "Требования для Catch-Up:"
 L["REQUIREMENTS"] = "Требования:"
 L["REQUIRES_PROFESSION_SKILL_25"] = "Требуется навык профессии 25"

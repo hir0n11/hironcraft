@@ -9,6 +9,9 @@ local Scan = select(2, ...)
 -- where it stopped.
 --
 --   offer  {seq}        "I have events up to seq"         (sent when quiet)
+--          {profiles}   this realm's crafter pool profiles; taken by the other
+--                       side whether it is quiet or not, so every linked
+--                       account counts and records by the same profiles
 --   pull   {from}       "send yours after from"           (sent when quiet)
 --   events {events, last, more}                           (answer to a pull)
 --
@@ -123,14 +126,59 @@ function M.Handles(operation)
         or operation == M.Operations.Events
 end
 
+local function Profiles()
+    return Scan.AnalyticsProfiles
+end
+
+-- Which state of the profiles each linked account was last sent.
+local profilesSent = {}
+
 local function Offer(accountID, target, force, reply)
     lastOfferAt[accountID] = time()
-    Send(M.Operations.Offer, { seq = Log().Seq(), force = force or nil, reply = reply or nil }, target)
+    local profiles = Profiles() and Profiles().Export() or nil
+    profilesSent[accountID] = Profiles() and Profiles().Stamp() or nil
+    Send(M.Operations.Offer, { seq = Log().Seq(), force = force or nil, reply = reply or nil,
+        profiles = profiles }, target)
+end
+
+-- A profile was changed here: the linked accounts that are online hear of it
+-- at once, busy or not. The others get it with the next offer.
+local profilesPending = false
+function M.PushProfiles()
+    profilesPending = false
+    if not Log().IsEnabled() then return end
+    local comm = Comm()
+    for accountID, account in pairs(Accounts()) do
+        local target = comm and comm.FreshTarget and comm:FreshTarget(accountID)
+        if MayShare(account) and target then Offer(accountID, target) end
+    end
+end
+
+if Profiles() then
+    Profiles().OnChange(function(isLocal)
+        -- Several characters ticked in a row go out together.
+        if not isLocal or profilesPending then return end
+        profilesPending = true
+        if C_Timer and C_Timer.After then C_Timer.After(2, M.PushProfiles) else M.PushProfiles() end
+    end)
 end
 
 -- Every minute: offer our events to each linked account that is online,
 -- at most every OFFER_INTERVAL, and only while quiet.
 function M.Tick(force)
+    -- Profiles do not wait for a quiet moment: an account that is online and
+    -- has not been sent the current ones (it was offline when they changed,
+    -- or this session has just begun) gets them now.
+    local stamp = Profiles() and Log().IsEnabled() and Profiles().Stamp() or nil
+    if stamp then
+        local comm = Comm()
+        for accountID, account in pairs(Accounts()) do
+            local target = comm and comm.FreshTarget and comm:FreshTarget(accountID)
+            if MayShare(account) and target and profilesSent[accountID] ~= stamp then
+                Offer(accountID, target)
+            end
+        end
+    end
     if not Ready(force) then return end
     if not force then pcall(Log().Maintain) end
     local comm = Comm()
@@ -187,6 +235,8 @@ function M.Receive(operation, sender, data, senderID)
     if session then session.answered = true end
 
     if operation == M.Operations.Offer then
+        -- Small and cheap: taken before anything can put the offer off.
+        if data.profiles and Profiles() then Profiles().Merge(data.profiles) end
         -- Gathering is switched off over there.
         if data.off then
             if session then
