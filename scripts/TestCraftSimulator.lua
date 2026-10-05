@@ -15,8 +15,8 @@ Enum = { CraftingReagentType = { Modifying = 0, Basic = 1, Finishing = 2, Automa
 local BASIC, OPTIONAL, FINISHING = 1, 0, 2
 
 -- Skill a full slot of an item adds, and difficulty an optional reagent adds.
-local SKILL = { [12] = 30, [22] = 10, [23] = 20, [41] = 15, [51] = 5 }
-local DIFFICULTY = { [42] = 40, [43] = 40, [44] = 40 }
+local SKILL = { [12] = 30, [22] = 10, [23] = 20, [41] = 15, [51] = 5, [102] = 20 }
+local DIFFICULTY = { [42] = 40, [43] = 40, [44] = 40, [94] = 30, [95] = 30, [96] = 30 }
 -- Crests are currencies, not items.
 local CURRENCY_DIFFICULTY = { [3001] = 50, [3002] = 80 }
 -- The reagent quality the game reports for an item.
@@ -57,6 +57,22 @@ local recipes = {
         slots = { { slotIndex = 1, dataSlotIndex = 1, required = true, quantityRequired = 2, reagentType = BASIC,
             reagents = { { itemID = 71 } } } },
     },
+    -- A required slot that takes one of six different reagents (a heraldry),
+    -- a quality reagent, and a required slot with more options than a reagent
+    -- has qualities.
+    [500] = {
+        info = { recipeID = 500, name = 'Amulet', maxQuality = 5, learned = true },
+        difficulty = 170, baseSkill = 180,
+        slots = {
+            { slotIndex = 1, dataSlotIndex = 11, required = true, quantityRequired = 3, reagentType = OPTIONAL,
+                reagents = { { itemID = 91 }, { itemID = 92 }, { itemID = 93 }, { itemID = 94 }, { itemID = 95 }, { itemID = 96 } } },
+            { slotIndex = 2, dataSlotIndex = 12, required = true, quantityRequired = 5, reagentType = BASIC,
+                reagents = { { itemID = 101 }, { itemID = 102 } } },
+            { slotIndex = 3, dataSlotIndex = 13, required = true, quantityRequired = 1, reagentType = BASIC,
+                slotInfo = { slotText = 'Setting' },
+                reagents = { { itemID = 111 }, { itemID = 112 }, { itemID = 113 }, { itemID = 114 } } },
+        },
+    },
     -- The game does not answer for this one.
     [400] = {
         info = { recipeID = 400, name = 'Mystery', maxQuality = 5, learned = true }, silent = true,
@@ -79,6 +95,7 @@ C_TradeSkillUI = {
     GetItemReagentQualityByItemInfo = function(itemID) return REAGENT_QUALITY[itemID] end,
     GetCraftingOperationInfo = function(recipeID, reagents, _, applyConcentration)
         calls.operation = calls.operation + 1
+        calls.last = reagents
         local recipe = recipes[recipeID]
         if not recipe or recipe.silent then return nil end
         local bonusSkill, bonusDifficulty = 0, 0
@@ -352,7 +369,46 @@ do
     S.ForgetEffects()
 end
 
-print('Craft simulator passed (thresholds, reagents, mixes, optional reagents, crests, top quality, game thresholds, +N skill, cost, reagent groups).')
+-- A required slot that takes one of several reagents is a choice, not a quality.
+do
+    local basics500 = CE:GetRecipeBasics(500)
+    local heraldry, stone, setting = basics500.basicSlots[1], basics500.basicSlots[2], basics500.basicSlots[3]
+    eq(#heraldry.options, 6, 'the slot with six reagents')
+    eq(S.IsChoiceSlot(heraldry), true, 'a required slot that is not a quality reagent')
+    eq(S.IsChoiceSlot(stone), false, 'a quality reagent')
+    eq(S.IsChoiceSlot(setting), true, 'more options than a reagent has qualities')
+    eq(S.IsChoiceSlot(basics100.basicSlots[2]), false, 'three qualities')
+    eq(S.IsChoiceSlot(nil), false, 'nothing')
+    local function made(current, choice)
+        local list = {}
+        for _, entry in ipairs(S.SimulatedReagents(basics500, current, choice)) do
+            list[#list + 1] = entry.dataSlotIndex .. ':' .. S.OptionKey(entry.reagent) .. 'x' .. entry.quantity
+        end
+        table.sort(list)
+        return table.concat(list, ' ')
+    end
+    local chosen = { { reagent = { itemID = 92 }, dataSlotIndex = 11, quantity = 3 },
+        { reagent = { itemID = 101 }, dataSlotIndex = 12, quantity = 5 } }
+    eq(made(chosen, {}), '11:i92x3 12:i101x5', 'the window as it is')
+    eq(made(chosen, { items = { [11] = 94 } }), '11:i94x3 12:i101x5', 'another reagent for the whole slot')
+    eq(made(chosen, { items = { [11] = false } }), '12:i101x5', 'the slot emptied')
+    eq(made({}, { items = { [11] = { itemID = 96 }, [13] = 112 }, mixes = { [12] = { [2] = 5 } } }),
+        '11:i96x3 12:i102x5 13:i112x1', 'beside a quality slot')
+    S.ForgetEffects()
+    calls.operation = 0
+    local groups = S.OptionGroups(500, basics500, {}, {}, heraldry)
+    eq(calls.operation, 7, 'the slot left empty and each of its six reagents')
+    eq(#groups, 2, 'two effects among the six')
+    eq(table.concat(groups[1].keys, ','), 'i91,i92,i93', 'those that change nothing')
+    eq(table.concat(groups[2].keys, ','), 'i94,i95,i96', 'those that make the recipe harder')
+    eq(groups[2].effect.difficulty, 30, 'by this much')
+    local harder = S.Outcome(S.Simulate(500, basics500, {}, { items = { [11] = 94 } }), 0)
+    eq(harder.difficulty, 200, 'difficulty with the chosen reagent')
+    eq(harder.quality, 4, 'and the quality it leaves')
+    S.ForgetEffects()
+end
+
+print('Craft simulator passed (thresholds, reagents, mixes, optional reagents, crests, top quality, game thresholds, +N skill, cost, reagent groups, slots with a choice of reagents).')
 
 -- The panel ----------------------------------------------------------------------
 
@@ -959,3 +1015,89 @@ eq(traitCalls, 0, 'the specializations were asked for the craft view')
 eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'the craft as it was')
 
 print('Specialization view passed (tabs, stats now and maxed, nodes, long lists, messages, counted only when shown).')
+
+-- A recipe with a required slot that takes one of several reagents ---------------------
+
+do
+    local function Menu(row)
+        opened = nil
+        row.scripts.OnClick(row)
+        assert(opened and opened.owner == row, 'no list was opened')
+        local radios = {}
+        opened.generator(row, {
+            CreateTitle = function(_, text) radios.title = text end,
+            CreateRadio = function(_, text, isSelected, setSelected)
+                radios[#radios + 1] = { text = text, selected = isSelected, pick = setSelected }
+                radios[text] = radios[#radios]
+            end,
+        })
+        return radios
+    end
+    S.ForgetEffects()
+    selected, allocation = 500, {}
+    eq(Recount(), 1, 'one question for such a recipe')
+    eq(body.shown, true, 'it is counted')
+    eq(panel.message.shown, false, 'without a message')
+    eq(body.recipe.text, 'Amulet', 'its name')
+    eq(body.status.text, 'Skill 180: T5', 'and its own numbers, not the last recipe\'s')
+    eq(body.scale.needs[5].text, '170', 'on the scale too')
+    eq(body.presets.shown, true, 'presets for its quality reagent')
+    eq(body.slotRows[1].shown, true, 'which has a row')
+    eq(body.slotRows[1].name.text, 'Item 101', 'under its name')
+    eq(body.slotRows[1].boxes[1].text, '5', 'counted at the lowest quality while nothing is chosen')
+    eq(body.slotRows[2].shown, false, 'the other required slots have no quality row')
+    eq(body.choiceRows[1].shown, true, 'but a list each')
+    eq(body.choiceRows[1].text.text, 'Item 91: as in the window', 'named after its first reagent')
+    eq(body.choiceRows[2].text.text, 'Setting: as in the window', 'or as the game names the slot')
+    eq(body.choiceRows[3].shown, false, 'and no other lists')
+
+    local list = Menu(body.choiceRows[1])
+    eq(list.title, 'Item 91', 'the list is headed like its button')
+    eq(#list, 4, 'as in the window, empty, and one line per effect instead of six reagents')
+    eq(list[3].text, 'Item 91 and 2 more: no effect on skill', 'the reagents that change nothing')
+    eq(list[4].text, 'Item 94 and 2 more: difficulty +30', 'and those that make the recipe harder')
+    list[4].pick()
+    eq(body.status.text, 'Skill 180: T4, T5 needs 20 more', 'the chosen reagent makes it harder')
+    eq(body.scale.needs[5].text, '200', 'the scale follows')
+    eq(body.choiceRows[1].text.text, 'Item 91: Item 94', 'the button names the choice')
+    local quantity
+    for _, entry in ipairs(calls.last) do
+        if entry.dataSlotIndex == 11 then quantity = entry.quantity end
+    end
+    eq(quantity, 3, 'in the amount the slot asks for')
+
+    -- The presets are about qualities: the chosen reagent stays.
+    local presets = body.presets.buttons
+    presets[2].scripts.OnClick(presets[2])
+    eq(body.status.text, 'Skill 200: T5', 'the highest quality with the chosen reagent')
+    eq(body.choiceRows[1].text.text, 'Item 91: Item 94', 'which is kept')
+    presets[1].scripts.OnClick(presets[1])
+    eq(body.status.text, 'Skill 180: T4, T5 needs 20 more', 'back to the window\'s qualities')
+    Menu(body.choiceRows[1])['empty'].pick()
+    eq(body.status.text, 'Skill 180: T5', 'the slot left empty')
+    S.ForgetEffects()
+end
+
+-- A view that fails reports it and says there is no data: it does not leave
+-- the numbers of the recipe shown before.
+do
+    local reported = {}
+    geterrorhandler = function() return function(message) reported[#reported + 1] = message end end
+    local showCraft = UI.ShowCraft
+    UI.ShowCraft = function() error('broken view') end
+    selected, allocation = 100, window
+    Recount()
+    eq(#reported, 1, 'the failure is reported')
+    assert(tostring(reported[1]):find('broken view', 1, true), 'with what went wrong')
+    eq(panel.message.shown, true, 'a message instead')
+    eq(panel.message.text, 'No data for this recipe.', 'saying there is no data')
+    eq(body.shown, false, 'and no numbers of another recipe')
+    UI.ShowCraft = showCraft
+    Recount()
+    eq(#reported, 1, 'nothing more to report')
+    eq(body.shown, true, 'counted again once it works')
+    eq(body.status.text, 'Skill 345: T4, T5 needs 55 more', 'with the right numbers')
+    geterrorhandler = nil
+end
+
+print('Slots with a choice of reagents passed (a list instead of quality boxes, presets leave it alone); a failing view shows no stale numbers.')

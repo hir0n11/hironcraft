@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Required slots with a choice of reagents (0.4.104)
+
+- Fixed the skill panel breaking on a recipe with a required slot that takes
+  one of several different reagents (`Competitor's Heraldry` on PvP gear has
+  six). The panel treated them as six qualities of one reagent while it has
+  room for three, and its recount stopped halfway: the slot's row slid out
+  of the panel to the left, the lists below were empty, and the skill, the
+  scale and the quality shown were those of the recipe selected before.
+- Such a slot is a list now, like the optional ones: its button names the
+  slot and the reagent chosen, and the list offers `as in the window`,
+  `empty` and the reagents gathered by what they do to difficulty and skill.
+  The quality presets leave it alone.
+- If a view of the panel ever fails again, the failure goes to the error log
+  as before, and the panel says it has no data instead of leaving another
+  recipe's numbers on screen.
+
 ## What the specializations give a recipe (0.4.103)
 
 - The skill panel has two views now, chosen by the tabs under its title:

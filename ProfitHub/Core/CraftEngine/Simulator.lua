@@ -114,6 +114,17 @@ local function OptionOf(slot, value)
     return AsOption(value)
 end
 
+-- A required slot that takes one of several different reagents (a spark, a
+-- heraldry) and not the qualities of one reagent: it is filled by choosing
+-- the reagent, the way an optional slot is. No reagent has more than three
+-- qualities, so a longer list is a choice too.
+function S.IsChoiceSlot(slot)
+    if type(slot) ~= "table" then return false end
+    local types = Enum and Enum.CraftingReagentType
+    if types and types.Modifying ~= nil and slot.reagentType == types.Modifying then return true end
+    return (tonumber(slot.qualityCount) or 0) > 3
+end
+
 -- How a quality slot is filled in the window: mix[quality] = how many, and
 -- how many in all (fewer than the slot holds when not all are chosen there).
 function S.WindowMix(slot, current)
@@ -160,8 +171,9 @@ end
 --   choice.mixes[dataSlotIndex] = { [quality] = how many } for a slot filled
 --   with several qualities at once;
 --   choice.items[dataSlotIndex] = the reagent for an optional or finishing
---   slot (an item's ID or the slot's option, which may be a currency), false
---   to leave it empty.
+--   slot, or for a required one that takes one of several (S.IsChoiceSlot):
+--   an item's ID or the slot's option, which may be a currency; false to
+--   leave it empty.
 -- A slot without a choice stays as it is in the window.
 function S.SimulatedReagents(basics, current, choice)
     local tiers = type(choice) == "table" and type(choice.tiers) == "table" and choice.tiers or {}
@@ -176,7 +188,17 @@ function S.SimulatedReagents(basics, current, choice)
     end
     for _, slot in ipairs(basics.basicSlots or {}) do
         local tier, mix = tonumber(tiers[slot.dataSlotIndex]), mixes[slot.dataSlotIndex]
-        if type(mix) == "table" then
+        local value = items[slot.dataSlotIndex]
+        if value ~= nil then
+            -- A reagent chosen for the whole slot.
+            local reagent = value and OptionOf(slot, value)
+            if reagent then
+                out[#out + 1] = {
+                    reagent = reagent, dataSlotIndex = slot.dataSlotIndex,
+                    quantity = math.max(1, tonumber(slot.quantity) or 1),
+                }
+            end
+        elseif type(mix) == "table" then
             -- No more than the slot holds, the higher qualities first.
             local left = tonumber(slot.quantity) or 0
             for quality = slot.qualityCount, 1, -1 do
@@ -259,7 +281,8 @@ function S.ForgetEffects()
     effects = {}
 end
 
--- The reagents of one optional or finishing slot gathered by what they do:
+-- The reagents of one slot that takes a reagent by choice (optional,
+-- finishing, or required with several to choose from) gathered by what they do:
 -- those that change difficulty and skill by the same amounts are one group
 -- (a dozen missives that differ only in the stats they give become one line
 -- per quality). Returns a list of
@@ -280,7 +303,8 @@ function S.OptionGroups(recipeID, basics, current, choice, slot)
             items[key] = item
         end
         items[dataSlotIndex] = value
-        local reagents = S.SimulatedReagents(basics, current, { tiers = choice and choice.tiers, items = items })
+        local reagents = S.SimulatedReagents(basics, current,
+            { tiers = choice and choice.tiers, mixes = choice and choice.mixes, items = items })
         return CE:Evaluate(recipeID, reagents, { useConcentration = false })
     end
     local empty, asked = nil, false

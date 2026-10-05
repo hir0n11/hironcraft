@@ -101,6 +101,15 @@ local function ShowMessage(text)
     panel:SetHeight(TOP + 38)
 end
 
+-- A view that fails must not leave another recipe's numbers on screen: the
+-- failure is reported like any other error and the panel says it has no data.
+local function Safely(show, ...)
+    if not (geterrorhandler and xpcall) then return show(...) end
+    local arguments, count = { ... }, select("#", ...)
+    local ok, shown = xpcall(function() return show(unpack(arguments, 1, count)) end, geterrorhandler())
+    return ok and shown
+end
+
 -- The reagents chosen in the window, as the game wants them.
 local function WindowReagents(form)
     local transaction = form and form.GetTransaction and form:GetTransaction()
@@ -125,7 +134,7 @@ function UI.Refresh()
         panel.message:Hide()
         panel.body:Hide()
         panel.spec:Show()
-        if not UI.ShowSpec(recipeID, recipeInfo.name) then
+        if not Safely(UI.ShowSpec, recipeID, recipeInfo.name) then
             ShowMessage(T("CRAFTSIM_SPEC_NONE", "No specialization of yours affects this recipe."))
         end
     elseif recipeInfo.isRecraft then
@@ -145,7 +154,7 @@ function UI.Refresh()
             panel.message:Hide()
             panel.spec:Hide()
             panel.body:Show()
-            if not UI.ShowCraft(recipeID, basics, WindowReagents(form), recipeInfo.name) then
+            if not Safely(UI.ShowCraft, recipeID, basics, WindowReagents(form), recipeInfo.name) then
                 ShowMessage(T("CRAFTSIM_NO_DATA", "No data for this recipe."))
             end
         end

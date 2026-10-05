@@ -68,7 +68,13 @@ local function SlotLabel(slot, fallback)
     return fallback
 end
 
--- What a row of an optional or finishing slot says: the slot and its choice.
+-- What a row with a list is called: its slot's name in the recipe window,
+-- or its first reagent's name for a required slot the window does not name.
+local function RowLabel(row)
+    return row.label or ReagentName(row.slot.options and row.slot.options[1])
+end
+
+-- What a row with a list says: the slot and its choice.
 local function ChoiceText(row)
     local value = choice.items[row.slot.dataSlotIndex]
     local text
@@ -79,7 +85,7 @@ local function ChoiceText(row)
     else
         text = ReagentName(value)
     end
-    return row.label .. ": " .. text
+    return RowLabel(row) .. ": " .. text
 end
 
 -- The reagent quality all of a group's reagents share, if they do.
@@ -304,8 +310,9 @@ local function SlotRow(index)
     return row
 end
 
--- A button per optional or finishing slot; its list is built when it is
--- opened, and only then is the game asked what each reagent does.
+-- A button per slot that takes a reagent by choice (optional, finishing, or
+-- required with several to choose from); its list is built when it is opened,
+-- and only then is the game asked what each reagent does.
 local function OpenChoiceMenu(row)
     local slot = row.slot
     if not slot or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
@@ -317,7 +324,7 @@ local function OpenChoiceMenu(row)
                 UI.RefreshSimulation()
             end
         end
-        root:CreateTitle(row.label)
+        root:CreateTitle(RowLabel(row))
         root:CreateRadio(T("CRAFTSIM_AS_WINDOW", "as in the window"),
             function() return choice.items[dataSlotIndex] == nil end, Pick(nil))
         root:CreateRadio(T("CRAFTSIM_EMPTY", "empty"),
@@ -363,15 +370,35 @@ local function Layout()
     Put(body.concentration, 13, 2)
     Put(body.cost, 13, 10)
 
+    -- Required slots are of two kinds: the qualities of one reagent (a row
+    -- with a count per quality) and one of several reagents (a list).
+    local qualitySlots, lists = {}, {}
+    for _, slot in ipairs(basics.basicSlots or {}) do
+        if S.IsChoiceSlot(slot) then
+            lists[#lists + 1] = { slot = slot, label = SlotLabel(slot, nil) }
+        else
+            qualitySlots[#qualitySlots + 1] = slot
+        end
+    end
+    for _, group in ipairs({
+        { slots = basics.optionalSlots or {}, label = T("CRAFTSIM_OPTIONAL", "Optional") },
+        { slots = basics.finishingSlots or {}, label = T("CRAFTSIM_FINISHING", "Finishing") },
+    }) do
+        for _, slot in ipairs(group.slots) do
+            -- A slot the character cannot use yet is left out.
+            if not slot.locked then lists[#lists + 1] = { slot = slot, label = SlotLabel(slot, group.label) } end
+        end
+    end
+
     local used = 0
-    if #(basics.basicSlots or {}) > 0 then
+    if #qualitySlots > 0 then
         Put(body.presetLabel, 12, 3)
         Put(body.presets, 20, 4)
     else
         body.presetLabel:Hide()
         body.presets:Hide()
     end
-    for _, slot in ipairs(basics.basicSlots or {}) do
+    for _, slot in ipairs(qualitySlots) do
         used = used + 1
         local row = SlotRow(used)
         row.slot, row.dataSlotIndex, row.shown = slot, slot.dataSlotIndex, true
@@ -401,19 +428,11 @@ local function Layout()
     if used > 0 then y = y + 4 end
 
     used = 0
-    for _, group in ipairs({
-        { slots = basics.optionalSlots or {}, label = T("CRAFTSIM_OPTIONAL", "Optional") },
-        { slots = basics.finishingSlots or {}, label = T("CRAFTSIM_FINISHING", "Finishing") },
-    }) do
-        for _, slot in ipairs(group.slots) do
-            -- A slot the character cannot use yet is left out.
-            if not slot.locked then
-                used = used + 1
-                local row = ChoiceRow(used)
-                row.slot, row.label, row.shown = slot, SlotLabel(slot, group.label), true
-                Put(row, 20, 3)
-            end
-        end
+    for _, list in ipairs(lists) do
+        used = used + 1
+        local row = ChoiceRow(used)
+        row.slot, row.label, row.shown = list.slot, list.label, true
+        Put(row, 20, 3)
     end
     for index = used + 1, #body.choiceRows do
         body.choiceRows[index].shown = false
@@ -511,7 +530,8 @@ function UI.BuildCraft(owner)
         button:SetScript("OnClick", function()
             choice.mixes = {}
             for _, slot in ipairs(basics and basics.basicSlots or {}) do
-                local tier = pick(slot)
+                -- A slot that takes one of several reagents has no quality.
+                local tier = not S.IsChoiceSlot(slot) and pick(slot)
                 if tier then choice.mixes[slot.dataSlotIndex] = { [tier] = tonumber(slot.quantity) or 0 } end
             end
             UI.RefreshSimulation()
