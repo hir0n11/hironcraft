@@ -104,6 +104,93 @@ function S.Reagents(basics, current, pickTier)
     return out
 end
 
+-- The option of a slot that is a given item, as the schematic has it.
+local function OptionOf(slot, itemID)
+    for _, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
+        if type(option) == "table" and option.itemID == itemID then return option end
+        if option == itemID then return { itemID = itemID } end
+    end
+    return { itemID = itemID }
+end
+
+-- The window's reagents with a simulation's choices put in:
+--   choice.tiers[dataSlotIndex] = the quality for a quality slot;
+--   choice.items[dataSlotIndex] = the item for an optional or finishing slot,
+--   false to leave it empty.
+-- A slot without a choice stays as it is in the window.
+function S.SimulatedReagents(basics, current, choice)
+    local tiers = type(choice) == "table" and type(choice.tiers) == "table" and choice.tiers or {}
+    local items = type(choice) == "table" and type(choice.items) == "table" and choice.items or {}
+    local out, replaced = {}, {}
+    for dataSlotIndex in pairs(tiers) do replaced[dataSlotIndex] = true end
+    for dataSlotIndex in pairs(items) do replaced[dataSlotIndex] = true end
+    for _, entry in ipairs(type(current) == "table" and current or {}) do
+        if type(entry) == "table" and not replaced[entry.dataSlotIndex] then out[#out + 1] = entry end
+    end
+    for _, slot in ipairs(basics.basicSlots or {}) do
+        local tier = tonumber(tiers[slot.dataSlotIndex])
+        if tier then
+            tier = math.max(1, math.min(slot.qualityCount, tier))
+            local option = slot.options and slot.options[tier]
+            if option and (slot.quantity or 0) > 0 then
+                out[#out + 1] = {
+                    reagent = type(option) == "table" and option or { itemID = option },
+                    dataSlotIndex = slot.dataSlotIndex, quantity = slot.quantity,
+                }
+            end
+        end
+    end
+    for _, group in ipairs({ basics.optionalSlots or {}, basics.finishingSlots or {} }) do
+        for _, slot in ipairs(group) do
+            local itemID = items[slot.dataSlotIndex]
+            if itemID then
+                out[#out + 1] = {
+                    reagent = OptionOf(slot, itemID), dataSlotIndex = slot.dataSlotIndex,
+                    quantity = math.max(1, tonumber(slot.quantity) or 1),
+                }
+            end
+        end
+    end
+    return out
+end
+
+-- What the reagents of a craft cost by HironCraft's prices: the given ones
+-- plus the recipe's reagents that have no choice. The second value is false
+-- when a price is not known and the sum is therefore too low.
+function S.Cost(basics, reagents)
+    local total, complete = 0, true
+    local function Add(itemID, quantity)
+        local price = itemID and CE:DefaultPrice(itemID)
+        if price and price > 0 then
+            total = total + price * (quantity or 1)
+        else
+            complete = false
+        end
+    end
+    for _, entry in ipairs(reagents or {}) do
+        Add(type(entry.reagent) == "table" and entry.reagent.itemID, entry.quantity)
+    end
+    for _, fixed in ipairs(basics.fixedReagents or {}) do Add(fixed.itemID, fixed.quantity) end
+    return total, complete
+end
+
+-- A simulated craft: the game's answer for the chosen reagents (one
+-- question), kept so that another skill can be tried without asking again.
+function S.Simulate(recipeID, basics, current, choice)
+    local reagents = S.SimulatedReagents(basics, current, choice)
+    local answer = CE:Evaluate(recipeID, reagents, { useConcentration = false })
+    if not answer then return nil end
+    local cost, complete = S.Cost(basics, reagents)
+    return { answer = answer, reagents = reagents, cost = cost, costComplete = complete,
+        maxQuality = tonumber(basics.maxQuality) or 0 }
+end
+
+-- The outcome of a simulation at a skill "extraSkill" higher (or lower).
+function S.Outcome(simulation, extraSkill)
+    if type(simulation) ~= "table" then return nil end
+    return S.Describe(simulation.maxQuality, simulation.answer, extraSkill)
+end
+
 local function Best(slot) return slot.qualityCount end
 local function Plain() return 1 end
 

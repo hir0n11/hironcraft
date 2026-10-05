@@ -25,6 +25,27 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Craft simulation (0.4.99)
+
+- The skill panel has a second part, opened by its button: the selected
+  recipe tried with other reagents and another skill. Nothing is spent and
+  the reagents need not be owned.
+- Reagents: a row per quality slot with `=` (as in the window) and the
+  slot's qualities, three presets for all slots at once (as in the window,
+  best, plain), and a list per optional and finishing slot (as in the window,
+  empty, or one of its reagents). Slots the character cannot use yet are
+  left out.
+- Skill: a `+/-` box; the button beside it puts in what the chosen reagents
+  lack for the top quality.
+- Result: skill, quality, what is missing, the concentration cost of the next
+  quality and the cost of the reagents by HironCraft's prices (marked when a
+  price is unknown). Concentration is known for the real skill only: the game
+  prices it, and it does not price a made-up skill.
+- One question to the game per change of reagents; another skill is
+  arithmetic on the last answer. With the simulation closed the panel costs
+  what it did in 0.4.98. Choices belong to the recipe and start over with
+  another one.
+
 ## Skill needed for each quality (0.4.98)
 
 - The `Skill` button outside the profession window's right edge opens a panel

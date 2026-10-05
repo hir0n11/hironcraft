@@ -86,6 +86,10 @@ local function Tier(quality)
     return "T" .. tostring(quality)
 end
 
+-- For the simulation part of the panel.
+UI.Text, UI.T, UI.Tier, UI.Saved = Text, T, Tier, Saved
+UI.INNER, UI.GOLD, UI.GREEN, UI.GREY, UI.WHITE = INNER, GOLD, GREEN, GREY, WHITE
+
 -- "430, T4 (T5 needs 20 more)" for one set of reagents.
 local function ResultText(result)
     if not result then return "-" end
@@ -139,7 +143,9 @@ local function ShowMessage(text)
     panel.message:SetText(text)
     panel.message:Show()
     panel.body:Hide()
-    panel:SetHeight(36 + 34)
+    panel.baseHeight = 36 + 34
+    panel:SetHeight(panel.baseHeight)
+    if UI.HideSimulation then UI.HideSimulation() end
 end
 
 local function ShowSummary(summary, name)
@@ -184,7 +190,8 @@ local function ShowSummary(summary, name)
     end
     panel.concentration:ClearAllPoints()
     panel.concentration:SetPoint("TOPLEFT", hasChoice and panel.plain or panel.status, "BOTTOMLEFT", 0, hasChoice and -6 or -10)
-    panel:SetHeight(hasChoice and 232 or 190)
+    panel.baseHeight = hasChoice and 232 or 190
+    panel:SetHeight(panel.baseHeight)
 end
 
 -- The reagents chosen in the window, as the game wants them.
@@ -214,9 +221,12 @@ function UI.Refresh()
     if basicsOf ~= recipeID then
         basicsOf, basics = recipeID, CE:GetRecipeBasics(recipeID)
     end
-    local summary, reason = S.Summary(recipeID, WindowReagents(form), basics)
+    local reagents = WindowReagents(form)
+    local summary, reason = S.Summary(recipeID, reagents, basics)
     if summary then
         ShowSummary(summary, recipeInfo.name)
+        -- The simulation below it (CraftSimulator_Sim.lua), when switched on.
+        if UI.UpdateSimulation then UI.UpdateSimulation(recipeID, basics, reagents) end
     elseif reason == "no_quality" then
         ShowMessage(T("CRAFTSIM_NO_QUALITY", "This recipe has no quality."))
     else
@@ -325,6 +335,8 @@ local function BuildPanel()
     panel.plain:SetPoint("TOPLEFT", panel.best, "BOTTOMLEFT", 0, -2)
     panel.concentration = Row(body, T("CRAFTSIM_CONCENTRATION", "Concentration"))
     panel.concentration:SetPoint("TOPLEFT", panel.plain, "BOTTOMLEFT", 0, -6)
+
+    if UI.BuildSimulation then UI.BuildSimulation(panel) end
 
     panel:SetScript("OnShow", MarkDirty)
     panel:SetScript("OnUpdate", function()

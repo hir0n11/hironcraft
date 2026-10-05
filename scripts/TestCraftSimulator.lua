@@ -97,7 +97,16 @@ C_TradeSkillUI = {
     end,
 }
 
-HironCraftProfit = { L = {}, FONT = 'Addon/default.ttf' }
+-- Prices in copper, by HironCraft's own price list.
+local prices = { [11] = 10000, [12] = 50000, [21] = 20000, [22] = 40000, [23] = 80000, [31] = 30000,
+    [41] = 1000000, [42] = 2000000, [51] = 500000 }
+local unloaded, nameRequests = {}, {}
+C_Item = {
+    GetItemNameByID = function(itemID) if not unloaded[itemID] then return 'Item ' .. itemID end end,
+    RequestLoadItemDataByID = function(itemID) nameRequests[itemID] = (nameRequests[itemID] or 0) + 1 end,
+}
+HironCraftProfit = { L = {}, FONT = 'Addon/default.ttf',
+    Prices = { GetItemPrice = function(_, itemID) return prices[itemID] end } }
 SlashCmdList = {}
 assert(loadfile('ProfitHub/Core/CraftEngine/Engine.lua'))()
 assert(loadfile('ProfitHub/Core/CraftEngine/Simulator.lua'))()
@@ -248,7 +257,52 @@ do
     eq(summary.current.missingToMax, 101, 'short of its top')
 end
 
-print('Craft simulator passed (thresholds, window/best/plain reagents, mixes, optional reagents, top quality, game thresholds, +N skill, empty cases).')
+-- A simulated craft: chosen qualities and optional reagents over the window's.
+do
+    local basics = CE:GetRecipeBasics(100)
+    local function ids(reagents)
+        local list = {}
+        for _, entry in ipairs(reagents) do
+            list[#list + 1] = entry.dataSlotIndex .. ':' .. entry.reagent.itemID .. 'x' .. entry.quantity
+        end
+        table.sort(list)
+        return table.concat(list, ' ')
+    end
+    eq(ids(S.SimulatedReagents(basics, window, {})), '1:12x10 2:21x5 4:41x1', 'no choices: the window as it is')
+    eq(ids(S.SimulatedReagents(basics, window, { tiers = { [2] = 3 } })), '1:12x10 2:23x5 4:41x1', 'one slot at another quality')
+    eq(ids(S.SimulatedReagents(basics, window, { tiers = { [1] = 9, [2] = 0 } })), '1:12x10 2:21x5 4:41x1', 'qualities kept within the slot\'s range')
+    eq(ids(S.SimulatedReagents(basics, window, { items = { [4] = 42, [5] = 51 } })), '1:12x10 2:21x5 4:42x1 5:51x1', 'optional and finishing reagents chosen')
+    eq(ids(S.SimulatedReagents(basics, window, { items = { [4] = false } })), '1:12x10 2:21x5', 'an optional slot emptied')
+    eq(ids(S.SimulatedReagents(basics, nil, { tiers = { [1] = 1 } })), '1:11x10', 'nothing in the window')
+
+    -- Cost: the chosen reagents and the one without a choice (item 31).
+    local total, complete = S.Cost(basics, window)
+    eq(total, 500000 + 100000 + 1000000 + 30000, 'cost of the window\'s reagents')
+    eq(complete, true, 'every price known')
+    prices[41] = nil
+    total, complete = S.Cost(basics, window)
+    eq(total, 630000, 'cost without the unknown price')
+    eq(complete, false, 'marked as incomplete')
+    prices[41] = 1000000
+
+    calls.operation = 0
+    local simulation = assert(S.Simulate(100, basics, window, { tiers = { [2] = 3 }, items = { [5] = 51 } }))
+    eq(calls.operation, 1, 'one question for a simulated craft')
+    eq(simulation.cost, 500000 + 400000 + 1000000 + 500000 + 30000, 'its cost')
+    local real = S.Outcome(simulation, 0)
+    eq(real.skill, 370, 'its skill')
+    eq(real.quality, 4, 'its quality')
+    eq(real.missingToMax, 30, 'what it lacks')
+    eq(real.concentrationCost, 150, 'its concentration')
+    local more = S.Outcome(simulation, 30)
+    eq(more.quality, 5, 'with the missing skill added')
+    eq(more.concentrationCost, nil, 'no concentration price for a made-up skill')
+    eq(calls.operation, 1, 'another skill asks nothing')
+    eq(S.Outcome(nil, 5), nil, 'no simulation, no outcome')
+    eq(S.Simulate(400, CE:GetRecipeBasics(400), {}, {}), nil, 'a recipe the game is silent about')
+end
+
+print('Craft simulator passed (thresholds, window/best/plain reagents, mixes, optional reagents, top quality, game thresholds, +N skill, empty cases, simulated crafts, cost).')
 
 -- The panel ----------------------------------------------------------------------
 
@@ -283,6 +337,13 @@ local function Frame(kind, name, parent, template)
     local methods = {}
     function methods:SetScript(script, fn) self.scripts[script] = fn end
     function methods:RegisterEvent(event) self.events[event] = true end
+    -- A text box tells its script about a new text, like the game does.
+    function methods:SetText(text)
+        self.text = text
+        if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
+    end
+    function methods:SetupMenu(fn) self.menu = fn end
+    function methods:GenerateMenu() self.generated = (self.generated or 0) + 1 end
     function methods:CreateFontString() return Region() end
     function methods:CreateTexture() return Region() end
     function methods:SetShown(on)
@@ -322,6 +383,8 @@ local before = #frames
 assert(loadfile('ProfitHub/Core/UI/CraftSimulator_UI.lua'))()
 local UI = S.UI
 eq(#frames, before + 1, 'only the event frame exists after loading')
+assert(loadfile('ProfitHub/Core/UI/CraftSimulator_Sim.lua'))()
+eq(#frames, before + 1, 'the simulation builds nothing at load')
 eq(HironCraftProfit_DB, nil, 'saved variables created at load')
 local events = frames[#frames]
 assert(events.events.ADDON_LOADED and events.events.TRADE_SKILL_SHOW, 'not waiting for the profession window')
@@ -467,6 +530,174 @@ recipes[100].info.isRecraft = nil
 hooks[1].fn()
 panel.scripts.OnUpdate(panel)
 eq(panel.body.shown, true, 'numbers back')
+
+-- The simulation ------------------------------------------------------------------
+
+do
+    local saved = HironCraftProfit_DB.craftSimulator
+    local simToggle, section = panel.simulationToggle, panel.simulation
+    assert(simToggle and section, 'the simulation part was not built with the panel')
+    eq(section.shown, false, 'closed until asked for')
+    eq(simToggle.shown, true, 'its button is there')
+    eq(simToggle.label.text, 'Simulate other reagents and skill', 'the button says what it opens')
+    local function Recount()
+        calls.operation = 0
+        hooks[1].fn()
+        panel.scripts.OnUpdate(panel)
+        return calls.operation
+    end
+    eq(Recount(), 3, 'a closed simulation asks nothing')
+
+    -- Opened: one more question, the window's reagents to begin with.
+    simToggle.scripts.OnClick(simToggle)
+    eq(saved.simulation, true, 'remembered as open')
+    calls.operation = 0
+    panel.scripts.OnUpdate(panel)
+    eq(calls.operation, 4, 'three questions for the panel and one for the simulation')
+    eq(section.shown, true, 'shown')
+    eq(simToggle.label.text, 'Hide simulation', 'the button says what it closes')
+    eq(section.slotRows[1].name.text, 'Item 11', 'first quality slot')
+    eq(section.slotRows[2].name.text, 'Item 21', 'second quality slot')
+    eq(section.slotRows[1].buttons[3].shown, false, 'no third quality for a two-quality reagent')
+    eq(section.slotRows[2].buttons[3].shown, true, 'three qualities for the other')
+    eq(#section.choiceRows, 2, 'one list each for the optional and the finishing slot')
+    eq(section.choiceRows[1].label, 'Optional', 'a slot without a name of its own')
+    eq(section.choiceRows[2].label, 'Finishing', 'the finishing slot')
+    eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'starts as the window')
+    eq(section.concentration.text, 'Concentration: 275 for T5', 'its concentration')
+    eq(section.cost.text, 'Reagents: 163g', 'its cost')
+    eq(section.fill.shown, true, 'the missing skill is offered')
+    eq(section.fill.label.text, '+55', 'as a number')
+    assert(panel.height > panel.baseHeight + 28, 'the panel did not grow for the simulation')
+
+    -- One reagent at another quality: one question.
+    calls.operation = 0
+    local third = section.slotRows[2].buttons[3]
+    third.scripts.OnClick(third)
+    eq(calls.operation, 1, 'one question per change')
+    eq(section.result.text, 'Result: 365, T4 (T5 needs 35 more)', 'better reagent in the second slot')
+    eq(section.cost.text, 'Reagents: 193g', 'and what it costs')
+    eq(third.label.color[1], 1, 'the chosen quality is marked')
+    eq(section.slotRows[2].buttons[0].label.color[1] < 1, true, 'the others are not')
+
+    -- Every slot at once.
+    local presets = section.presets.buttons
+    presets[3].scripts.OnClick(presets[3])
+    eq(section.result.text, 'Result: 315, T3 (T5 needs 85 more)', 'plainest reagents')
+    eq(section.cost.text, 'Reagents: 123g', 'are the cheapest here')
+    presets[2].scripts.OnClick(presets[2])
+    eq(section.result.text, 'Result: 365, T4 (T5 needs 35 more)', 'best reagents')
+    presets[1].scripts.OnClick(presets[1])
+    eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'back to the window')
+
+    -- Optional and finishing reagents from their lists.
+    local function Menu(row)
+        local radios = {}
+        row.menu(row, { CreateRadio = function(_, text, isSelected, setSelected)
+            radios[#radios + 1] = { text = text, selected = isSelected, pick = setSelected }
+            radios[text] = radios[#radios]
+        end })
+        return radios
+    end
+    local optional = Menu(section.choiceRows[1])
+    eq(#optional, 4, 'as in the window, empty, and the two reagents')
+    assert(optional['Optional: as in the window'].selected(), 'the window\'s choice is the default')
+    calls.operation = 0
+    optional['Optional: Item 42'].pick()
+    eq(calls.operation, 1, 'one question for an optional reagent')
+    eq(section.result.text, 'Result: 330, T3 (T5 needs 110 more)', 'the harder optional reagent')
+    eq(section.cost.text, 'Reagents: 263g', 'its cost')
+    assert(Menu(section.choiceRows[1])['Optional: Item 42'].selected(), 'the list shows the choice')
+    assert(section.choiceRows[1].generated > 0, 'the list\'s own text was refreshed')
+    optional['Optional: empty'].pick()
+    eq(section.result.text, 'Result: 330, T4 (T5 needs 70 more)', 'without the optional reagent')
+    eq(section.cost.text, 'Reagents: 63g', 'cheaper without it')
+    optional['Optional: as in the window'].pick()
+    eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'the window again')
+    Menu(section.choiceRows[2])['Finishing: Item 51'].pick()
+    eq(section.result.text, 'Result: 350, T4 (T5 needs 50 more)', 'a finishing reagent')
+    eq(section.fill.label.text, '+50', 'the offer follows')
+
+    -- Another skill: arithmetic only.
+    calls.operation = 0
+    section.extra:SetText('10')
+    eq(section.result.text, 'Result: 360, T4 (T5 needs 40 more)', 'ten more skill')
+    eq(section.concentration.text, 'Concentration: known for your real skill only', 'no price for a made-up skill')
+    section.extra:SetText('-40')
+    eq(section.result.text, 'Result: 310, T3 (T5 needs 90 more)', 'less skill')
+    section.fill.scripts.OnClick(section.fill)
+    eq(section.extra.text, '50', 'the missing skill put in')
+    eq(section.result.text, 'Result: 400, T5', 'reaches the top')
+    eq(section.concentration.text, 'Concentration: not needed', 'no concentration at the top')
+    eq(section.fill.label.text, '+50', 'the offer stays what the reagents lack')
+    section.extra:SetText('nonsense')
+    eq(section.result.text, 'Result: 350, T4 (T5 needs 50 more)', 'nonsense is no change')
+    eq(calls.operation, 0, 'the game was not asked about another skill')
+
+    -- A price that is not known is said so.
+    prices[51] = nil
+    presets[1].scripts.OnClick(presets[1])
+    eq(section.cost.text, 'Reagents: 163g (some prices unknown)', 'an incomplete cost')
+    prices[51] = 500000
+
+    -- Reagents changed in the window: the simulation follows what was not chosen.
+    allocation = { { reagent = { itemID = 11 }, dataSlotIndex = 1, quantity = 10 } }
+    eq(Recount(), 4, 'recounted with the window')
+    eq(section.result.text, 'Result: 305, T3 (T5 needs 95 more)', 'the window\'s new reagents with the chosen finishing one')
+    allocation = window
+
+    -- Another recipe starts with its own, empty choices.
+    selected, allocation = 300, {}
+    Recount()
+    eq(section.presets.shown, false, 'no presets without quality slots')
+    eq(section.slotRows[1].shown, false, 'no quality rows')
+    eq(section.choiceRows[1].shown, false, 'no optional lists')
+    eq(section.extra.text, '', 'the other skill starts empty')
+    eq(section.result.text, 'Result: 200, T2 (T3 needs 101 more)', 'the other recipe')
+    selected, allocation = 100, window
+    Recount()
+    eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'earlier choices are not carried back')
+    eq(section.choiceRows[1].label, 'Optional', 'its lists are back')
+
+    -- A slot named by the game keeps that name.
+    recipes[100].slots[4].slotInfo = { slotText = 'Embellishment' }
+    selected = 300; Recount(); selected = 100; Recount()
+    eq(section.choiceRows[1].label, 'Embellishment', 'the game\'s name for the slot')
+    assert(Menu(section.choiceRows[1])['Embellishment: Item 41'], 'used in its list')
+
+    -- A name the game does not have yet is asked for once and put in when it comes.
+    unloaded[11] = true
+    selected = 300; Recount(); selected = 100; Recount()
+    eq(section.slotRows[1].name.text, '#11', 'a placeholder meanwhile')
+    Recount()
+    eq(nameRequests[11], 1, 'asked once')
+    unloaded[11] = nil
+    calls.operation = 0
+    section.scripts.OnEvent(section, 'ITEM_DATA_LOAD_RESULT', 999, true)
+    eq(section.slotRows[1].name.text, '#11', 'another item\'s name changes nothing')
+    section.scripts.OnEvent(section, 'ITEM_DATA_LOAD_RESULT', 11, true)
+    eq(section.slotRows[1].name.text, 'Item 11', 'the name was put in')
+    eq(calls.operation, 0, 'without asking about the craft')
+
+    -- A recipe with nothing to show hides the simulation with the numbers.
+    selected = 200
+    Recount()
+    eq(section.shown, false, 'no simulation without numbers')
+    eq(simToggle.shown, false, 'nor its button')
+    selected = 100
+    Recount()
+    eq(section.shown, true, 'back with the recipe')
+
+    -- Closed again: three questions per recount, as before.
+    simToggle.scripts.OnClick(simToggle)
+    eq(saved.simulation, false, 'remembered as closed')
+    calls.operation = 0
+    panel.scripts.OnUpdate(panel)
+    eq(calls.operation, 3, 'a closed simulation asks nothing')
+    eq(section.shown, false, 'hidden')
+    eq(panel.height, panel.baseHeight + 28, 'the panel is its own size again, with the button')
+end
+print('Craft simulation passed (lazy, one question per change, qualities, presets, optional and finishing lists, +N skill, cost, recipe changes, names).')
 
 -- Moved: remembered relative to the profession window.
 local drag
