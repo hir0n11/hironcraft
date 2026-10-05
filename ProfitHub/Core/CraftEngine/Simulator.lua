@@ -191,6 +191,65 @@ function S.Outcome(simulation, extraSkill)
     return S.Describe(simulation.maxQuality, simulation.answer, extraSkill)
 end
 
+-- What each reagent of an optional or finishing slot does to the craft, per
+-- recipe: { difficulty = change, skill = change }, false when the game did
+-- not answer. Asked once and kept for the session.
+local effects = {}
+
+function S.ForgetEffects()
+    effects = {}
+end
+
+-- The reagents of one optional or finishing slot gathered by what they do:
+-- those that change difficulty and skill by the same amounts are one group
+-- (a dozen missives that differ only in the stats they give become one line
+-- per quality). Returns a list of { items = { itemID, ... }, effect = { difficulty, skill } }
+-- in the slot's own order. The first time for a recipe this asks the game
+-- once per reagent and once for the slot left empty; later it asks nothing.
+function S.OptionGroups(recipeID, basics, current, choice, slot)
+    local known = effects[recipeID]
+    if not known then
+        known = {}
+        effects[recipeID] = known
+    end
+    local dataSlotIndex = slot.dataSlotIndex
+    local function With(value)
+        local items = {}
+        for key, item in pairs(type(choice) == "table" and type(choice.items) == "table" and choice.items or {}) do
+            items[key] = item
+        end
+        items[dataSlotIndex] = value
+        local reagents = S.SimulatedReagents(basics, current, { tiers = choice and choice.tiers, items = items })
+        return CE:Evaluate(recipeID, reagents, { useConcentration = false })
+    end
+    local empty, asked = nil, false
+    local groups, byEffect = {}, {}
+    for _, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
+        local itemID = type(option) == "table" and option.itemID or tonumber(option)
+        if itemID then
+            local effect = known[itemID]
+            if effect == nil then
+                if not asked then
+                    empty, asked = With(false), true
+                end
+                local answer = empty and With(itemID)
+                effect = answer and tonumber(answer.difficulty) and tonumber(answer.skill)
+                    and { difficulty = answer.difficulty - empty.difficulty, skill = answer.skill - empty.skill } or false
+                known[itemID] = effect
+            end
+            local key = effect and (effect.difficulty .. ":" .. effect.skill) or "?"
+            local group = byEffect[key]
+            if not group then
+                group = { items = {}, effect = effect or nil }
+                byEffect[key] = group
+                groups[#groups + 1] = group
+            end
+            group.items[#group.items + 1] = itemID
+        end
+    end
+    return groups
+end
+
 local function Best(slot) return slot.qualityCount end
 local function Plain() return 1 end
 

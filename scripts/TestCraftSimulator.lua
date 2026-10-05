@@ -14,7 +14,9 @@ local BASIC, OPTIONAL, FINISHING = 1, 0, 2
 
 -- Skill a full slot of an item adds, and difficulty an optional reagent adds.
 local SKILL = { [12] = 30, [22] = 10, [23] = 20, [41] = 15, [51] = 5 }
-local DIFFICULTY = { [42] = 40 }
+local DIFFICULTY = { [42] = 40, [43] = 40, [44] = 40 }
+-- The reagent quality the game reports for an item.
+local REAGENT_QUALITY = { [42] = 1, [43] = 1, [44] = 1 }
 local SLOT_QUANTITY = { [1] = 10, [2] = 5 }
 
 local recipes = {
@@ -29,7 +31,7 @@ local recipes = {
             { slotIndex = 3, dataSlotIndex = 3, required = true, quantityRequired = 1, reagentType = BASIC,
                 reagents = { { itemID = 31 } } },
             { slotIndex = 4, dataSlotIndex = 4, required = false, quantityRequired = 1, reagentType = OPTIONAL,
-                reagents = { { itemID = 41 }, { itemID = 42 } } },
+                reagents = { { itemID = 41 }, { itemID = 42 }, { itemID = 43 }, { itemID = 44 } } },
             { slotIndex = 5, dataSlotIndex = 5, required = false, quantityRequired = 1, reagentType = FINISHING,
                 reagents = { { itemID = 51 } } },
         },
@@ -67,6 +69,7 @@ C_TradeSkillUI = {
         return recipe and { recipeID = recipeID, reagentSlotSchematics = recipe.slots, quantityMin = 1, recipeType = 1 } or nil
     end,
     GetRecipeInfo = function(recipeID) return recipes[recipeID] and recipes[recipeID].info or nil end,
+    GetItemReagentQualityByItemInfo = function(itemID) return REAGENT_QUALITY[itemID] end,
     GetCraftingOperationInfo = function(recipeID, reagents, _, applyConcentration)
         calls.operation = calls.operation + 1
         local recipe = recipes[recipeID]
@@ -302,7 +305,41 @@ do
     eq(S.Simulate(400, CE:GetRecipeBasics(400), {}, {}), nil, 'a recipe the game is silent about')
 end
 
-print('Craft simulator passed (thresholds, window/best/plain reagents, mixes, optional reagents, top quality, game thresholds, +N skill, empty cases, simulated crafts, cost).')
+-- The reagents of an optional slot gathered by what they do to the craft.
+do
+    local basics = CE:GetRecipeBasics(100)
+    local optionalSlot, finishingSlot = basics.optionalSlots[1], basics.finishingSlots[1]
+    S.ForgetEffects()
+    calls.operation = 0
+    local groups = S.OptionGroups(100, basics, window, {}, optionalSlot)
+    eq(calls.operation, 5, 'the slot left empty and each of its four reagents')
+    eq(#groups, 2, 'two different effects')
+    eq(table.concat(groups[1].items, ','), '41', 'the reagent that adds skill')
+    eq(groups[1].effect.skill, 15, 'its skill')
+    eq(groups[1].effect.difficulty, 0, 'and no difficulty')
+    eq(table.concat(groups[2].items, ','), '42,43,44', 'the three that only differ in name')
+    eq(groups[2].effect.difficulty, 40, 'their difficulty')
+    eq(groups[2].effect.skill, 0, 'and no skill')
+    -- Known now: nothing is asked again, whatever else is chosen.
+    calls.operation = 0
+    groups = S.OptionGroups(100, basics, window, { tiers = { [1] = 1 }, items = { [4] = 42 } }, optionalSlot)
+    eq(calls.operation, 0, 'known effects are not asked again')
+    eq(#groups, 2, 'the same groups')
+    -- Another slot of the same recipe asks for its own reagents only.
+    groups = S.OptionGroups(100, basics, window, {}, finishingSlot)
+    eq(calls.operation, 2, 'the finishing slot: empty and its one reagent')
+    eq(groups[1].effect.skill, 5, 'the finishing reagent\'s skill')
+    -- A recipe the game is silent about: the reagents are listed without an effect.
+    local silent = CE:GetRecipeBasics(400)
+    local slot = { dataSlotIndex = 9, slotIndex = 9, quantity = 1, options = { { itemID = 91 }, { itemID = 92 } } }
+    groups = S.OptionGroups(400, silent, {}, {}, slot)
+    eq(#groups, 1, 'one group when nothing is known')
+    eq(groups[1].effect, nil, 'without an effect')
+    eq(#groups[1].items, 2, 'holding every reagent')
+    S.ForgetEffects()
+end
+
+print('Craft simulator passed (thresholds, window/best/plain reagents, mixes, optional reagents, top quality, game thresholds, +N skill, empty cases, simulated crafts, cost, reagent groups).')
 
 -- The panel ----------------------------------------------------------------------
 
@@ -402,6 +439,7 @@ ProfessionsRecipeSchematicFormMixin = { Event = { AllocationsModified = 'alloc',
 ProfessionsFrame = Frame('Frame', 'ProfessionsFrame', UIParent)
 ProfessionsFrame.right, ProfessionsFrame.top = 900, 700
 local page = Frame('Frame', nil, ProfessionsFrame)
+page.CreateButton = Frame('GameButton', nil, page)
 local form = Frame('Frame', nil, page)
 ProfessionsFrame.CraftingPage, page.SchematicForm = page, form
 function page:SelectRecipe() end
@@ -419,8 +457,16 @@ for index = before + 2, #frames do
     if frames[index].kind == 'Button' and frames[index].parent == page then toggle = frames[index] end
 end
 assert(toggle, 'no button to open the panel')
-eq(toggle.points.TOPLEFT[1], ProfessionsFrame, 'the button hangs on the profession window')
-eq(toggle.points.TOPLEFT[2], 'TOPRIGHT', 'outside its right edge')
+eq(toggle.points.BOTTOMRIGHT[1], page.CreateButton, 'the button sits by the Create button')
+eq(toggle.points.BOTTOMRIGHT[2], 'TOPRIGHT', 'right above it')
+eq(toggle.points.TOPLEFT, nil, 'and no longer outside the window')
+-- Made before the addon's language was set: the label follows when shown.
+eq(toggle.label.text, 'Skill', 'label at creation')
+PT.L.CRAFTSIM_TOGGLE = 'Навык'
+toggle.scripts.OnShow(toggle)
+eq(toggle.label.text, 'Навык', 'label in the addon\'s language once shown')
+PT.L.CRAFTSIM_TOGGLE = nil
+toggle.scripts.OnShow(toggle)
 eq(named.HironCraftCraftSimulator, nil, 'the panel is not built until asked for')
 eq(#hooks, 2, 'follows recipe selection and the window\'s own recount')
 assert(callbacks.alloc and callbacks.best, 'follows reagent changes')
@@ -591,30 +637,50 @@ do
     eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'back to the window')
 
     -- Optional and finishing reagents from their lists.
+    local opened
+    MenuUtil = { CreateContextMenu = function(owner, generator) opened = { owner = owner, generator = generator } end }
     local function Menu(row)
+        opened = nil
+        row.scripts.OnClick(row)
+        assert(opened and opened.owner == row, 'no list was opened')
         local radios = {}
-        row.menu(row, { CreateRadio = function(_, text, isSelected, setSelected)
-            radios[#radios + 1] = { text = text, selected = isSelected, pick = setSelected }
-            radios[text] = radios[#radios]
-        end })
+        opened.generator(row, {
+            CreateTitle = function(_, text) radios.title = text end,
+            CreateRadio = function(_, text, isSelected, setSelected)
+                radios[#radios + 1] = { text = text, selected = isSelected, pick = setSelected }
+                radios[text] = radios[#radios]
+            end,
+        })
         return radios
     end
-    local optional = Menu(section.choiceRows[1])
-    eq(#optional, 4, 'as in the window, empty, and the two reagents')
-    assert(optional['Optional: as in the window'].selected(), 'the window\'s choice is the default')
+    local sameThree = 'Item 42 and 2 more (quality 1): difficulty +40'
+    eq(section.choiceRows[1].text.text, 'Optional: as in the window', 'the button names its slot and choice')
+    -- Until a list is opened the game is not asked about its reagents.
+    S.ForgetEffects()
     calls.operation = 0
-    optional['Optional: Item 42'].pick()
+    local optional = Menu(section.choiceRows[1])
+    eq(calls.operation, 5, 'opening a list asks once per reagent and once for the empty slot')
+    eq(optional.title, 'Optional', 'the list is headed by its slot')
+    eq(#optional, 4, 'as in the window, empty, and one line per effect instead of four reagents')
+    eq(optional[3].text, 'Item 41: skill +15', 'a reagent of its own')
+    eq(optional[4].text, sameThree, 'three reagents that do the same, as one line')
+    assert(optional['as in the window'].selected(), 'the window\'s choice is the default')
+    calls.operation = 0
+    Menu(section.choiceRows[1])
+    eq(calls.operation, 0, 'opening it again asks nothing')
+    optional[sameThree].pick()
     eq(calls.operation, 1, 'one question for an optional reagent')
     eq(section.result.text, 'Result: 330, T3 (T5 needs 110 more)', 'the harder optional reagent')
     eq(section.cost.text, 'Reagents: 263g', 'its cost')
-    assert(Menu(section.choiceRows[1])['Optional: Item 42'].selected(), 'the list shows the choice')
-    assert(section.choiceRows[1].generated > 0, 'the list\'s own text was refreshed')
-    optional['Optional: empty'].pick()
+    eq(section.choiceRows[1].text.text, 'Optional: Item 42', 'the button shows the choice')
+    assert(Menu(section.choiceRows[1])[sameThree].selected(), 'and the list marks its line')
+    optional['empty'].pick()
     eq(section.result.text, 'Result: 330, T4 (T5 needs 70 more)', 'without the optional reagent')
     eq(section.cost.text, 'Reagents: 63g', 'cheaper without it')
-    optional['Optional: as in the window'].pick()
+    eq(section.choiceRows[1].text.text, 'Optional: empty', 'the button says so')
+    optional['as in the window'].pick()
     eq(section.result.text, 'Result: 345, T4 (T5 needs 55 more)', 'the window again')
-    Menu(section.choiceRows[2])['Finishing: Item 51'].pick()
+    Menu(section.choiceRows[2])['Item 51: skill +5'].pick()
     eq(section.result.text, 'Result: 350, T4 (T5 needs 50 more)', 'a finishing reagent')
     eq(section.fill.label.text, '+50', 'the offer follows')
 
@@ -663,7 +729,8 @@ do
     recipes[100].slots[4].slotInfo = { slotText = 'Embellishment' }
     selected = 300; Recount(); selected = 100; Recount()
     eq(section.choiceRows[1].label, 'Embellishment', 'the game\'s name for the slot')
-    assert(Menu(section.choiceRows[1])['Embellishment: Item 41'], 'used in its list')
+    eq(section.choiceRows[1].text.text, 'Embellishment: as in the window', 'on its button')
+    eq(Menu(section.choiceRows[1]).title, 'Embellishment', 'and over its list')
 
     -- A name the game does not have yet is asked for once and put in when it comes.
     unloaded[11] = true

@@ -104,6 +104,54 @@ local function ShowOutcome()
     end
 end
 
+-- What a row of an optional or finishing slot says: the slot and its choice.
+local function ChoiceText(row)
+    local value = choice.items[row.slot.dataSlotIndex]
+    local text
+    if value == nil then
+        text = T("CRAFTSIM_AS_WINDOW", "as in the window")
+    elseif value == false then
+        text = T("CRAFTSIM_EMPTY", "empty")
+    else
+        text = ItemName(value)
+    end
+    return row.label .. ": " .. text
+end
+
+-- The reagent quality all of a group's items share, if they do.
+local function SharedQuality(group)
+    if not (C_TradeSkillUI and C_TradeSkillUI.GetItemReagentQualityByItemInfo) then return nil end
+    local shared
+    for _, itemID in ipairs(group.items) do
+        local ok, quality = pcall(C_TradeSkillUI.GetItemReagentQualityByItemInfo, itemID)
+        quality = ok and tonumber(quality) or nil
+        if not quality or (shared and shared ~= quality) then return nil end
+        shared = quality
+    end
+    return shared
+end
+
+-- One line for reagents that do the same to the craft:
+-- "Missive of the Aurora and 5 more (quality 1): difficulty +25".
+local function GroupText(group)
+    local text = ItemName(group.items[1])
+    if #group.items > 1 then
+        text = string.format(T("CRAFTSIM_GROUP_MORE", "%s and %d more"), text, #group.items - 1)
+    end
+    local quality = SharedQuality(group)
+    if quality then text = text .. " (" .. string.format(T("CRAFTSIM_GROUP_QUALITY", "quality %d"), quality) .. ")" end
+    local effect, parts = group.effect, {}
+    if not effect then return text end
+    if effect.difficulty ~= 0 then
+        parts[#parts + 1] = string.format(T("CRAFTSIM_EFFECT_DIFFICULTY", "difficulty %+d"), effect.difficulty)
+    end
+    if effect.skill ~= 0 then
+        parts[#parts + 1] = string.format(T("CRAFTSIM_EFFECT_SKILL", "skill %+d"), effect.skill)
+    end
+    if #parts == 0 then parts[1] = T("CRAFTSIM_EFFECT_NONE", "no effect on skill") end
+    return text .. ": " .. table.concat(parts, ", ")
+end
+
 local function UpdateControls()
     for _, row in ipairs(section.slotRows) do
         if row.shown then
@@ -115,7 +163,7 @@ local function UpdateControls()
         end
     end
     for _, row in ipairs(section.choiceRows) do
-        if row.shown and row.GenerateMenu then row:GenerateMenu() end
+        if row.shown then row.text:SetText(ChoiceText(row)) end
     end
 end
 
@@ -153,33 +201,45 @@ local function SlotRow(index)
     return row
 end
 
-local function ChoiceRow(index)
-    local row = section.choiceRows[index]
-    if row then return row end
-    row = CreateFrame("DropdownButton", nil, section, "WowStyle1DropdownTemplate")
-    row:SetWidth(INNER)
-    row:SetupMenu(function(_, root)
-        local slot = row.slot
-        if not slot then return end
-        local dataSlotIndex, prefix = slot.dataSlotIndex, row.label .. ": "
+-- A button per optional or finishing slot; its list is built when it is
+-- opened, and only then is the game asked what each reagent does.
+local function OpenChoiceMenu(row)
+    local slot = row.slot
+    if not slot or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+    MenuUtil.CreateContextMenu(row, function(_, root)
+        local dataSlotIndex = slot.dataSlotIndex
         local function Pick(value)
             return function()
                 choice.items[dataSlotIndex] = value
                 UI.RefreshSimulation()
             end
         end
-        root:CreateRadio(prefix .. T("CRAFTSIM_AS_WINDOW", "as in the window"),
+        root:CreateTitle(row.label)
+        root:CreateRadio(T("CRAFTSIM_AS_WINDOW", "as in the window"),
             function() return choice.items[dataSlotIndex] == nil end, Pick(nil))
-        root:CreateRadio(prefix .. T("CRAFTSIM_EMPTY", "empty"),
+        root:CreateRadio(T("CRAFTSIM_EMPTY", "empty"),
             function() return choice.items[dataSlotIndex] == false end, Pick(false))
-        for _, option in ipairs(type(slot.options) == "table" and slot.options or {}) do
-            local itemID = OptionItem(option)
-            if itemID then
-                root:CreateRadio(prefix .. ItemName(itemID),
-                    function() return choice.items[dataSlotIndex] == itemID end, Pick(itemID), itemID)
-            end
+        -- Reagents that do the same to the craft are one line.
+        for _, group in ipairs(S.OptionGroups(recipeOf, basics, windowReagents, choice, slot)) do
+            root:CreateRadio(GroupText(group), function()
+                for _, itemID in ipairs(group.items) do
+                    if choice.items[dataSlotIndex] == itemID then return true end
+                end
+                return false
+            end, Pick(group.items[1]))
         end
     end)
+end
+
+local function ChoiceRow(index)
+    local row = section.choiceRows[index]
+    if row then return row end
+    row = CreateFrame("Button", nil, section, "UIPanelButtonTemplate")
+    row:SetSize(INNER, 20)
+    row.text = Text(row, 10, "LEFT", WHITE)
+    row.text:SetPoint("LEFT", row, "LEFT", 8, 0)
+    row.text:SetWidth(INNER - 16)
+    row:SetScript("OnClick", OpenChoiceMenu)
     section.choiceRows[index] = row
     return row
 end
@@ -223,7 +283,7 @@ local function Layout()
                 used = used + 1
                 local row = ChoiceRow(used)
                 row.slot, row.label, row.shown = slot, SlotLabel(slot, group.label), true
-                Put(row, 24, 4)
+                Put(row, 20, 3)
             end
         end
     end
@@ -254,7 +314,7 @@ local function Relabel()
         if row.shown and row.firstItem then row.name:SetText(ItemName(row.firstItem)) end
     end
     for _, row in ipairs(section.choiceRows) do
-        if row.shown and row.GenerateMenu then row:GenerateMenu() end
+        if row.shown then row.text:SetText(ChoiceText(row)) end
     end
 end
 

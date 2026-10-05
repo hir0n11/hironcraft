@@ -378,10 +378,15 @@ end
 local function BuildToggle()
     local page = Page()
     if toggle or not page then return end
-    -- Outside the window's right edge, above where the side panels dock.
+    -- Inside the window, right above its Create button.
     toggle = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
-    toggle:SetSize(64, 22)
-    toggle:SetPoint("TOPLEFT", ProfessionsFrame, "TOPRIGHT", 2, -40)
+    toggle:SetSize(80, 22)
+    if page.CreateButton then
+        toggle:SetPoint("BOTTOMRIGHT", page.CreateButton, "TOPRIGHT", 0, 10)
+    else
+        toggle:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -10, 38)
+    end
+    toggle:SetFrameLevel((page:GetFrameLevel() or 0) + 20)
     toggle.label = Text(toggle, 11, "CENTER", GOLD)
     toggle.label:SetPoint("CENTER", 0, 0)
     toggle.label:SetText(T("CRAFTSIM_TOGGLE", "Skill"))
@@ -398,8 +403,10 @@ local function BuildToggle()
     toggle:SetScript("OnLeave", function()
         if PT.Tooltip then PT.Tooltip:Clear() end
     end)
-    -- Left open last time: open again with the crafting page.
+    -- Left open last time: open again with the crafting page. The label is
+    -- set again here: the button can be made before the addon's language is.
     toggle:SetScript("OnShow", function()
+        toggle.label:SetText(T("CRAFTSIM_TOGGLE", "Skill"))
         if Saved().shown and not UI.IsShown() then UI.SetShown(true) end
     end)
     Hook()

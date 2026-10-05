@@ -486,6 +486,13 @@ function HironCraftScan_ScannerConfigButtonMixin:AttachedMenuLoadComplete()
     self.Spinner:SetShown(false)
 end
 
+-- The button is as wide as its text needs, in any language.
+function HironCraftScan_ScannerConfigButtonMixin:SetLabel(text)
+    self:SetText(text)
+    local width = self.GetTextWidth and tonumber(self:GetTextWidth()) or 0
+    self:SetWidth(math.max(140, math.ceil(width) + 28))
+end
+
 function HironCraftScan_ScannerConfigButtonMixin:Setup(ctxt)
     ctxt = ctxt or GetParentContext()
     if not ctxt then
@@ -494,7 +501,7 @@ function HironCraftScan_ScannerConfigButtonMixin:Setup(ctxt)
     end
 
     if ctxt.dbPP.character_disabled then
-        self:SetText(L(LID.SCANNER_CONFIG_DISABLED))
+        self:SetLabel(L(LID.SCANNER_CONFIG_DISABLED))
         self.ScanningLabel:Hide()
         self:SetEnabled(true)
         self:Show()
@@ -515,14 +522,14 @@ function HironCraftScan_ScannerConfigButtonMixin:Setup(ctxt)
     self:SetEnabled(AllScanned(ctxt.profInfos))
     self:UpdateRecipeLabel(nil, ctxt)
     if not AllScanned(ctxt.profInfos) then
-        self:SetText(L('Loading...'))
+        self:SetLabel(L('Loading...'))
     else
         if ProfessionsFrame.CraftingPage.SchematicForm:IsShown() then
             if self.tethered == true then
-                self:SetText(L('Hide HironCraftScan'))
+                self:SetLabel(L('Hide HironCraftScan'))
                 OpenRecipe()
             else
-                self:SetText(L('Open in HironCraftScan'))
+                self:SetLabel(L('Open in HironCraftScan'))
             end
         end
     end

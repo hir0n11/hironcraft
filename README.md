@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Skill button by Create, shorter reagent lists (0.4.100)
+
+- The `Skill` button sits inside the profession window, right above `Create`,
+  instead of outside its right edge. Its label is set again each time it is
+  shown: the button can be created before the addon's language is applied.
+- The lists of optional and finishing reagents in the simulation show one line
+  per effect instead of one per reagent: reagents that change difficulty and
+  skill by the same amounts are gathered (`Missive of the Aurora and 5 more
+  (quality 1): difficulty +25`), so a dozen missives that differ only in the
+  stats they give become one line per quality. Picking a line uses its first
+  reagent. The game is asked what each reagent does only when a list is first
+  opened for a recipe (once per reagent), and never again in that session.
+- The `Attach HironCraftScan` button is as wide as its text needs.
+
 ## Craft simulation (0.4.99)
 
 - The skill panel has a second part, opened by its button: the selected
