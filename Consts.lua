@@ -188,6 +188,9 @@ HironCraftScan.CONST.DEFAULT_SETTINGS = {
     match_customer_class = true,
     scan_bnet_whispers = true,
     generic_request_keywords = 'LF crafter, LF craft, LF recraft',
+    -- A whisper with one of these asks for a recraft of what was delivered.
+    recraft_request_keywords = 'recraft, re-craft, re craft, remake, redo, craft again, craft it again, '
+        .. 'рекрафт, перекрафт, переделать',
 }
 
 HironCraftScan.CONST.PROFESSION_COLORS = {

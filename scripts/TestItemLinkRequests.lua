@@ -2068,3 +2068,183 @@ do
     Scan.Utils.ProfessionNameByID = savedProfessionName
 end
 print('Chat menu fitting passed (tall, shorter, short, switched off).')
+
+-- Recrafts: a new request for what was delivered, by a whisper or by hand ----------
+do
+    local previousFulfillment, previousKeywords = Scan.OrderFulfillment, Scan.DB.settings.recraft_request_keywords
+    local statuses = {}
+    Scan.OrderFulfillment = {
+        Status = { Fulfilled = 'fulfilled' },
+        GetStatuses = function() return statuses end,
+        -- As the real one: a status from before the row's request is not the row's.
+        GetStatus = function(_, listed)
+            local entry = statuses[Scan.OrderToOrderID(listed)]
+            local current = Scan.OrderToResponse(listed)
+            if entry and current and current.time and entry.updatedAt < current.time then return nil end
+            return entry
+        end,
+    }
+    local function deliver(id, customer, crafter, at)
+        local delivered = order(id, customer)
+        statuses[Scan.OrderToOrderID(delivered)] = { customerName = delivered.customerName, responseID = id,
+            status = 'fulfilled', crafterFullName = crafter or 'Seller-Realm', updatedAt = at or now }
+    end
+    local function whisper(text, customer)
+        Scan.OnMessage('CHAT_MSG_WHISPER', text, customer or 'Buyer', (customer or 'Buyer') .. '-GUID')
+    end
+    local function fresh()
+        reset()
+        statuses = {}
+    end
+    Scan.DB.settings.recraft_request_keywords = 'recraft, craft again'
+    reloadConfig()
+    assert(Scan.Scanner.IsRecraftRequest('Can you RECRAFT it?') and Scan.Scanner.IsRecraftRequest('craft again pls')
+        and not Scan.Scanner.IsRecraftRequest('recrafting is fun') and not Scan.Scanner.IsRecraftRequest('thanks!')
+        and not Scan.Scanner.IsRecraftRequest(''), 'the phrases of a recraft request are told wrong')
+
+    -- The order's row has left the list by the time they come back.
+    fresh()
+    deliver(101, 'Buyer')
+    now = now + 600
+    whisper('thanks, looks great')
+    assert(countRows() == 0, 'a whisper that asks for nothing made a row')
+    whisper('hey, can you recraft?')
+    local again = response(101)
+    assert(countRows() == 1 and again, 'no row was added for the recraft')
+    assert(again.recraft == true and again.itemID == 1001 and again.recipeID == 101
+        and again.crafterFullName == 'Seller-Realm' and again.professionID == 164,
+        'the recraft is not the item, recipe and crafter of the delivery')
+    assert(again.customer_answered and not again.greeting_sent and #sent == 0,
+        'the recraft did not wait for the crafter like a request whispered by the customer')
+    local passedOn = shared[#shared][4]
+    assert(passedOn.recraftOf and passedOn.recraftOf.id == 101 and passedOn.recraftOf.crafter == 'Seller-Realm',
+        'the linked account is not told which delivery is asked for again')
+    -- Asking twice is one request.
+    local token = again.requestToken
+    now = now + 30
+    whisper('recraft pls')
+    assert(countRows() == 1 and response(101).requestToken == token, 'a second whisper made another request')
+
+    -- The row is still listed: it becomes the new request.
+    fresh()
+    scan(a)
+    local first = response(101).requestToken
+    deliver(101, 'Buyer')
+    now = now + 120
+    whisper('could you craft again? wrong stats')
+    assert(countRows() == 1 and response(101).requestToken ~= first and response(101).recraft == true,
+        'a delivered row that is still listed was not asked for again')
+    -- An ordinary request for it later is not a recraft.
+    deliver(101, 'Buyer', nil, now)
+    now = now + 60
+    scan(a, { restartTerminalRequest = true })
+    assert(response(101).recraft == nil, 'a new ordinary request kept the recraft mark')
+
+    -- Several deliveries and nothing that tells them apart: not guessed at.
+    fresh()
+    deliver(101, 'Buyer', 'Seller-Realm', now - 50)
+    deliver(102, 'Buyer', 'Tailor-Realm', now - 20)
+    local printed, realPrint = {}, print
+    print = function(text) printed[#printed + 1] = tostring(text) end
+    whisper('can you recraft?')
+    print = realPrint
+    assert(countRows() == 0, 'one of several deliveries was guessed')
+    assert(#printed == 1 and printed[1]:find('Recraft request ambiguous', 1, true), 'the crafter was not told to choose')
+    -- The chat menu lists them, the newest first, with what and who.
+    local recent = Scan.Scanner.RecentDeliveries('Buyer')
+    assert(#recent == 2 and recent[1].responseID == 102 and recent[2].responseID == 101, 'the deliveries are not listed newest first')
+    assert(Scan.Scanner.DeliveryLabel(recent[1]) == link(1002) .. ' - Tailor', 'a delivery is not labelled by item and crafter')
+    -- Naming the item picks it.
+    whisper('can you recraft ' .. b .. '?')
+    assert(countRows() == 1 and response(102) and response(102).recraft and response(102).crafterFullName == 'Tailor-Realm'
+        and not response(101), 'the linked item did not pick its delivery')
+    -- By hand: the other one, as the crafter's own row (not answered by the customer).
+    recent = Scan.Scanner.RecentDeliveries('Buyer')
+    assert(#recent == 1 and recent[1].responseID == 101, 'a delivery asked for again is still offered')
+    local done
+    Scan.Scanner.RequestRecraft(recent[1], {}, function(made) done = made end)
+    assert(done and done == response(101) and done.recraft and done.itemID == 1001
+        and not done.customer_answered and not done.greeting_sent, 'the row added by hand is wrong')
+    assert(countRows() == 2 and #Scan.Scanner.RecentDeliveries('Buyer') == 0 and #sent == 0)
+    -- Quietly: as already greeted.
+    fresh()
+    deliver(101, 'Buyer')
+    Scan.Scanner.RequestRecraft(Scan.Scanner.RecentDeliveries('Buyer')[1], { quiet = true }, function(made) done = made end)
+    assert(done == response(101) and done.greeting_sent == true and done.recraft, 'a quiet recraft row is not marked as greeted')
+
+    -- A linked item that was not delivered is its own request, not a recraft of the delivery.
+    fresh()
+    deliver(101, 'Buyer')
+    whisper('can you recraft ' .. b .. '?')
+    assert(response(102) and not response(102).recraft and not response(101), 'another item was taken for the delivered one')
+
+    -- Only what is recent: a day for a whisper, a week for the menu.
+    fresh()
+    deliver(101, 'Buyer', nil, now - 25 * 3600)
+    whisper('can you recraft?')
+    assert(countRows() == 0, 'a delivery of yesterday was asked for again by a whisper')
+    assert(#Scan.Scanner.RecentDeliveries('Buyer') == 1, 'but the menu does not offer it')
+    deliver(101, 'Buyer', nil, now - 8 * 24 * 3600)
+    assert(#Scan.Scanner.RecentDeliveries('Buyer') == 0, 'the menu offers a delivery older than a week')
+
+    -- Someone else's delivery, a crafter that is not set up here, the phrases switched off.
+    fresh()
+    deliver(101, 'Other')
+    whisper('can you recraft?')
+    assert(countRows() == 0, 'another customer\'s delivery was used')
+    fresh()
+    deliver(101, 'Buyer', 'Gone-Realm')
+    whisper('can you recraft?')
+    assert(countRows() == 0 and #Scan.Scanner.RecentDeliveries('Buyer') == 0, 'a delivery by an unknown crafter was offered')
+    fresh()
+    Scan.DB.settings.recraft_request_keywords = ''
+    reloadConfig()
+    deliver(101, 'Buyer')
+    whisper('can you recraft?')
+    assert(countRows() == 0, 'an empty list of phrases still asks for recrafts')
+    assert(#Scan.Scanner.RecentDeliveries('Buyer') == 1, 'the menu depends on the phrases')
+    Scan.DB.settings.recraft_request_keywords = 'recraft, craft again'
+    reloadConfig()
+
+    -- A profession's row and a general one are asked for again as they were.
+    fresh()
+    deliver(164, 'Buyer')
+    whisper('recraft?')
+    assert(countRows() == 1 and response(164) and response(164).recraft and not response(164).itemID
+        and response(164).professionID == 164, 'a profession\'s row was not asked for again')
+    fresh()
+    deliver(Scan.Scanner.GENERAL_REQUEST_ID, 'Buyer')
+    whisper('recraft?')
+    local general = response(Scan.Scanner.GENERAL_REQUEST_ID)
+    assert(countRows() == 1 and general and general.generic_request and general.recraft, 'a general row was not asked for again')
+
+    -- From a linked account: the delivery it names, under its request, whatever this account knows.
+    fresh()
+    HironCraftScanComm.applying_remote_state = true
+    Scan.OnMessage('CHAT_MSG_CHANNEL', '', 'Buyer', 'Buyer-GUID', { requestToken = 'remote-token',
+        restartTerminalRequest = true, chatEntry = { chatType = 'SYSTEM', message = '[Manual matching] Recraft request',
+            syncID = 'order:remote-token', recraftOf = { id = 101, crafter = 'Seller-Realm' } } })
+    HironCraftScanComm.applying_remote_state = false
+    assert(countRows() == 1 and response(101) and response(101).requestToken == 'remote-token' and response(101).recraft
+        and response(101).itemID == 1001, 'a recraft passed on by a linked account was not added')
+    -- The same packet twice is one request.
+    HironCraftScanComm.applying_remote_state = true
+    Scan.OnMessage('CHAT_MSG_CHANNEL', '', 'Buyer', 'Buyer-GUID', { requestToken = 'remote-token',
+        restartTerminalRequest = true, chatEntry = { chatType = 'SYSTEM', message = '[Manual matching] Recraft request',
+            syncID = 'order:remote-token', recraftOf = { id = 101, crafter = 'Seller-Realm' } } })
+    HironCraftScanComm.applying_remote_state = false
+    assert(countRows() == 1 and response(101).requestToken == 'remote-token')
+    -- A whisper it passed on without naming a delivery is not answered here.
+    fresh()
+    deliver(101, 'Buyer')
+    HironCraftScanComm.applying_remote_state = true
+    Scan.OnMessage('CHAT_MSG_WHISPER', 'can you recraft?', 'Buyer', 'Buyer-GUID', { chatEntry = { chatType = 'WHISPER',
+        message = 'can you recraft?', syncID = 'chat:1' } })
+    HironCraftScanComm.applying_remote_state = false
+    assert(countRows() == 0, 'a linked account\'s whisper was matched here on its own')
+
+    Scan.OrderFulfillment, Scan.DB.settings.recraft_request_keywords = previousFulfillment, previousKeywords
+    reloadConfig()
+    reset()
+end
+print('Recraft requests passed (whisper after the row is gone, listed row, several deliveries, by hand, quiet, age, linked account).')

@@ -38,10 +38,14 @@ function HironCraftScanGeneralConfigMatchingMixin:Init()
     HironCraftScan.SetupTextInput(self, self.Keywords, 'inclusions')
     HironCraftScan.SetupTextInput(self, self.Exclusions, 'exclusions')
     HironCraftScan.SetupTextInput(self, self.GenericRequests, 'generic_request_keywords')
+    HironCraftScan.SetupTextInput(self, self.RecraftRequests, 'recraft_request_keywords')
 end
 
 function HironCraftScanGeneralConfigMatchingMixin:GetConfigValue(keyword)
-    return HironCraftScan.DB.settings[keyword]
+    -- A list that was never edited shows its default.
+    local value = HironCraftScan.DB.settings[keyword]
+    if value == nil then value = HironCraftScan.CONST.DEFAULT_SETTINGS[keyword] end
+    return value
 end
 
 function HironCraftScanGeneralConfigMatchingMixin:UpdateConfigValue(keyword, value)

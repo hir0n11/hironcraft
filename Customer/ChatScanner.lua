@@ -272,6 +272,8 @@ function HironCraftScan.Scanner.LoadConfig()
         HironCraftScan.DB.settings.generic_request_keywords
             or L(HironCraftScan.CONST.TEXT.GENERIC_REQUEST_KEYWORDS_DEFAULT)
     )
+    config.recraft_requests = ParseStringList(
+        HironCraftScan.Utils.GetSetting('recraft_request_keywords') or '')
 
     -- Sort professions so that when we scan for generic keyword matches, we
     -- find the local charcter first, then the primary crafter. We ignore
@@ -1637,6 +1639,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
         response.previousGreeting = reoffer
             and { id = response.inquiryID or response.requestToken } or nil
         response.requestToken = requestToken
+        response.recraft = overrides and overrides.recraft == true or nil
         response.conversationCharacter = nil
         response.conversationFaction = nil
         response.greetingGroup = nil
@@ -1940,6 +1943,8 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         -- greeting is actually sent; do not mark this new row as greeted yet.
         response.previousGreeting = reoffer and {id=response.inquiryID or response.requestToken} or nil
         response.requestToken = requestToken
+        -- A request for what was already delivered once (see Recrafts below).
+        response.recraft = overrides and overrides.recraft == true or nil
         response.conversationCharacter = nil
         response.conversationFaction = nil
         response.greetingGroup = nil
@@ -2348,6 +2353,225 @@ local function WaitForClass(event, message, customer, guid, options)
     return true
 end
 
+-- Recrafts ---------------------------------------------------------------------
+-- A customer who got their order often comes back: wrong stats, the wrong
+-- embellishment, "can you recraft?". By then the row of that order has left
+-- the list, so the new request for the same item is made from what the
+-- delivery left behind: the order's status keeps the customer, the recipe and
+-- the crafter for a month, also on a linked account.
+local RECRAFT_AUTO_SECONDS = 24 * 60 * 60       -- a whisper means a delivery this recent
+local RECRAFT_MANUAL_SECONDS = 7 * 24 * 60 * 60 -- the chat menu offers these
+local RECRAFT_MENU_ROWS = 6
+
+-- "can you recraft?": a phrase from Settings - Matching ("Recraft requests").
+local function IsRecraftRequest(message)
+    if type(message) ~= 'string' or message == '' then return false end
+    return HasDelimitedPhrase(message:lower(), config.recraft_requests)
+end
+HironCraftScan.Scanner.IsRecraftRequest = IsRecraftRequest
+
+-- What a delivered order was, as far as it can still be told: its row when
+-- that is still listed, else the recipe or profession its status is kept
+-- under. nil when the crafter or the profession is not set up here.
+local function DescribeDelivery(entry)
+    local customer, responseID = entry.customerName, entry.responseID
+    local delivery = { customer = customer, responseID = responseID,
+        deliveredAt = tonumber(entry.updatedAt) or 0 }
+    if responseID == GENERAL_REQUEST_ID then
+        delivery.general = true
+        return delivery
+    end
+    local info = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
+    local listed = HironCraftScan.DB.listed_orders[
+        HironCraftScan.OrderToOrderID({ customerName = customer, responseID = responseID })]
+    local response = listed and type(info) == 'table' and type(info.responses) == 'table'
+        and info.responses[responseID] or nil
+    local crafter = type(response) == 'table' and response.crafterFullName or entry.crafterFullName
+    local character = crafter and HironCraftScan.DB.characters[crafter]
+    if type(character) ~= 'table' or type(character.professions) ~= 'table'
+        or type(character.parent_professions) ~= 'table' then return nil end
+    local function Known(profID)
+        local profession = profID and character.professions[profID]
+        return type(profession) == 'table' and character.parent_professions[profession.parentProfID] ~= nil
+    end
+    delivery.crafter = crafter
+    if type(response) == 'table' and Known(response.professionID) then
+        delivery.profID, delivery.itemID, delivery.recipeID = response.professionID, response.itemID, response.recipeID
+        delivery.equipmentRequest, delivery.label = response.equipmentRequest, response.equipmentLabel
+        return delivery
+    end
+    if type(responseID) == 'string' then
+        -- A slot's row whose details went with the row: its profession is left.
+        local profID = tonumber(responseID:match('^equipment:(%d+):'))
+        if not Known(profID) then return nil end
+        delivery.profID = profID
+        return delivery
+    end
+    if type(responseID) ~= 'number' then return nil end
+    if Known(responseID) then
+        delivery.profID = responseID -- a profession's row
+        return delivery
+    end
+    -- A recipe's row: the crafter's profession that has it.
+    local profID
+    for id, profession in pairs(character.professions) do
+        if type(profession.recipes) == 'table' and profession.recipes[responseID] and Known(id) then profID = id end
+    end
+    if not profID and C_TradeSkillUI.GetProfessionInfoByRecipeID then
+        local ok, professionInfo = pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID, responseID)
+        local id = ok and type(professionInfo) == 'table' and professionInfo.professionID
+        if Known(id) then profID = id end
+    end
+    if not profID then return nil end
+    delivery.profID, delivery.recipeID = profID, responseID
+    local ok, recipeInfo = pcall(C_TradeSkillUI.GetRecipeInfo, responseID)
+    local items = ok and recipeInfo and HironCraftScan.Utils.GetOutputItems(recipeInfo)
+    delivery.itemID = items and items[1] or nil
+    return delivery
+end
+
+-- What was delivered to a customer in the last maxAge seconds, the newest
+-- first. A row that is listed answers for itself: one that was asked for
+-- again since is not a delivery any more.
+local function Deliveries(customer, maxAge)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    local found = {}
+    if not fulfillment or not fulfillment.GetStatuses or not fulfillment.Status then return found end
+    local now = time()
+    for _, entry in pairs(fulfillment:GetStatuses() or {}) do
+        if type(entry) == 'table' and entry.customerName == customer and entry.responseID ~= nil
+            and entry.status == fulfillment.Status.Fulfilled
+            and now - (tonumber(entry.updatedAt) or 0) <= maxAge then
+            local order = { customerName = customer, responseID = entry.responseID }
+            local delivered = true
+            if HironCraftScan.DB.listed_orders[HironCraftScan.OrderToOrderID(order)] then
+                local current = fulfillment:GetStatus(order)
+                delivered = type(current) == 'table' and current.status == fulfillment.Status.Fulfilled
+            end
+            local delivery = delivered and DescribeDelivery(entry)
+            if delivery then found[#found + 1] = delivery end
+        end
+    end
+    table.sort(found, function(lhs, rhs)
+        if lhs.deliveredAt ~= rhs.deliveredAt then return lhs.deliveredAt > rhs.deliveredAt end
+        return tostring(lhs.responseID) < tostring(rhs.responseID)
+    end)
+    return found
+end
+
+-- The delivery a message means. When it names nothing, only a single delivery
+-- can be meant; when it links an item or names a slot, the delivery of that
+-- item and no other. The second value says that several were delivered and
+-- nothing told them apart: that is not guessed at.
+local function PickDelivery(deliveries, crafterInfo, itemID, recipeInfo)
+    local slots = crafterInfo and type(crafterInfo.equipmentRequests) == 'table'
+        and #crafterInfo.equipmentRequests > 0 and crafterInfo.equipmentRequests or nil
+    local recipeID = recipeInfo and recipeInfo.recipeID
+    if not itemID and not recipeID and not slots then
+        if #deliveries == 1 then return deliveries[1], false end
+        return nil, #deliveries > 1
+    end
+    local matched = {}
+    for _, delivery in ipairs(deliveries) do
+        local hit = (itemID ~= nil and delivery.itemID == itemID)
+            or (recipeID ~= nil and delivery.recipeID == recipeID)
+        if not hit and slots and delivery.itemID and HironCraftScan.ClassMatching then
+            for _, request in ipairs(slots) do
+                if HironCraftScan.ClassMatching.MatchesItem(request, delivery.itemID) then hit = true end
+            end
+        end
+        if hit then matched[#matched + 1] = delivery end
+    end
+    return #matched == 1 and matched[1] or nil, false
+end
+
+-- A delivery as a line of a menu: the item (or profession) and who made it.
+local function DeliveryLabel(delivery)
+    local what
+    if delivery.general then
+        what = L('General crafting request')
+    elseif delivery.itemID then
+        what = HironCraftScan.Utils.GetReplyItemLink(delivery.itemID, nil) or ('item:' .. tostring(delivery.itemID))
+    else
+        local character = HironCraftScan.DB.characters[delivery.crafter]
+        local profession = character and character.professions[delivery.profID]
+        what = delivery.label
+            or (profession and HironCraftScan.Utils.ProfessionNameByID
+                and HironCraftScan.Utils.ProfessionNameByID(profession.parentProfID))
+            or tostring(delivery.responseID)
+    end
+    if delivery.crafter then what = what .. ' - ' .. HironCraftScan.NameAndRealmToName(delivery.crafter) end
+    return what
+end
+
+-- A new request for what was delivered: the same row as the first time (the
+-- same item, crafter and profession) with a request of its own, marked as a
+-- recraft. onDone gets the row's response once it is there.
+local function RequestRecraft(delivery, message, customerGuid, overrides, event, onDone)
+    local customer = delivery.customer
+    local customerInfo = saved(HironCraftScan.DB.customers, customer, {})
+    customerInfo.guid = customerGuid or customerInfo.guid
+    local options = {}
+    for key, value in pairs(overrides or {}) do options[key] = value end
+    options.recraft = true
+    -- Asked for again on purpose, whatever became of the row meanwhile.
+    options.restartTerminalRequest = true
+    options.existingCustomerRequest = nil
+    options.equipmentRequest = delivery.equipmentRequest
+    if type(options.chatEntry) == 'table' then
+        -- A linked account makes the same request from this.
+        options.chatEntry.recraftOf = { id = delivery.responseID, crafter = delivery.crafter }
+    end
+    local function Done(response)
+        if type(response) == 'table' and onDone then onDone(response) end
+        return response
+    end
+    if delivery.general then
+        return Done(HandleGeneralRequest(message, customer, customerInfo, options, event))
+    end
+    local crafterInfo = { crafter = delivery.crafter, profID = delivery.profID }
+    local recipeInfo = delivery.recipeID and { recipeID = delivery.recipeID } or nil
+    local function Open()
+        local itemLink = delivery.itemID and HironCraftScan.Utils.GetReplyItemLink(delivery.itemID, nil)
+        local item = itemLink and { GetItemLink = function() return itemLink end } or nil
+        return Done(handleResponse(message, customer, crafterInfo, delivery.itemID, recipeInfo, item, options, event))
+    end
+    if delivery.itemID and Item and Item.CreateFromItemID then
+        Item:CreateFromItemID(delivery.itemID):ContinueOnItemLoad(function()
+            RunRequestCallback(options, function()
+                if HironCraftScan.DB.customers[customer] then Open() end
+            end)
+        end)
+        return nil
+    end
+    return Open()
+end
+
+-- For the chat menu of a customer's name: what could be asked for again.
+function HironCraftScan.Scanner.RecentDeliveries(customer)
+    local found = Deliveries(customer, RECRAFT_MANUAL_SECONDS)
+    for index = #found, RECRAFT_MENU_ROWS + 1, -1 do found[index] = nil end
+    return found
+end
+HironCraftScan.Scanner.DeliveryLabel = DeliveryLabel
+
+-- The crafter asks for the row by hand. options.quiet adds it as already
+-- greeted, without a banner or a greeting card, like a quiet manual match.
+function HironCraftScan.Scanner.RequestRecraft(delivery, options, onDone)
+    if type(delivery) ~= 'table' or type(delivery.customer) ~= 'string' then return nil end
+    options = options or {}
+    local quiet = options.quiet == true or nil
+    return RequestRecraft(delivery, '', options.customerGuid, {
+        manualMatch = true,
+        battleNet = options.battleNet or nil,
+        suppressBatchAlert = quiet,
+        suppressGreetingBanner = quiet,
+        greeted = quiet,
+        chatEntry = HironCraftScan.Utils.StampChatHistory({ chatType = 'SYSTEM',
+            message = '[Manual matching] ' .. L('Recraft request') }),
+    }, nil, onDone)
+end
+
 function HironCraftScan.OnMessage(event, message, customer, customerGuid, overrides)
     if not message or not customer then
         return false
@@ -2390,6 +2614,14 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     -- greeting, so it raises the normal request banner. Only a real incoming
     -- whisper is answered with a greeting card.
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
+    -- A recraft a linked account passed on names its delivery; in a whisper of
+    -- ours it is a phrase like "can you recraft?".
+    local remoteRecraft = overrides.remoteRequest and type(overrides.chatEntry) == 'table'
+        and type(overrides.chatEntry.recraftOf) == 'table' and overrides.chatEntry.recraftOf or nil
+    local wantsRecraft = remoteRecraft ~= nil
+        or (incomingWhisper and not overrides.remoteRequest and not overrides.classRetry
+            and not overrides.forceGeneralRequest and not overrides.manualMatch
+            and IsRecraftRequest(message))
     if incomingWhisper and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
@@ -2474,7 +2706,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 customerGuid
             )
             if not crafterInfo and not classPending and not overrides.forceGeneralRequest
-                and not IsGenericRequest(message) then
+                and not IsGenericRequest(message) and not wantsRecraft then
                 OfferDeferredQuickReply(customer, message, customerInfo, overrides)
                 return false
             end
@@ -2500,6 +2732,31 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     elseif not crafterInfo then
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
+    if wantsRecraft then
+        local delivery, several
+        if remoteRecraft then
+            delivery = DescribeDelivery({ customerName = customer, responseID = remoteRecraft.id,
+                crafterFullName = remoteRecraft.crafter, updatedAt = time() })
+        else
+            delivery, several = PickDelivery(Deliveries(customer, RECRAFT_AUTO_SECONDS),
+                crafterInfo, itemID, recipeInfo)
+        end
+        if delivery then
+            local info = saved(HironCraftScan.DB.customers, customer, {})
+            info.guid = customerGuid or info.guid
+            RememberCustomerFaction(info)
+            RequestRecraft(delivery, message, customerGuid, overrides, event, function(response)
+                OfferDeferredQuickReply(customer, message,
+                    HironCraftScan.DB.customers[customer], overrides, response)
+            end)
+            return false
+        elseif several then
+            -- Which of them is not guessed at: the crafter picks it.
+            print('|cffffd100HironCraftScan:|r ' .. string.format(L('Recraft request ambiguous'),
+                HironCraftScan.NameAndRealmToName(customer)))
+        end
+    end
+
     local function RetryOnceClassIsKnown()
         if (overrides.classRetry or 0) > 3 or not (C_Timer and C_Timer.After) then return false end
         local options = {}

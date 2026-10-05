@@ -25,6 +25,35 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Recraft requests (0.4.108)
+
+A customer who got their order often comes back for a recraft: wrong stats,
+the wrong embellishment. By then the row of that order has left the list (it
+goes ten minutes after the request), and nothing in "can you recraft?" says
+which item is meant. Now a new request for the same item is added:
+
+- **By a whisper.** When a whisper has one of the phrases from Settings -
+  Matching - `Recraft requests` (`recraft, re-craft, remake, redo, craft
+  again, ...`; edit the list there, empty switches this off) and one thing
+  was delivered to that customer in the last 24 hours, a row for the same
+  item, crafter and profession is added, marked `(recraft)` after the item's
+  name. It behaves like any request the customer whispered: the greeting
+  waits for a click, the marks start over, analytics count a new request.
+- **Several deliveries are not guessed at.** If the whisper links the item or
+  names its slot, that delivery is taken. Otherwise a line in chat says that
+  they ask for a recraft and that the crafter has to choose.
+- **By hand.** The menu of a player's name in chat (HironCraftScan - Manual
+  Matching) lists `Recraft: [item] - crafter` for what was delivered to them
+  in the last week, up to six. A click adds the row with the usual banner;
+  Shift+click adds it quietly, as already greeted.
+- What was delivered is read from the orders' saved statuses (customer,
+  recipe, crafter; kept for a month and shared with linked accounts), so it
+  works for orders delivered before this version and whether or not the row
+  is still listed. A row that is still listed becomes the new request. A
+  delivery whose crafter is not set up on this account is not offered.
+- A linked account is told which delivery is asked for again and adds the
+  same row under the same request (both sides need this version).
+
 ## Names again in the reply about materials (0.4.107)
 
 - 0.4.106 wrote items in `{reagent_issues}` as links. A link takes about 110

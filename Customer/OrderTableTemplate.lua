@@ -191,17 +191,19 @@ HironCraftScanCrafterTableCellItemNameMixin = CreateFromMixins(TableBuilderCellM
 
 function HironCraftScanCrafterTableCellItemNameMixin:Populate(rowData, dataIndex)
     local response = HironCraftScan.OrderToResponse(rowData.order);
+    -- A request for what was already delivered once says so after its name.
+    local recraft = response.recraft and (' |cffffd100' .. L('(recraft)') .. '|r') or ''
 
     if response.generic_request then
         self.Icon:SetTexture(HironCraftScan.Utils.GetCurrentProfessionIcon() or 4620670)
-        self.Text:SetText('|cffffd100' .. L('General crafting request') .. '|r')
+        self.Text:SetText('|cffffd100' .. L('General crafting request') .. '|r' .. recraft)
         return
     end
 
     if not response.itemID then
         self.Icon:SetTexture(C_TradeSkillUI.GetTradeSkillTexture(response.professionID))
         self.Text:SetText(HironCraftScan.Utils.ColorizeProfessionName(response.parentProfID,
-            response.equipmentLabel or response.professionName))
+            response.equipmentLabel or response.professionName) .. recraft)
         return
     end
 
@@ -216,7 +218,7 @@ function HironCraftScanCrafterTableCellItemNameMixin:Populate(rowData, dataIndex
 
         local qualityColor = item:GetItemQualityColor().color;
         local itemName = qualityColor:WrapTextInColorCode(item:GetItemName());
-        self.Text:SetText(itemName);
+        self.Text:SetText(itemName .. recraft);
     end);
 end
 

@@ -628,6 +628,31 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
         end
 
+        -- What was delivered to them lately, to ask for again: a customer
+        -- with the wrong stats comes back for a recraft after the row of the
+        -- order has left the list.
+        do
+            local scanner = HironCraftScan.Scanner
+            local deliveries = scanner and scanner.RecentDeliveries and scanner.RecentDeliveries(target) or {}
+            for _, delivery in ipairs(deliveries) do
+                local recraftButton = matchMenu:CreateButton(
+                    (foldMatching and '' or prefix) .. string.format(L('Recraft: %s'), scanner.DeliveryLabel(delivery)),
+                    function()
+                        local quiet = IsQuietPick()
+                        scanner.RequestRecraft(delivery, { quiet = quiet, battleNet = isBattleNet }, function(response)
+                            if quiet then MarkQuietRowGreeted(response) end
+                            HironCraftScanCraftingOrderPage:ShowGeneric()
+                        end)
+                    end)
+                if recraftButton and recraftButton.SetTooltip then
+                    recraftButton:SetTooltip(function(tooltip)
+                        GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Recraft menu help')))
+                        QuietTooltip(tooltip)
+                    end)
+                end
+            end
+        end
+
         do
             local lineID = contextData.lineID
             if type(lineID) == 'string' then
