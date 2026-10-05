@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A slot named beside a linked item (0.4.109)
+
+- `neeed to craft [Thalassian Competitor's Signet] and the neck` made a row
+  for the signet only: a message with an item link was answered by its links
+  alone, and the words beside them were never read. Now the text outside the
+  links is read for slots as well, and every slot it names gets its own row
+  (`Neck`), greeted together with the linked items and shared with a linked
+  account as one request.
+- Not counted as another request: the slot the linked item fills itself
+  (`LF [Signet] ring` is one row) and a slot word inside an item's name.
+- An armor slot named beside a link (`[Signet] and wrist`) still needs the
+  customer's class, like a slot named alone: its row is added once the class
+  is known.
+
 ## Recraft requests (0.4.108)
 
 A customer who got their order often comes back for a recraft: wrong stats,

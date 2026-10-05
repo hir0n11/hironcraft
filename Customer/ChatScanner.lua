@@ -833,6 +833,34 @@ local function DescribedProfessions(message)
     return described
 end
 
+-- The slots a message names beside its item links: "[Signet] and the neck"
+-- asks for a neck too. The links and names in brackets are left out first (a
+-- "Signet" in a name is not a request for a ring), and so is a slot that a
+-- linked item fills itself ("LF [Signet] ring"). Returns the requests, the
+-- text they were read from, and whether an armor slot waits for the
+-- customer's class.
+local function EquipmentBesideItems(message, itemMatches, customer, customerGuid, overrides, hasKeywords)
+    local matching = HironCraftScan.ClassMatching
+    if not matching or not matching.GetContext or not matching.GetRequests then return nil end
+    local rest = message:gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|cn[%w_]+:', '')
+        :gsub('|H[^|]*|h.-|h', ' '):gsub('|+[Aa]:[^|]*|+[Aa]', ' '):gsub('|r', ''):gsub('%b[]', ' ')
+    if not rest:find('%a') then return nil end
+    local existing = HironCraftScan.DB.customers and HironCraftScan.DB.customers[customer]
+    local context = matching.GetContext(rest, customerGuid or (existing and existing.guid),
+        HironCraftScanComm.applying_remote_state and overrides and overrides.customerClass,
+        { noTypos = not hasKeywords })
+    if not context then return nil end
+    local kept = {}
+    for _, request in ipairs(matching.GetRequests(context) or {}) do
+        local covered = false
+        for _, match in ipairs(itemMatches) do
+            if match.itemID and matching.MatchesItem(request, match.itemID) then covered = true end
+        end
+        if not covered then kept[#kept + 1] = request end
+    end
+    return #kept > 0 and kept or nil, rest, context.unknownClass or nil
+end
+
 local function GetCrafterForMessage(customer, message, overrides, customerGuid)
     local originalMessage = message
     message = string.lower(message)
@@ -873,8 +901,12 @@ local function GetCrafterForMessage(customer, message, overrides, customerGuid)
             and not (HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)) then
         end
 
-        if #itemMatches > 0 then
+        -- A slot that is being routed (see HandleItemBatch) is not answered
+        -- with an item the text happens to name.
+        if #itemMatches > 0 and not (overrides and overrides.equipmentRequest) then
             local first = itemMatches[1]
+            itemMatches.equipmentRequests, itemMatches.equipmentText, itemMatches.classPending =
+                EquipmentBesideItems(originalMessage, itemMatches, customer, customerGuid, overrides, hasKeywords)
             return first.crafterInfo, first.itemID, first.recipeInfo, itemMatches
         end
     end
@@ -2113,6 +2145,30 @@ local function HandleItemBatch(message, customer, matches, overrides, event)
             tokens[id] = response.requestToken
         end
     end
+    -- "[Signet] and the neck": the slots named beside the links, a row each,
+    -- answered together with the items.
+    for _, request in ipairs(matches.equipmentRequests or {}) do
+        local options = {}
+        for key, value in pairs(overrides or {}) do options[key] = value end
+        options.equipmentRequest = request
+        -- The links already made the message a request: the slot needs no LF.
+        options.genericFollowup = true
+        options.deferItemBatch = true
+        options.suppressBatchAlert = (overrides and overrides.suppressBatchAlert) or #responses > 0
+        options.chatHistoryAlreadyStored = options.chatHistoryAlreadyStored or #responses > 0
+        local crafter = GetCrafterForMessage(customer, matches.equipmentText or message, options)
+        if crafter then
+            local id = 'equipment:' .. crafter.profID .. ':' .. request.key
+            if overrides and type(overrides.requestTokens) == 'table' then
+                options.requestToken = overrides.requestTokens[id]
+            end
+            local response = handleResponse(message, customer, crafter, nil, nil, nil, options, event)
+            if response then
+                responses[#responses + 1] = response
+                tokens[response.responseID] = response.requestToken
+            end
+        end
+    end
     if #responses == 0 then return end
     HironCraftScan.GroupOrderGreetings(responses)
     HironCraftScanCraftingOrderPage:ShowGeneric()
@@ -2835,7 +2891,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         return false
     end
 
-    if itemMatches and #itemMatches > 1 then
+    if itemMatches and (#itemMatches > 1 or itemMatches.equipmentRequests or itemMatches.classPending) then
+        -- An armor slot named beside the links may still wait for the
+        -- customer's class: look again once it is known.
+        if itemMatches.classPending then RetryOnceClassIsKnown() end
         -- Load every base-item link before creating/sending the group. This is
         -- the same cache boundary as the single-item path below.
         local function Continue()

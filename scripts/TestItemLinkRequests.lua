@@ -1733,6 +1733,41 @@ assert(countRows()==5 and response(211) and not response(ringID) and response(ne
 assert(#sent==0,'exact jewelry/trinket link sent automatically')
 reset();scan('need tailoring trinket')
 assert(countRows()==0,'unsupported explicit trinket profession produced a row')
+-- A slot named beside a linked item is asked for too: "[Signet] and the neck".
+reset()
+scan('neeed to craft ' .. link(1211) .. ' and the neck')
+assert(countRows()==2 and response(211) and response(neckID), 'the slot named beside a linked item made no row')
+assert(not response(ringID), 'the linked item was also taken for its own slot')
+assert(response(neckID).crafterFullName=='Jewel-Realm' and not response(neckID).itemID, 'the slot row is not a jeweler\'s slot')
+assert(#sent==0, 'a link with a slot sent something by itself')
+do
+    -- Both go to the linked account as one request, each with its own token.
+    local tokens=shared[#shared][7]
+    assert(type(tokens)=='table' and tokens[211]==response(211).requestToken
+        and tokens[neckID]==response(neckID).requestToken, 'the item and the slot were not shared together')
+    -- And are answered together.
+    local group=response(211).greetingGroup
+    assert(type(group)=='table' and #group==2, 'the item and the slot are not greeted together')
+end
+-- The same message again is the same two rows.
+scan('neeed to craft ' .. link(1211) .. ' and the neck')
+assert(countRows()==2, 'a repeated message added rows')
+-- The slot of the linked item itself is not another request, and a slot word
+-- inside an item's name is no request at all.
+reset()
+scan('need ' .. link(1211) .. ' ring')
+assert(countRows()==1 and response(211) and not response(ringID), 'the linked ring also asked for a ring')
+reset()
+scan('need |cffa335ee|Hitem:1211:0|h[Signet of the Neck]|h|r')
+assert(countRows()==1 and response(211) and not response(neckID), 'a word in an item\'s name was read as a slot')
+-- Several links and a slot.
+reset()
+scan('need ' .. link(1211) .. ' ' .. link(1213) .. ' and neck')
+assert(countRows()==3 and response(211) and response(213) and response(neckID), 'two links and a slot are not three rows')
+-- A link alone is still one row.
+reset()
+scan('need ' .. link(1211))
+assert(countRows()==1 and response(211), 'a link alone changed')
 -- A conversation that is already about an order: "dagger for Favu, wrist for
 -- ? and ring for ?" asks for more items without saying LF again.
 reset()
