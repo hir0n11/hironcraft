@@ -227,6 +227,66 @@ assert(not panel.selectAllOrdersButton:IsVisible(), 'knowledge and select-all bu
 assert(panel.queueActions:GetHeight() == 64 and panel.clearSelectedButton.anchors.TOPLEFT[1] == panel.selectAllButton,
     'Patron sidebar retained the vacated knowledge/shopping rows')
 assert(panel.clearSelectedButton:GetWidth() == panel.selectAllButton:GetWidth(), 'Clear no longer fills the sidebar row')
+-- The profession's expansions above the toolbar: patron orders are one
+-- expansion's at a time, and the sidebar's choice is hidden when collapsed.
+do
+    local switch = panel.expansionSwitch
+    assert(switch and switch:GetParent() == page, 'no expansion buttons in the list toolbar')
+    assert(not switch:IsVisible(), 'expansion buttons with nothing to switch to')
+    assert(switch.anchors.BOTTOMRIGHT[1] == panel.collapseButton and switch.anchors.BOTTOMRIGHT[2] == 'TOPRIGHT',
+        'the expansion buttons are not above the toolbar\'s right end')
+    local offered, minimum = { E.EXPANSION_OPTIONS[1], E.EXPANSION_OPTIONS[2] }, nil
+    local currentKey, picked, styled = 'midnight', {}, {}
+    local realStyle = CO.StyleWidget
+    CO.StyleWidget = function(self, widget, isSelected)
+        styled[widget] = isSelected and true or false
+        return realStyle(self, widget, isSelected)
+    end
+    CO.GetAvailableProfessionExpansions = function(_, _, minExpansionID) minimum = minExpansionID; return offered end
+    CO.SyncSelectedProfessionExpansionFromBlizzard = noop
+    CO.GetSelectedProfessionExpansionKey = function() return currentKey end
+    CO.SetSelectedProfessionExpansionKey = function(_, key) picked[#picked + 1] = key; currentKey = key; return true end
+    CO:UpdateTabActionButton(page)
+    local midnight, tww, df = switch.buttons.midnight, switch.buttons.tww, switch.buttons.df
+    assert(switch:IsVisible() and midnight:IsVisible() and tww:IsVisible() and not df:IsVisible(),
+        'the Patron tab does not offer its expansions')
+    assert(minimum == E.EXPANSION_TWW, 'expansions without patron orders are offered')
+    assert(midnight.text.text == 'Midnight' and tww.text.text == 'TWW', 'the buttons are not named by expansion')
+    assert(midnight.anchors.LEFT[3] == 0 and tww.anchors.LEFT[3] == 76 and switch.w == 148,
+        'the buttons are not laid out side by side')
+    assert(styled[midnight] == true and styled[tww] == false, 'the expansion on screen is not marked')
+    -- A click switches; a click on the one on screen does not.
+    tww:Click()
+    assert(#picked == 1 and picked[1] == 'tww', 'a click did not switch the expansion')
+    assert(styled[tww] == true and styled[midnight] == false, 'the mark did not follow the switch')
+    tww:Click()
+    assert(#picked == 1, 'the expansion on screen was selected again')
+    -- Only on the Patron tab, and only with something to switch to.
+    page.orderType = Enum.CraftingOrderType.Personal
+    CO:UpdateTabActionButton(page)
+    assert(not switch:IsVisible(), 'expansion buttons on the Personal tab')
+    page.orderType = Enum.CraftingOrderType.Npc
+    offered = { E.EXPANSION_OPTIONS[1] }
+    CO:UpdateTabActionButton(page)
+    assert(not switch:IsVisible(), 'expansion buttons for a single expansion')
+    -- Switched off in the settings, and on again.
+    offered = { E.EXPANSION_OPTIONS[1], E.EXPANSION_OPTIONS[2] }
+    PT.config = { showExpansionSwitchOrders = false }
+    CO:UpdateExpansionSwitch(page)
+    assert(not switch:IsVisible(), 'expansion buttons are shown though switched off')
+    PT.config.showExpansionSwitchOrders = true
+    CO:UpdateExpansionSwitch(page)
+    assert(switch:IsVisible(), 'expansion buttons did not come back')
+    PT.config = nil
+    offered = { E.EXPANSION_OPTIONS[1], E.EXPANSION_OPTIONS[2], E.EXPANSION_OPTIONS[3] }
+    CO:UpdateExpansionSwitch(page)
+    assert(switch:IsVisible() and df:IsVisible() and df.anchors.LEFT[3] == 152 and switch.w == 224, 'a third expansion has no place')
+    CO.StyleWidget = realStyle
+    CO.GetAvailableProfessionExpansions, CO.SyncSelectedProfessionExpansionFromBlizzard = nil, nil
+    CO.GetSelectedProfessionExpansionKey, CO.SetSelectedProfessionExpansionKey = nil, nil
+    CO:UpdateTabActionButton(page)
+    assert(not switch:IsVisible())
+end
 local knowledgeCalls, shoppingCalls = 0, 0
 CO.QueueWorkOrdersSelection = function(_, knowledgeOnly)
     assert(knowledgeOnly == true, 'knowledge button lost its profit-independent selection mode')

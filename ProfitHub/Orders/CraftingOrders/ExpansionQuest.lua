@@ -195,6 +195,36 @@ function CO:SetSelectedProfessionExpansionKey(key, owner)
     return self:SelectProfessionExpansion(GetExpansionOptionByKey(key), owner)
 end
 
+-- The expansions of the open profession that this character has, the newest
+-- first, from minExpansionID on (patron orders begin with TWW). The game's
+-- own list of the profession's expansions says which are learned; without it
+-- every expansion the profession has is offered.
+function CO:GetAvailableProfessionExpansions(pageFrame, minExpansionID)
+    local profession = self:GetActiveBaseProfessionID(pageFrame)
+    local learned
+    if C_TradeSkillUI and type(C_TradeSkillUI.GetChildProfessionInfos) == "function" then
+        local ok, infos = pcall(C_TradeSkillUI.GetChildProfessionInfos)
+        if ok and type(infos) == "table" and #infos > 0 then
+            learned = {}
+            for _, info in ipairs(infos) do
+                local skillLineID = type(info) == "table" and tonumber(info.professionID)
+                -- An expansion that was never trained has no skill to gain.
+                if skillLineID and (tonumber(info.maxSkillLevel) or 1) > 0 then learned[skillLineID] = true end
+            end
+        end
+    end
+
+    local available = {}
+    for _, option in ipairs(EXPANSION_OPTIONS) do
+        local skillLineID = GetExpansionSkillLineIDForProfession(profession, option.expansionID)
+        if skillLineID and (not minExpansionID or option.expansionID >= minExpansionID)
+            and (not learned or learned[skillLineID]) then
+            available[#available + 1] = option
+        end
+    end
+    return available
+end
+
 function IsQuestCompletedForWeeklyIndicator(questID)
     questID = tonumber(questID)
     if not questID or not C_QuestLog or type(C_QuestLog.IsQuestFlaggedCompleted) ~= "function" then

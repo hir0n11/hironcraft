@@ -1883,6 +1883,9 @@ function CO:UpdateControlPanel()
         self:SyncSelectedProfessionExpansionFromBlizzard(panel.pageFrame or self.activePageFrame)
         panel.expansionButton.text:SetText(self:GetSelectedProfessionExpansionLabel())
     end
+    if self.UpdateExpansionSwitch then
+        self:UpdateExpansionSwitch(panel.pageFrame or self.activePageFrame)
+    end
 
     if self.UpdateShoppingCostText then
         self:UpdateShoppingCostText()

@@ -3,7 +3,9 @@ if not PT then return end
 
 -- A bar on the Specializations page: knowledge points earned out of what the
 -- whole profession takes. The solid part is spent, the pale part is earned
--- and not spent yet.
+-- and not spent yet. To its left, a button for each expansion of the
+-- profession that has specializations: the game shows one expansion's trees
+-- at a time and changes it only by the dropdown on the recipe page.
 local KB = {}
 PT.KnowledgeBar = KB
 
@@ -85,9 +87,38 @@ function KB.Text(spent, unspent, total)
     return string.format("%s  %d / %d", label, spent + unspent, total)
 end
 
+-- The expansions of the open profession that have specializations, the newest
+-- first: the game's own entries, as that dropdown has them.
+function KB.Expansions()
+    local choices = {}
+    if not (C_TradeSkillUI and C_ProfSpecs) then return choices end
+    local infos = Call(C_TradeSkillUI.GetChildProfessionInfos)
+    for _, info in ipairs(type(infos) == "table" and infos or {}) do
+        local skillLineID = type(info) == "table" and tonumber(info.professionID)
+        if skillLineID and Call(C_ProfSpecs.SkillLineHasSpecialization, skillLineID) == true then
+            choices[#choices + 1] = info
+        end
+    end
+    table.sort(choices, function(a, b) return tonumber(a.professionID) > tonumber(b.professionID) end)
+    return choices
+end
+
+-- Takes the profession to another of its expansions the way the dropdown
+-- does. True when the game was told.
+function KB.SelectExpansion(info)
+    if type(info) ~= "table" or not info.professionID then return false end
+    if EventRegistry and type(EventRegistry.TriggerEvent) == "function" then
+        if pcall(EventRegistry.TriggerEvent, EventRegistry, "Professions.SelectSkillLine", info) then return true end
+    end
+    if C_TradeSkillUI and type(C_TradeSkillUI.SetProfessionChildSkillLineID) == "function" then
+        return (pcall(C_TradeSkillUI.SetProfessionChildSkillLineID, info.professionID))
+    end
+    return false
+end
+
 if not CreateFrame then return end
 
-local driver, holder, spentBar, earnedBar, label
+local driver, holder, spentBar, earnedBar, label, switch
 local dirty = true
 
 function KB.Refresh()
@@ -95,6 +126,7 @@ function KB.Refresh()
     if not holder or not page then return end
     local skillLineID = page.GetProfessionID and page:GetProfessionID()
     local configID = page.GetConfigID and page:GetConfigID()
+    KB.RefreshSwitch(skillLineID)
     local spent, unspent, total = KB.Count(skillLineID, configID)
     if not spent then
         holder:Hide()
@@ -110,6 +142,74 @@ end
 
 local function MarkDirty()
     dirty = true
+end
+
+local function SwitchTip(owner)
+    local tooltip = PT.Tooltip
+    if not tooltip then return end
+    tooltip:Clear()
+    tooltip:AddLine(PT.L and PT.L["EXPANSION_SWITCH_TITLE"] or "Specializations of another expansion", 13, 1, 0.82, 0.35)
+    tooltip:AddLine(PT.L and PT.L["EXPANSION_SWITCH_TIP"]
+        or "Switches the profession to that expansion, like the dropdown on the recipe page, and shows its specializations and knowledge points.",
+        11, 0.85, 0.85, 0.85)
+    tooltip:ShowCursorRightOrBelow()
+end
+
+local function SwitchButton(index)
+    local button = switch.buttons[index]
+    if button then return button end
+    button = CreateFrame("Button", nil, switch, "UIPanelButtonTemplate")
+    button:SetSize(60, 20)
+    button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local font = PT.FONT or button.label:GetFont()
+    if font then button.label:SetFont(font, 11, "") end
+    button.label:SetPoint("CENTER", 0, 0)
+    button:SetScript("OnClick", function(self)
+        if self.info and not self.selected then KB.SelectExpansion(self.info) end
+        MarkDirty()
+    end)
+    button:SetScript("OnEnter", SwitchTip)
+    button:SetScript("OnLeave", function()
+        if PT.Tooltip then PT.Tooltip:Clear() end
+    end)
+    switch.buttons[index] = button
+    return button
+end
+
+-- The buttons beside the bar, with the expansion on screen marked. Nothing is
+-- shown for a profession that has specializations in one expansion only, or
+-- when the buttons are switched off in the settings.
+function KB.RefreshSwitch(current)
+    if not switch then return end
+    -- Switched off in the settings ("Expansion buttons: specializations").
+    local choices = (PT.config and PT.config.showExpansionSwitchSpec == false) and {} or KB.Expansions()
+    if #choices < 2 then
+        switch:Hide()
+        return
+    end
+    current = tonumber(current)
+        or tonumber(C_TradeSkillUI and Call(C_TradeSkillUI.GetProfessionChildSkillLineID))
+    local x = 0
+    for index, info in ipairs(choices) do
+        local button = SwitchButton(index)
+        button.info, button.selected = info, tonumber(info.professionID) == current
+        button.label:SetText(info.expansionName or info.professionName or tostring(info.professionID))
+        local width = math.max(60, math.floor((button.label.GetStringWidth and button.label:GetStringWidth() or 0) + 20))
+        button:SetWidth(width)
+        button:ClearAllPoints()
+        button:SetPoint("LEFT", switch, "LEFT", x, 0)
+        -- The expansion on screen is gold, the others are white.
+        if button.selected then
+            button.label:SetTextColor(1, 0.82, 0)
+        else
+            button.label:SetTextColor(1, 1, 1)
+        end
+        button:Show()
+        x = x + width + 4
+    end
+    for index = #choices + 1, #switch.buttons do switch.buttons[index]:Hide() end
+    switch:SetWidth(x - 4)
+    switch:Show()
 end
 
 local function NewBar(parent, color, level)
@@ -159,6 +259,14 @@ local function Build()
     font = PT.FONT or font
     if font then label:SetFont(font, 11, "OUTLINE") end
     holder:Hide()
+
+    -- To the left of the bar, in the same strip.
+    switch = CreateFrame("Frame", nil, driver)
+    switch:SetSize(10, 20)
+    switch:SetPoint("TOPRIGHT", page, "TOPRIGHT", -16 - WIDTH - 10, -32)
+    switch:SetFrameLevel(level)
+    switch.buttons = {}
+    switch:Hide()
 
     for _, event in ipairs({
         "TRAIT_NODE_CHANGED", "TRAIT_TREE_CURRENCY_INFO_UPDATED", "TRAIT_CONFIG_UPDATED",

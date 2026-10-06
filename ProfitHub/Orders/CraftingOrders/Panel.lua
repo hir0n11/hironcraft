@@ -1265,12 +1265,14 @@ function CO:EnsureControlPanel(pageFrame)
             if self.controlPanel.collapseButton then self.controlPanel.collapseButton:Hide() end
             if self.controlPanel.knowledgeButton then self.controlPanel.knowledgeButton:Hide() end
             if self.controlPanel.shopButton then self.controlPanel.shopButton:Hide() end
+            if self.controlPanel.expansionSwitch then self.controlPanel.expansionSwitch:Hide() end
         end
         if pageFrame and pageFrame.ahuiCraftingOrdersPanel then
             pageFrame.ahuiCraftingOrdersPanel:Hide()
             if pageFrame.ahuiCraftingOrdersPanel.collapseButton then pageFrame.ahuiCraftingOrdersPanel.collapseButton:Hide() end
             if pageFrame.ahuiCraftingOrdersPanel.knowledgeButton then pageFrame.ahuiCraftingOrdersPanel.knowledgeButton:Hide() end
             if pageFrame.ahuiCraftingOrdersPanel.shopButton then pageFrame.ahuiCraftingOrdersPanel.shopButton:Hide() end
+            if pageFrame.ahuiCraftingOrdersPanel.expansionSwitch then pageFrame.ahuiCraftingOrdersPanel.expansionSwitch:Hide() end
         end
         return
     end
@@ -1585,6 +1587,36 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.knowledgeButton:SetScript("OnLeave", HideStyledTooltip)
 
+    -- The profession's expansions, above the same toolbar: patron orders are
+    -- those of one expansion at a time, and the choice in the sidebar is out
+    -- of reach while the sidebar is collapsed.
+    panel.expansionSwitch = CreateFrame("Frame", nil, pageFrame)
+    panel.expansionSwitch:SetSize(10, 20)
+    panel.expansionSwitch:SetPoint("BOTTOMRIGHT", panel.collapseButton, "TOPRIGHT", 0, 8)
+    panel.expansionSwitch:SetFrameLevel(panel:GetFrameLevel())
+    panel.expansionSwitch.buttons = {}
+    for _, option in ipairs(EXPANSION_OPTIONS) do
+        local key = option.key
+        local button = self:CreateTextButton(panel.expansionSwitch, nil, 72, 20, T(option.labelKey, option.fallback))
+        button.expansionKey = key
+        button:SetScript("OnClick", function(self2)
+            if CO:GetSelectedProfessionExpansionKey() ~= key then
+                CO:SetSelectedProfessionExpansionKey(key, self2)
+            end
+            CO:UpdateExpansionSwitch(pageFrame)
+        end)
+        button:SetScript("OnEnter", function(self2)
+            if not Tooltip then return end
+            Tooltip:Clear()
+            Tooltip:AddLine(T("COA_EXPANSION_DROPDOWN_TITLE", "Profession expansion"), 13, 1, 0.82, 0.35)
+            Tooltip:AddLine(T("COA_EXPANSION_SWITCH_TIP", "Patron orders are shown for one expansion of the profession at a time. This switches the profession to that expansion, like the dropdown on the recipe page."), 11, 0.85, 0.85, 0.85)
+            ShowStyledTooltip(self2)
+        end)
+        button:SetScript("OnLeave", HideStyledTooltip)
+        panel.expansionSwitch.buttons[key] = button
+    end
+    panel.expansionSwitch:Hide()
+
     panel.selectAllOrdersButton = self:CreateTextButton(body, nil, ACTION_INNER, 22, T("COA_SELECT_ALL_TITLE", "Select all"))
     if panel.selectAllOrdersButton.text then ApplyFont(panel.selectAllOrdersButton.text, 12, "") end
     panel.selectAllOrdersButton:SetPoint("TOPLEFT", PADX, y)
@@ -1787,10 +1819,59 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateConflictBar(pageFrame)
 end
 
+-- The expansion buttons above the list's toolbar: on the Patron tab, when the
+-- character has the profession in more than one expansion with patron orders.
+-- The one the profession is in now is marked.
+function CO:UpdateExpansionSwitch(pageFrame)
+    local panel = self.controlPanel or (pageFrame and pageFrame.ahuiCraftingOrdersPanel)
+    local switch = panel and panel.expansionSwitch
+    if not switch then return end
+    pageFrame = pageFrame or panel.pageFrame or self.activePageFrame
+
+    local isPatron = pageFrame ~= nil and Enum and Enum.CraftingOrderType
+        and pageFrame.orderType == Enum.CraftingOrderType.Npc
+    local available = {}
+    -- They can be switched off in the settings ("Expansion buttons: patron orders").
+    local wanted = not (PT.config and PT.config.showExpansionSwitchOrders == false)
+    if wanted and isPatron and self:IsEnabled() and self:IsOrderListOpen(pageFrame)
+        and self.GetAvailableProfessionExpansions then
+        available = self:GetAvailableProfessionExpansions(pageFrame, EXPANSION_TWW)
+    end
+    if #available < 2 then
+        switch:Hide()
+        return
+    end
+
+    if self.SyncSelectedProfessionExpansionFromBlizzard then
+        self:SyncSelectedProfessionExpansionFromBlizzard(pageFrame)
+    end
+    local current = self.GetSelectedProfessionExpansionKey and self:GetSelectedProfessionExpansionKey()
+    local offered = {}
+    for _, option in ipairs(available) do offered[option.key] = true end
+    local width, gap, index = 72, 4, 0
+    for _, option in ipairs(EXPANSION_OPTIONS) do
+        local button = switch.buttons[option.key]
+        if button then
+            if offered[option.key] then
+                button:ClearAllPoints()
+                button:SetPoint("LEFT", switch, "LEFT", index * (width + gap), 0)
+                button:Show()
+                self:StyleWidget(button, option.key == current)
+                index = index + 1
+            else
+                button:Hide()
+            end
+        end
+    end
+    switch:SetWidth(index * width + (index - 1) * gap)
+    switch:Show()
+end
+
 function CO:UpdateTabActionButton(pageFrame)
     local panel = self.controlPanel or (pageFrame and pageFrame.ahuiCraftingOrdersPanel)
     if not panel then return end
     pageFrame = pageFrame or panel.pageFrame or self.activePageFrame
+    self:UpdateExpansionSwitch(pageFrame)
 
     local isPatron = pageFrame ~= nil and Enum and Enum.CraftingOrderType
         and pageFrame.orderType == Enum.CraftingOrderType.Npc

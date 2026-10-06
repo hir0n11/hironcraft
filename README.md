@@ -25,6 +25,26 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Expansion buttons (0.4.110)
+
+The game shows one expansion of a profession at a time and changes it only
+by the dropdown on the recipe page. Two places now have buttons for it:
+
+- **Patron orders.** On the Patron tab of the crafting orders, above
+  `Shopping` / `Queue: knowledge`: a button for each expansion with patron
+  orders (`Midnight`, `TWW`) that the character has trained. The one on
+  screen is marked; a click switches the profession to the other and the
+  list follows. It is the same switch as the button in the sidebar, which
+  is out of reach while the sidebar is collapsed. Shown only when there is
+  more than one such expansion.
+- **Specializations.** On the Specializations page, to the left of the
+  knowledge points bar: a button for each expansion of the profession that
+  has specializations, named as the game names them (`Midnight`, `Khaz
+  Algar`, `Dragon Isles`). The trees and the knowledge bar follow.
+- Both can be switched off in the settings, under `Additional modules`:
+  `Expansion buttons: patron orders` and `Expansion buttons:
+  specializations`.
+
 ## A slot named beside a linked item (0.4.109)
 
 - `neeed to craft [Thalassian Competitor's Signet] and the neck` made a row
