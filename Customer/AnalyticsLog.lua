@@ -72,15 +72,17 @@ function M.Root()
     return analytics
 end
 
--- On unless switched off (the old chat counter was opt-in).
+-- On unless switched off in the settings, for every character of the
+-- account (settings.gather_analytics; the realm's own flag is retired).
 function M.IsEnabled()
-    local analytics = Scan.DB and Scan.DB.analytics
-    return type(analytics) == 'table' and analytics.enabled ~= false
+    local db = Scan.DB
+    if not db or type(db.analytics) ~= 'table' then return false end
+    return not (db.settings and db.settings.gather_analytics == false)
 end
 
 function M.SetEnabled(on)
     if not on and M.StopPresence then M.StopPresence() end
-    Scan.DB.analytics.enabled = on and true or false
+    Scan.DB.settings.gather_analytics = on and true or false
     if on and M.StartPresence then M.StartPresence() end
 end
 
@@ -796,17 +798,14 @@ function M.UntippedCustomers()
     return names
 end
 
--- Gathering is on by default. The old chat counter was opt-in, and an
--- account switched off back then kept its greetings out of the combined
--- picture unnoticed: it is switched on once. Unticked by hand after that, it
--- stays off.
+-- Gathering is on by default. Until 0.4.115 its switch was a checkbox in the
+-- analytics window, kept per realm, and before that the chat counter was
+-- opt-in: what they left is dropped, so the one switch in the settings starts
+-- switched on. Unticked there, it stays off.
 function M.Startup()
     local analytics = Scan.DB and Scan.DB.analytics
     if type(analytics) ~= 'table' then return end
-    if analytics.default_on ~= 1 then
-        analytics.enabled = nil
-        analytics.default_on = 1
-    end
+    analytics.enabled, analytics.default_on = nil, nil
     if M.IsEnabled() and M.Root() then
         pcall(M.Backfill)
         if analytics.untipped_silver ~= 1 and Scan.Generous and Scan.Generous.MarkUntipped then

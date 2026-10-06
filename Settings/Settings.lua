@@ -496,6 +496,22 @@ HironCraftScan.Utils.onLoad(function()
         local initializer = Settings.CreateCheckbox(category, setting, L('Fit windows to the screen tooltip'))
         initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
     end
+    do
+        local setting = Settings.RegisterProxySetting(
+            category,
+            'HIRONCRAFT_SCAN_GATHER_ANALYTICS',
+            Settings.VarType.Boolean,
+            L('Collect analytics data'),
+            true,
+            function() return HironCraftScan.AnalyticsLog.IsEnabled() end,
+            function(value)
+                HironCraftScan.AnalyticsLog.SetEnabled(value)
+                if HironCraftScan.AnalyticsWindow then HironCraftScan.AnalyticsWindow.GatheringChanged() end
+            end
+        )
+        local initializer = Settings.CreateCheckbox(category, setting, L('Collect analytics data tooltip'))
+        initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
+    end
     if CreateSettingsButtonInitializer then
         local initializer = CreateSettingsButtonInitializer(L('Chat filter'), L('Open'), function()
             if HironCraftScan.ChatFilterWindow then HironCraftScan.ChatFilterWindow.Show() end

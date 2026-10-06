@@ -312,14 +312,28 @@ for _, event in ipairs(Scan.DB.analytics.open.events) do if event.q then own = o
 assert(own == 4, 'a received result was taken in as our own: ' .. own)
 print('Analytics backfill passed.')
 
--- Switched off in the old opt-in days: on once, then a later untick stays.
+-- On by default. The switch of the analytics window (per realm, off in the
+-- old opt-in days) is retired: what it left does not switch gathering off.
+-- Switched off in the settings, it stays off, on every realm of the account.
 Scan.DB = newDB()
-Scan.DB.analytics.enabled = false
+assert(Log.IsEnabled(), 'gathering is not on by default')
+Scan.DB.analytics.enabled, Scan.DB.analytics.default_on = false, 1
+assert(Log.IsEnabled(), 'the retired switch of the window still stops gathering')
 Log.Startup()
-assert(Log.IsEnabled() and Scan.DB.analytics.default_on == 1, 'gathering was not switched on by default')
+assert(Log.IsEnabled() and Scan.DB.analytics.enabled == nil and Scan.DB.analytics.default_on == nil,
+    'the retired switch was not dropped')
 Log.SetEnabled(false)
+assert(Scan.DB.settings.gather_analytics == false and Scan.DB.analytics.enabled == nil, 'the switch is not kept in the settings')
 Log.Startup()
-assert(not Log.IsEnabled(), 'an untick by hand did not stay')
+assert(not Log.IsEnabled(), 'switched off in the settings, it did not stay off')
+local otherRealm = newDB()
+otherRealm.settings = Scan.DB.settings
+Scan.DB = otherRealm
+assert(not Log.IsEnabled(), 'the switch is not shared by the realms of the account')
+Log.SetEnabled(true)
+assert(Log.IsEnabled() and Scan.DB.settings.gather_analytics == true, 'it cannot be switched on again')
+Scan.DB = { settings = {} }
+assert(not Log.IsEnabled(), 'gathering without a place to keep it')
 print('Analytics default on passed.')
 
 -- Once: silver for customers whose delivered orders carry no tip.
@@ -386,13 +400,13 @@ assert(Sync.Older('0.4.9', '0.4.41') and not Sync.Older('0.4.41', '0.4.41') and 
     and Sync.Older('old', '0.4.41'))
 -- Gathering switched off over there: it says so instead of keeping quiet.
 said, timers = {}, {}
-dbB.analytics.enabled = false
+dbB.settings.gather_analytics = false
 as(dbA, function() Sync.SyncNow() end)
 deliver()
 local off = false
 for _, line in ipairs(said) do if line:find('gathering is off on other', 1, true) then off = true end end
 assert(off, 'a switched-off account was not reported: ' .. table.concat(said, ' | '))
-dbB.analytics.enabled = nil
+dbB.settings.gather_analytics = nil
 said, timers = {}, {}
 as(dbB, function() Log.Request('Bee-Realm', { requestToken = 'b9', itemID = 1001, time = now }) end)
 as(dbA, function() Sync.SyncNow() end)

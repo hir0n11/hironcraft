@@ -209,8 +209,11 @@ assert(frame.Toolbar.y==-138 and frame.Toolbar.height==22 and frame.Toolbar.widt
     'the toolbar is not below the metrics and above the chart')
 assert(frame.Search.parent==frame.Toolbar and frame.Search.anchor==frame.Toolbar
     and frame.ExportButton.parent==frame.Toolbar and frame.ExportButton.anchor==frame.Toolbar
-    and frame.SyncButton.anchor==frame.ExportButton and frame.GatherCheck.anchor==frame.Search,
+    and frame.SyncButton.anchor==frame.ExportButton,
     'search/actions still occupy the metrics row')
+-- Gathering is switched in the settings: no checkbox here, and no note while it is on.
+assert(rawget(frame, 'GatherCheck')==nil and not frame.GatherOffText:IsShown()
+    and frame.SyncText.points.LEFT.relative==frame.Search, 'the toolbar still carries the gathering switch')
 -- The hour's tooltip: the conversion of the greetings sent in it.
 local noon = frame.HourChart.bars[13].info
 assert(noon and noon.lines[5] == 'Conversion: 100% (1 / 1)', 'no hourly conversion: ' .. tostring(noon and noon.lines[5]))
@@ -786,12 +789,23 @@ Scan.AnalyticsSync.SyncNow = function() syncClicks = syncClicks + 1 end
 frame.SyncButton.scripts.OnClick(frame.SyncButton)
 assert(syncClicks==1, 'the relocated sync button does not respond')
 Scan.AnalyticsSync.SyncNow = originalSync
-frame.GatherCheck:SetChecked(false)
-frame.GatherCheck.scripts.OnClick(frame.GatherCheck)
-assert(not Log.IsEnabled(), 'the relocated collection checkbox cannot stop recording')
-frame.GatherCheck:SetChecked(true)
-frame.GatherCheck.scripts.OnClick(frame.GatherCheck)
-assert(Log.IsEnabled(), 'the relocated collection checkbox cannot resume recording')
+-- Switched off in the settings: the window says so, next to the search box.
+Log.SetEnabled(false)
+Scan.AnalyticsWindow.GatheringChanged()
+assert(frame.GatherOffText:IsShown() and frame.GatherOffText.text=='Data collection is off'
+    and frame.GatherOffText.anchor==frame.Search and frame.SyncText.points.LEFT.relative==frame.GatherOffText,
+    'the window does not say that gathering is off')
+Log.SetEnabled(true)
+Scan.AnalyticsWindow.GatheringChanged()
+assert(not frame.GatherOffText:IsShown() and frame.SyncText.points.LEFT.relative==frame.Search,
+    'the note stayed after gathering was switched on')
+-- And it is looked at again whenever the window opens.
+Log.SetEnabled(false)
+frame:Hide(); frame:Show()
+assert(frame.GatherOffText:IsShown(), 'a reopened window does not notice that gathering is off')
+Log.SetEnabled(true)
+frame:Hide(); frame:Show()
+assert(not frame.GatherOffText:IsShown(), 'a reopened window does not notice that gathering is on')
 print('Analytics single-row header passed (long values/labels, stable tabs, separate toolbar, manual actions).')
 
 -- Crafter pool profiles: the list on the toolbar picks and edits them.

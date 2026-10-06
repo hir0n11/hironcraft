@@ -937,14 +937,6 @@ local function UpgradePersistentConfig()
         end
     end
 
-    -- We used to be always on. Now that we want to support customers, it's
-    -- opt-in. This keeps it on for existing users.
-    if HironCraftScan.DB.analytics.enabled == nil then
-        if HironCraftScan.DB.analytics.seen_items and next(HironCraftScan.DB.analytics.seen_items) then
-            HironCraftScan.DB.analytics.enabled = true
-        end
-    end
-
     if HironCraftScan.DB.settings.discoverable == nil then
         HironCraftScan.DB.settings.discoverable = true
     end

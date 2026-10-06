@@ -1716,21 +1716,22 @@ local function Create()
     end)
     frame.Search = search
 
-    local gather = CreateFrame('CheckButton', nil, toolbar, 'UICheckButtonTemplate')
-    gather:SetSize(22, 22)
-    gather:SetPoint('LEFT', search, 'RIGHT', 16, 0)
-    gather.text = gather:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    gather.text:SetPoint('LEFT', gather, 'RIGHT', 2, 0)
-    gather.text:SetText(L('Gather Analytics'))
-    gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
-    gather:SetScript('OnClick', function(self) Scan.AnalyticsLog.SetEnabled(self:GetChecked()) end)
-    frame.GatherCheck = gather
+    -- Gathering is switched in the settings; here only a note while it is off.
+    frame.GatherOffText = toolbar:CreateFontString(nil, 'OVERLAY', 'GameFontRedSmall')
+    frame.GatherOffText:SetPoint('LEFT', search, 'RIGHT', 16, 0)
+    frame.GatherOffText:SetText(L('Data collection is off'))
 
     frame.SyncText = toolbar:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    frame.SyncText:SetPoint('LEFT', gather.text, 'RIGHT', 20, 0)
-    frame.SyncText:SetPoint('RIGHT', frame.ProfileDropdown or sync, 'LEFT', -16, 0)
     frame.SyncText:SetJustifyH('LEFT')
     frame.SyncText:SetWordWrap(false)
+    function frame.ShowGathering()
+        local off = not Scan.AnalyticsLog.IsEnabled()
+        frame.GatherOffText:SetShown(off)
+        frame.SyncText:ClearAllPoints()
+        frame.SyncText:SetPoint('LEFT', off and frame.GatherOffText or search, 'RIGHT', 16, 0)
+        frame.SyncText:SetPoint('RIGHT', frame.ProfileDropdown or sync, 'LEFT', -16, 0)
+    end
+    frame.ShowGathering()
 
 
     -- The tabs' contents.
@@ -1869,7 +1870,7 @@ local function Create()
     frame:SetScript('OnShow', function()
         -- Smaller than the game window when it has to be (tabs hang below).
         if Scan.Utils.FitFrame then Scan.Utils.FitFrame(frame, 20, 40) end
-        gather:SetChecked(Scan.AnalyticsLog.IsEnabled())
+        frame.ShowGathering()
         UpdateDateBoxes()
         SelectTab(View().tab or TAB_ITEMS)
         W.Reload()
@@ -1904,6 +1905,11 @@ function W.Toggle()
     else
         frame:Show()
     end
+end
+
+-- Gathering was switched in the settings.
+function W.GatheringChanged()
+    if frame and frame.ShowGathering then frame.ShowGathering() end
 end
 
 -- The fit-to-screen setting changed.

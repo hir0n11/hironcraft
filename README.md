@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Collecting analytics is a setting (0.4.115)
+
+The `Collect data` checkbox has left the toolbar of the analytics window. It
+is now `Collect analytics data` in the HironCraft settings (the page with the
+sounds and the chat filter), switched on by default.
+
+- It is one switch for the whole account now. It used to be kept per realm,
+  so it could be off on one realm unnoticed.
+- What the old checkbox left behind is dropped: an account that had it
+  unticked starts with collecting switched on once. Unticked in the
+  settings, it stays off.
+- While it is off, the analytics window says `Data collection is off
+  (settings)` next to the search box, and a linked account that asks for an
+  exchange is told where to switch it on.
+
 ## The reason of a decline, again (0.4.114)
 
 A customer who missed the reply about a declined order asks why it was
