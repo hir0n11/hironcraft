@@ -677,11 +677,12 @@ function UI:Create()
 
     -- The buttons that take the profession to another expansion: above the
     -- patron orders, and beside the knowledge bar on the Specializations page.
+    -- Off until switched on here.
     local cbExpansionOrders = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
     cbExpansionOrders:SetPoint("TOPLEFT", cbFirstCraft, "BOTTOMLEFT", 0, -8)
     cbExpansionOrders.text:SetText(L["Settings_ExpansionSwitchOrders"] or "Expansion buttons: patron orders")
     cbExpansionOrders.GetValue = function()
-        return PT.config.showExpansionSwitchOrders ~= false
+        return PT.config.showExpansionSwitchOrders == true
     end
     cbExpansionOrders:SetChecked(cbExpansionOrders.GetValue())
     self.checkboxes.showExpansionSwitchOrders = cbExpansionOrders
@@ -695,7 +696,7 @@ function UI:Create()
     cbExpansionSpec:SetPoint("TOPLEFT", cbExpansionOrders, "BOTTOMLEFT", 0, -8)
     cbExpansionSpec.text:SetText(L["Settings_ExpansionSwitchSpec"] or "Expansion buttons: specializations")
     cbExpansionSpec.GetValue = function()
-        return PT.config.showExpansionSwitchSpec ~= false
+        return PT.config.showExpansionSwitchSpec == true
     end
     cbExpansionSpec:SetChecked(cbExpansionSpec.GetValue())
     self.checkboxes.showExpansionSwitchSpec = cbExpansionSpec

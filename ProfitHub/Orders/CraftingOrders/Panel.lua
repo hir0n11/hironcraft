@@ -1819,9 +1819,10 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateConflictBar(pageFrame)
 end
 
--- The expansion buttons above the list's toolbar: on the Patron tab, when the
--- character has the profession in more than one expansion with patron orders.
--- The one the profession is in now is marked.
+-- The expansion buttons above the list's toolbar: on the Patron tab, when they
+-- are switched on in the settings and the character has the profession in
+-- more than one expansion with patron orders. The one the profession is in
+-- now is marked.
 function CO:UpdateExpansionSwitch(pageFrame)
     local panel = self.controlPanel or (pageFrame and pageFrame.ahuiCraftingOrdersPanel)
     local switch = panel and panel.expansionSwitch
@@ -1831,8 +1832,8 @@ function CO:UpdateExpansionSwitch(pageFrame)
     local isPatron = pageFrame ~= nil and Enum and Enum.CraftingOrderType
         and pageFrame.orderType == Enum.CraftingOrderType.Npc
     local available = {}
-    -- They can be switched off in the settings ("Expansion buttons: patron orders").
-    local wanted = not (PT.config and PT.config.showExpansionSwitchOrders == false)
+    -- Only when switched on in the settings ("Expansion buttons: patron orders").
+    local wanted = PT.config ~= nil and PT.config.showExpansionSwitchOrders == true
     if wanted and isPatron and self:IsEnabled() and self:IsOrderListOpen(pageFrame)
         and self.GetAvailableProfessionExpansions then
         available = self:GetAvailableProfessionExpansions(pageFrame, EXPANSION_TWW)

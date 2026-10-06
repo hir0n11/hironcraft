@@ -25,7 +25,7 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## Expansion buttons (0.4.110)
+## Expansion buttons (0.4.110, off by default since 0.4.111)
 
 The game shows one expansion of a profession at a time and changes it only
 by the dropdown on the recipe page. Two places now have buttons for it:
@@ -41,9 +41,9 @@ by the dropdown on the recipe page. Two places now have buttons for it:
   knowledge points bar: a button for each expansion of the profession that
   has specializations, named as the game names them (`Midnight`, `Khaz
   Algar`, `Dragon Isles`). The trees and the knowledge bar follow.
-- Both can be switched off in the settings, under `Additional modules`:
-  `Expansion buttons: patron orders` and `Expansion buttons:
-  specializations`.
+- Both are off until switched on in the settings, under `Additional
+  modules`: `Expansion buttons: patron orders` and `Expansion buttons:
+  specializations` (on by default in 0.4.110, off since 0.4.111).
 
 ## A slot named beside a linked item (0.4.109)
 

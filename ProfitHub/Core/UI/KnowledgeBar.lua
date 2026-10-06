@@ -3,9 +3,10 @@ if not PT then return end
 
 -- A bar on the Specializations page: knowledge points earned out of what the
 -- whole profession takes. The solid part is spent, the pale part is earned
--- and not spent yet. To its left, a button for each expansion of the
--- profession that has specializations: the game shows one expansion's trees
--- at a time and changes it only by the dropdown on the recipe page.
+-- and not spent yet. To its left, when switched on in the settings, a button
+-- for each expansion of the profession that has specializations: the game
+-- shows one expansion's trees at a time and changes it only by the dropdown
+-- on the recipe page.
 local KB = {}
 PT.KnowledgeBar = KB
 
@@ -178,11 +179,11 @@ end
 
 -- The buttons beside the bar, with the expansion on screen marked. Nothing is
 -- shown for a profession that has specializations in one expansion only, or
--- when the buttons are switched off in the settings.
+-- unless the buttons are switched on in the settings.
 function KB.RefreshSwitch(current)
     if not switch then return end
-    -- Switched off in the settings ("Expansion buttons: specializations").
-    local choices = (PT.config and PT.config.showExpansionSwitchSpec == false) and {} or KB.Expansions()
+    -- Only when switched on in the settings ("Expansion buttons: specializations").
+    local choices = (PT.config and PT.config.showExpansionSwitchSpec == true) and KB.Expansions() or {}
     if #choices < 2 then
         switch:Hide()
         return

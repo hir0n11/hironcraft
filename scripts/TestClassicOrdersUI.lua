@@ -246,6 +246,13 @@ do
     CO.SyncSelectedProfessionExpansionFromBlizzard = noop
     CO.GetSelectedProfessionExpansionKey = function() return currentKey end
     CO.SetSelectedProfessionExpansionKey = function(_, key) picked[#picked + 1] = key; currentKey = key; return true end
+    -- Off until switched on in the settings.
+    CO:UpdateTabActionButton(page)
+    assert(not switch:IsVisible(), 'expansion buttons are shown without being switched on')
+    PT.config = {}
+    CO:UpdateTabActionButton(page)
+    assert(not switch:IsVisible(), 'expansion buttons are shown by default')
+    PT.config = { showExpansionSwitchOrders = true }
     CO:UpdateTabActionButton(page)
     local midnight, tww, df = switch.buttons.midnight, switch.buttons.tww, switch.buttons.df
     assert(switch:IsVisible() and midnight:IsVisible() and tww:IsVisible() and not df:IsVisible(),
@@ -271,19 +278,19 @@ do
     assert(not switch:IsVisible(), 'expansion buttons for a single expansion')
     -- Switched off in the settings, and on again.
     offered = { E.EXPANSION_OPTIONS[1], E.EXPANSION_OPTIONS[2] }
-    PT.config = { showExpansionSwitchOrders = false }
+    PT.config.showExpansionSwitchOrders = false
     CO:UpdateExpansionSwitch(page)
     assert(not switch:IsVisible(), 'expansion buttons are shown though switched off')
     PT.config.showExpansionSwitchOrders = true
     CO:UpdateExpansionSwitch(page)
     assert(switch:IsVisible(), 'expansion buttons did not come back')
-    PT.config = nil
     offered = { E.EXPANSION_OPTIONS[1], E.EXPANSION_OPTIONS[2], E.EXPANSION_OPTIONS[3] }
     CO:UpdateExpansionSwitch(page)
     assert(switch:IsVisible() and df:IsVisible() and df.anchors.LEFT[3] == 152 and switch.w == 224, 'a third expansion has no place')
     CO.StyleWidget = realStyle
     CO.GetAvailableProfessionExpansions, CO.SyncSelectedProfessionExpansionFromBlizzard = nil, nil
     CO.GetSelectedProfessionExpansionKey, CO.SetSelectedProfessionExpansionKey = nil, nil
+    PT.config = nil
     CO:UpdateTabActionButton(page)
     assert(not switch:IsVisible())
 end

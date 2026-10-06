@@ -264,7 +264,16 @@ do
         'Midnight, Khaz Algar, Dragon Isles', 'the newest first')
 end
 
+-- Off until switched on in the settings.
 local built = #frames
+driver.scripts.OnShow(driver)
+driver.scripts.OnUpdate(driver)
+eq(switch.shown, false, 'the buttons are shown without being switched on')
+eq(#frames, built, 'and built')
+HironCraftProfit.config = {}
+KB.Refresh()
+eq(switch.shown, false, 'the buttons are shown by default')
+HironCraftProfit.config = { showExpansionSwitchSpec = true }
 driver.scripts.OnShow(driver)
 driver.scripts.OnUpdate(driver)
 eq(switch.shown, true, 'the buttons are shown')
@@ -301,15 +310,14 @@ eq(switch.shown, true, 'the buttons stay')
 eq(holder.shown, false, 'a bar only where the points can be counted')
 eq(#frames, built + 3, 'no more buttons are made')
 
--- Switched off in the settings: no buttons, and none again when switched on.
-HironCraftProfit.config = { showExpansionSwitchSpec = false }
+-- Switched off in the settings: no buttons; switched on again: they are back.
+HironCraftProfit.config.showExpansionSwitchSpec = false
 KB.Refresh()
 eq(switch.shown, false, 'the buttons are shown though switched off')
 eq(holder.shown, false, 'the bar is not theirs to change')
 HironCraftProfit.config.showExpansionSwitchSpec = true
 KB.Refresh()
 eq(switch.shown, true, 'the buttons did not come back')
-HironCraftProfit.config = nil
 
 -- One expansion with specializations: nothing to switch to.
 withSpecs[2823], withSpecs[2871] = nil, nil
