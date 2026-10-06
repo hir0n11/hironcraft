@@ -913,3 +913,144 @@ dismissAll()
 assert(QuickReplies:DeleteTemplate(repeatKey2))
 
 print('Visible reply editing tests passed (built-in deletion, rename, stale clicks, keyboard, no auto-send, per-reply repeat delay).')
+
+-- The reason of a decline, again -----------------------------------------------------
+-- "why?" from a customer whose order was declined: a card with the reason,
+-- built from the decline itself, whether or not the order's row is listed.
+do
+    local clock = 500000
+    function time() return clock end
+    function date(_, at) return 'at ' .. tostring(at) end
+    local statuses = {}
+    local savedFulfillment, savedAudit, savedScanner = Scan.OrderFulfillment, Scan.ReagentAudit, Scan.Scanner
+    Scan.OrderFulfillment = {
+        Status = { Rejected = 'rejected', Fulfilled = 'fulfilled' },
+        GetStatuses = function() return statuses end,
+        GetStatus = function(_, order) return statuses[Scan.OrderToOrderID(order)] end,
+    }
+    Scan.ReagentAudit = { Issues = function(snapshot)
+        return snapshot and snapshot.text or "I couldn't find the material details for this order."
+    end }
+    Scan.Scanner = {
+        DescribeDelivery = function(entry) return entry.item and { profID = 2918, item = entry.item } or nil end,
+        DeliveryLabel = function(described) return described.item .. ' - Crafter' end,
+    }
+    local function decline(customer, id, text, age, orderID, item)
+        statuses[customer .. '-' .. id] = { customerName = customer, responseID = id, status = 'rejected',
+            craftingOrderID = orderID or (9000 + id), crafterFullName = 'Leathloring-Realm',
+            updatedAt = clock - (age or 60), reagentAudit = text and { text = text } or nil, item = item }
+    end
+    local function ask(customer, text)
+        now = now + 10
+        return QuickReplies:OfferDeclineReason(customer, text, 'guid-' .. customer)
+    end
+    dismissAll()
+
+    -- The question is recognized by its own keywords, apart from the other replies.
+    assert(#QuickReplies:Classify('why?', 'DECLINE_REASON') == 1 and #QuickReplies:Classify("what's wrong", 'DECLINE_REASON') == 1
+        and #QuickReplies:Classify('thanks', 'DECLINE_REASON') == 0, 'the question about a decline is told wrong')
+    for _, key in ipairs(QuickReplies:Classify('why')) do
+        assert(key ~= 'DECLINE_REASON', 'the decline reason competes with the ordinary replies')
+    end
+
+    -- No decline, no card.
+    assert(ask('Asker', 'why?') == false and #visible('Asker') == 0, 'a reason was offered to someone who was not declined')
+
+    -- Declined, and the row is long gone: the reason from the decline itself.
+    decline('Asker', 101, 'Could you replace 5 T1 Gemdust with T2, please?', 600, nil, '[Amulet]')
+    assert(ask('Asker', 'thanks anyway') == false and #visible('Asker') == 0, 'a card for a whisper that asks nothing')
+    assert(ask('Asker', 'why declined?') == true, 'the reason was not offered')
+    local cards = visible('Asker')
+    assert(#cards == 1, 'not one card for one decline')
+    assert(cards[1].option.reply == 'I checked your order. Could you replace 5 T1 Gemdust with T2, please?',
+        'the card does not carry the reason: ' .. tostring(cards[1].option.reply))
+    assert(cards[1].option.contextLabel == '[Amulet] - Crafter, at ' .. (clock - 600), 'the card does not say which order')
+    assert(#sent == beforeRepeat2 + 2, 'the reason was sent without a click')
+    -- Asked twice: still one card.
+    ask('Asker', 'why?')
+    assert(#visible('Asker') == 1, 'the same reason stacked')
+    -- The click sends it and takes the card away.
+    local before = #sent
+    click(visible('Asker')[1])
+    assert(#sent == before + 1 and sent[#sent].customer == 'Asker'
+        and sent[#sent].text == 'I checked your order. Could you replace 5 T1 Gemdust with T2, please?',
+        'the click did not send the reason')
+    assert(#visible('Asker') == 0, 'the card stayed after sending')
+    -- And it can be asked for again later.
+    now = now + 600
+    assert(ask('Asker', 'why?') == true and #visible('Asker') == 1, 'the reason cannot be offered a second time')
+    dismissAll()
+
+    -- Several declines: a card each, the newest first; none for an old one.
+    decline('Asker', 102, 'Looks like you are missing 3 Thread.', 120)
+    decline('Asker', 103, 'old', 25 * 3600)
+    now = now + 600
+    ask('Asker', 'what happened')
+    cards = visible('Asker')
+    assert(#cards == 2, 'not a card per recent decline: ' .. #cards)
+    local texts = {}
+    for _, card in ipairs(cards) do texts[card.option.reply] = card.optionIndex end
+    assert(texts['I checked your order. Looks like you are missing 3 Thread.'] == 1
+        and texts['I checked your order. Could you replace 5 T1 Gemdust with T2, please?'] == 2,
+        'the declines are not offered newest first')
+    dismissAll()
+    assert(#QuickReplies:RecentDeclines('Asker') == 2 and #QuickReplies:DeclinesForMenu('Asker') == 3,
+        'the menu does not offer the week\'s declines')
+    assert(#QuickReplies:RecentDeclines('Other') == 0, 'another customer has these declines')
+
+    -- A decline that recorded no materials still says so; a completed order is no decline.
+    statuses = {}
+    decline('Plain', 101, nil, 60)
+    statuses['Plain-102'] = { customerName = 'Plain', responseID = 102, status = 'fulfilled', updatedAt = clock - 30 }
+    ask('Plain', 'why')
+    cards = visible('Plain')
+    assert(#cards == 1 and cards[1].option.reply
+        == "I checked your order. I couldn't find the material details for this order.", 'a decline without details has no reason')
+    dismissAll()
+
+    -- The row is listed and was asked for again: not a decline any more.
+    statuses = {}
+    addCustomer('Again')
+    decline('Again', 101, 'Could you replace 2 T1 Ore with T2, please?', 60)
+    now = now + 600
+    assert(ask('Again', 'why?') == true and #visible('Again') == 1, 'a listed declined row has no reason')
+    assert(visible('Again')[1].option.reply == 'I checked your order. Could you replace 2 T1 Ore with T2, please?')
+    statuses['Again-101'].status = 'claimed'
+    local stale = visible('Again')[1]
+    local sentBefore = #sent
+    local realPrint, said = print, {}
+    print = function(text) said[#said + 1] = tostring(text) end
+    click(stale)
+    print = realPrint
+    assert(#sent == sentBefore and #said == 1 and #visible('Again') == 0, 'a reason was sent for an order that is in the works again')
+    now = now + 600
+    assert(ask('Again', 'why?') == false, 'a reason is offered for an order that was taken again')
+
+    -- The wording is this reply's own; a tag that cannot be filled leaves the plain reason.
+    statuses = {}
+    decline('Worded', 101, 'Missing 1 Ore.', 60)
+    local template = QuickReplies:GetConfig().templates.DECLINE_REASON
+    template.response = 'Once more from {crafter}: {reagent_issues}'
+    assert(QuickReplies:BuildDeclineReason(QuickReplies:RecentDeclines('Worded')[1]) == 'Once more from Leathloring: Missing 1 Ore.',
+        'the reply\'s own wording is not used')
+    template.response = '{item}: {reagent_issues}'
+    assert(QuickReplies:BuildDeclineReason(QuickReplies:RecentDeclines('Worded')[1]) == 'Missing 1 Ore.',
+        'a tag without a row was sent as it is')
+    -- Switched off: no card on a whisper, but the menu can still send it.
+    template.response = 'I checked your order. {reagent_issues}'
+    template.enabled = false
+    now = now + 600
+    assert(ask('Worded', 'why?') == false and #visible('Worded') == 0, 'a switched-off reply was offered')
+    sentBefore = #sent
+    assert(QuickReplies:SendDeclineReason(QuickReplies:DeclinesForMenu('Worded')[1]) == 'I checked your order. Missing 1 Ore.'
+        and #sent == sentBefore + 1, 'the menu could not send the reason')
+    -- Right away again is held back like any repeated reply.
+    assert(QuickReplies:SendDeclineReason(QuickReplies:DeclinesForMenu('Worded')[1]) == false and #sent == sentBefore + 1,
+        'the same reason went out twice in a row')
+    template.enabled = true
+
+    Scan.OrderFulfillment, Scan.ReagentAudit, Scan.Scanner = savedFulfillment, savedAudit, savedScanner
+    time, date = nil, nil
+    dismissAll()
+end
+print('Decline reason passed (asked after the row is gone, several declines, clicks, listed rows, wording, switched off, by hand).')

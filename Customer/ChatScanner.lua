@@ -2617,6 +2617,8 @@ function HironCraftScan.Scanner.RecentDeliveries(customer)
     return found
 end
 HironCraftScan.Scanner.DeliveryLabel = DeliveryLabel
+-- A decline is described the same way: what its order's status still tells.
+HironCraftScan.Scanner.DescribeDelivery = DescribeDelivery
 
 -- The crafter asks for the row by hand. options.quiet adds it as already
 -- greeted, without a banner or a greeting card, like a quiet manual match.
@@ -2752,6 +2754,13 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             RecordCustomerWhisper()
         end
         return false
+    end
+
+    -- "why?" after a decline: its reason once more, to send by a click,
+    -- whether or not the order's row is still listed.
+    if incomingWhisper and not overrides.remoteRequest and not overrides.classRetry
+        and HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.OfferDeclineReason then
+        HironCraftScan.QuickReplies:OfferDeclineReason(customer, message, customerGuid)
     end
 
     if (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER') and not overrides.classRetry then

@@ -68,11 +68,14 @@ local function edit(field,text)
     box:SetText(text);box.scripts.OnEditFocusLost(box)
 end
 local replies=Scan.Config.LoadQuickReplyConfigOptions(nil,false)
-assert(replies.definitionCount==6)
+assert(replies.definitionCount==7)
 local function findRow(key)
     for _,row in ipairs(replies.Rows) do if row:IsShown() and row.definition.key==key then return row end end
 end
 for _,row in ipairs(replies.Rows) do assert(row.Rename:IsShown() and row.Delete:IsShown()) end
+-- The reason of a decline is a reply like the others here: keywords and a text.
+assert(findRow('DECLINE_REASON') and not findRow('DECLINE_REASON').definition.eventOnly
+    and findRow('DECLINE_REASON').Keywords:IsShown(), 'the decline reason has no settings row with keywords')
 local price=findRow('PRICE')
 price.Enabled.Act:SetChecked(false);click(price.Enabled.Act)
 replies:RefreshRows()
@@ -98,7 +101,7 @@ assert(template.active_orders_only==true,'the open-order switch was not saved')
 price.ActiveOnly.Act:SetChecked(false);click(price.ActiveOnly.Act)
 assert(template.active_orders_only==false,'the open-order switch could not be turned off')
 click(findRow('PRICE').Delete)
-assert(replies.definitionCount==5 and not findRow('PRICE'))
+assert(replies.definitionCount==6 and not findRow('PRICE'))
 -- The completed-order reply is a normal built-in row: editable and switchable.
 local done=findRow('COMPLETED_ORDER')
 assert(done and done.Keywords and not done.Keywords:IsShown(),'completed-order reply asked for keywords')
@@ -120,7 +123,7 @@ assert(completed.response=='Your order is ready!' and completed.enabled==false,
 done.Enabled.Act:SetChecked(true);click(done.Enabled.Act)
 -- Pooled rows must replace their delete/rename callbacks after reordering.
 click(findRow('ORDER').Delete)
-assert(replies.definitionCount==4 and not findRow('ORDER') and findRow('QUALITY'))
+assert(replies.definitionCount==5 and not findRow('ORDER') and findRow('QUALITY'))
 click(findRow('REJECTED_ORDER').Rename);dialog.OnAccept('Resend materials')
 edit(findRow('REJECTED_ORDER').Response,'Please resend: {reagent_issues}')
 assert(Scan.QuickReplies:GetConfig().templates.REJECTED_ORDER.response=='Please resend: {reagent_issues}')

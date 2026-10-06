@@ -2311,3 +2311,28 @@ do
     reset()
 end
 print('Recraft requests passed (whisper after the row is gone, listed row, several deliveries, by hand, quiet, age, linked account).')
+
+-- Every whisper of our own is shown to the reply that answers "why was it
+-- declined?": it needs no row, so it is asked before anything else decides.
+do
+    reset()
+    local asked = {}
+    Scan.QuickReplies.OfferDeclineReason = function(_, customer, message, guid)
+        asked[#asked + 1] = customer .. '|' .. message .. '|' .. tostring(guid)
+    end
+    Scan.OnMessage('CHAT_MSG_WHISPER', 'why declined?', 'Stranger', 'Stranger-GUID')
+    assert(#asked == 1 and asked[1] == 'Stranger|why declined?|Stranger-GUID', 'a whisper from someone without a row was not asked about a decline')
+    assert(countRows() == 0, 'the question made a row')
+    scan('why declined?')
+    assert(#asked == 1, 'a line in a channel was asked about a decline')
+    HironCraftScanComm.applying_remote_state = true
+    Scan.OnMessage('CHAT_MSG_WHISPER', 'why declined?', 'Stranger', 'Stranger-GUID', { chatEntry = { chatType = 'WHISPER',
+        message = 'why declined?', syncID = 'chat:2' } })
+    HironCraftScanComm.applying_remote_state = false
+    assert(#asked == 1, 'a whisper passed on by a linked account was asked about a decline here')
+    Scan.OnMessage('CHAT_MSG_WHISPER_INFORM', 'why declined?', 'Stranger', 'Stranger-GUID')
+    assert(#asked == 1, 'our own outgoing whisper was asked about a decline')
+    Scan.QuickReplies.OfferDeclineReason = nil
+    reset()
+end
+print('Decline question routing passed (own whispers only).')

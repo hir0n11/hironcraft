@@ -25,6 +25,29 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The reason of a decline, again (0.4.114)
+
+A customer who missed the reply about a declined order asks why it was
+declined. The reply could not be offered a second time, and the order's row
+has usually left the list by then. Now the reason can be sent again:
+
+- **By a whisper.** When a customer whose order was declined in the last 24
+  hours whispers a question like `why?`, `why declined`, `what's wrong`, a
+  reply card with the reason appears; a click sends it. Several declines get
+  a card each, the newest first, with the item and the time in the card's
+  tooltip.
+- It is a quick reply of its own, `DECLINE REASON`, in the quick reply
+  settings: its keywords and its text can be edited there, and switching it
+  off stops the cards. Its keywords count only for a customer who was
+  declined, so `why` does not compete with the other replies.
+- **By hand.** The menu of a player's name in chat lists `Decline reason:
+  item - crafter, time` for their declines of the last week; the tooltip
+  shows the text and a click sends it.
+- The reason is rebuilt from the decline itself (the order's saved status
+  keeps its material list for a month, also on a linked account), so it does
+  not need the row. A declined order that was taken again is no longer
+  offered.
+
 ## The recraft of what was just made (0.4.113)
 
 - `u can recraft it ?` right after a craft was answered with "several orders

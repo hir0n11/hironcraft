@@ -653,6 +653,28 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
         end
 
+        -- What was declined for them lately: its reason once more, for a
+        -- customer who missed the reply. The click sends it.
+        do
+            local replies = HironCraftScan.QuickReplies
+            local declines = replies and replies.DeclinesForMenu and replies:DeclinesForMenu(target) or {}
+            for _, decline in ipairs(declines) do
+                local reason = replies:BuildDeclineReason(decline)
+                if reason then
+                    local reasonButton = matchMenu:CreateButton(
+                        (foldMatching and '' or prefix)
+                            .. string.format(L('Decline reason: %s'), replies:DeclineLabel(decline)),
+                        function() replies:SendDeclineReason(decline) end)
+                    if reasonButton and reasonButton.SetTooltip then
+                        reasonButton:SetTooltip(function(tooltip)
+                            GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Decline reason menu help')))
+                            GameTooltip_AddNormalLine(tooltip, '"' .. reason .. '"')
+                        end)
+                    end
+                end
+            end
+        end
+
         do
             local lineID = contextData.lineID
             if type(lineID) == 'string' then

@@ -15,6 +15,9 @@ local MAX_OPTIONS_PER_POPUP = 8
 local MAX_PRIORITY = 999
 local REJECTED_ORDER_TEMPLATE_KEY = 'REJECTED_ORDER'
 local COMPLETED_ORDER_TEMPLATE_KEY = 'COMPLETED_ORDER'
+-- "why?" after a decline: its reason once more (see "The reason of a decline").
+local DECLINE_REASON_TEMPLATE_KEY = 'DECLINE_REASON'
+local DECLINE_REASON_ACTION = 'decline-reason'
 local ORDER_GREETING_ACTION = 'order-greeting'
 local REPLY_COOLDOWN = 6
 -- How long the last answer to a customer keeps the same answer from being
@@ -157,6 +160,18 @@ local DEFAULT_TEMPLATES = {
         response = 'Your order is done, thank you!',
     },
     {
+        -- Answered from the decline itself, not from a row of the order list:
+        -- the question comes when the row may be long gone. Its keywords are
+        -- matched apart from the other replies (special), so that "why" does
+        -- not compete with them for a customer who was not declined.
+        key = DECLINE_REASON_TEMPLATE_KEY,
+        special = true,
+        keywords = "why, reason, why declined, why decline, why cancel, why canceled, why cancelled, why rejected, "
+            .. "what's wrong, whats wrong, what is wrong, what wrong, what happened, declined, canceled, cancelled, "
+            .. "rejected, почему, причина, что не так",
+        response = 'I checked your order. {reagent_issues}',
+    },
+    {
         key = 'NAME',
         keywords = 'name, crafter, char, character, who',
         response = '{crafter}',
@@ -269,6 +284,7 @@ function QuickReplies:GetDefinitions()
             label = template.label or L('dialog.quick_reply.' .. definition.key .. '.enabled'),
             custom = false,
             eventOnly = definition.eventOnly == true,
+            special = definition.special == true,
         }) end
     end
 
@@ -519,7 +535,9 @@ local function KeywordScore(message, keyword, allowTypos, exactWords)
     return #keywordWords * 1000 + #keyword - bestDistance * 100 - 1, false, #keywordWords
 end
 
-function QuickReplies:Classify(message)
+-- The replies a message asks for. A special reply (the reason of a decline)
+-- is not among them: it is asked about on its own, by its key.
+function QuickReplies:Classify(message, onlyKey)
     local config = EnsureConfig()
     if not config.enabled then
         return {}
@@ -557,7 +575,8 @@ function QuickReplies:Classify(message)
     local matched = {}
     for _, definition in ipairs(self:GetDefinitions()) do
         local template = config.templates[definition.key]
-        if template and template.enabled and not definition.eventOnly then
+        local asked = (onlyKey == nil and not definition.special) or definition.key == onlyKey
+        if template and template.enabled and not definition.eventOnly and asked then
             local templateScore, templateExact, templateWords = nil, false, 0
             local keywords = HironCraftScan.Config.SubstituteTags(template.keywords or '')
             for keyword in keywords:gmatch('[^,\n]+') do
@@ -1518,6 +1537,22 @@ end
 
 local function SendOption(toast, option)
     if toast.option ~= option or not toast:IsVisible() then return end
+    if option.action == DECLINE_REASON_ACTION then
+        -- The decline as it stands now: a new order may have answered it since.
+        local decline = QuickReplies:FindDecline(option.customer, option.responseID, option.declineOrderID)
+        local result = decline and QuickReplies:SendDeclineReason(decline)
+        -- Not now (the server holds messages back): the card stays for another click.
+        if result == false then return end
+        if not result then
+            print('|cffffd100HironCraftScan:|r ' .. L('Quick reply is no longer available.'))
+        end
+        if toast.option == option then
+            toast.option = nil
+            toast:Hide()
+            LayoutToasts()
+        end
+        return
+    end
     if option.action == ORDER_GREETING_ACTION then
         local response = CurrentResponse(option)
         if not response or response.greeting_sent then
@@ -1671,6 +1706,170 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
         self.Glow:Hide()
     end)
     toast:Show()
+end
+
+-- The reason of a decline ---------------------------------------------------------
+-- A customer who missed the reply about a declined order asks why it was
+-- declined. The row of that order has usually left the list by then, so the
+-- reason is rebuilt from the decline itself: the order's saved status keeps
+-- its material list for a month, also on a linked account.
+local DECLINE_REASON_MAX_AGE = 24 * 60 * 60      -- a whisper asks about a decline this recent
+local DECLINE_MENU_MAX_AGE = 7 * 24 * 60 * 60    -- the chat menu offers these
+local MAX_DECLINE_REASON_CARDS = 3
+
+-- The orders declined for a customer in the last maxAge seconds, the newest
+-- first: { order, entry, declinedAt }. A row that is still listed answers for
+-- itself: one that was asked for again since is not a decline any more.
+function QuickReplies:RecentDeclines(customer, maxAge)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    local found = {}
+    if type(customer) ~= 'string' or not fulfillment or not fulfillment.GetStatuses
+        or not fulfillment.Status then return found end
+    local now = time and time() or 0
+    maxAge = tonumber(maxAge) or DECLINE_REASON_MAX_AGE
+    for _, entry in pairs(fulfillment:GetStatuses() or {}) do
+        if type(entry) == 'table' and entry.customerName == customer and entry.responseID ~= nil
+            and entry.status == fulfillment.Status.Rejected
+            and now - (tonumber(entry.updatedAt) or 0) <= maxAge then
+            local order = { customerName = customer, responseID = entry.responseID }
+            local current = entry
+            if IsListedOrder(customer, entry.responseID) and fulfillment.GetStatus then
+                local ok, status = pcall(fulfillment.GetStatus, fulfillment, order)
+                current = ok and type(status) == 'table' and status.status == fulfillment.Status.Rejected
+                    and status or nil
+            end
+            if current then
+                found[#found + 1] = { order = order, entry = current, declinedAt = tonumber(current.updatedAt) or 0 }
+            end
+        end
+    end
+    table.sort(found, function(lhs, rhs)
+        if lhs.declinedAt ~= rhs.declinedAt then return lhs.declinedAt > rhs.declinedAt end
+        return tostring(lhs.order.responseID) < tostring(rhs.order.responseID)
+    end)
+    return found
+end
+
+-- One of those declines, by its row and its game order.
+function QuickReplies:FindDecline(customer, responseID, craftingOrderID)
+    for _, decline in ipairs(self:RecentDeclines(customer, DECLINE_MENU_MAX_AGE)) do
+        if tostring(decline.order.responseID) == tostring(responseID)
+            and tostring(decline.entry.craftingOrderID or '') == tostring(craftingOrderID or '') then
+            return decline
+        end
+    end
+    return nil
+end
+
+-- What was declined, for a card or a menu line: the item and crafter when they
+-- can still be told, and when it happened.
+function QuickReplies:DeclineLabel(decline)
+    local scanner = HironCraftScan.Scanner
+    local described = scanner and scanner.DescribeDelivery and scanner.DescribeDelivery(decline.entry)
+    local what = described and scanner.DeliveryLabel and scanner.DeliveryLabel(described) or nil
+    local at = date and decline.declinedAt > 0 and date('%H:%M', decline.declinedAt) or nil
+    if what and at then return what .. ', ' .. at end
+    return what or at or tostring(decline.order.responseID)
+end
+
+-- The text of the reason: this reply's own wording around what the decline
+-- recorded about the materials. A tag the wording uses that cannot be filled
+-- without the order's row leaves the plain reason.
+function QuickReplies:BuildDeclineReason(decline)
+    local audit = HironCraftScan.ReagentAudit
+    if type(decline) ~= 'table' or type(decline.entry) ~= 'table' or not audit or not audit.Issues then
+        return nil
+    end
+    local issues = audit.Issues(decline.entry.reagentAudit)
+    if type(issues) ~= 'string' or issues == '' then return nil end
+
+    local template = EnsureConfig().templates[DECLINE_REASON_TEMPLATE_KEY]
+    if type(template) ~= 'table' or template.deleted or (template.response or '') == '' then return issues end
+    local context
+    if IsListedOrder(decline.order.customerName, decline.order.responseID) then
+        local ok, response = pcall(HironCraftScan.OrderToResponse, decline.order)
+        if ok and type(response) == 'table' then
+            local built
+            ok, built = pcall(HironCraftScan.BuildResponseContext, response)
+            if ok and type(built) == 'table' then context = built end
+        end
+    end
+    context = context or {}
+    context.reagent_issues = issues
+    if not context.crafter and type(decline.entry.crafterFullName) == 'string' then
+        context.crafter = HironCraftScan.NameAndRealmToName(decline.entry.crafterFullName)
+    end
+    local raw = HironCraftScan.Config.SubstituteTags(template.response)
+    local reply = HironCraftScan.Utils.FString(raw, context)
+    reply = reply:gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+    if reply == '' or reply:find('%b{}') or #reply > 4096 then return issues end
+    return reply
+end
+
+-- Sends the reason, on the crafter's click (a card or the chat menu). Returns
+-- the text, false when it could not be sent now, nil when there is none.
+function QuickReplies:SendDeclineReason(decline)
+    local reply = self:BuildDeclineReason(decline)
+    if not reply then return nil end
+    local customer = decline.order.customerName
+    if self:IsReplyOnCooldown(customer, reply) then return false end
+    local messages = #reply > MAX_CHAT_BYTES and HironCraftScan.Utils.SplitResponse(reply) or { reply }
+    if HironCraftScan.Utils.SendResponses(messages, customer, true) == false then return false end
+    self:RememberSentReply(customer, reply)
+    self:RememberSentTemplate(customer, DECLINE_REASON_TEMPLATE_KEY)
+    return reply
+end
+
+-- A whisper that asks why ("why?", "what's wrong", ...) from a customer whose
+-- order was declined lately: a card with the reason, to send again by a click.
+-- Several declines get a card each, the newest first.
+function QuickReplies:OfferDeclineReason(customer, message, customerGuid)
+    if type(customer) ~= 'string' or type(message) ~= 'string' then return false end
+    if not EnsureConfig().enabled then return false end
+    if #self:Classify(message, DECLINE_REASON_TEMPLATE_KEY) == 0 then return false end
+    if self:IsTemplateOnRepeatCooldown(customer, DECLINE_REASON_TEMPLATE_KEY) then return false end
+    local declines = self:RecentDeclines(customer)
+    if #declines == 0 then return false end
+
+    local customerInfo = HironCraftScan.DB.customers[customer] or { guid = customerGuid }
+    local scanner = HironCraftScan.Scanner
+    local shown = 0
+    popupSerial = popupSerial + 1
+    for _, decline in ipairs(declines) do
+        if shown >= MAX_DECLINE_REASON_CARDS then break end
+        local reply = self:BuildDeclineReason(decline)
+        if reply then
+            local described = scanner and scanner.DescribeDelivery and scanner.DescribeDelivery(decline.entry)
+            local label = self:DeclineLabel(decline)
+            local option = {
+                action = DECLINE_REASON_ACTION,
+                customer = customer,
+                message = message,
+                -- Only for the card's portrait: there may be no row behind it.
+                response = { professionID = described and described.profID or nil },
+                responseID = decline.order.responseID,
+                declineOrderID = decline.entry.craftingOrderID,
+                templateKey = DECLINE_REASON_TEMPLATE_KEY,
+                templateLabel = self:GetTemplateLabel(DECLINE_REASON_TEMPLATE_KEY),
+                reply = reply,
+                label = reply,
+                contextLabel = label,
+                contextLabels = { label },
+            }
+            DismissEquivalentToasts(option)
+            shown = shown + 1
+            SetupToast(GetToast(), option, customerInfo, popupSerial, shown)
+        end
+    end
+    if shown > 0 then LayoutToasts() end
+    return shown > 0
+end
+
+-- For the chat menu of a customer's name: the declines of the last week.
+function QuickReplies:DeclinesForMenu(customer)
+    local found = self:RecentDeclines(customer, DECLINE_MENU_MAX_AGE)
+    for index = #found, 5, -1 do found[index] = nil end
+    return found
 end
 
 -- A craft request received in whisper is matched asynchronously. Offer its
