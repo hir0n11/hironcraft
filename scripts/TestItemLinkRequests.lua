@@ -2207,6 +2207,34 @@ do
     Scan.Scanner.RequestRecraft(Scan.Scanner.RecentDeliveries('Buyer')[1], { quiet = true }, function(made) done = made end)
     assert(done == response(101) and done.greeting_sent == true and done.recraft, 'a quiet recraft row is not marked as greeted')
 
+    -- Several deliveries in a day, one of them in the last half hour: that one is meant.
+    fresh()
+    deliver(101, 'Buyer', 'Seller-Realm', now - 3 * 3600)
+    deliver(102, 'Buyer', 'Tailor-Realm', now - 10 * 60)
+    printed = {}
+    print = function(text) printed[#printed + 1] = tostring(text) end
+    whisper('u can recraft it ?')
+    print = realPrint
+    assert(countRows() == 1 and response(102) and response(102).recraft and not response(101),
+        'the delivery of the last half hour was not taken')
+    assert(#printed == 0, 'the crafter was asked to choose though one delivery was just made')
+    -- Just past half an hour, or two in it: not guessed at.
+    fresh()
+    deliver(101, 'Buyer', 'Seller-Realm', now - 3 * 3600)
+    deliver(102, 'Buyer', 'Tailor-Realm', now - 31 * 60)
+    printed = {}
+    print = function(text) printed[#printed + 1] = tostring(text) end
+    whisper('u can recraft it ?')
+    assert(countRows() == 0 and #printed == 1, 'a delivery of over half an hour ago was taken for the one just made')
+    fresh()
+    deliver(101, 'Buyer', 'Seller-Realm', now - 5 * 60)
+    deliver(102, 'Buyer', 'Tailor-Realm', now - 10 * 60)
+    deliver(103, 'Buyer', 'Seller-Realm', now - 5 * 3600)
+    printed = {}
+    whisper('u can recraft it ?')
+    print = realPrint
+    assert(countRows() == 0 and #printed == 1, 'one of two deliveries just made was guessed')
+
     -- A linked item that was not delivered is its own request, not a recraft of the delivery.
     fresh()
     deliver(101, 'Buyer')

@@ -2416,6 +2416,7 @@ end
 -- delivery left behind: the order's status keeps the customer, the recipe and
 -- the crafter for a month, also on a linked account.
 local RECRAFT_AUTO_SECONDS = 24 * 60 * 60       -- a whisper means a delivery this recent
+local RECRAFT_JUST_NOW_SECONDS = 30 * 60        -- of several, the only one this recent is meant
 local RECRAFT_MANUAL_SECONDS = 7 * 24 * 60 * 60 -- the chat menu offers these
 local RECRAFT_MENU_ROWS = 6
 
@@ -2515,16 +2516,22 @@ local function Deliveries(customer, maxAge)
     return found
 end
 
--- The delivery a message means. When it names nothing, only a single delivery
--- can be meant; when it links an item or names a slot, the delivery of that
--- item and no other. The second value says that several were delivered and
--- nothing told them apart: that is not guessed at.
+-- The delivery a message means. When it names nothing, a single delivery is
+-- meant, or of several the only one of the last half hour ("u can recraft
+-- it?" right after the craft); when it links an item or names a slot, the
+-- delivery of that item and no other. The second value says that several
+-- were delivered and nothing told them apart: that is not guessed at.
 local function PickDelivery(deliveries, crafterInfo, itemID, recipeInfo)
     local slots = crafterInfo and type(crafterInfo.equipmentRequests) == 'table'
         and #crafterInfo.equipmentRequests > 0 and crafterInfo.equipmentRequests or nil
     local recipeID = recipeInfo and recipeInfo.recipeID
     if not itemID and not recipeID and not slots then
         if #deliveries == 1 then return deliveries[1], false end
+        local now, justNow = time(), {}
+        for _, delivery in ipairs(deliveries) do
+            if now - delivery.deliveredAt <= RECRAFT_JUST_NOW_SECONDS then justNow[#justNow + 1] = delivery end
+        end
+        if #justNow == 1 then return justNow[1], false end
         return nil, #deliveries > 1
     end
     local matched = {}

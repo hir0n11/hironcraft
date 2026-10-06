@@ -25,6 +25,15 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The recraft of what was just made (0.4.113)
+
+- `u can recraft it ?` right after a craft was answered with "several orders
+  were delivered to them lately, choose one" when the same customer had
+  another delivery earlier that day. Of several deliveries in the last 24
+  hours, the only one of the last half hour is taken now: that is the one
+  they mean. Two or more in that half hour, or none, are still not guessed
+  at.
+
 ## Completed orders leave the list (0.4.112)
 
 - The last completed order could reappear from the list's anti-flicker
