@@ -887,6 +887,13 @@ function CO:GetClaimedOrder()
     return nil
 end
 
+function CO:IsOrderFulfilled(orderID)
+    local fulfilled = self.fulfilledOrderIDs
+    return orderID ~= nil and fulfilled ~= nil
+        and (fulfilled[orderID] == true or fulfilled[tostring(orderID)] == true
+            or fulfilled[tonumber(orderID)] == true)
+end
+
 function CO:GetEffectiveOrder(orderID, fallback)
     if self.RememberOrderIdentity and fallback and SameOrderID(fallback.orderID, orderID) then
         self:RememberOrderIdentity(fallback)
@@ -926,6 +933,11 @@ function CO:IsSafeToPrepareOrderViewForAnalysis(pageFrame)
 end
 
 function CO:GetRowAction(orderID, fallbackOrder)
+    -- The server or a preserved row can still expose a claimed/fulfillable
+    -- snapshot after success. Completion is terminal regardless of that data.
+    if self:IsOrderFulfilled(orderID) then
+        return "none", T("COA_STATUS_FULFILLED", "Order completed."), fallbackOrder, false
+    end
     local order = self:GetEffectiveOrder(orderID, fallbackOrder)
     local claimed = self:GetClaimedOrder()
 

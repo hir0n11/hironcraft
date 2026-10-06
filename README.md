@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Completed orders leave the list (0.4.112)
+
+- The last completed order could reappear from the list's anti-flicker
+  snapshot, especially on the Public tab. Completed orders are now excluded
+  from that snapshot too; unfinished rows keep their stable positions.
+- A completed order cannot be submitted again from a stale row or cached
+  claimed-order data. Repeated presses while completion is pending do nothing.
+- A failed completion still allows an explicit retry, including when the
+  game API throws an error before it can send a response.
+
 ## Expansion buttons (0.4.110, off by default since 0.4.111)
 
 The game shows one expansion of a profession at a time and changes it only

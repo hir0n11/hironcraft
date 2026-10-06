@@ -1150,6 +1150,10 @@ end
 
 function CO:FulfillOrder(order, pageFrame)
     if not order or not order.orderID then return false end
+    if (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID))
+        or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, order.orderID)) then
+        return false
+    end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not self:IsAtUsableCraftingOrderTable(pageFrame) then
         self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
@@ -1169,19 +1173,26 @@ function CO:FulfillOrder(order, pageFrame)
     self:SetStatus(T("COA_STATUS_FULFILLING", "Completing order..."))
     self:RefreshVisibleRows()
 
-    return SafeCall("FulfillOrder", function()
+    local ok = SafeCall("FulfillOrder", function()
         C_CraftingOrders.FulfillOrder(order.orderID, "", profession)
     end)
+    if not ok and self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, order.orderID) then
+        self.pendingFulfillOrderID = nil
+        self:SetStatus(T("COA_STATUS_FULFILL_FAILED", "Could not complete the order."))
+        self:RefreshVisibleRowsSoon()
+    end
+    return ok
 end
 
 function CO:RunRowButtonAction(btn)
     if not btn or not btn.orderID then return end
+    if self.IsOrderFulfilled and self:IsOrderFulfilled(btn.orderID) then return end
 
-    -- Repeated presses while the protected craft is already pending must not
+    -- Repeated presses while the protected craft/completion is pending must not
     -- rebuild bindings or re-enter the order state machine. This also removes
     -- the misleading "No available action" spam during the cast.
-    if self.pendingCraftOrderID
-        and SameOrderID(self.pendingCraftOrderID, btn.orderID)
+    if (self.pendingCraftOrderID and SameOrderID(self.pendingCraftOrderID, btn.orderID))
+        or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, btn.orderID))
     then
         return
     end

@@ -784,6 +784,58 @@ CL.GetOrders=function() return {sortOrders[1],sortOrders[2],sortOrders[3]} end
 CO.IsOrderActionInProgress=nil
 CL:Refresh(page)
 
+-- Completion retires rows even when the anti-blink cache is the only list
+-- left. Unfinished rows still retain their frames through transient empties.
+do
+    local previousOrders, previousFulfilled = CL.GetOrders, CO.fulfilledOrderIDs
+    for _, orderType in ipairs({1, 2, 3, 4}) do
+        page.orderType = orderType
+        CO.fulfilledOrderIDs = {}
+        CL.GetOrders = function() return {sortOrders[1], sortOrders[2]} end
+        container._listScope = nil
+        CL:Refresh(page)
+        local survivor = container.rowsByOrderID['102']
+        CO.fulfilledOrderIDs[101] = true
+        CL:Refresh(page)
+        assert(#container.rows == 1 and container.rows[1] == survivor,
+            'completing one order removed or reassigned a surviving row')
+
+        -- The last row must not be restored from the anti-blink snapshot,
+        -- whether the server still returns it or has already removed it.
+        CO.fulfilledOrderIDs['102'] = true
+        CL:Refresh(page)
+        assert(#container.rows == 0 and container.emptyText:IsShown(),
+            'the last completed order was revived by the empty-list fallback')
+        assert(not survivor:IsShown() and not CO.visibleRowButtons[survivor.action]
+            and not CO.rowButtonsByOrderID['102'], 'completed row kept its click/hotkey target')
+        CL.GetOrders = function() return {} end
+        CL:Refresh(page)
+        assert(#container.rows == 0, 'an empty server answer revived a completed order')
+
+        -- A genuine transient empty snapshot still keeps unfinished rows.
+        CO.fulfilledOrderIDs = {}
+        CL.GetOrders = function() return {sortOrders[3]} end
+        CL:Refresh(page)
+        local unfinished = container.rows[1]
+        CL.GetOrders = function() return {} end
+        CL:Refresh(page)
+        assert(#container.rows == 1 and container.rows[1] == unfinished,
+            'the completed-order fix disabled anti-blink protection for unfinished orders')
+
+        -- Completion wins even while another action keeps the old snapshot.
+        CO.IsOrderActionInProgress = function() return true end
+        CL:Refresh(page)
+        CO.fulfilledOrderIDs[103] = true
+        CL:Refresh(page)
+        assert(#container.rows == 0, 'the action-settle snapshot revived a completed order')
+        CO.IsOrderActionInProgress = nil
+        container._actionOrders, container._actionHoldUntil = nil, nil
+    end
+    CL.GetOrders, CO.fulfilledOrderIDs = previousOrders, previousFulfilled
+    page.orderType = Enum.CraftingOrderType.Personal
+    CL:Refresh(page)
+end
+
 -- Two nearby Blizzard events must produce one list repaint after the quiet
 -- window instead of exposing both intermediate states.
 local scheduled={}

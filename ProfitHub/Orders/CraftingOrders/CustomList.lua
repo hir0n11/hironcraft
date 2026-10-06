@@ -1695,7 +1695,16 @@ local function IsFulfilledOrder(order)
     local orderID = order and order.orderID
     local fulfilled = CO.fulfilledOrderIDs
     return orderID and fulfilled
-        and (fulfilled[orderID] == true or fulfilled[tostring(orderID)] == true)
+        and (fulfilled[orderID] == true or fulfilled[tostring(orderID)] == true
+            or fulfilled[tonumber(orderID)] == true)
+end
+
+local function WithoutFulfilledOrders(orders)
+    local remaining = {}
+    for _, order in ipairs(orders or {}) do
+        if not IsFulfilledOrder(order) then remaining[#remaining + 1] = order end
+    end
+    return remaining
 end
 
 -- While claim/craft/fulfill is in flight, Blizzard may briefly remove the
@@ -1892,13 +1901,7 @@ function CL:Refresh(pageFrame)
     end
 
     if CO.fulfilledOrderIDs and #orders > 0 then
-        local filtered = {}
-        for _, o in ipairs(orders) do
-            if not (o and o.orderID and CO.fulfilledOrderIDs[o.orderID]) then
-                filtered[#filtered + 1] = o
-            end
-        end
-        orders = filtered
+        orders = WithoutFulfilledOrders(orders)
     end
 
     orders = self:StabilizeOrdersDuringAction(container, orders)
@@ -1911,8 +1914,11 @@ function CL:Refresh(pageFrame)
         elseif container._lastGoodOrders and #container._lastGoodOrders > 0
             and container._lastGoodType == currentType
             and container._lastGoodScope == currentScope then
-            orders = container._lastGoodOrders
-            if not container._emptyRetryQueued and C_Timer and C_Timer.After then
+            -- Anti-blink snapshots may outlive the last order's successful
+            -- completion. Never resurrect that row after filtering it above.
+            orders = WithoutFulfilledOrders(container._lastGoodOrders)
+            container._lastGoodOrders = orders
+            if #orders > 0 and not container._emptyRetryQueued and C_Timer and C_Timer.After then
                 container._emptyRetryQueued = true
                 C_Timer.After(EMPTY_SNAPSHOT_RETRY, function()
                     container._emptyRetryQueued = nil
