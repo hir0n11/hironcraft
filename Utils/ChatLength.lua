@@ -1,32 +1,38 @@
 local HironCraftScan = select(2, ...)
 
--- What one chat message holds. The game counts the letters that are shown:
--- the code of a link (its color, |H...|h, the closing |h and |r) costs
--- nothing, so a link takes what its [name] takes, where 255 bytes of
--- everything had been assumed before 0.4.116.
+-- What one whisper holds, as /hcchatlimit measured it in the game on
+-- 2026-10-07 (patch 12.0) with whispers to oneself:
 --
--- Checked in the game with whispers sent from here, which arrived whole:
---   six item links, 508 bytes;
---   eight links of a reagent with a quality icon, 1016 bytes, 216 letters
---   shown without the icons.
--- The second leaves at most 4 letters for a quality icon (|A...|a), so an
--- icon is counted as 4, and a message takes no more bytes than that whisper
--- had: nothing longer is known to arrive.
+--   255 bytes of what is shown. Cyrillic takes 2 for a letter: 255 Cyrillic
+--   letters (505 bytes) did not arrive.
+--   The code of a link (its color, |H...|h, the closing |h and |r) costs
+--   nothing: a link takes what its [name] takes, brackets included.
+--   The quality icon inside a name (|A...|a) costs nothing either: three
+--   links of "[Arcanoweave Bolt <icon>]" and a filler filled a whisper
+--   exactly, the name counted as 19.
+--   Ten links of 119 bytes, 1196 bytes in all, arrived whole; eleven
+--   (1315 bytes) did not. Whether that is the bytes or the number of links
+--   is not known, so neither is exceeded.
+--
+-- A message over the limit is not cut: the game raises "Chat message limits
+-- exceeded" and sends nothing. So this must never say that something fits
+-- when it does not.
 local CHAT_MESSAGE_LETTERS = 255
-local CHAT_MESSAGE_BYTES = 1016
-local CHAT_ICON_LETTERS = 4
+local CHAT_MESSAGE_BYTES = 1196
+local CHAT_MESSAGE_LINKS = 10
 
 function HironCraftScan.Utils.ChatLength(text)
     local shown = text:gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|cn[%w_]+:', ''):gsub('|H.-|h', '')
-        :gsub('|h', ''):gsub('|r', '')
-    local icons
-    shown, icons = shown:gsub('|A.-|a', '')
-    return #shown + icons * CHAT_ICON_LETTERS
+        :gsub('|h', ''):gsub('|r', ''):gsub('|A.-|a', '')
+    return #shown
 end
 
 function HironCraftScan.Utils.FitsChatMessage(text)
-    if #text <= CHAT_MESSAGE_LETTERS then return true end
-    return #text <= CHAT_MESSAGE_BYTES and HironCraftScan.Utils.ChatLength(text) <= CHAT_MESSAGE_LETTERS
+    -- Plain text is its own length.
+    if not text:find('|', 1, true) then return #text <= CHAT_MESSAGE_LETTERS end
+    if #text > CHAT_MESSAGE_BYTES then return false end
+    local _, links = text:gsub('|H', '')
+    return links <= CHAT_MESSAGE_LINKS and HironCraftScan.Utils.ChatLength(text) <= CHAT_MESSAGE_LETTERS
 end
 
 -- One whisper where one is enough: someone who gets two in a row takes the

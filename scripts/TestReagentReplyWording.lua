@@ -154,17 +154,28 @@ assert(source:find('context.reagent_issues = HironCraftScan.ReagentAudit.Issues(
     and source:find('context.reagent_issues_plain = HironCraftScan.ReagentAudit.Issues(audit)',1,true),
     'the chat reply does not ask for links, or keeps no names to fall back on')
 
--- A message is measured by what is shown: the code of a link (color, |H...|h,
--- |h, |r) is not counted, and the quality icon in a name counts as 4 letters.
+-- A message is measured the way /hcchatlimit found the game to do it: by
+-- what is shown. The code of a link (color, |H...|h, |h, |r) is not counted,
+-- and neither is the quality icon in a name.
 local Fits,Length=Scan.Utils.FitsChatMessage,Scan.Utils.ChatLength
 assert(Length(links[5201])==#"[Competitor's Heraldry]",'the code of a link is counted against the message')
-assert(Length(links[5001])==#'[Glimmering Gemdust ]'+4,'the quality icon is not counted as 4 letters')
--- What arrived whole in the game: eight links of a reagent with its icon,
--- 127 bytes each.
-local bolt='|cnIQ2:|Hitem:251665::::::::90:145:::::::::|h[Imbued Bright Linen Bolt '
+assert(Length(links[5001])==#'[Glimmering Gemdust ]','the quality icon is counted against the message')
+-- What the game was seen to take: three links of [Arcanoweave Bolt <icon>]
+-- (19 letters, 119 bytes) and a filler that fill a whisper exactly, and ten
+-- of them with 1196 bytes. One letter more, or an eleventh link, is refused.
+local bolt='|cnIQ2:|Hitem:251665::::::::90:145:::::::::|h[Arcanoweave Bolt '
     ..'|A:Professions-ChatIcon-Quality-12-Tier2:17:18::1|a]|h|r'
-assert(#bolt==127 and Fits(string.rep(bolt,8)),'the message that arrived in the game is taken not to fit')
-assert(not Fits(string.rep(bolt,8)..'!'),'a message longer than any that is known to arrive is taken to fit')
+assert(#bolt==119 and Length(bolt)==19,'the measured link is rebuilt wrong: '..#bolt)
+local filled='hcp9 '..string.rep(bolt,3)..' '..string.rep('x',255-5-1-3*19)
+assert(Length(filled)==255 and Fits(filled) and not Fits(filled..'x'),'a whisper filled exactly is measured wrong')
+assert(Fits('hcp15 '..string.rep(bolt,10)) and #('hcp15 '..string.rep(bolt,10))==1196,
+    'the message that arrived in the game is taken not to fit')
+assert(not Fits('hcp15 '..string.rep(bolt,11)),'the message the game refused is taken to fit')
+local eleven=string.rep(links[5201],11)
+assert(#eleven<1196 and Length(eleven)<=255 and not Fits(eleven) and Fits(string.rep(links[5201],10)),
+    'more links than are known to arrive are taken to fit')
+-- Cyrillic takes two for a letter.
+assert(Fits(string.rep('я',127)) and not Fits(string.rep('я',128)),'Cyrillic is not measured by its bytes')
 assert(Length('plain words')==11 and Fits(string.rep('x',255)) and not Fits(string.rep('x',256)),
     'plain text is measured differently than before')
 -- Two linked items are longer than 255 bytes and still one whisper.
@@ -175,8 +186,8 @@ assert(#two>255 and Fits(two) and #Scan.Utils.SplitResponse(two)==1 and Scan.Uti
 -- Short names do not buy any number of links: the bytes stay within what is
 -- known to arrive.
 local short='|cnIQ1:|Hitem:5601'..string.rep(':1',70)..'|h[Ore]|h|r'
-local many=string.rep(short..' ',7):gsub(' $','')
-assert(Length(many)<=255 and #many>1016 and not Fits(many),'a message of any number of bytes is taken to fit')
+local many=string.rep(short..' ',8):gsub(' $','')
+assert(Length(many)<=255 and #many>1196 and not Fits(many),'a message of any number of bytes is taken to fit')
 local manyParts=Scan.Utils.SplitResponse(many)
 assert(#manyParts==2 and table.concat(manyParts,' ')==many and Fits(manyParts[1]) and Fits(manyParts[2]),
     'links beyond the known number of bytes were not moved to the next whisper')
@@ -221,8 +232,9 @@ for index,part in ipairs(parts) do
     if index>1 then assert(part:find('^%d+ T1 |cnIQ1:|Hitem:'),'a whisper does not start with its item: '..part) end
 end
 assert(parts[1]=='I checked your order. Could you replace 5 T1 '..links[5001]..' with T2, 5 T1 '..links[5101]
-    ..' with T2, 5 T1 '..links[5301]..' with T2, 5 T1 '..links[5001]..' with T2, 5 T1 '..links[5101]..' with T2,')
-assert(parts[2]=='5 T1 '..links[5301]..' with T2 and 12 T1 '..links[5001]..' with T2, please?')
+    ..' with T2, 5 T1 '..links[5301]..' with T2, 5 T1 '..links[5001]..' with T2, 5 T1 '..links[5101]..' with T2, 5 T1 '
+    ..links[5301]..' with T2 and')
+assert(parts[2]=='12 T1 '..links[5001]..' with T2, please?')
 -- A count is carried only for a link; plain text splits as before.
 local plainSplit=Scan.Utils.SplitResponse(string.rep('word ',50)..'5 T1 '..string.rep('x',30))
 assert(plainSplit[1]:find('5 T1$') and table.concat(plainSplit,' ')==string.rep('word ',50)..'5 T1 '..string.rep('x',30))

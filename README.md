@@ -25,6 +25,26 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The real size of a whisper (0.4.122)
+
+`/hcchatlimit` ran in the game (patch 12.0) and the measure in
+`Utils/ChatLength.lua` is set from what it found:
+
+- A whisper holds **255 bytes of what is shown**. A longer one is not cut:
+  the game refuses it. Cyrillic takes 2 for a letter (255 Cyrillic letters
+  did not arrive).
+- The code of a link costs nothing: a link takes what its `[name]` takes,
+  brackets included.
+- The quality icon inside a name costs nothing either (it was counted as 4
+  until now).
+- Ten links, 1196 bytes in all, arrived whole; eleven (1315 bytes) did not.
+  Whether the bytes or the number of links decided is not known, so a
+  message takes at most 1196 bytes and at most ten links (it was 1016
+  bytes).
+
+For the reply about materials this means about five items as links in one
+whisper, six by name; seven and more still take a second whisper.
+
 ## A message the game refuses is not taken for sent (0.4.121)
 
 What stopped the first `/hcchatlimit` is known from the error log: the game
