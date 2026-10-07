@@ -131,3 +131,117 @@ now=now+4; Flush(); first=#calls
 now=now+5.1; P.Tick(); Flush()
 assert(calls[#calls]==102 and #calls==first+1 and P.GetPrice(101)==350)
 print('Fast reagent scan passed (button, prefetch, event-driven queue, throttling, manual priority, bounded cache wait, no stale callbacks).')
+
+-- What matters first: a visit to the auction house updates the reagents that
+-- came back lately before the rest, and takes prices it has already seen.
+do
+    event(nil, 'AUCTION_HOUSE_CLOSED'); Flush()
+    C_AuctionHouse.GetItemKeyInfo = nil
+    HironCraftProfit = nil
+    AuctionHouseFrame = nil
+    amount, ready = 500, true
+    clock = 2000000
+    local DAY = 24 * 3600
+    local db = HironCraftProfit_PriceDB
+    assert(db.returnRealms.TestRealm.catalogIndexed == 2, 'the history was not read with the times of the returns')
+    -- Returned a minute, an hour and a day ago; 8 days ago; and one kept from
+    -- before the time of a return was recorded.
+    db.returnCatalog = { [201] = clock - 3600, [202] = clock - DAY, [203] = clock - 8 * DAY, [204] = true, [205] = clock - 60 }
+    db.returnRealms.TestRealm.items = {}
+    assert(P.Status().catalog == 5 and P.Status().current == 3, 'the reagents returned lately are counted wrong')
+
+    local function visit(expected, what)
+        event(nil, 'AUCTION_HOUSE_SHOW')
+        assert(P.Status().total == #expected, what .. ': ' .. P.Status().total .. ' queued, not ' .. #expected)
+        now = now + 4
+        for _, id in ipairs(expected) do
+            P.Tick(); Flush()
+            assert(calls[#calls] == id, what .. ': asked for ' .. tostring(calls[#calls]) .. ', not ' .. id)
+            P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', id)
+            Flush()
+        end
+        assert(not P.Status().running, what .. ': the scan did not end')
+        event(nil, 'AUCTION_HOUSE_CLOSED'); Flush()
+    end
+    -- Nothing is priced: all of them, the latest return first, then the old ones.
+    visit({ 205, 201, 202, 203, 204 }, 'first visit')
+    assert(P.GetPrice(205) == 500 and P.GetPrice(204) == 500)
+    -- A quarter of an hour later: the reagents of this week again, the others not.
+    clock = clock + 16 * 60
+    visit({ 205, 201, 202 }, 'next visit')
+    -- Five minutes later nothing is old enough.
+    clock = clock + 5 * 60
+    visit({}, 'a visit right after')
+    -- The next day the others are due as well, after the current ones.
+    clock = clock + DAY
+    visit({ 205, 201, 202, 203, 204 }, 'the next day')
+    -- A new return makes its reagent the first.
+    clock = clock + 16 * 60
+    P.Observe({ k = 'c', t = clock, rs = { { i = 203, n = 2, c = 1 } } })
+    assert(P.Status().current == 4)
+    visit({ 203, 205, 201, 202 }, 'after a new return')
+    -- A return recorded earlier than the one known does not move it back.
+    P.Observe({ k = 'c', t = clock - 3 * DAY, rs = { { i = 203, n = 1, c = 1 } } })
+    assert(db.returnCatalog[203] == clock, 'an older return replaced the time of the last one')
+
+    -- A price a browse of the auction house has read is taken when it is
+    -- newer than ours, and not asked for again.
+    clock = clock + 16 * 60
+    db.realms = { TestRealm = { items = {
+        ['205'] = { min = 777.4, market = 777.4, t = clock, q = 10 },
+        ['201'] = { min = 5, market = 5, t = 1, q = 1 },
+        ['999'] = { min = 1, market = 1, t = clock, q = 1 },
+    } } }
+    local before = P.GetPrice(201)
+    assert(P.TakeBrowsed() == 1 and P.GetPrice(205) == 777 and select(2, P.GetPrice(205)) == clock,
+        'a newer browsed price was not taken')
+    assert(P.GetPrice(201) == before and not P.GetPrice(999), 'an older browsed price, or one outside the catalogue, was taken')
+    assert(P.TakeBrowsed() == 0, 'the same browsed price was taken twice')
+    visit({ 203, 201, 202 }, 'after a browse')
+    -- While a scan waits, what a browse brings leaves the queue; the browse
+    -- is heard through the price module's own notice.
+    local heard
+    HironCraftProfit = { Prices = { OnScanDone = function(_, fn) heard = fn end } }
+    clock = clock + 16 * 60
+    event(nil, 'AUCTION_HOUSE_SHOW')
+    assert(type(heard) == 'function', 'the scanner does not listen to browses')
+    HironCraftProfit = nil
+    assert(P.Status().total == 4 and P.Status().finished == 0)
+    db.realms.TestRealm.items['201'] = { min = 42, market = 42, t = clock, q = 3 }
+    db.realms.TestRealm.items['202'] = { min = 43, market = 43, t = clock, q = 3 }
+    heard(2)
+    assert(P.GetPrice(201) == 42 and P.GetPrice(202) == 43 and P.Status().finished == 2, 'browsed prices did not shorten the queue')
+    now = now + 4
+    P.Tick(); Flush(); assert(calls[#calls] == 203)
+    P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', 203); Flush()
+    assert(calls[#calls] == 205, 'the queue lost its order after a browse')
+    P.Results('COMMODITY_SEARCH_RESULTS_UPDATED', 205); Flush()
+    assert(not P.Status().running and P.Status().finished == 4)
+    event(nil, 'AUCTION_HOUSE_CLOSED'); Flush()
+
+    -- A click asks for everything, the current ones first.
+    event(nil, 'AUCTION_HOUSE_SHOW')
+    assert(P.Status().total == 0)
+    button.scripts.OnClick()
+    assert(P.Status().total == 5, 'a click did not ask for the whole catalogue')
+    now = now + 4; P.Tick(); Flush()
+    assert(calls[#calls] == 203, 'a click does not start with the latest return')
+    event(nil, 'AUCTION_HOUSE_CLOSED'); Flush()
+
+    -- The tooltip says how many there are and how many are current.
+    local lines = {}
+    GameTooltip = { SetOwner = function() end, SetText = function(_, text) lines[#lines + 1] = text end,
+        AddLine = function(_, text) lines[#lines + 1] = text end, Show = function() end, Hide = function() end }
+    date = os.date
+    button.scripts.OnEnter(button)
+    assert(table.concat(lines, '\n'):find('Reagents: 5, returned in the last week: 4', 1, true),
+        'the tooltip does not count the reagents: ' .. table.concat(lines, ' | '))
+
+    -- A catalogue from before the times were kept is read again, once.
+    db.returnCatalog = { [101] = true }
+    db.returnRealms.TestRealm.catalogIndexed = true
+    event(nil, 'PLAYER_LOGIN')
+    assert(type(db.returnCatalog[101]) == 'number' and db.returnRealms.TestRealm.catalogIndexed == 2,
+        'an old catalogue did not get the times of its returns')
+end
+print('Reagent scan order passed (latest returns first, every visit / once a day, new return, browsed prices, click, old catalogue).')

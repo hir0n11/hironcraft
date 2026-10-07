@@ -25,6 +25,31 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Reagent prices: what came back lately is scanned first (0.4.126)
+
+A resource return is valued with the price known when the craft happens, so
+the prices of the reagents that come back these days have to be recent. The
+reagent price scan (the `Scan reagent prices` button; it also starts by
+itself when the auction house opens) asks the auction house for one reagent
+at a time, about half a second each. It went through the whole catalogue in
+the order of item numbers: 85 reagents took about 50 seconds, and a short
+visit refreshed whatever had the lowest numbers.
+
+- **The current ones first.** The reagents returned in the last week are
+  scanned first, the latest return at the front, at every visit to the
+  auction house (when their price is older than 15 minutes). On this
+  account that is about 17 reagents a day, some 8 seconds.
+- **The rest once a day**, after the current ones.
+- **A click asks for all of them**, in the same order.
+- **Prices already seen are not asked for again.** What any browse of the
+  auction house has read into the price database (the full `SCAN`, a search
+  in the shop, another addon's scan) is taken as it is when it is newer, and
+  leaves the queue. After a full scan nothing is left to scan.
+- The tooltip of the button says how many reagents there are and how many
+  were returned in the last week.
+
+Values already recorded do not change, as before.
+
 ## `/hcchatlimit` is taken out; the manual-action check runs again (0.4.125)
 
 `scripts/TestManualPolicy.cjs` checks that the addon writes to players only

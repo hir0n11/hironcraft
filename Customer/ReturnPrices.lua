@@ -1,7 +1,17 @@
 -- Low-priority, exact-item price queries for the resourcefulness catalogue.
 -- Historical AnalyticsLog events are never repriced.
+--
+-- A return is valued with the price known when the craft happens, so the
+-- prices of the reagents that come back these days have to be recent. One
+-- query takes about half a second (the auction house answers two a second),
+-- so the order matters: a visit to the auction house first updates the
+-- reagents returned in the last week (currentFor), the latest first, and
+-- then, once a day, the rest of the catalogue. A price that any browse of the
+-- auction house has just read (a full scan, a search in the shop, another
+-- addon's scan) is taken as it is and not asked for again.
 local _, Scan = ...
-local P = { freshFor = 900, retryAfter = 300, pauseFor = 2 }
+local P = { freshFor = 900, retryAfter = 300, pauseFor = 2,
+    currentFor = 7 * 24 * 3600, restFreshFor = 24 * 3600 }
 Scan.ReturnPrices = P
 local listeners, queue, pending, sending = {}, {}, nil, false
 local open, pausedUntil, nextSend, total, finished = false, 0, 0, 0, 0
@@ -16,12 +26,20 @@ local function DB()
     db.returnRealms[realm] = db.returnRealms[realm] or { items = {} }
     return db.returnRealms[realm], db.returnCatalog
 end
+-- When a catalogue reagent was last returned. 0 for an entry from before
+-- that was kept (a plain true), until the history is read again.
+local function ReturnedAt(seen)
+    return type(seen) == 'number' and seen or 0
+end
 function P.Observe(event)
     if type(event) ~= 'table' or event.k ~= 'c' then return end
     local _, catalog = DB()
+    local at = tonumber(event.t) or time()
     for _, reagent in ipairs(event.rs or {}) do
         local id = tonumber(reagent.i)
-        if id and id > 0 and reagent.c and (tonumber(reagent.n) or 0) > 0 then catalog[id] = true end
+        if id and id > 0 and reagent.c and (tonumber(reagent.n) or 0) > 0 then
+            catalog[id] = math.max(ReturnedAt(catalog[id]), at)
+        end
     end
 end
 function P.GetPrice(itemID)
@@ -59,9 +77,9 @@ function P.AttachScanButton(button)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_TOP')
         GameTooltip:SetText(L('Scan reagent prices'))
-        GameTooltip:AddLine(L('Scans only reagents recorded in resource returns, across all dates and professions. Historical values do not change. Manual auction activity pauses the scan.'), 1, 1, 1, true)
+        GameTooltip:AddLine(L('Reagent price scan tooltip'), 1, 1, 1, true)
         local status = P.Status()
-        GameTooltip:AddLine(L('Reagents') .. ': ' .. status.catalog)
+        GameTooltip:AddLine(string.format(L('Reagents: %d, returned in the last week: %d'), status.catalog, status.current))
         GameTooltip:AddLine(status.at and (L('Prices updated') .. ': ' .. date('%d.%m %H:%M', status.at)) or L('Prices not scanned yet'))
         GameTooltip:Show()
     end)
@@ -89,9 +107,12 @@ local function UserBusy()
 end
 function P.Status()
     local db, catalog = DB()
-    local count = 0
-    for _ in pairs(catalog) do count = count + 1 end
-    return { open = open, total = total, finished = finished, catalog = count,
+    local count, current = 0, 0
+    for _, seen in pairs(catalog) do
+        count = count + 1
+        if time() - ReturnedAt(seen) <= P.currentFor then current = current + 1 end
+    end
+    return { open = open, total = total, finished = finished, catalog = count, current = current,
         running = pending ~= nil or #queue > 0, paused = Now() < pausedUntil or UserBusy(),
         at = db.lastSuccess, indexing = P.indexing }
 end
@@ -121,19 +142,79 @@ local function Complete(price)
     Changed()
     ScheduleTick()
 end
+-- Prices that a browse of the auction house has read into the price
+-- database (a full scan, a search in the shop, another addon's scan) are the
+-- same lowest unit prices a query of ours would bring: newer ones are taken
+-- as they are, and what waited in the queue for them is done.
+function P.TakeBrowsed()
+    local store = HironCraftProfit_PriceDB and HironCraftProfit_PriceDB.realms
+    local realm = (GetRealmName() or ''):gsub('%s+', '')
+    local browsed = type(store) == 'table' and type(store[realm]) == 'table' and store[realm].items
+    if type(browsed) ~= 'table' then return 0 end
+    local db, catalog = DB()
+    local taken = {}
+    local count = 0
+    for id in pairs(catalog) do
+        local seen = browsed[tostring(id)]
+        local price, at = type(seen) == 'table' and tonumber(seen.min), type(seen) == 'table' and tonumber(seen.t)
+        local record = db.items[id]
+        if price and price > 0 and at and at > (record and record.at or 0) then
+            record = record or {}
+            db.items[id] = record
+            record.price, record.at = math.floor(price + 0.5), at
+            record.attempt = math.max(record.attempt or 0, at)
+            db.lastSuccess = math.max(db.lastSuccess or 0, at)
+            taken[id] = true
+            count = count + 1
+        end
+    end
+    if count == 0 then return 0 end
+    for index = #queue, 1, -1 do
+        local id = queue[index]
+        if taken[id] and not (pending and pending.id == id) then
+            table.remove(queue, index)
+            finished = finished + 1
+        end
+    end
+    Changed()
+    ScheduleTick()
+    return count
+end
+local function HookBrowse()
+    local prices = HironCraftProfit and HironCraftProfit.Prices
+    if P.browseHooked or not (prices and prices.OnScanDone) then return end
+    P.browseHooked = true
+    prices:OnScanDone(function() P.TakeBrowsed() end)
+end
 function P.Start(force)
     if not open then Changed(); return false end
     if P.indexing then P.forceAfterIndex = force or P.forceAfterIndex; return false end
     if pending or #queue > 0 then return false end
+    P.TakeBrowsed()
     local db, catalog = DB()
-    queue = {}
-    for id in pairs(catalog) do
+    -- The reagents returned lately first, and at every visit; the others
+    -- after them, once a day. A click on the button asks for all of them.
+    local current, rest = {}, {}
+    local now = time()
+    for id, seen in pairs(catalog) do
         local record = db.items[id]
-        local stale = not record or not record.at or time() - record.at >= P.freshFor
-        local retry = not record or not record.attempt or time() - record.attempt >= P.retryAfter
-        if force or (stale and retry) then queue[#queue + 1] = id end
+        local lately = now - ReturnedAt(seen) <= P.currentFor
+        local stale = not record or not record.at or now - record.at >= (lately and P.freshFor or P.restFreshFor)
+        local retry = not record or not record.attempt or now - record.attempt >= P.retryAfter
+        if force or (stale and retry) then
+            local list = lately and current or rest
+            list[#list + 1] = id
+        end
     end
-    table.sort(queue)
+    local function LatestFirst(lhs, rhs)
+        local left, right = ReturnedAt(catalog[lhs]), ReturnedAt(catalog[rhs])
+        if left ~= right then return left > right end
+        return lhs < rhs
+    end
+    table.sort(current, LatestFirst)
+    table.sort(rest, LatestFirst)
+    queue = current
+    for _, id in ipairs(rest) do queue[#queue + 1] = id end
     -- Warm item-key data up front: the AH can silently ignore a search for
     -- an uncached key, otherwise costing the whole result timeout per item.
     if C_AuctionHouse and C_AuctionHouse.GetItemKeyInfo then
@@ -207,16 +288,18 @@ function P.Results(event, item)
     else return end
     Complete(price)
 end
+-- Reads the returns of the whole journal into the catalogue, once. 2: with
+-- the time of each reagent's last return (before 0.4.126 only that it was).
 function P.IndexHistory()
     if P.indexing then return end
     local db = DB()
-    if db.catalogIndexed then return end
+    if db.catalogIndexed == 2 then return end
     local log = Scan.AnalyticsLog
     if not log or not log.VisitReturnEvents or not log.Root() then return end
     P.indexing = true
     log.VisitReturnEvents(P.Observe, function()
         P.indexing = nil
-        db.catalogIndexed = true
+        db.catalogIndexed = 2
         if open then P.Start(P.forceAfterIndex) end
         P.forceAfterIndex = nil
         Changed()
@@ -228,9 +311,11 @@ for _, event in ipairs({ 'AUCTION_HOUSE_SHOW', 'AUCTION_HOUSE_CLOSED',
     'COMMODITY_SEARCH_RESULTS_UPDATED', 'ITEM_SEARCH_RESULTS_UPDATED', 'PLAYER_LOGIN' }) do events:RegisterEvent(event) end
 events:SetScript('OnEvent', function(_, event, item)
     if event == 'PLAYER_LOGIN' then
+        HookBrowse()
         P.IndexHistory()
     elseif event == 'AUCTION_HOUSE_SHOW' then
         open, pausedUntil, nextSend = true, Now() + 3, Now() + 3
+        HookBrowse()
         P.IndexHistory()
         P.Start(false)
         if not P.timer then P.timer = C_Timer.NewTicker(0.25, P.Tick) end
