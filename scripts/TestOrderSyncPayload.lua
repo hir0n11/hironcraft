@@ -12,7 +12,8 @@ local comm={RegisterComm=noop,SendCommMessage=function(_,prefix,data,channel,tar
 end}
 local serialize={Serialize=function(_,data) return copy(data) end,
     SerializeAsync=function(_,data) return function() return true,copy(data) end end,
-    DeserializeAsync=function(_,data) return function() return true,true,copy(data) end end}
+    DeserializeAsync=function(_,data) return function() return true,true,copy(data) end end,
+    Deserialize=function(_,data) return true,copy(data) end}
 local identity=function(_,value) return value end
 local libs={['AceAddon-3.0']={NewAddon=function() return comm end},LibSerialize=serialize,
     LibDeflate={CompressDeflate=identity,EncodeForWoWAddonChannel=identity,
@@ -226,6 +227,179 @@ local retry=find(op.ShareOrderMaterials)
 assert(retry and retry.data.data.batch~=lost.data.data.batch
     and retry.data.data.statuses[1].craftingOrderID==50,'lost material list was not retried')
 print('Order sync payload tests passed (lean marks, bulk prefix, coalescing, single material batch, separate ACKs, reordering, isolation, retry).')
+
+-- The mark channel (0.4.128). To a linked account that understands it, a
+-- mark and its notice go compactly, as one packet on a prefix of their own,
+-- at once; the ACK of both comes back the same way. An older account still
+-- gets the packet it knows on the shared prefix.
+do
+    assert(loadfile('Utils/OrderMarkCodec.lua'))('HironCraft',Scan)
+    local codec=Scan.OrderMarkCodec
+    local clock=100
+    function GetTime() return clock end
+    -- Lets whatever is scheduled run out (a dropped timer would leave its
+    -- "already scheduled" flag behind), then starts with nothing sent.
+    local function settle()
+        for _=1,3 do runTimers(1000);flushFrames() end
+        sent={}
+    end
+    local function link(me,peer,version,statuses,notices)
+        actAs(me,peer)
+        Scan.DB.realm.linked_accounts[peer].addon_version=version
+        Scan.DB.realm.order_statuses=statuses
+        Scan.DB.settings.order_completion_notices=notices
+    end
+    local function hear(peer,character,version)
+        receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID=peer,addon=version,data={state=2}}},character)
+        settle()
+    end
+    local function newMark(id,at)
+        local mark=copy(entry);mark.responseID=id;mark.craftingOrderID=id+1000;mark.reagentAudit=nil
+        mark.updatedAt=at;mark.requestToken='source:'..id;mark.requestTime=at-50
+        comm:PrepareOrderStatusDelivery(mark)
+        fulfillment:GetStatuses()[Scan.OrderToOrderID(mark)]=mark
+        return mark
+    end
+    local function newNotice(mark)
+        local notice={orderID=mark.craftingOrderID,customerName=mark.customerName,spellID=5,itemID=6,status='fulfilled',
+            origin='source',updatedAt=mark.updatedAt,crafterFullName='Crafter-Realm',requestToken=mark.requestToken,tipAmount=900}
+        comm:PrepareOrderCompletionDelivery(notice)
+        fulfillment:GetCompletionNotices()[fulfillment:CompletionNoticeKey(notice)]=notice
+        return notice
+    end
+
+    -- Sender: one packet on the mark prefix, without the 0.3 s wait.
+    local senderStatuses,senderNotices={},{}
+    link('source','receiver','0.4.128',senderStatuses,senderNotices)
+    hear('receiver','Receiver-Realm','0.4.128')
+    local mark=newMark(300,time())
+    local notice=newNotice(mark)
+    comm:ShareOrderStatus(mark)
+    assert(#sent==0,'the mark did not wait for its notice of the same moment')
+    runTimers(0.05)
+    assert(#sent==1 and sent[1].prefix=='HIRONCRAFT_MARK' and sent[1].priority=='ALERT' and sent[1].target=='Receiver-Realm',
+        'the mark did not go at once on its own prefix')
+    local markPacket=sent[1]
+    assert(markPacket.data[1]==codec.MARKS and not hasKey(markPacket.data,'operation') and not hasKey(markPacket.data,'customerName'),
+        'the mark was not written compactly')
+    local wireStatuses,wireNotices=codec.Decode(markPacket.data,'receiver')
+    assert(#wireStatuses==1 and #wireNotices==1 and wireStatuses[1].responseID==300 and wireNotices[1].orderID==1300
+        and wireNotices[1].tipAmount==900 and wireStatuses[1].requestToken=='source:300','the packet does not carry the mark and its notice')
+    sent={};comm:ShareOrderStatus(mark);runTimers(0.05)
+    assert(#sent==0,'a mark still waiting in the local queue was queued again')
+    markSent(markPacket)
+
+    -- Receiver: applied, and both ACKed in one packet the same way.
+    local receiverStatuses,receiverNotices={},{}
+    link('receiver','source','0.4.128',receiverStatuses,receiverNotices)
+    receive({prefix='HIRONCRAFT_MARK',data=markPacket.data},'Sender-Realm')
+    assert(receiverStatuses[Scan.OrderToOrderID(mark)] and receiverStatuses[Scan.OrderToOrderID(mark)].status=='fulfilled',
+        'the receiver did not take the mark in')
+    assert(next(receiverNotices),'the receiver did not take the notice in')
+    assert(Scan.DB.realm.linked_accounts.source.addon_version=='0.4.128','a mark packet reset the version of its account')
+    assert(#sent==1 and sent[1].prefix=='HIRONCRAFT_MARK' and sent[1].priority=='ALERT' and sent[1].data[1]==codec.ACKS
+        and sent[1].target=='Sender-Realm','the mark was not ACKed in one packet on its own prefix')
+    local ackPacket=sent[1]
+    local statusAcks,noticeAcks=codec.Decode(ackPacket.data,'source')
+    assert(#statusAcks==1 and #noticeAcks==1 and statusAcks[1].rev==mark.rev and noticeAcks[1].orderID==1300,'the ACK is not of both')
+    -- From someone who is not a linked account, or in another protocol: nothing.
+    link('receiver','source','0.4.128',{},{})
+    local forged=copy(markPacket.data);forged[3]=codec.PackID('stranger')
+    receive({prefix='HIRONCRAFT_MARK',data=forged},'Stranger-Realm')
+    assert(#sent==0 and not next(Scan.DB.realm.order_statuses),'a mark from an unknown account was taken in')
+    local future=copy(markPacket.data);future[2]=99
+    receive({prefix='HIRONCRAFT_MARK',data=future},'Sender-Realm')
+    assert(#sent==0 and not next(Scan.DB.realm.order_statuses),'a mark of another protocol version was taken in')
+    Scan.DB.realm.linked_accounts.source.permissions={2}
+    receive({prefix='HIRONCRAFT_MARK',data=markPacket.data},'Sender-Realm')
+    assert(#sent==0 and not next(Scan.DB.realm.order_statuses),'a mark from an account without full access was taken in')
+    receive({prefix='HIRONCRAFT_MARK',data='junk'},'Sender-Realm')
+    assert(#sent==0)
+
+    -- Sender: the ACK confirms both.
+    link('source','receiver','0.4.128',senderStatuses,senderNotices)
+    receive({prefix='HIRONCRAFT_MARK',data=ackPacket.data},'Receiver-Realm')
+    assert(not mark.deliveryPending and mark.deliveryConfirmedAt,'the ACK did not confirm the mark')
+    assert(not notice.deliveryPending and notice.deliveryConfirmedAt,'the ACK did not confirm the notice')
+
+    -- An account on an older version: the packet it knows, on the shared prefix.
+    for _,version in ipairs({'0.4.127','old',false}) do
+        local statuses,notices={},{}
+        link('source','receiver',version or nil,statuses,notices)
+        hear('receiver','Receiver-Realm',version or nil)
+        local old=newMark(400,time())
+        comm:ShareOrderStatus(old);runTimers(0.05)
+        local packet=only(op.ShareOrderCompletion)
+        assert(packet.prefix=='HIRONCRAFT_SCAN' and packet.data.data.statuses[1].responseID==400,
+            'an older account ('..tostring(version)..') was sent a packet it does not know')
+    end
+    for _,version in ipairs({'0.4.128','0.4.129','0.5','1.0.0'}) do
+        link('source','receiver',version,{},{})
+        hear('receiver','Receiver-Realm',version)
+        comm:ShareOrderStatus(newMark(410,time()));runTimers(0.05)
+        assert(#sent==1 and sent[1].prefix=='HIRONCRAFT_MARK','version '..version..' is not taken to know the mark channel')
+    end
+
+    -- Not answered three times on the mark channel: the old way, in case the
+    -- account does not listen there after all.
+    link('source','receiver','0.4.128',{},{})
+    hear('receiver','Receiver-Realm','0.4.128')
+    local silent=newMark(420,time())
+    for attempt=1,3 do
+        settle()
+        comm:ShareOrderStatus(silent);runTimers(0.05)
+        assert(#sent==1 and sent[1].prefix=='HIRONCRAFT_MARK','attempt '..attempt..' left the mark channel early')
+        markSent(sent[1])
+        clock=clock+20
+    end
+    settle()
+    comm:ShareOrderStatus(silent);runTimers(0.05)
+    assert(only(op.ShareOrderCompletion).prefix=='HIRONCRAFT_SCAN','an unanswered mark was never sent the old way')
+
+    -- A backlog: as many of the newest as one addon message holds, each order's
+    -- notice beside its status; the rest follow after the ACK.
+    link('source','receiver','0.4.128',{},{})
+    hear('receiver','Receiver-Realm','0.4.128')
+    local realEncode,packets=comm.EncodeMarkPacket,{}
+    comm.EncodeMarkPacket=function(_,packet)
+        local text=string.rep('x',100*(#packet[4]+#packet[5]))..'#'..(#packets+1)
+        packets[text]=packet
+        return text
+    end
+    local older,newer,newest=newMark(501,time()-30),newMark(502,time()-20),newMark(503,time()-10)
+    local newestNotice=newNotice(newest)
+    settle()
+    comm:ShareOrderStatus(newest);runTimers(0.05)
+    assert(#sent==1 and sent[1].prefix=='HIRONCRAFT_MARK')
+    local firstPacket=packets[sent[1].data]
+    local firstStatuses,firstNotices=codec.Decode(firstPacket,'receiver')
+    assert(#firstStatuses==1 and #firstNotices==1 and firstStatuses[1].responseID==503 and firstNotices[1].orderID==1503,
+        'the newest order did not go first, its notice beside its status')
+    markSent(sent[1])
+    newest.deliveryPending,newestNotice.deliveryPending=nil,nil
+    settle()
+    comm:ShareOrderStatus(newer);runTimers(0.05)
+    local secondStatuses=codec.Decode(packets[sent[1].data],'receiver')
+    assert(#sent==1 and #secondStatuses==2 and secondStatuses[1].responseID==502 and secondStatuses[2].responseID==501,
+        'the rest of the backlog did not follow, newest first')
+    -- One entry alone always goes, however long it is.
+    local trials=0
+    comm.EncodeMarkPacket=function(_,packet)
+        trials=trials+1
+        local text=string.rep('x',900)..'#'..trials
+        packets[text]=packet
+        return text
+    end
+    link('source','receiver','0.4.128',{},{})
+    hear('receiver','Receiver-Realm','0.4.128')
+    newMark(510,time())
+    comm:ShareOrderStatus(newMark(511,time()+1));runTimers(0.05)
+    assert(#sent==1 and #packets[sent[1].data][4]==1 and codec.Decode(packets[sent[1].data],'receiver')[1].responseID==511,
+        'a long mark was not sent, or not alone')
+    comm.EncodeMarkPacket=realEncode
+    function GetTime() return 10 end
+end
+print('Mark channel passed (own prefix, compact packet, no wait, one ACK, unknown senders, older accounts, fallback, backlog in single messages).')
 
 -- Every message says which HironCraft sent it, and the receiver keeps it per
 -- account; analytics travels on a prefix of its own.

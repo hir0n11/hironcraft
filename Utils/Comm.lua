@@ -45,10 +45,23 @@ local HIRONCRAFT_BULK_COMM_PREFIX = 'HIRONCRAFT_BULK'
 -- Analytics between linked accounts has a channel of its own, so a long
 -- exchange never holds up material lists or profession data.
 local HIRONCRAFT_ANALYTICS_COMM_PREFIX = 'HIRONCRAFT_ANLT'
+-- The final marks of orders and their ACKs have a prefix to themselves
+-- (0.4.128): on the shared one they waited behind shared chat lines, requests
+-- and pings for the same allowance of about one message a second. They are
+-- written compactly there, one mark to a message (Utils/OrderMarkCodec.lua).
+-- Only a linked account that says it is 0.4.128 or newer is sent to this way;
+-- an older one gets the packets it knows on the shared prefix.
+local HIRONCRAFT_MARK_COMM_PREFIX = 'HIRONCRAFT_MARK'
+local MARK_CHANNEL_FIRST_VERSION = '0.4.128'
+-- What one addon message carries; a longer packet is cut into several.
+local MARK_MESSAGE_BYTES = 255
+-- Not answered this many times there: the old way, in case it does not listen.
+local MARK_CHANNEL_ATTEMPTS = 3
 function HironCraftScanComm:OnEnable()
     self:RegisterComm(HIRONCRAFT_SCAN_COMM_PREFIX)
     self:RegisterComm(HIRONCRAFT_BULK_COMM_PREFIX)
     self:RegisterComm(HIRONCRAFT_ANALYTICS_COMM_PREFIX)
+    self:RegisterComm(HIRONCRAFT_MARK_COMM_PREFIX)
 
     -- We want to make sure we've waited until after the other channels are
     -- initialized so we don't plan HironCraftScan at /1. I tried being clever and
@@ -131,9 +144,12 @@ local RECENT_ORDER_REPLAY_THROTTLE_SECONDS = 2
 local RECENT_ORDER_NOTICE_LIMIT = 12
 local RECENT_ORDER_STATUS_LIMIT = 20
 local PENDING_ORDER_BATCH_LIMIT = 10
--- Status delivery: coalesce claim/craft/fulfil revisions into one small packet
--- and never re-queue an entry that is still waiting in the local send queue.
-local STATUS_FLUSH_DELAY_SECONDS = 0.3
+-- Status delivery: a mark and the completion notice written in the same
+-- moment go as one packet, and an entry that is still waiting in the local
+-- send queue is never queued again. The wait was 0.3 s to also catch the
+-- confirmed revision of a mark set when the order was handed in; the mark is
+-- one message now, so it goes at once and the confirmation follows on its own.
+local STATUS_FLUSH_DELAY_SECONDS = 0.05
 local STATUS_ACK_TIMEOUT_SECONDS = 2
 local STATUS_RESEND_SECONDS = 3
 local STATUS_QUEUE_STALE_SECONDS = 30
@@ -190,6 +206,31 @@ end
 local function IsProgressMark(entry)
     return type(entry) == 'table' and (entry.status == 'claimed' or entry.status == 'crafted')
 end
+
+-- "0.4.128" and newer; nil, "old" and anything unreadable are older.
+local function VersionAtLeast(version, wanted)
+    if type(version) ~= 'string' then return false end
+    local have, need = {}, {}
+    for part in version:gmatch('%d+') do have[#have + 1] = tonumber(part) end
+    for part in wanted:gmatch('%d+') do need[#need + 1] = tonumber(part) end
+    if #have == 0 then return false end
+    for index = 1, math.max(#have, #need) do
+        local left, right = have[index] or 0, need[index] or 0
+        if left ~= right then return left > right end
+    end
+    return true
+end
+
+local function PeerTakesMarks(accountID)
+    local accounts = HironCraftScan.DB.realm.linked_accounts
+    local account = accounts and accounts[accountID]
+    return HironCraftScan.OrderMarkCodec ~= nil and type(account) == 'table'
+        and VersionAtLeast(account.addon_version, MARK_CHANNEL_FIRST_VERSION)
+end
+
+-- While a packet of the mark channel is being taken in, the ACKs it calls for
+-- are gathered here and go back the same way, as one message.
+local markReply = nil
 
 local function HaveTarget()
     if remoteTargets then
@@ -1142,6 +1183,10 @@ SendOrderStatusAcks = function(target, entries)
     end
 
     if #statuses > 0 then
+        if markReply then
+            for _, ack in ipairs(statuses) do table.insert(markReply.statuses, ack) end
+            return
+        end
         HironCraftScanComm:Transmit(
             { statuses = statuses },
             HironCraftScanComm.Operations.OrderStatusAck,
@@ -1153,6 +1198,10 @@ end
 local function SendOrderStatusAck(target, entry)
     local ack = StatusAck(entry)
     if ack then
+        if markReply then
+            table.insert(markReply.statuses, ack)
+            return
+        end
         HironCraftScanComm:Transmit(
             { statuses = { ack } },
             HironCraftScanComm.Operations.OrderStatusAck,
@@ -1300,45 +1349,28 @@ local function SendPendingOrderStatuses(accountID, target)
         return
     end
 
-    local statuses = {}
-    local notices = {}
-    local batch = {}
-    local function Flush()
-        if #batch == 0 then
-            return
+    -- Once a packet has really left the local queue: when it was sent, and
+    -- from then the wait for its ACK. A missing ACK means the character
+    -- changed, and a ping discovers the live one.
+    local function OnSent(sentEntries)
+        local sentAt = Now()
+        for _, entry in ipairs(sentEntries) do
+            local send = statusSends[entry] and statusSends[entry][accountID]
+            if send and send.target == target then
+                send.queued = false
+                send.sentAt = sentAt
+            end
         end
-        local sentEntries = batch
-        HironCraftScanComm:Transmit(
-            { statuses = statuses, recent = notices },
-            HironCraftScanComm.Operations.ShareOrderCompletion,
-            target,
-            function()
-                local sentAt = Now()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(STATUS_ACK_TIMEOUT_SECONDS, function()
                 for _, entry in ipairs(sentEntries) do
-                    local send = statusSends[entry] and statusSends[entry][accountID]
-                    if send and send.target == target then
-                        send.queued = false
-                        send.sentAt = sentAt
+                    if PendingForAccount(entry, accountID) then
+                        SendPing(accountID)
+                        return
                     end
                 end
-                -- Start the ACK timeout only once the packet has really left
-                -- the local queue. A missing ACK then means the character
-                -- changed, and a ping discovers the live one.
-                if C_Timer and C_Timer.After then
-                    C_Timer.After(STATUS_ACK_TIMEOUT_SECONDS, function()
-                        for _, entry in ipairs(sentEntries) do
-                            if PendingForAccount(entry, accountID) then
-                                SendPing(accountID)
-                                return
-                            end
-                        end
-                    end)
-                end
-            end
-        )
-        statuses = {}
-        notices = {}
-        batch = {}
+            end)
+        end
     end
 
     local function Pending(entry)
@@ -1348,41 +1380,88 @@ local function SendPendingOrderStatuses(accountID, target)
     end
 
     -- Outcomes draw the final green/red mark and matter most to the operator,
-    -- so put newest notices first. Exact state rows follow, also newest first,
-    -- instead of relying on undefined pairs order. Transmit strips materials.
+    -- so newest notices come first. Exact state rows follow, also newest
+    -- first, instead of relying on undefined pairs order.
     -- Only one small batch is queued per call: a long backlog (the linked
     -- account was offline) would otherwise sit in front of every new mark.
     -- Each ACK schedules the next flush, so the backlog drains self-clocked.
-    for _, notice in ipairs(NewestOrderEntries(
-        HironCraftScan.OrderFulfillment:GetCompletionNotices(),
-        nil,
-        Pending
-    )) do
-        if #batch >= PENDING_ORDER_BATCH_LIMIT then
-            break
+    local pendingNotices = NewestOrderEntries(HironCraftScan.OrderFulfillment:GetCompletionNotices(), nil, Pending)
+    local pendingStatuses = NewestOrderEntries(HironCraftScan.OrderFulfillment:GetStatuses(), nil, Pending)
+
+    local compact = PeerTakesMarks(accountID)
+    if compact then
+        for _, list in ipairs({ pendingNotices, pendingStatuses }) do
+            for _, entry in ipairs(list) do
+                local send = statusSends[entry] and statusSends[entry][accountID]
+                if send and send.target == target and send.attempts >= MARK_CHANNEL_ATTEMPTS then compact = false end
+            end
         end
-        MarkStatusQueued(notice, accountID, target)
-        table.insert(notices, notice)
-        table.insert(batch, notice)
     end
 
-    for _, entry in ipairs(NewestOrderEntries(
-        HironCraftScan.OrderFulfillment:GetStatuses(),
-        nil,
-        Pending
-    )) do
-        if #batch >= PENDING_ORDER_BATCH_LIMIT then
-            break
+    if compact then
+        -- The newest order first, its notice and its status side by side: they
+        -- share the customer, the crafter and the request, which are written
+        -- once. As many of the newest as one addon message holds go now; the
+        -- rest follow, ACK by ACK.
+        local order = {}
+        for _, notice in ipairs(pendingNotices) do order[#order + 1] = { entry = notice, notice = true } end
+        for _, status in ipairs(pendingStatuses) do order[#order + 1] = { entry = status } end
+        for index, item in ipairs(order) do item.index = index end
+        table.sort(order, function(lhs, rhs)
+            local left, right = tonumber(lhs.entry.updatedAt) or 0, tonumber(rhs.entry.updatedAt) or 0
+            if left ~= right then return left > right end
+            if (lhs.notice == true) ~= (rhs.notice == true) then return lhs.notice == true end
+            return lhs.index < rhs.index
+        end)
+        local codec = HironCraftScan.OrderMarkCodec
+        local myID = HironCraftScan.DB.settings.my_uuid
+        local statuses, notices, batch, encoded = {}, {}, {}, nil
+        for _, item in ipairs(order) do
+            if #batch >= PENDING_ORDER_BATCH_LIMIT then break end
+            local list = item.notice and notices or statuses
+            list[#list + 1] = item.entry
+            local trial = HironCraftScanComm:EncodeMarkPacket(codec.EncodeMarks(statuses, notices, myID, accountID,
+                HironCraftScan.CONST.CURRENT_VERSION))
+            if #batch > 0 and #trial > MARK_MESSAGE_BYTES then
+                list[#list] = nil
+                break
+            end
+            batch[#batch + 1] = item.entry
+            encoded = trial
         end
-        MarkStatusQueued(entry, accountID, target)
-        table.insert(statuses, entry)
-        table.insert(batch, entry)
+        if encoded then
+            for _, entry in ipairs(batch) do MarkStatusQueued(entry, accountID, target) end
+            HironCraftScanComm:SendMarkPacket(encoded, target, function() OnSent(batch) end)
+        end
+    else
+        local statuses, notices, batch = {}, {}, {}
+        for _, notice in ipairs(pendingNotices) do
+            if #batch >= PENDING_ORDER_BATCH_LIMIT then break end
+            MarkStatusQueued(notice, accountID, target)
+            table.insert(notices, notice)
+            table.insert(batch, notice)
+        end
+        for _, entry in ipairs(pendingStatuses) do
+            if #batch >= PENDING_ORDER_BATCH_LIMIT then break end
+            MarkStatusQueued(entry, accountID, target)
+            table.insert(statuses, entry)
+            table.insert(batch, entry)
+        end
+        if #batch > 0 then
+            -- Transmit strips the material lists.
+            HironCraftScanComm:Transmit(
+                { statuses = statuses, recent = notices },
+                HironCraftScanComm.Operations.ShareOrderCompletion,
+                target,
+                function() OnSent(batch) end
+            )
+        end
     end
-    Flush()
 
     ScheduleMaterialPump(accountID)
 end
 
+local statusFlushes = {}
 local statusFlushes = {}
 
 ScheduleOrderStatusFlush = function(accountID)
@@ -1496,6 +1575,10 @@ local function SendOrderCompletionAcks(target, notices)
     end
 
     if #acknowledgements > 0 then
+        if markReply then
+            for _, ack in ipairs(acknowledgements) do table.insert(markReply.notices, ack) end
+            return
+        end
         HironCraftScanComm:Transmit(
             { notices = acknowledgements },
             HironCraftScanComm.Operations.OrderCompletionAck,
@@ -2236,6 +2319,11 @@ local function SendMessage(encoded, target, priority, prefix, callback)
     )
 end
 
+-- A packet of the mark channel, ready for the wire (see MARK_MESSAGE_BYTES).
+function HironCraftScanComm:EncodeMarkPacket(packet)
+    return LibDeflate:EncodeForWoWAddonChannel(LibDeflate:CompressDeflate(LibSerialize:Serialize(packet)))
+end
+
 local ALERT_OPERATIONS = {
     [HironCraftScanComm.Operations.Handshake] = true,
     [HironCraftScanComm.Operations.ShareCustomerOrder] = true,
@@ -2460,6 +2548,19 @@ local function TransmitSerialized(serialized, target, priority, prefix, onSent)
 
 end
 
+-- Hands an encoded packet of the mark channel to one character. onSent is
+-- called once it has left the local queue.
+function HironCraftScanComm:SendMarkPacket(encoded, target, onSent)
+    RegisterOfflineTargets({ { [target] = true } })
+    local notified = false
+    SendMessage(encoded, target, 'ALERT', HIRONCRAFT_MARK_COMM_PREFIX, onSent and function(_, sent, total)
+        if not notified and sent and total and sent >= total then
+            notified = true
+            onSent(target)
+        end
+    end or nil)
+end
+
 local function IsPublicOperation(op)
     return HironCraftScanComm.Operations.FindCrafter == op or HironCraftScanComm.Operations.RequestCraft == op
 end
@@ -2649,6 +2750,48 @@ local function ReceiveDeserialized(msg, sender)
     end
 end
 
+-- A packet of the mark channel: marks of a linked account's orders, or its
+-- ACKs of ours. Small and urgent, so it is read at once, not over frames.
+local function ReceiveMarkPacket(payload, sender)
+    local codec = HironCraftScan.OrderMarkCodec
+    local decoded = codec and LibDeflate:DecodeForWoWAddonChannel(payload)
+    local decompressed = decoded and LibDeflate:DecompressDeflate(decoded)
+    if not decompressed then return end
+    local ok, packet = LibSerialize:Deserialize(decompressed)
+    if not ok then return end
+
+    local kind, version, senderID = codec.Header(packet)
+    -- Another protocol version is not guessed at; the sender falls back to
+    -- the shared prefix, where a mismatch is reported.
+    if not kind or version ~= HironCraftScan.CONST.CURRENT_VERSION then return end
+    local linkedAccounts = HironCraftScan.DB.realm.linked_accounts
+    local linkedAccount = linkedAccounts and linkedAccounts[senderID]
+    if not linkedAccount
+        or not HironCraftScan.Utils.Contains(linkedAccount.permissions, HironCraftScanComm.Permissions.Full) then
+        return
+    end
+    remoteTargets = remoteTargets or {}
+    ReceiveRemoteTarget(senderID, sender)
+
+    local myID = HironCraftScan.DB.settings.my_uuid
+    local first, second = codec.Decode(packet, myID)
+    if kind == codec.ACKS then
+        ReceiveOrderStatusAck(sender, { statuses = first or {} }, senderID)
+        ReceiveOrderCompletionAck(sender, { notices = second or {} }, senderID)
+        return
+    end
+
+    markReply = { statuses = {}, notices = {} }
+    local reply = markReply
+    local handled, problem = pcall(ReceiveShareOrderCompletion, sender, { statuses = first or {}, recent = second or {} }, senderID)
+    markReply = nil
+    if #reply.statuses > 0 or #reply.notices > 0 then
+        HironCraftScanComm:SendMarkPacket(HironCraftScanComm:EncodeMarkPacket(
+            codec.EncodeAcks(reply.statuses, reply.notices, myID, senderID, HironCraftScan.CONST.CURRENT_VERSION)), sender)
+    end
+    if not handled then error(problem, 0) end
+end
+
 function HironCraftScanComm:OnCommReceived(prefix, payload, distribution, sender)
     if issecretvalue(payload) then return end
 
@@ -2667,6 +2810,10 @@ function HironCraftScanComm:OnCommReceived(prefix, payload, distribution, sender
         sender = HironCraftScan.GetUnitName(sender, true)
     end
 
+    if prefix == HIRONCRAFT_MARK_COMM_PREFIX then
+        ReceiveMarkPacket(payload, sender)
+        return
+    end
     if prefix ~= HIRONCRAFT_SCAN_COMM_PREFIX and prefix ~= HIRONCRAFT_BULK_COMM_PREFIX
         and prefix ~= HIRONCRAFT_ANALYTICS_COMM_PREFIX then
         return

@@ -25,6 +25,35 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The third mark: its own channel, one message, no wait (0.4.128)
+
+Three more things that held the final mark of an order back on its way to a
+linked account, after 0.4.127 stopped sending the steps before it.
+
+- **A channel of its own.** Marks and their confirmations shared one addon
+  prefix with every chat line passed to the linked account, with requests
+  and with pings, and the server allows a prefix a small burst and then
+  about one message a second. They have the prefix `HIRONCRAFT_MARK` to
+  themselves now.
+- **One message instead of two or three.** A mark with its completion notice
+  was about 500 bytes on the wire, and an addon message carries 255. Written
+  by position instead of with named fields, with what the two halves share
+  sent once and account ids packed to their 16 bytes, it is about 170 bytes
+  (220 with the longest names). The confirmation of both is one message of
+  about 70 bytes where it was two.
+- **No wait.** A mark waited 0.3 seconds to be sent together with a
+  confirmed revision that might follow. It goes at once now (0.05 s, enough
+  for the notice written in the same moment); the confirmed revision follows
+  as a message of its own when it comes.
+- A backlog (the linked account was away) goes as single messages, the
+  newest order first, each confirmed before the next.
+
+**Both accounts need 0.4.128.** A linked account says its version in every
+message; one that is older keeps getting the packets it knows on the shared
+prefix, so nothing breaks while only one side is updated, and nothing gets
+faster either. A mark that is not confirmed three times on the new channel
+is sent the old way.
+
 ## The final mark alone travels; a decline of a large tip asks; key hints on Shift (0.4.127)
 
 **The third mark on a linked account.** The mark of a crafting order went
