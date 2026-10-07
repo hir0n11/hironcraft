@@ -154,8 +154,8 @@ assert(source:find('context.reagent_issues = HironCraftScan.ReagentAudit.Issues(
     and source:find('context.reagent_issues_plain = HironCraftScan.ReagentAudit.Issues(audit)',1,true),
     'the chat reply does not ask for links, or keeps no names to fall back on')
 
--- A message is measured the way /hcchatlimit found the game to do it: by
--- what is shown. The code of a link (color, |H...|h, |h, |r) is not counted,
+-- A message is measured the way the game was found to do it (see
+-- Utils/ChatLength.lua): by what is shown. The code of a link (color, |H...|h, |h, |r) is not counted,
 -- and neither is the quality icon in a name.
 local Fits,Length=Scan.Utils.FitsChatMessage,Scan.Utils.ChatLength
 assert(Length(links[5201])==#"[Competitor's Heraldry]",'the code of a link is counted against the message')

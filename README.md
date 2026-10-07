@@ -25,6 +25,27 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## `/hcchatlimit` is taken out; the manual-action check runs again (0.4.125)
+
+`scripts/TestManualPolicy.cjs` checks that the addon writes to players only
+on the crafter's own action: one central sender, an explicit "by hand" flag
+on every call, no return of the old auto-replies. It could not run on this
+machine, because the Lua parser it needs was missing, so it had checked
+nothing for a while. With the parser installed it found what had slipped
+past it:
+
+- `/hcchatlimit` whispered outside the central sender and from timers. Only
+  to yourself and on your command, but that is what the rule forbids. Its
+  work is done (the measured numbers are in `Utils/ChatLength.lua`), so the
+  command is removed; its code stays in the git history (0.4.120 - 0.4.124).
+  The saved result (`chat_limit_probe`) is dropped.
+- The check now knows the central sender's guarded call (it catches the
+  game's refusal of a message that is too long) and the sender of a
+  decline's reason, which runs on a click.
+
+The parser is looked for next to the other test tools:
+`npm install luaparse --prefix C:/Tools/lua51`.
+
 ## A recraft row is made by hand only (0.4.124)
 
 The row for a recraft of what was delivered is no longer made on its own.

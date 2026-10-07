@@ -3,7 +3,21 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const lua = require('../../test-tools/luaparse-node_modules/luaparse');
+// The Lua parser is not part of the addon. It is looked for where this test
+// was first written and next to the other test tools:
+//   npm install luaparse --prefix C:/Tools/lua51
+function loadParser() {
+    const places = ['../../test-tools/luaparse-node_modules/luaparse', 'C:/Tools/lua51/node_modules/luaparse', 'luaparse'];
+    for (const place of places) {
+        try {
+            return require(place);
+        } catch (error) {
+            if (error.code !== 'MODULE_NOT_FOUND') throw error;
+        }
+    }
+    throw new Error('luaparse is not installed: npm install luaparse --prefix C:/Tools/lua51');
+}
+const lua = loadParser();
 const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const excluded = new Set(['.git', '.build', 'dist', 'artwork', 'scripts']);
 const calls = [], functions = new Map();
@@ -52,7 +66,10 @@ for (const file of manualFiles) {
 }
 
 const ownCalls = calls.filter(call => !call.file.startsWith('Libs/'));
-const directChat = ownCalls.filter(call => /(^|\.)SendChatMessage$/.test(call.name));
+// Also through pcall: the central sender catches the game's refusal of a
+// message that is too long ("Chat message limits exceeded").
+const directChat = ownCalls.filter(call => /(^|\.)SendChatMessage$/.test(call.name)
+    || (call.name === 'pcall' && /(^|\.)SendChatMessage$/.test(name(call.node.arguments[0]))));
 assert.deepEqual(directChat.map(call => call.file), ['Utils/Utils.lua'], 'player chat bypassed the central sender');
 const bnetSends = ownCalls.filter(call => /(^|\.)(BNSendWhisper|SendWhisper)$/.test(call.name)
     || (call.name === 'pcall' && /(^|\.)(BNSendWhisper|SendWhisper)$/.test(name(call.node.arguments[0]))));
@@ -68,9 +85,12 @@ function checkManualCalls(method, files, flagIndex = -1) {
             'missing manual-action opt-in: ' + call.file + ':' + call.name);
     }
 }
+// QuickReplies twice: a reply card (SendOption) and the reason of a decline
+// sent again (SendDeclineReason, 0.4.114), which runs on a click of its card
+// or of its line in the chat menu.
 checkManualCalls('SendResponses', [
     'Customer/CustomExplanations.lua', 'Customer/OrderGreetings.lua',
-    'Customer/QuickReplies.lua', 'Utils/Comm.lua',
+    'Customer/QuickReplies.lua', 'Customer/QuickReplies.lua', 'Utils/Comm.lua',
 ]);
 checkManualCalls('SendOrderGreeting', [
     'Customer/OrderPage.lua', 'Customer/QuickReplies.lua',

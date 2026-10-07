@@ -2671,8 +2671,6 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if not message or not customer then
         return false
     end
-    -- A test whisper of /hcchatlimit to ourselves is nobody's request.
-    if HironCraftScan.ChatLimitProbe and HironCraftScan.ChatLimitProbe.Owns(message) then return false end
     local isBattleNet = HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)
     if isBattleNet and (HironCraftScanComm.applying_remote_state
         or not (overrides and overrides.battleNet)) then return false end

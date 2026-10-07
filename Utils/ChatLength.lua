@@ -1,7 +1,10 @@
 local HironCraftScan = select(2, ...)
 
--- What one whisper holds, as /hcchatlimit measured it in the game on
--- 2026-10-07 (patch 12.0) with whispers to oneself:
+-- What one whisper holds, as measured in the game on 2026-10-07 (patch 12.0)
+-- with whispers to oneself. The probe that did it, /hcchatlimit, shipped in
+-- 0.4.118 - 0.4.124 and is in the git history (Utils/ChatLimitProbe.lua): it
+-- whispered from timers, which the addon otherwise never does, so it was
+-- taken out once the numbers were known.
 --
 --   255 bytes of what is shown. Cyrillic takes 2 for a letter: 255 Cyrillic
 --   letters (505 bytes) did not arrive.
