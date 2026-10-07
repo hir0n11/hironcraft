@@ -38,7 +38,6 @@ function HironCraftScanGeneralConfigMatchingMixin:Init()
     HironCraftScan.SetupTextInput(self, self.Keywords, 'inclusions')
     HironCraftScan.SetupTextInput(self, self.Exclusions, 'exclusions')
     HironCraftScan.SetupTextInput(self, self.GenericRequests, 'generic_request_keywords')
-    HironCraftScan.SetupTextInput(self, self.RecraftRequests, 'recraft_request_keywords')
 end
 
 function HironCraftScanGeneralConfigMatchingMixin:GetConfigValue(keyword)

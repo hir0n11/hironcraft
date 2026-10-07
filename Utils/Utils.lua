@@ -860,6 +860,9 @@ local function UpgradePersistentConfig()
     -- before anything else runs against it so we don't need conditionals
     -- anywhere else.
 
+    -- The phrases that made a recraft row on their own (0.4.108 - 0.4.123).
+    HironCraftScan.DB.settings.recraft_request_keywords = nil
+
     -- Upgrade the profession configuration to create a normalized 'parent
     -- profession' node. The professionIDs we usually deal with are 'Dragon
     -- Isles Blacksmithing', but we present most options per parent profession

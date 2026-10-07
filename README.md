@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A recraft row is made by hand only (0.4.124)
+
+The row for a recraft of what was delivered is no longer made on its own.
+It guessed wrong too often, so both ways are taken out:
+
+- a whisper with a phrase like `can you recraft?` (0.4.108, 0.4.113);
+- `LF recraft [the delivered item]` in public chat (0.4.118).
+
+Such a whisper is an ordinary whisper again, and a public line that repeats
+a finished request is passed over as before.
+
+- **By hand, as before.** The menu of a player's name in chat lists
+  `Recraft: item - crafter` under Manual Matching for their deliveries of
+  the last week; a click adds the row marked `(recraft)`, Shift+click adds
+  it quietly. A linked account still gets the row made this way.
+- The setting `Recraft requests` (Settings - Matching) is gone, and its
+  saved phrases are dropped.
+
 ## Problem customer: a mark set by hand (0.4.123)
 
 A customer who is hard work can be marked by hand. The mark is a toy monkey

@@ -335,8 +335,6 @@ function HironCraftScan.Scanner.LoadConfig()
         HironCraftScan.DB.settings.generic_request_keywords
             or L(HironCraftScan.CONST.TEXT.GENERIC_REQUEST_KEYWORDS_DEFAULT)
     )
-    config.recraft_requests = ParseStringList(
-        HironCraftScan.Utils.GetSetting('recraft_request_keywords') or '')
 
     -- Sort professions so that when we scan for generic keyword matches, we
     -- find the local charcter first, then the primary crafter. We ignore
@@ -2483,17 +2481,13 @@ end
 -- the list, so the new request for the same item is made from what the
 -- delivery left behind: the order's status keeps the customer, the recipe and
 -- the crafter for a month, also on a linked account.
-local RECRAFT_AUTO_SECONDS = 24 * 60 * 60       -- a whisper means a delivery this recent
-local RECRAFT_JUST_NOW_SECONDS = 30 * 60        -- of several, the only one this recent is meant
+--
+-- The row is made by hand only, from the menu of the customer's name in chat.
+-- Until 0.4.124 a whisper with a phrase like "can you recraft?" and a public
+-- "LF recraft [the item]" made it on their own; that guessed wrong too often
+-- and was taken out.
 local RECRAFT_MANUAL_SECONDS = 7 * 24 * 60 * 60 -- the chat menu offers these
 local RECRAFT_MENU_ROWS = 6
-
--- "can you recraft?": a phrase from Settings - Matching ("Recraft requests").
-local function IsRecraftRequest(message)
-    if type(message) ~= 'string' or message == '' then return false end
-    return HasDelimitedPhrase(message:lower(), config.recraft_requests)
-end
-HironCraftScan.Scanner.IsRecraftRequest = IsRecraftRequest
 
 -- What a delivered order was, as far as it can still be told: its row when
 -- that is still listed, else the recipe or profession its status is kept
@@ -2582,38 +2576,6 @@ local function Deliveries(customer, maxAge)
         return tostring(lhs.responseID) < tostring(rhs.responseID)
     end)
     return found
-end
-
--- The delivery a message means. When it names nothing, a single delivery is
--- meant, or of several the only one of the last half hour ("u can recraft
--- it?" right after the craft); when it links an item or names a slot, the
--- delivery of that item and no other. The second value says that several
--- were delivered and nothing told them apart: that is not guessed at.
-local function PickDelivery(deliveries, crafterInfo, itemID, recipeInfo)
-    local slots = crafterInfo and type(crafterInfo.equipmentRequests) == 'table'
-        and #crafterInfo.equipmentRequests > 0 and crafterInfo.equipmentRequests or nil
-    local recipeID = recipeInfo and recipeInfo.recipeID
-    if not itemID and not recipeID and not slots then
-        if #deliveries == 1 then return deliveries[1], false end
-        local now, justNow = time(), {}
-        for _, delivery in ipairs(deliveries) do
-            if now - delivery.deliveredAt <= RECRAFT_JUST_NOW_SECONDS then justNow[#justNow + 1] = delivery end
-        end
-        if #justNow == 1 then return justNow[1], false end
-        return nil, #deliveries > 1
-    end
-    local matched = {}
-    for _, delivery in ipairs(deliveries) do
-        local hit = (itemID ~= nil and delivery.itemID == itemID)
-            or (recipeID ~= nil and delivery.recipeID == recipeID)
-        if not hit and slots and delivery.itemID and HironCraftScan.ClassMatching then
-            for _, request in ipairs(slots) do
-                if HironCraftScan.ClassMatching.MatchesItem(request, delivery.itemID) then hit = true end
-            end
-        end
-        if hit then matched[#matched + 1] = delivery end
-    end
-    return #matched == 1 and matched[1] or nil, false
 end
 
 -- A delivery as a line of a menu: the item (or profession) and who made it.
@@ -2749,23 +2711,10 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     -- greeting, so it raises the normal request banner. Only a real incoming
     -- whisper is answered with a greeting card.
     local incomingWhisper = event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER'
-    -- A recraft a linked account passed on names its delivery; in a whisper of
-    -- ours it is a phrase like "can you recraft?".
+    -- A recraft row is made by hand only; nothing a customer writes makes one.
+    -- A linked account passes on the one made there, naming its delivery.
     local remoteRecraft = overrides.remoteRequest and type(overrides.chatEntry) == 'table'
         and type(overrides.chatEntry.recraftOf) == 'table' and overrides.chatEntry.recraftOf or nil
-    local wantsRecraft = remoteRecraft ~= nil
-        or (incomingWhisper and not overrides.remoteRequest and not overrides.classRetry
-            and not overrides.forceGeneralRequest and not overrides.manualMatch
-            and IsRecraftRequest(message))
-    -- In public chat the phrase is anyone's "LF recraft": it means a delivery
-    -- of ours only when the line names what was delivered to them ("LF recraft
-    -- [the belt]" a few minutes after the belt). Without this the line is a
-    -- repeat of a request that is done, and is passed over.
-    local publicRecraft = not wantsRecraft and not overrides.remoteRequest and not overrides.classRetry
-        and not overrides.forceGeneralRequest and not overrides.manualMatch
-        and (event == 'CHAT_MSG_CHANNEL' or event == 'CHAT_MSG_SAY' or event == 'CHAT_MSG_PARTY'
-            or event == 'CHAT_MSG_GUILD')
-        and IsRecraftRequest(message)
     if incomingWhisper and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
@@ -2857,7 +2806,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                 customerGuid
             )
             if not crafterInfo and not classPending and not overrides.forceGeneralRequest
-                and not IsGenericRequest(message) and not wantsRecraft then
+                and not IsGenericRequest(message) and not remoteRecraft then
                 OfferDeferredQuickReply(customer, message, customerInfo, overrides)
                 return false
             end
@@ -2883,17 +2832,9 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     elseif not crafterInfo then
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
-    if wantsRecraft or publicRecraft then
-        local delivery, several
-        local named = itemID ~= nil or (recipeInfo and recipeInfo.recipeID ~= nil)
-            or (crafterInfo and type(crafterInfo.equipmentRequests) == 'table' and #crafterInfo.equipmentRequests > 0)
-        if remoteRecraft then
-            delivery = DescribeDelivery({ customerName = customer, responseID = remoteRecraft.id,
-                crafterFullName = remoteRecraft.crafter, updatedAt = time() })
-        elseif wantsRecraft or named then
-            delivery, several = PickDelivery(Deliveries(customer, RECRAFT_AUTO_SECONDS),
-                crafterInfo, itemID, recipeInfo)
-        end
+    if remoteRecraft then
+        local delivery = DescribeDelivery({ customerName = customer, responseID = remoteRecraft.id,
+            crafterFullName = remoteRecraft.crafter, updatedAt = time() })
         if delivery then
             local info = saved(HironCraftScan.DB.customers, customer, {})
             info.guid = customerGuid or info.guid
@@ -2903,10 +2844,6 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
                     HironCraftScan.DB.customers[customer], overrides, response)
             end)
             return false
-        elseif several then
-            -- Which of them is not guessed at: the crafter picks it.
-            print('|cffffd100HironCraftScan:|r ' .. string.format(L('Recraft request ambiguous'),
-                HironCraftScan.NameAndRealmToName(customer)))
         end
     end
 

@@ -11,7 +11,7 @@
 
         <Frames>
             <Frame parentKey="Matching" mixin="HironCraftScanGeneralConfigMatchingMixin">
-                <Size x="350" y="350"/>
+                <Size x="350" y="270"/>
                 <Anchors>
                     <Anchor point="TOPLEFT"/>
                 </Anchors>
@@ -45,12 +45,6 @@
                         <Size x="335" y="80"/>
                         <Anchors>
                             <Anchor point="TOPLEFT" relativeKey="$parent.Exclusions" relativePoint="BOTTOMLEFT"/>
-                        </Anchors>
-                    </Frame>
-                    <Frame parentKey="RecraftRequests" inherits="HironCraftScanTextInputTemplate">
-                        <Size x="335" y="80"/>
-                        <Anchors>
-                            <Anchor point="TOPLEFT" relativeKey="$parent.GenericRequests" relativePoint="BOTTOMLEFT"/>
                         </Anchors>
                     </Frame>
                 </Frames>
