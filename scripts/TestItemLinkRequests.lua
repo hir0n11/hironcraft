@@ -1017,6 +1017,18 @@ assert(table.concat(unicodePieces)==unicode)
 for _, piece in ipairs(unicodePieces) do
     assert(#piece<=255 and utf8.len(piece), 'split cut through a UTF-8 character')
 end
+-- The game refuses a message that is too long for it with an error: the
+-- reply does not pass for sent, and the crafter is told.
+do
+    local realSend, realPrint, said = SendChatMessage, print, {}
+    SendChatMessage = function() error('SendChatMessage(): Chat message limits exceeded\nLua Taint: HironCraft', 0) end
+    print = function(text) said[#said + 1] = tostring(text) end
+    local ok, result = pcall(Scan.Utils.SendResponses, { 'hello' }, 'Buyer', true)
+    SendChatMessage, print = realSend, realPrint
+    assert(ok and result == false, 'a message the game refused passed for sent, or broke the click')
+    assert(#said == 1 and said[1]:find('Chat message limits exceeded', 1, true) and not said[1]:find('Lua Taint', 1, true),
+        'the crafter is not told why the reply did not go out: ' .. tostring(said[1]))
+end
 local before=#sent
 assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer', true)==false)
 assert(#sent==before, 'invalid later line was detected only after partially sending the group')

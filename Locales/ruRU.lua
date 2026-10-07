@@ -477,6 +477,7 @@ L["Choose which unfinished order supplies custom message tags."] = "Выбрат
 L["No unfinished order contexts are available."] = "Нет незавершённых заказов, по которым можно составить ответ."
 L["dialog.quick_reply.enabled"] = "Включить быстрые ответы"
 L["dialog.quick_reply.enabled.tooltip.body"] = "Показывать кликабельный вариант ответа, когда известный клиент задаёт настроенный дополнительный вопрос. Ответы никогда не отправляются автоматически."
+L["Reply could not be sent: the game refused the message (%s)."] = "Сообщение не отправлено: игра отклонила его (%s)."
 L["Reply could not be sent: the server limits how fast messages go out. Try again in a few seconds."] = "Сообщение не отправлено: сервер ограничивает частоту отправки. Попробуйте через несколько секунд."
 L["Greeting was not sent, the server limited the rate"] = "Приветствие для %s не отправлено: сервер ограничил частоту сообщений. Строка снова готова к отправке."
 L["dialog.quick_reply.typo_tolerance"] = "Распознавать опечатки"

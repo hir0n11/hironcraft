@@ -25,6 +25,16 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A message the game refuses is not taken for sent (0.4.121)
+
+What stopped the first `/hcchatlimit` is known from the error log: the game
+does not cut a message that is too long. It raises `SendChatMessage(): Chat
+message limits exceeded` and sends nothing.
+
+- A reply the game refuses this way no longer breaks the click silently:
+  the crafter is told `Reply could not be sent: the game refused the message
+  (...)`, and the row is not marked as answered.
+
 ## `/hcchatlimit` says what stops it (0.4.120)
 
 The first run of `/hcchatlimit` in the game printed its opening line and

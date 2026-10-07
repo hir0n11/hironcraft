@@ -197,7 +197,16 @@ function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
         -- if an incomplete installation failed to load the transport module.
         if type(customer) == 'string' and customer:sub(1,5) == 'BNET:' then return false end
         for _, response in ipairs(responses) do
-            SendChatMessage(response, 'WHISPER', select(2, GetDefaultLanguage()), customer)
+            -- The game does not cut a message that is too long for it: it
+            -- raises "Chat message limits exceeded" and sends nothing. That
+            -- must not pass for a reply that went out.
+            local language = select(2, GetDefaultLanguage())
+            local sent, problem = pcall(SendChatMessage, response, 'WHISPER', language, customer)
+            if not sent then
+                print('HironCraft: ' .. string.format(L('Reply could not be sent: the game refused the message (%s).'),
+                    tostring(problem):match('^[^\n]*') or ''))
+                return false
+            end
         end
     end
     return true
