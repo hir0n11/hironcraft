@@ -25,6 +25,43 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## One whisper where one is enough; a recraft asked for in public chat (0.4.118)
+
+**One whisper.** Someone who gets two whispers in a row takes the sender for
+a bot. Everything the addon sends to a player now goes out as one whisper
+whenever its text fits one:
+
+- Lines sent by one click are joined. A greeting for several items or
+  professions was a whisper per crafter (`Hi! Send [A] to Seller.`, then
+  `[B] Send to Tailor.`); a greeting written in several lines was a whisper
+  per line. They are one whisper now, and only what does not fit together
+  stays apart. The same holds for quick replies, the reply about materials,
+  the reason of a decline and the texts sent from the chat menu.
+- The reply about materials writes items as links only while the whole reply
+  fits one whisper. When the links make it too long, the items are named
+  instead (about five items fit as links, six by name). Only a text that is
+  too long even by name is split.
+- `/hcchatlimit` measures what one whisper really holds, with a few whispers
+  to yourself (about half a minute): the number of letters, whether Cyrillic
+  is counted by letters or by bytes, what a link and its quality icon take,
+  and how many bytes arrive whole. It prints the result and saves it in the
+  settings (`chat_limit_probe`); the measure in `Utils/ChatLength.lua` is set
+  from it. The scanner ignores these test whispers.
+
+**A recraft asked for in public chat.** A customer who got their item and a
+few minutes later wrote `LF recraft [that item]` in Trade was passed over:
+with the row of the delivered order still listed, the line looked like a
+repeat of a request that was done. Now a line in public chat that has a
+recraft phrase (Settings - Matching, "Recraft requests") next to the item
+that was delivered to them in the last 24 hours, or its slot, adds the
+request again, marked `(recraft)`, like the whisper "can you recraft?" does.
+
+- Without the item it is not taken to be about that delivery: in public
+  chat `LF recraft` is anyone's line.
+- Another item, or a player nothing was delivered to, is an ordinary
+  request as before. The old line repeated without the phrase stays passed
+  over.
+
 ## Five linked items in one whisper (0.4.117)
 
 0.4.116 still counted the quality icon inside an item's name in full (about

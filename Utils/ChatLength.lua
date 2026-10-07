@@ -28,3 +28,21 @@ function HironCraftScan.Utils.FitsChatMessage(text)
     if #text <= CHAT_MESSAGE_LETTERS then return true end
     return #text <= CHAT_MESSAGE_BYTES and HironCraftScan.Utils.ChatLength(text) <= CHAT_MESSAGE_LETTERS
 end
+
+-- One whisper where one is enough: someone who gets two in a row takes the
+-- sender for a bot. Lines that fit one message together go as one.
+function HironCraftScan.Utils.PackMessages(messages)
+    local packed = {}
+    for _, message in ipairs(messages) do
+        if message ~= '' then
+            local last = packed[#packed]
+            local joined = last and (last .. ' ' .. message)
+            if joined and HironCraftScan.Utils.FitsChatMessage(joined) then
+                packed[#packed] = joined
+            else
+                packed[#packed + 1] = message
+            end
+        end
+    end
+    return packed
+end

@@ -1570,9 +1570,12 @@ function HironCraftScan.BuildResponseContext(response)
     context.profession = response.professionName or context.profession
     context.profession_link = context.profession_link or context.profession
     if HironCraftScan.ReagentAudit then
-        -- Goes to chat: items are their links there.
-        context.reagent_issues = HironCraftScan.ReagentAudit.Issues(
-            HironCraftScan.ReagentAudit.ForResponse(response), nil, true)
+        -- Goes to chat: items are their links there. The same with their
+        -- names is kept for a reply the links would make too long for one
+        -- whisper.
+        local audit = HironCraftScan.ReagentAudit.ForResponse(response)
+        context.reagent_issues = HironCraftScan.ReagentAudit.Issues(audit, nil, true)
+        context.reagent_issues_plain = HironCraftScan.ReagentAudit.Issues(audit)
     end
     return context
 end
@@ -2706,6 +2709,8 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if not message or not customer then
         return false
     end
+    -- A test whisper of /hcchatlimit to ourselves is nobody's request.
+    if HironCraftScan.ChatLimitProbe and HironCraftScan.ChatLimitProbe.Owns(message) then return false end
     local isBattleNet = HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(customer)
     if isBattleNet and (HironCraftScanComm.applying_remote_state
         or not (overrides and overrides.battleNet)) then return false end
@@ -2752,6 +2757,15 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         or (incomingWhisper and not overrides.remoteRequest and not overrides.classRetry
             and not overrides.forceGeneralRequest and not overrides.manualMatch
             and IsRecraftRequest(message))
+    -- In public chat the phrase is anyone's "LF recraft": it means a delivery
+    -- of ours only when the line names what was delivered to them ("LF recraft
+    -- [the belt]" a few minutes after the belt). Without this the line is a
+    -- repeat of a request that is done, and is passed over.
+    local publicRecraft = not wantsRecraft and not overrides.remoteRequest and not overrides.classRetry
+        and not overrides.forceGeneralRequest and not overrides.manualMatch
+        and (event == 'CHAT_MSG_CHANNEL' or event == 'CHAT_MSG_SAY' or event == 'CHAT_MSG_PARTY'
+            or event == 'CHAT_MSG_GUILD')
+        and IsRecraftRequest(message)
     if incomingWhisper and not overrides.remoteRequest then
         overrides.deferQuickReplyUntilScan = true
     end
@@ -2869,12 +2883,14 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     elseif not crafterInfo then
         crafterInfo, itemID, recipeInfo, itemMatches, classPending = GetCrafterForMessage(customer, message, overrides, customerGuid)
     end
-    if wantsRecraft then
+    if wantsRecraft or publicRecraft then
         local delivery, several
+        local named = itemID ~= nil or (recipeInfo and recipeInfo.recipeID ~= nil)
+            or (crafterInfo and type(crafterInfo.equipmentRequests) == 'table' and #crafterInfo.equipmentRequests > 0)
         if remoteRecraft then
             delivery = DescribeDelivery({ customerName = customer, responseID = remoteRecraft.id,
                 crafterFullName = remoteRecraft.crafter, updatedAt = time() })
-        else
+        elseif wantsRecraft or named then
             delivery, several = PickDelivery(Deliveries(customer, RECRAFT_AUTO_SECONDS),
                 crafterInfo, itemID, recipeInfo)
         end

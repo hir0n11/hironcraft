@@ -615,17 +615,16 @@ assert(response(101).requestToken~=response(102).requestToken, 'requests must ha
 scan(a .. b .. c)
 assert(countRows()==3 and #Scan.DB.customers.Buyer.chat_history==2, 'repeat duplicated rows or lost the new chat message')
 Scan.GreetCustomer('LeftButton', order(102)) -- Clicking any row sends the block in source order.
-assert(#sent==3)
-assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller.')
-assert(sent[2].message==b .. ' Send to Tailor.')
-assert(sent[3].message==c .. ' Send to Seller.')
+-- ...as one whisper: three in a row read like a bot.
+assert(#sent==1, 'a greeting that fits one whisper went out as ' .. #sent)
+assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller. ' .. b .. ' Send to Tailor. ' .. c .. ' Send to Seller.')
 for _, id in ipairs({101,102,103}) do
     assert(response(id).greeting_sent and response(id).conversationCharacter=='Seller-Realm')
     Scan.GreetCustomer('LeftButton', order(id))
 end
-assert(#sent==3 and opened==3, 'already answered rows must open chat, not resend the block')
+assert(#sent==1 and opened==3, 'already answered rows must open chat, not resend the block')
 scan(a .. a .. b .. c)
-assert(countRows()==3 and #sent==3)
+assert(countRows()==3 and #sent==1)
 
 -- "send to Lavu" looks like a crafter's pitch, but from a customer we greeted
 -- it is their answer: the second mark is set, and no request is made of it.
@@ -756,8 +755,8 @@ assert(countRows()==2 and response(164) and response(197), 'a list of profession
 assert(response(164).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'one message was shared as two requests')
 Scan.GreetCustomer('LeftButton', order(164))
-assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
-    'the professions were not answered together: '..tostring(sent[2] and sent[2].message))
+assert(#sent==1 and sent[1].message:find(' Profession 197 Send to Tailor.$'),
+    'the professions were not answered together, in one whisper: '..tostring(sent[1] and sent[1].message))
 -- Commas, "&" and a question mark separate words like spaces do.
 reset()
 scan('LF bs, tailor?')
@@ -805,8 +804,8 @@ assert(countRows()==2 and response(101) and response(197),
 assert(response(101).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'two recipe links were shared as two requests')
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
-    'the second recipe was not answered with the first: '..tostring(sent[2] and sent[2].message))
+assert(#sent==1 and sent[1].message:find(' Profession 197 Send to Tailor.$'),
+    'the second recipe was not answered with the first, in one whisper: '..tostring(sent[1] and sent[1].message))
 assert(response(101).greeting_sent and response(197).greeting_sent)
 -- A recipe link and an item link of the same craft are one request.
 reset()
@@ -929,8 +928,8 @@ response(101).message={'Hi! ' .. recraftLink:sub(1,230), recraftLink:sub(231) ..
 response(101).itemLink=recraftLink
 response(103).itemLink=secondRecraft
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent)
-assert(sent[1].message:find(a, 1, true) and sent[2].message==c .. ' Send to Seller.',
+assert(#sent==1 and response(101).greeting_sent and response(103).greeting_sent)
+assert(sent[1].message:find(a, 1, true) and sent[1].message:find(' ' .. c .. ' Send to Seller.', 1, true),
     'saved broken replies were not rebuilt using complete base-item links')
 
 reset(); Scan.auto_replies_enabled=true
@@ -949,7 +948,7 @@ assert(countRows()==2 and #timers==0)
 flushTimers()
 assert(#sent==0, 'item-cache completion sent a greeting without a click')
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent,
+assert(#sent==1 and response(101).greeting_sent and response(103).greeting_sent,
     'loaded long-link batch did not send exactly once on click')
 Item.CreateFromItemID=createItem
 
@@ -989,7 +988,15 @@ assert(#pieces==3 and pieces[2]:find(namedLink, 1, true), 'named-color link was 
 assert(Scan.Utils.SendResponses(pieces, 'Buyer')==false and #sent==0,
     'player whisper did not require an explicit user action')
 assert(Scan.Utils.SendResponses(pieces, 'Buyer', true))
-assert(#sent==3)
+-- The second and third piece fit one whisper together and go as one.
+assert(#sent==2 and sent[1].message==pieces[1] and sent[2].message==pieces[2] .. ' ' .. pieces[3],
+    'lines that fit one whisper were not sent as one')
+-- Packing: nothing is lost or reordered, empty lines add nothing, and what
+-- does not fit together stays apart.
+local packed=Scan.Utils.PackMessages({'one','','two',string.rep('x',250),'three','four'})
+assert(#packed==3 and packed[1]=='one two' and packed[2]==string.rep('x',250) and packed[3]=='three four',
+    'messages were packed wrongly: '..table.concat(packed,' | '))
+assert(#Scan.Utils.PackMessages({})==0 and Scan.Utils.PackMessages({'alone'})[1]=='alone')
 local unicode=string.rep('я',300)
 local unicodePieces=Scan.Utils.SplitResponse(unicode)
 assert(table.concat(unicodePieces)==unicode)
@@ -1984,8 +1991,8 @@ assert(Scan.NameAndRealmToName(key)=='friend#1234 (Battle.net)')
 assert(Scan.ColorizePlayerName(key):find('friend#1234',1,true))
 assert(Scan.Utils.SendResponses({'hi'},key)==false and #bnetSent==0)
 Scan.GreetCustomer('LeftButton',firstOrder)
-assert(#bnetSent==2 and #sent==0 and bnetSent[1].id==70 and bnetSent[2].id==70)
-assert(bnetSent[2].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
+assert(#bnetSent==1 and #sent==0 and bnetSent[1].id==70, 'a Battle.net greeting that fits one whisper took several')
+assert(bnetSent[1].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
 bn('our reply',70,'CHAT_MSG_BN_WHISPER_INFORM')
 assert(info.chat_history[#info.chat_history].chatType=='BN_WHISPER_INFORM')
 local quickCount=0
@@ -1993,7 +2000,7 @@ Scan.QuickReplies.OnWhisper=function(_,who,text)
     assert(who==key and text=='yo');quickCount=quickCount+1
 end
 bn('yo')
-assert(quickCount==1 and countRows()==2 and #bnetSent==2, 'follow-up did not reach the quick-reply classifier once')
+assert(quickCount==1 and countRows()==2 and #bnetSent==1, 'follow-up did not reach the quick-reply classifier once')
 Scan.GreetCustomer('LeftButton',firstOrder)
 assert(bnetOpened==1 and opened==0, 'row opened character whisper for a BNet conversation')
 bn(a,71)
@@ -2286,6 +2293,49 @@ do
     local general = response(Scan.Scanner.GENERAL_REQUEST_ID)
     assert(countRows() == 1 and general and general.generic_request and general.recraft, 'a general row was not asked for again')
 
+    -- In public chat: they got the item and look for its recraft a few
+    -- minutes later, while the row of the delivered order is still listed.
+    fresh()
+    scan('LF ' .. a)
+    Scan.GreetCustomer('LeftButton', order(101))
+    local served = response(101).requestToken
+    assert(response(101).greeting_sent)
+    deliver(101, 'Buyer')
+    now = now + 240
+    scan('LF ' .. a)
+    assert(countRows() == 1 and response(101).requestToken == served and response(101).greeting_sent,
+        'the old line repeated after the delivery was taken for a new request')
+    scan('LF recraft ' .. a)
+    assert(countRows() == 1 and response(101).requestToken ~= served and response(101).recraft == true
+        and not response(101).greeting_sent and response(101).crafterFullName == 'Seller-Realm',
+        '"LF recraft [the delivered item]" in public chat was passed over')
+    local publicShare = shared[#shared][4]
+    assert(publicShare.recraftOf and publicShare.recraftOf.id == 101, 'the linked account is not told about the public recraft')
+    assert(#sent == 1, 'a public recraft line sent something on its own')
+    -- The row has left the list: the same line still makes the recraft.
+    fresh()
+    deliver(101, 'Buyer')
+    now = now + 900
+    scan('LF recraft ' .. a)
+    assert(countRows() == 1 and response(101) and response(101).recraft == true, 'a public recraft line after the row left made no recraft')
+    -- Another item than the delivered one is its own request.
+    fresh()
+    deliver(101, 'Buyer')
+    now = now + 60
+    scan('LF recraft ' .. b)
+    assert(response(102) and not response(102).recraft and not response(101), 'another item in public chat was taken for the delivered one')
+    -- No item named: in public chat that is not about our delivery.
+    fresh()
+    deliver(101, 'Buyer')
+    now = now + 60
+    scan('LF recraft pls')
+    assert(not response(101), 'a public line that names nothing was taken for the delivery')
+    -- Someone we delivered nothing to: an ordinary request.
+    fresh()
+    scan('LF recraft ' .. a, nil, 'Stranger')
+    assert(Scan.DB.customers.Stranger and Scan.DB.customers.Stranger.responses[101]
+        and not Scan.DB.customers.Stranger.responses[101].recraft, 'a stranger\'s public line was marked as a recraft of ours')
+
     -- From a linked account: the delivery it names, under its request, whatever this account knows.
     fresh()
     HironCraftScanComm.applying_remote_state = true
@@ -2315,7 +2365,7 @@ do
     reloadConfig()
     reset()
 end
-print('Recraft requests passed (whisper after the row is gone, listed row, several deliveries, by hand, quiet, age, linked account).')
+print('Recraft requests passed (whisper after the row is gone, listed row, several deliveries, by hand, quiet, age, public chat, linked account).')
 
 -- Every whisper of our own is shown to the reply that answers "why was it
 -- declined?": it needs no row, so it is asked before anything else decides.

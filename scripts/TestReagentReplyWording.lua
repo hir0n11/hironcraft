@@ -141,14 +141,18 @@ local forged=A.Sanitize({version=1,orderID=1,capturedAt=1,complete=true,rows={
 assert(forged.rows[1].bestItemID==5002 and not forged.rows[1].name:find('|',1,true),'a snapshot kept a link')
 
 -- The real reply, in one whisper, and its short label without link markup.
-Scan.BuildResponseContext=function(response) return {reagent_issues=A.Issues(response.audit,nil,true)} end
+Scan.BuildResponseContext=function(response)
+    return {reagent_issues=A.Issues(response.audit,nil,true),reagent_issues_plain=A.Issues(response.audit)}
+end
 local linked=assert(Q:BuildReply('REJECTED_ORDER',{audit=gemdust}))
 assert(linked=='I checked your order. Could you replace 5 T1 '..links[5001]..' with T2, please?')
 assert(Scan.Utils.FitsChatMessage(linked),'one linked item no longer fits one whisper')
 assert(Q.DisplayText(linked)=='I checked your order. Could you replace 5 T1 [Glimmering Gemdust] with T2, please?',
     'the label of a linked reply shows link markup')
 local source=assert(io.open('Customer/ChatScanner.lua','rb')):read('*a')
-assert(source:find('ReagentAudit.ForResponse(response), nil, true)',1,true),'the chat reply does not ask for links')
+assert(source:find('context.reagent_issues = HironCraftScan.ReagentAudit.Issues(audit, nil, true)',1,true)
+    and source:find('context.reagent_issues_plain = HironCraftScan.ReagentAudit.Issues(audit)',1,true),
+    'the chat reply does not ask for links, or keeps no names to fall back on')
 
 -- A message is measured by what is shown: the code of a link (color, |H...|h,
 -- |h, |r) is not counted, and the quality icon in a name counts as 4 letters.
@@ -181,12 +185,31 @@ assert(#manyParts==2 and table.concat(manyParts,' ')==many and Fits(manyParts[1]
 local three=assert(Q:BuildReply('REJECTED_ORDER',{audit=snapshot(item('Glimmering Gemdust',5001,5002,5,5,1,2),
     item('Dusk-Shrouded Stone',5101,5102,5,5,1,2),item('Sunfire Silk',5301,5302,12,12,1,2))}))
 assert(#three>400 and Fits(three) and #Scan.Utils.SplitResponse(three)==1,'three linked items no longer fit one whisper')
--- Seven take two: every link whole, every count with its link, nothing lost.
-local several=snapshot(item('Glimmering Gemdust',5001,5002,5,5,1,2),item('Dusk-Shrouded Stone',5101,5102,5,5,1,2),
-    item('Sunfire Silk',5301,5302,5,5,1,2),item('Glimmering Gemdust',5001,5002,5,5,1,2),
-    item('Dusk-Shrouded Stone',5101,5102,5,5,1,2),item('Sunfire Silk',5301,5302,5,5,1,2),
-    item('Glimmering Gemdust',5001,5002,12,12,1,2))
-local long=assert(Q:BuildReply('REJECTED_ORDER',{audit=several}))
+-- One whisper where one is enough. Six linked items are too long for one,
+-- and their names are not: the reply names them and stays one whisper.
+local function rows(count)
+    local kinds={{'Glimmering Gemdust',5001},{'Dusk-Shrouded Stone',5101},{'Sunfire Silk',5301}}
+    local list={}
+    for index=1,count do
+        local kind=kinds[(index-1)%3+1]
+        list[index]=item(kind[1],kind[2],kind[2]+1,index==count and 12 or 5,index==count and 12 or 5,1,2)
+    end
+    return snapshot(unpack(list))
+end
+local five=assert(Q:BuildReply('REJECTED_ORDER',{audit=rows(5)}))
+assert(Fits(five) and select(2,five:gsub('|Hitem:',''))==5,'five linked items no longer fit one whisper with their links')
+local six=assert(Q:BuildReply('REJECTED_ORDER',{audit=rows(6)}))
+assert(not six:find('|H',1,true) and Fits(six) and six=='I checked your order. '..A.Issues(rows(6)),
+    'a reply the links make too long for one whisper did not fall back on names')
+assert(not Fits('I checked your order. '..A.Issues(rows(6),nil,true)),'the links would have fit')
+-- Too many even by name: names still, in as few whispers as they take.
+local nine=assert(Q:BuildReply('REJECTED_ORDER',{audit=rows(9)}))
+assert(not nine:find('|H',1,true) and #Scan.Utils.SplitResponse(nine)==2)
+
+-- A text with links that does take two whispers: every link whole, every
+-- count with its link, nothing lost.
+local several=rows(7)
+local long='I checked your order. '..A.Issues(several,nil,true)
 assert(#long>255 and not Fits(long))
 local parts=Scan.Utils.SplitResponse(long)
 assert(#parts==2 and table.concat(parts,' ')==long,'splitting a linked reply lost or reordered something')

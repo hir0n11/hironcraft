@@ -720,12 +720,21 @@ function QuickReplies:BuildReply(templateKey, response)
     -- Match greeting behavior: custom substitution tags are expanded first so
     -- their values may themselves contain response-context placeholders.
     local raw = HironCraftScan.Config.SubstituteTags(template.response)
-    local reply = HironCraftScan.Utils.FString(raw, context)
-    reply = reply:gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+    local function Fill()
+        local text = HironCraftScan.Utils.FString(raw, context)
+        return (text:gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', ''))
+    end
+    local reply = Fill()
 
     -- An unavailable commission (or any unknown context token) must never leak
     -- as a literal placeholder or turn into a misleading answer.
     local hasAuditTag = raw:find('{reagent_issues}', 1, true)
+    -- One whisper where one is enough: when the links of the items make the
+    -- reply too long for one, the items are named instead.
+    if hasAuditTag and context.reagent_issues_plain and not HironCraftScan.Utils.FitsChatMessage(reply) then
+        context.reagent_issues = context.reagent_issues_plain
+        reply = Fill()
+    end
     -- The reply about materials may take several whispers, any other one.
     local tooLong
     if hasAuditTag then tooLong = #reply > 4096 else tooLong = not HironCraftScan.Utils.FitsChatMessage(reply) end
@@ -1787,12 +1796,18 @@ function QuickReplies:BuildDeclineReason(decline)
     if type(decline) ~= 'table' or type(decline.entry) ~= 'table' or not audit or not audit.Issues then
         return nil
     end
-    -- Goes to chat: items are their links there.
+    -- Goes to chat: items are their links there, unless the links make the
+    -- reason too long for one whisper; then the items are named.
+    local Fits = HironCraftScan.Utils.FitsChatMessage
     local issues = audit.Issues(decline.entry.reagentAudit, nil, true)
     if type(issues) ~= 'string' or issues == '' then return nil end
+    local named = audit.Issues(decline.entry.reagentAudit)
+    if type(named) ~= 'string' or named == '' then named = issues end
 
     local template = EnsureConfig().templates[DECLINE_REASON_TEMPLATE_KEY]
-    if type(template) ~= 'table' or template.deleted or (template.response or '') == '' then return issues end
+    if type(template) ~= 'table' or template.deleted or (template.response or '') == '' then
+        return Fits(issues) and issues or named
+    end
     local context
     if IsListedOrder(decline.order.customerName, decline.order.responseID) then
         local ok, response = pcall(HironCraftScan.OrderToResponse, decline.order)
@@ -1803,14 +1818,19 @@ function QuickReplies:BuildDeclineReason(decline)
         end
     end
     context = context or {}
-    context.reagent_issues = issues
     if not context.crafter and type(decline.entry.crafterFullName) == 'string' then
         context.crafter = HironCraftScan.NameAndRealmToName(decline.entry.crafterFullName)
     end
     local raw = HironCraftScan.Config.SubstituteTags(template.response)
-    local reply = HironCraftScan.Utils.FString(raw, context)
-    reply = reply:gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
-    if reply == '' or reply:find('%b{}') or #reply > 4096 then return issues end
+    local function Worded(reason)
+        context.reagent_issues = reason
+        local reply = HironCraftScan.Utils.FString(raw, context)
+        reply = reply:gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+        if reply == '' or reply:find('%b{}') or #reply > 4096 then return reason end
+        return reply
+    end
+    local reply = Worded(issues)
+    if not Fits(reply) then reply = Worded(named) end
     return reply
 end
 

@@ -931,7 +931,8 @@ do
     }
     local askedLinked
     Scan.ReagentAudit = { Issues = function(snapshot, _, linked)
-        askedLinked = linked
+        askedLinked = askedLinked or linked
+        if linked and snapshot and snapshot.linked then return snapshot.linked end
         return snapshot and snapshot.text or "I couldn't find the material details for this order."
     end }
     Scan.Scanner = {
@@ -1052,6 +1053,18 @@ do
     assert(QuickReplies:SendDeclineReason(QuickReplies:DeclinesForMenu('Worded')[1]) == false and #sent == sentBefore + 1,
         'the same reason went out twice in a row')
     template.enabled = true
+
+    -- Items are their links in the reason, unless the links make it too long
+    -- for one whisper: then they are named.
+    statuses = {}
+    decline('Linked', 101, 'Missing 1 Ore.', 60)
+    local ore = '|cnIQ1:|Hitem:1::::::::90:::::::::|h[Ore]|h|r'
+    statuses['Linked-101'].reagentAudit.linked = 'Missing 1 ' .. ore .. '.'
+    assert(QuickReplies:BuildDeclineReason(QuickReplies:RecentDeclines('Linked')[1]) == 'I checked your order. Missing 1 ' .. ore .. '.',
+        'the reason does not link its item')
+    statuses['Linked-101'].reagentAudit.linked = 'Missing 1 ' .. string.rep('|cnIQ1:|Hitem:1::::::::90:::::::::|h[Ore of a rather long name]|h|r ', 10)
+    assert(QuickReplies:BuildDeclineReason(QuickReplies:RecentDeclines('Linked')[1]) == 'I checked your order. Missing 1 Ore.',
+        'a reason too long for one whisper kept its links')
 
     Scan.OrderFulfillment, Scan.ReagentAudit, Scan.Scanner = savedFulfillment, savedAudit, savedScanner
     time, date = nil, nil
