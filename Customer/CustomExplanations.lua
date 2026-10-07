@@ -207,9 +207,9 @@ function CustomExplanations:SendAssignments(target)
         return false
     end
     local message = table.concat(assignments, '; ')
-    -- Prefer one compact whisper. If several links exceed Blizzard's 255-byte
-    -- chat limit, keep each mapping intact as its own line from the same click.
-    return SendManualMessages(#message <= 255 and { message } or assignments, target)
+    -- Prefer one compact whisper. If several links do not fit one message,
+    -- keep each mapping intact as its own line from the same click.
+    return SendManualMessages(HironCraftScan.Utils.FitsChatMessage(message) and { message } or assignments, target)
 end
 
 -- Custom explanations are follow-up messages for the selected customer, so use

@@ -9,7 +9,6 @@ HironCraftScan.QuickReplies = QuickReplies
 
 local MAX_MESSAGE_BYTES = 160
 local MAX_MESSAGE_WORDS = 12
-local MAX_CHAT_BYTES = 255
 local MAX_VISIBLE_TOASTS = 8
 local MAX_OPTIONS_PER_POPUP = 8
 local MAX_PRIORITY = 999
@@ -727,7 +726,10 @@ function QuickReplies:BuildReply(templateKey, response)
     -- An unavailable commission (or any unknown context token) must never leak
     -- as a literal placeholder or turn into a misleading answer.
     local hasAuditTag = raw:find('{reagent_issues}', 1, true)
-    if reply == '' or reply:find('%b{}') or #reply > (hasAuditTag and 4096 or MAX_CHAT_BYTES) then
+    -- The reply about materials may take several whispers, any other one.
+    local tooLong
+    if hasAuditTag then tooLong = #reply > 4096 else tooLong = not HironCraftScan.Utils.FitsChatMessage(reply) end
+    if reply == '' or reply:find('%b{}') or tooLong then
         return nil
     end
     return reply
@@ -736,13 +738,18 @@ end
 local toastPool = {}
 local popupSerial = 0
 
+-- A reply as a short label: links become their names, without the colors and
+-- the quality icon a link carries (a label cut short must not end inside one).
 local function DisplayText(text)
     return text
         :gsub('|c%x%x%x%x%x%x%x%x', '')
+        :gsub('|cn[%w_]+:', '')
         :gsub('|r', '')
         :gsub('|H.-|h(.-)|h', '%1')
+        :gsub('%s*|A.-|a', '')
         :gsub('|T.-|t', '')
 end
+QuickReplies.DisplayText = function(text) return (DisplayText(text)) end
 
 local function Shorten(text, maxBytes)
     if #text <= maxBytes then
@@ -1614,7 +1621,7 @@ local function SendOption(toast, option)
     -- Long reagent audits are split only on this explicit click; the complete
     -- reply shares one cooldown. Each whisper is recorded in chat history.
     if QuickReplies:IsReplyOnCooldown(option.customer, reply) then return end
-    local messages = #reply > MAX_CHAT_BYTES and HironCraftScan.Utils.SplitResponse(reply) or { reply }
+    local messages = HironCraftScan.Utils.FitsChatMessage(reply) and { reply } or HironCraftScan.Utils.SplitResponse(reply)
     if HironCraftScan.Utils.SendResponses(messages, option.customer, true) == false then return end
     QuickReplies:RememberSentReply(option.customer, reply)
     QuickReplies:RememberSentTemplate(option.customer, templateKey or option.templateKey)
@@ -1780,7 +1787,8 @@ function QuickReplies:BuildDeclineReason(decline)
     if type(decline) ~= 'table' or type(decline.entry) ~= 'table' or not audit or not audit.Issues then
         return nil
     end
-    local issues = audit.Issues(decline.entry.reagentAudit)
+    -- Goes to chat: items are their links there.
+    local issues = audit.Issues(decline.entry.reagentAudit, nil, true)
     if type(issues) ~= 'string' or issues == '' then return nil end
 
     local template = EnsureConfig().templates[DECLINE_REASON_TEMPLATE_KEY]
@@ -1813,7 +1821,7 @@ function QuickReplies:SendDeclineReason(decline)
     if not reply then return nil end
     local customer = decline.order.customerName
     if self:IsReplyOnCooldown(customer, reply) then return false end
-    local messages = #reply > MAX_CHAT_BYTES and HironCraftScan.Utils.SplitResponse(reply) or { reply }
+    local messages = HironCraftScan.Utils.FitsChatMessage(reply) and { reply } or HironCraftScan.Utils.SplitResponse(reply)
     if HironCraftScan.Utils.SendResponses(messages, customer, true) == false then return false end
     self:RememberSentReply(customer, reply)
     self:RememberSentTemplate(customer, DECLINE_REASON_TEMPLATE_KEY)

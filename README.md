@@ -25,6 +25,33 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Item links in the reply about materials (0.4.116)
+
+The reply about an order's materials writes an item as its link again, where
+it wrote its name: the item to replace, and for a missing one the item of the
+quality that is needed. 0.4.106 did this and 0.4.107 took it back, because a
+link was believed to cost about 110 of the 255 bytes of a whisper, so every
+item took a whisper of its own.
+
+That was wrong. The game counts what is shown: the code of a link (its color,
+`|H...|h`, `|r`) is not counted, and a link takes what its `[name]` takes.
+Checked in the game: a whisper of six item links and 508 bytes sent by the
+addon arrived whole.
+
+- One or two linked items fit one whisper, three or four take two. When a
+  reply is split, a count stays with its link and a link's phrase is kept
+  whole, as in 0.4.106.
+- The reason of a decline sent again (`DECLINE REASON`) uses links as well.
+- The measure is used for everything the addon sends: a greeting or a quick
+  reply with an item or profession link is no longer split, or refused,
+  because of the bytes of the link's code.
+- Two things stay on the safe side until they are checked: the quality icon
+  inside a name is still counted in full (about 50 letters), and a message
+  stays under 500 bytes.
+- Without item data the name is used and the data is asked for once. A
+  snapshot never carries a link; it is made from the item's number when the
+  reply is built.
+
 ## Collecting analytics is a setting (0.4.115)
 
 The `Collect data` checkbox has left the toolbar of the analytics window. It

@@ -77,6 +77,7 @@ function CreateFrame()
     local frame=surface(); frames[#frames+1]=frame; return frame
 end
 assert(loadfile('Utils/FStrings.lua'))('HironCraft', Scan)
+assert(loadfile('Utils/ChatLength.lua'))('HironCraft', Scan)
 assert(loadfile('Customer/QuickReplies.lua'))('HironCraft', Scan)
 local QuickReplies=Scan.QuickReplies
 local function response(id, crafter)
@@ -928,7 +929,9 @@ do
         GetStatuses = function() return statuses end,
         GetStatus = function(_, order) return statuses[Scan.OrderToOrderID(order)] end,
     }
-    Scan.ReagentAudit = { Issues = function(snapshot)
+    local askedLinked
+    Scan.ReagentAudit = { Issues = function(snapshot, _, linked)
+        askedLinked = linked
         return snapshot and snapshot.text or "I couldn't find the material details for this order."
     end }
     Scan.Scanner = {
@@ -960,6 +963,7 @@ do
     decline('Asker', 101, 'Could you replace 5 T1 Gemdust with T2, please?', 600, nil, '[Amulet]')
     assert(ask('Asker', 'thanks anyway') == false and #visible('Asker') == 0, 'a card for a whisper that asks nothing')
     assert(ask('Asker', 'why declined?') == true, 'the reason was not offered')
+    assert(askedLinked == true, 'the reason goes to chat without item links')
     local cards = visible('Asker')
     assert(#cards == 1, 'not one card for one decline')
     assert(cards[1].option.reply == 'I checked your order. Could you replace 5 T1 Gemdust with T2, please?',

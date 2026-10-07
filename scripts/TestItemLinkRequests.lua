@@ -55,7 +55,7 @@ local sent, shared, timers, refreshes, opened = {}, {}, {}, 0, 0
 function GetDefaultLanguage() return 'Common', 7 end
 function SendChatMessage(message, kind, language, customer)
     assert(kind=='WHISPER' and language==7)
-    assert(#message<=255, 'outgoing whisper exceeds 255 bytes')
+    assert(Scan.Utils.FitsChatMessage(message), 'outgoing whisper does not fit one chat message')
     local text=message:gsub('|H[^|]+|h.-|h', '')
     assert(not text:find('|H', 1, true) and not text:find('|h', 1, true),
         'outgoing whisper contains a split hyperlink')
@@ -105,6 +105,7 @@ end
 loadSource('Libs/classic.lua')
 loadSource('Utils/WaitGroup.lua')
 loadSource('Utils/Utils.lua')
+loadSource('Utils/ChatLength.lua')
 Scan.Utils.onLoad = noop
 loadSource('Utils/FStrings.lua')
 loadSource('Utils/ProfessionLinks.lua')
@@ -170,7 +171,9 @@ do
     end}
     Enum={SpellBookSpellBank={Player=0}}
     Scan.DB.settings.greeting={
-        GREETING_I_CAN_CRAFT_ITEM=string.rep('Thanks ',25)..'{item}: {profession_link}.',
+        -- Long enough to take two whispers by what is shown (the code of
+        -- the links is not counted against a message).
+        GREETING_I_CAN_CRAFT_ITEM=string.rep('Thanks ',34)..'{item}: {profession_link}.',
         GREETING_I_HAVE_PROF='I have {profession_link}.',
         GREETING_ALT_CAN_CRAFT_ITEM='{crafter} can craft {item}: {profession_link}.',
         GREETING_ALT_HAS_PROF='{crafter} has {profession_link}.',
@@ -980,7 +983,7 @@ end
 -- A long greeting may require extra whispers, but never an incomplete link.
 reset()
 local namedLink='|cnIQ4:|Hitem:1001:0|h[A long item name with spaces]|h|r'
-local text=string.rep('word ',43) .. namedLink .. ' suffix\n' .. a .. b
+local text=string.rep('word ',47) .. namedLink .. ' suffix\n' .. a .. b
 local pieces=Scan.Utils.SplitResponse(text)
 assert(#pieces==3 and pieces[2]:find(namedLink, 1, true), 'named-color link was split at a display-name space')
 assert(Scan.Utils.SendResponses(pieces, 'Buyer')==false and #sent==0,
@@ -996,7 +999,9 @@ end
 local before=#sent
 assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer', true)==false)
 assert(#sent==before, 'invalid later line was detected only after partially sending the group')
-local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',120))
+-- More bytes than a message is known to carry, whatever is shown of them.
+local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',500))
+assert(not Scan.Utils.FitsChatMessage(oversizedLink) and Scan.Utils.ChatLength(oversizedLink)<=255)
 assert(Scan.Utils.SendResponses(Scan.Utils.SplitResponse(oversizedLink), 'Buyer', true)==false)
 assert(#sent==before, 'oversized indivisible link was sent')
 

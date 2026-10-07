@@ -75,6 +75,7 @@ function GetItemInfo(itemID)
 end
 
 assert(loadfile('Utils/FStrings.lua'))('HironCraft', CraftScan)
+assert(loadfile('Utils/ChatLength.lua'))('HironCraft', CraftScan)
 assert(loadfile("Customer/QuickReplies.lua"))("HironCraft", CraftScan)
 local QuickReplies = CraftScan.QuickReplies
 

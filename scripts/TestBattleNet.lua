@@ -41,6 +41,7 @@ local secret={}
 function issecretvalue(value) return value==secret end
 C_ChatInfo={GetChatLineText=function(id) assert(id==44);return '[Item request]' end,
     GetChatLineSenderGUID=function() return 'BNet-GUID' end}
+assert(loadfile('Utils/ChatLength.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/BattleNet.lua'))('HironCraft',Scan)
 local key=Scan.BattleNet.FromID(30)
 local response={crafterName='Favu',crafterFullName='Favu-Kazzak',professionID=164,
