@@ -30,7 +30,9 @@ function HironCraftScan.Utils.FitsChatMessage(text)
 end
 
 -- One whisper where one is enough: someone who gets two in a row takes the
--- sender for a bot. Lines that fit one message together go as one.
+-- sender for a bot. The lines of one text that fit one message together go as
+-- one. Not for lines that are answers of their own: a greeting says what goes
+-- to which crafter in a whisper per crafter, which reads better apart.
 function HironCraftScan.Utils.PackMessages(messages)
     local packed = {}
     for _, message in ipairs(messages) do

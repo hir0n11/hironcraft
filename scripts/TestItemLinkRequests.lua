@@ -615,16 +615,30 @@ assert(response(101).requestToken~=response(102).requestToken, 'requests must ha
 scan(a .. b .. c)
 assert(countRows()==3 and #Scan.DB.customers.Buyer.chat_history==2, 'repeat duplicated rows or lost the new chat message')
 Scan.GreetCustomer('LeftButton', order(102)) -- Clicking any row sends the block in source order.
--- ...as one whisper: three in a row read like a bot.
-assert(#sent==1, 'a greeting that fits one whisper went out as ' .. #sent)
-assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller. ' .. b .. ' Send to Tailor. ' .. c .. ' Send to Seller.')
+-- A whisper per crafter: joined into one line they are hard to read.
+assert(#sent==3)
+assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller.')
+assert(sent[2].message==b .. ' Send to Tailor.')
+assert(sent[3].message==c .. ' Send to Seller.')
 for _, id in ipairs({101,102,103}) do
     assert(response(id).greeting_sent and response(id).conversationCharacter=='Seller-Realm')
     Scan.GreetCustomer('LeftButton', order(id))
 end
-assert(#sent==1 and opened==3, 'already answered rows must open chat, not resend the block')
+assert(#sent==3 and opened==3, 'already answered rows must open chat, not resend the block')
 scan(a .. a .. b .. c)
-assert(countRows()==3 and #sent==1)
+assert(countRows()==3 and #sent==3)
+
+-- A greeting written in several lines is one text: one whisper when it fits.
+reset()
+do
+    local written=greetings.GREETING_I_CAN_CRAFT_ITEM
+    greetings.GREETING_I_CAN_CRAFT_ITEM='Hi!\nSend {item} to {crafter}.\nYou choose the price.'
+    scan(a)
+    Scan.GreetCustomer('LeftButton', order(101))
+    assert(#sent==1 and sent[1].message=='Hi! Send ' .. a .. ' to Seller. You choose the price.',
+        'the lines of one greeting went out as ' .. #sent .. ' whispers')
+    greetings.GREETING_I_CAN_CRAFT_ITEM=written
+end
 
 -- "send to Lavu" looks like a crafter's pitch, but from a customer we greeted
 -- it is their answer: the second mark is set, and no request is made of it.
@@ -755,8 +769,8 @@ assert(countRows()==2 and response(164) and response(197), 'a list of profession
 assert(response(164).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'one message was shared as two requests')
 Scan.GreetCustomer('LeftButton', order(164))
-assert(#sent==1 and sent[1].message:find(' Profession 197 Send to Tailor.$'),
-    'the professions were not answered together, in one whisper: '..tostring(sent[1] and sent[1].message))
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+    'the professions were not answered together: '..tostring(sent[2] and sent[2].message))
 -- Commas, "&" and a question mark separate words like spaces do.
 reset()
 scan('LF bs, tailor?')
@@ -804,8 +818,8 @@ assert(countRows()==2 and response(101) and response(197),
 assert(response(101).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'two recipe links were shared as two requests')
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==1 and sent[1].message:find(' Profession 197 Send to Tailor.$'),
-    'the second recipe was not answered with the first, in one whisper: '..tostring(sent[1] and sent[1].message))
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+    'the second recipe was not answered with the first: '..tostring(sent[2] and sent[2].message))
 assert(response(101).greeting_sent and response(197).greeting_sent)
 -- A recipe link and an item link of the same craft are one request.
 reset()
@@ -928,8 +942,8 @@ response(101).message={'Hi! ' .. recraftLink:sub(1,230), recraftLink:sub(231) ..
 response(101).itemLink=recraftLink
 response(103).itemLink=secondRecraft
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==1 and response(101).greeting_sent and response(103).greeting_sent)
-assert(sent[1].message:find(a, 1, true) and sent[1].message:find(' ' .. c .. ' Send to Seller.', 1, true),
+assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent)
+assert(sent[1].message:find(a, 1, true) and sent[2].message==c .. ' Send to Seller.',
     'saved broken replies were not rebuilt using complete base-item links')
 
 reset(); Scan.auto_replies_enabled=true
@@ -948,7 +962,7 @@ assert(countRows()==2 and #timers==0)
 flushTimers()
 assert(#sent==0, 'item-cache completion sent a greeting without a click')
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==1 and response(101).greeting_sent and response(103).greeting_sent,
+assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent,
     'loaded long-link batch did not send exactly once on click')
 Item.CreateFromItemID=createItem
 
@@ -988,9 +1002,9 @@ assert(#pieces==3 and pieces[2]:find(namedLink, 1, true), 'named-color link was 
 assert(Scan.Utils.SendResponses(pieces, 'Buyer')==false and #sent==0,
     'player whisper did not require an explicit user action')
 assert(Scan.Utils.SendResponses(pieces, 'Buyer', true))
--- The second and third piece fit one whisper together and go as one.
-assert(#sent==2 and sent[1].message==pieces[1] and sent[2].message==pieces[2] .. ' ' .. pieces[3],
-    'lines that fit one whisper were not sent as one')
+-- What it is given is what it sends: joining lines is the caller's choice.
+assert(#sent==3 and sent[1].message==pieces[1] and sent[2].message==pieces[2] and sent[3].message==pieces[3],
+    'the sender joined or dropped lines on its own')
 -- Packing: nothing is lost or reordered, empty lines add nothing, and what
 -- does not fit together stays apart.
 local packed=Scan.Utils.PackMessages({'one','','two',string.rep('x',250),'three','four'})
@@ -1991,8 +2005,8 @@ assert(Scan.NameAndRealmToName(key)=='friend#1234 (Battle.net)')
 assert(Scan.ColorizePlayerName(key):find('friend#1234',1,true))
 assert(Scan.Utils.SendResponses({'hi'},key)==false and #bnetSent==0)
 Scan.GreetCustomer('LeftButton',firstOrder)
-assert(#bnetSent==1 and #sent==0 and bnetSent[1].id==70, 'a Battle.net greeting that fits one whisper took several')
-assert(bnetSent[1].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
+assert(#bnetSent==2 and #sent==0 and bnetSent[1].id==70 and bnetSent[2].id==70)
+assert(bnetSent[2].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
 bn('our reply',70,'CHAT_MSG_BN_WHISPER_INFORM')
 assert(info.chat_history[#info.chat_history].chatType=='BN_WHISPER_INFORM')
 local quickCount=0
@@ -2000,7 +2014,7 @@ Scan.QuickReplies.OnWhisper=function(_,who,text)
     assert(who==key and text=='yo');quickCount=quickCount+1
 end
 bn('yo')
-assert(quickCount==1 and countRows()==2 and #bnetSent==1, 'follow-up did not reach the quick-reply classifier once')
+assert(quickCount==1 and countRows()==2 and #bnetSent==2, 'follow-up did not reach the quick-reply classifier once')
 Scan.GreetCustomer('LeftButton',firstOrder)
 assert(bnetOpened==1 and opened==0, 'row opened character whisper for a BNet conversation')
 bn(a,71)

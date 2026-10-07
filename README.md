@@ -25,6 +25,19 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A greeting for several crafters: a whisper per crafter again (0.4.119)
+
+0.4.118 joined everything one click sends into one whisper, also a greeting
+for several items or professions: `Hi! Send [A] to Seller. [B] Send to
+Tailor. [C] Send to Seller.` in one line is hard to read. That part is taken
+back: what goes to another crafter is a whisper of its own, as before.
+
+- Still one whisper when it fits: the lines of one text (a greeting or a
+  text of the chat menu written in several lines), and the reply about
+  materials, which names its items when their links would make it too long.
+- The sender itself joins nothing any more; joining is done where one text
+  was split into lines.
+
 ## One whisper where one is enough; a recraft asked for in public chat (0.4.118)
 
 **One whisper.** Someone who gets two whispers in a row takes the sender for

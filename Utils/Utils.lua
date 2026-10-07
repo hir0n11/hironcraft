@@ -164,8 +164,6 @@ function HironCraftScan.Utils.SendResponses(responses, customer, userInitiated)
     -- linked-account packets must remain read-only with respect to player chat.
     -- This is an internal call-site guard, not a bypass of Blizzard protection.
     if userInitiated ~= true then return false end
-    -- As few whispers as the text allows (see PackMessages).
-    responses = HironCraftScan.Utils.PackMessages(responses)
     -- Validate the complete batch before sending any part or marking its rows.
     for _, response in ipairs(responses) do
         local plain = response:gsub('|H[^|]+|h.-|h', '')

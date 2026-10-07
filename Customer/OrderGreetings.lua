@@ -100,7 +100,9 @@ local function BuildGreeting(order)
             table.remove(lines, 1)
             for index = #opening, 1, -1 do table.insert(lines, 1, opening[index]) end
         end
-        for _, line in ipairs(lines) do messages[#messages + 1] = line end
+        -- The greeting's own lines are one whisper when they fit one; what
+        -- goes to another crafter follows in a whisper of its own.
+        for _, line in ipairs(Scan.Utils.PackMessages(lines)) do messages[#messages + 1] = line end
     end
 
     -- The rest, one line per crafter: "Shield and Sword Send to Favu."

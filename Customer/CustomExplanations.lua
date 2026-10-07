@@ -197,7 +197,8 @@ local function SendManualMessages(messages, target)
 end
 
 local function SendManualText(text, target)
-    return SendManualMessages(HironCraftScan.Utils.SplitResponse(text), target)
+    -- The lines of one text go as one whisper when they fit one.
+    return SendManualMessages(HironCraftScan.Utils.PackMessages(HironCraftScan.Utils.SplitResponse(text)), target)
 end
 
 function CustomExplanations:SendAssignments(target)
