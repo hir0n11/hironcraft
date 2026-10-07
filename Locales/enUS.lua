@@ -979,6 +979,9 @@ HironCraftScan.L = {
     ["Temporarily replaces"] = "Temporarily replaces",
     ["Press a key combination, then Save. Escape cancels."] = "Press a key combination, then Save. Escape cancels.",
     ["Assign hotkey"] = "Assign hotkey",
+    ["Quick phrase keys"] = "Quick phrases for %s",
+    ["Quick phrase keys help"] = "With the cursor on this row, a key whispers its phrase.",
+    ["Quick phrase keys none"] = "No phrase has a key yet. Open the \"Custom Explanations\" button of this window, pick a phrase and choose \"Assign hotkey\".",
     ["Remove hotkey"] = "Remove hotkey",
     ['Profession link greeting help'] = 'Supports {profession} for the profession name and {profession_link} for the selected crafter\'s clickable link, including alts and linked accounts. Log into that crafter and open the profession once to cache/sync it. Until the link is available, the profession name is used instead. Use curly braces.',
 }

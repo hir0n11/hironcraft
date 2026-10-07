@@ -174,6 +174,83 @@ end
 assert(released==2 and rejected==2)
 assert(auditRecordCount==2,'decline failed to record a reagent snapshot')
 
+-- An order with a large tip is not declined by a click: it asks first, and
+-- only the answer in the dialog declines. Up to the limit nothing is asked.
+do
+    local options={}
+    CO.GetQueueOptions=function() return options end
+    assert(CO:GetRejectConfirmTipCopper()==5000*10000,'the limit is not 5,000 gold unless set')
+    local shown
+    StaticPopupDialogs={}
+    StaticPopup_Show=function(which,text,_,data) shown={which=which,text=text,data=data} end
+    local recordRejected=HironCraft.RecordRejectedCraftingOrder
+    HironCraft.RecordRejectedCraftingOrder=function() return true end
+    local function try(tip)
+        -- Released already: the click declines at once.
+        claimed=nil
+        order.tipAmount=tip
+        quality=false; missing=true
+        CO.rejectedOrderIDs={}; CO.rejectConfirmedUntil=nil; CO.pendingReleaseForReject=nil
+        shown=nil
+        local before=rejected
+        local result=CO:RejectOrder(order,page)
+        return result,rejected-before
+    end
+    -- Exactly the limit and below: declined at once.
+    local done,declined=try(5000*10000)
+    assert(done and declined==1 and not shown,'an order at the limit asked first')
+    -- Above it: nothing is sent, the dialog is up and names the tip.
+    done,declined=try(5001*10000)
+    assert(not done and declined==0 and shown and shown.which=='HIRONCRAFT_CONFIRM_REJECT_ORDER',
+        'an order with a large tip was declined by a click')
+    assert(shown.text:find('Buyer-Realm',1,true) and shown.text:find('5001',1,true),'the question does not name the customer and the tip: '..shown.text)
+    assert(CO.lastStatus:find('5001',1,true),'the panel does not say that an answer is needed')
+    -- Clicking the row again only asks again.
+    local before=rejected
+    CO:RejectOrder(order,page); CO:RejectOrder(order,page)
+    assert(rejected==before,'clicking through declined the order')
+    -- The answer in the dialog declines, once, and holds for the next step.
+    local dialog=StaticPopupDialogs.HIRONCRAFT_CONFIRM_REJECT_ORDER
+    assert(dialog and not dialog.enterClicksFirstButton and dialog.button1=='Decline','the dialog can be answered by a key press')
+    dialog.OnAccept(nil,shown.data)
+    assert(rejected==before+1,'the answer in the dialog did not decline')
+    shown=nil
+    CO.rejectedOrderIDs={}
+    assert(CO:RejectOrder(order,page) and not shown and rejected==before+2,'a confirmed order asked a second time')
+    -- The answer is for that order only, and not for ever.
+    now=now+61
+    CO.rejectedOrderIDs={}
+    assert(not CO:RejectOrder(order,page) and shown,'an answer of a minute ago still declines')
+    -- Cancelled (nothing accepted): nothing declined.
+    before=rejected
+    assert(rejected==before)
+    -- Switched off with 0, and a limit of one's own.
+    options.rejectConfirmTipCopper=0
+    done,declined=try(900000*10000)
+    assert(done and declined==1 and not shown,'a limit of 0 still asks')
+    CO:SetRejectConfirmTipCopper(100*10000)
+    done,declined=try(101*10000)
+    assert(not done and declined==0 and shown,'an own limit is not used')
+    CO:SetRejectConfirmTipCopper(nil)
+    assert(CO:GetRejectConfirmTipCopper()==5000*10000,'an emptied limit did not return to the default')
+    -- The click-through helper must leave this dialog alone.
+    local source=assert(io.open('ProfitHub/Buttons/ConfirmButtons.lua','rb')):read('*a')
+    assert(source:find('HIRONCRAFT_CONFIRM_REJECT_ORDER = true',1,true),'the click-through helper may cover the decline question')
+    -- A claimed order asks before it is released, not after.
+    options.rejectConfirmTipCopper=nil
+    order.tipAmount=7000*10000
+    claimed={orderID=7001,orderState='claimed',provided=17,tipAmount=order.tipAmount}
+    CO.rejectedOrderIDs={}; CO.rejectConfirmedUntil=nil; CO.pendingReleaseForReject=nil
+    shown=nil
+    local releasedBefore=released
+    assert(not CO:RejectOrder(order,page) and shown and released==releasedBefore,'a claimed order was released before the question')
+    order.tipAmount=nil; claimed=nil
+    CO.pendingReleaseForReject=nil
+    CO.GetQueueOptions=nil
+    HironCraft.RecordRejectedCraftingOrder=recordRejected
+    StaticPopupDialogs,StaticPopup_Show=nil,nil
+end
+
 -- The rejection bridge must see immutable identity as well as immutable mats.
 -- The game/row refresh can retire the very table passed to RejectOrder.
 order={orderID=7010,orderState='created',customerName='Buyer-Realm',customerGuid='Player-1-ABCD',

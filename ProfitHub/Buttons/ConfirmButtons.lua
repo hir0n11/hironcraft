@@ -91,6 +91,8 @@ M.EXCLUDED_POPUPS = {
     ADDON_ACTION_FORBIDDEN = true,
     ADD_GUILDMEMBER_WITH_FINDER_LINK = true,
     HIRONCRAFT_PROFIT_COPY_LINK = true,
+    -- "Decline an order with a large tip?" must be read, not clicked through.
+    HIRONCRAFT_CONFIRM_REJECT_ORDER = true,
     AREA_SPIRIT_HEAL = true,
     CAMP = true,
     CMC_RELOAD_UI_ASK = true,

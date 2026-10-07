@@ -1139,6 +1139,10 @@ function CO:UpdateQueueSettingWidgets()
         panel.kpValueInput:RefreshValue()
     end
 
+    if panel.rejectConfirmInput and panel.rejectConfirmInput.RefreshValue then
+        panel.rejectConfirmInput:RefreshValue()
+    end
+
     if panel.finisherButton and panel.finisherButton.text then
         panel.finisherButton.text:SetText(self:GetAutoFinishingLabel())
     end
@@ -1496,6 +1500,28 @@ function CO:EnsureControlPanel(pageFrame)
         function() return CO:GetKnowledgePointValueCopper() end,
         function(c) CO:SetKnowledgePointValueCopper(c) end)
     panel.kpValueInput:SetPoint("TOPRIGHT", -PADX, y)
+    y = y - 26
+
+    -- Ask before declining an order with a tip above this
+    local rejectHeader = body:CreateFontString(nil, "OVERLAY")
+    ApplyFont(rejectHeader, 11, "OUTLINE")
+    rejectHeader:SetPoint("TOPLEFT", PADX, y - 4)
+    rejectHeader:SetTextColor(1, 0.82, 0.35, 1)
+    rejectHeader:SetText(T("COA_REJECT_CONFIRM_HEADER", "Decline: ask above"))
+    panel.rejectConfirmInput = self:CreateValueInput(body, 62, 20,
+        function() return CO:GetRejectConfirmTipCopper() end,
+        function(c) CO:SetRejectConfirmTipCopper(c) end)
+    panel.rejectConfirmInput:SetPoint("TOPRIGHT", -PADX, y)
+    panel.rejectConfirmInput:HookScript("OnEnter", function(self)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_REJECT_CONFIRM_HEADER", "Decline: ask above"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_REJECT_CONFIRM_TIP",
+            "A personal order with a tip above this many gold is not declined by a click: a dialog asks first, and it cannot be clicked through. 0 never asks. Leave it empty for 5000."),
+            11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(self)
+    end)
+    panel.rejectConfirmInput:HookScript("OnLeave", HideStyledTooltip)
     y = y - 28
 
     panel.knowledgeProfitCheck = self:CreateCheckToggle(body, T("COA_KNOWLEDGE_IGNORE_PROFIT", "Знания: без мин. профита"),
@@ -1795,7 +1821,7 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
     for _, w in ipairs({ panel.minProfitInput, panel.knowledgeMinProfitInput,
-        panel.bagValueInput, panel.kpValueInput }) do
+        panel.bagValueInput, panel.kpValueInput, panel.rejectConfirmInput }) do
         if w then self:StyleWidget(w) end
     end
 

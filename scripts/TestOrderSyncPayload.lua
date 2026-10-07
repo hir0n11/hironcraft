@@ -117,14 +117,41 @@ assert(sent[1].prefix=='HIRONCRAFT_SCAN','public operation left the prefix other
 -- Only final marks schedule a list, and never an echo of a remote notice.
 local prepared=copy(entry);comm:PrepareOrderStatusDelivery(prepared)
 assert(prepared.deliveryPending.receiver and prepared.materialsPending.receiver)
-local claimed=copy(entry);claimed.status='claimed';comm:PrepareOrderStatusDelivery(claimed)
-assert(claimed.deliveryPending.receiver and not claimed.materialsPending,'progress mark scheduled a material list')
+-- "Claimed" and "crafted" stay on the crafter's own list: nothing is queued
+-- for a linked account, so the final mark has the channel to itself.
+for _,progress in ipairs({'claimed','crafted'}) do
+    local step=copy(entry);step.status=progress;step.deliveryPending={receiver=true};step.materialsPending={receiver=true}
+    step.deliveryConfirmedAt=5
+    assert(comm:PrepareOrderStatusDelivery(step)==false and step.deliveryPending==nil and step.materialsPending==nil
+        and step.deliveryConfirmedAt==nil, 'a '..progress..' mark is still queued for the linked account')
+end
+for _,final in ipairs({'fulfilled','rejected','failed','unknown'}) do
+    local mark=copy(entry);mark.status=final
+    assert(comm:PrepareOrderStatusDelivery(mark)==true and mark.deliveryPending.receiver, 'a '..final..' mark is not delivered')
+end
 local echoed=copy(entry);echoed.result='completion_notice';comm:PrepareOrderStatusDelivery(echoed)
 assert(echoed.deliveryPending.receiver and not echoed.materialsPending,'materialized row echoed the list back')
 
 -- The receiver's current character answers a ping, so it is a fresh target.
 receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID='receiver',data={state=2}}},'Receiver-Realm')
 local senderStatuses=fulfillment:GetStatuses()
+-- A progress mark goes nowhere when it is shared, also one that an older
+-- version had saved as waiting for delivery.
+for _,progress in ipairs({'claimed','crafted'}) do
+    local step=copy(entry);step.status=progress;comm:PrepareOrderStatusDelivery(step);senderStatuses[key]=step
+    sent={};timers={}
+    comm:ShareOrderStatus(step);runTimers(0.3)
+    assert(#sent==0,'a '..progress..' mark was sent to the linked account')
+    step.deliveryPending={receiver=true}
+    sent={};timers={}
+    comm:ShareOrderStatus(step);runTimers(0.3)
+    -- Let what the flush scheduled (the material pump) run out, as it would.
+    runTimers(10);flushFrames()
+    for _,packet in ipairs(sent) do
+        assert(packet.data.operation~=op.ShareOrderCompletion and packet.data.operation~=op.ShareOrderStatus
+            and packet.data.operation~=op.ShareOrderMaterials, 'a '..progress..' mark saved as pending was sent')
+    end
+end
 local live=copy(entry);comm:PrepareOrderStatusDelivery(live);senderStatuses[key]=live
 sent={};timers={}
 comm:ShareOrderStatus(live)

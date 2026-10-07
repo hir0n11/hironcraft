@@ -70,6 +70,23 @@ function B.Remove(label)
     B.Refresh()
 end
 function B.Key(label) return Keys()[label] end
+-- The phrases that have a key, for the hint a held Shift shows on a row:
+-- { key, label, text }, in the order of the keys.
+function B.List()
+    local list = {}
+    local texts = Scan.DB and Scan.DB.settings and Scan.DB.settings.explanations
+    if type(texts) ~= 'table' then return list end
+    for label, key in pairs(Keys()) do
+        if type(key) == 'string' and key ~= '' and type(texts[label]) == 'string' then
+            list[#list + 1] = { key = key, label = label, text = texts[label] }
+        end
+    end
+    table.sort(list, function(lhs, rhs)
+        if lhs.key ~= rhs.key then return lhs.key < rhs.key end
+        return lhs.label < rhs.label
+    end)
+    return list
+end
 function B.Assign(label, key)
     for other, existing in pairs(Keys()) do
         if existing == key and other ~= label then return false, other end

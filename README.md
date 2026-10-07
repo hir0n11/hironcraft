@@ -25,6 +25,46 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The final mark alone travels; a decline of a large tip asks; key hints on Shift (0.4.127)
+
+**The third mark on a linked account.** The mark of a crafting order went
+to linked accounts at every step: claimed, crafted, then the final one. Each
+step was a packet of two addon messages plus a confirmation back, on a
+channel the server limits to a small burst and then about one message a
+second, so with orders following each other the final mark queued behind
+the steps of the same or the previous order.
+
+- "Claimed" and "crafted" are no longer sent. A linked account gets the
+  final mark alone (delivered, declined, failed, cleared by hand): one
+  packet an order where there were three.
+- The crafter's own list still shows the orange and yellow steps; they
+  cost nothing there.
+- A side effect on the other account: while the order is being crafted
+  elsewhere its row shows no step, so a customer who repeats the request in
+  public chat without ever answering can be offered the greeting again.
+
+**Declining an order with a large tip.** The row buttons and the action key
+are made to be clicked through, and one click too many could send back an
+order worth thousands.
+
+- A personal order whose tip is above the limit is not declined by the
+  click: a dialog names the customer and the tip and asks. Only its
+  "Decline" button declines; it cannot be answered with Enter, and the
+  click-through helper for dialogs leaves it alone.
+- The limit is "Decline: ask above" among the gold values of the order
+  filters, 5,000 gold unless set; 0 never asks, an empty field returns to
+  5,000.
+- The answer holds for that order for a minute, so the release that comes
+  before a decline and the decline itself are asked about once.
+- Blizzard's own "Decline" button is not touched: it has a dialog of its
+  own.
+
+**Which key sends which phrase.** Keys given to quick phrases (the "Custom
+Explanations" button, "Assign hotkey") work while the cursor is on a row of
+the chat orders list. Holding Shift there now shows the keys with their
+phrases in place of the chat history, in the order of the keys; letting go
+brings the history back. Without any key it says where to assign one.
+
 ## Reagent prices: what came back lately is scanned first (0.4.126)
 
 A resource return is valued with the price known when the craft happens, so

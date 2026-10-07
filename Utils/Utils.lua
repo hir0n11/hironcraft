@@ -1401,6 +1401,23 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Hide()
     end
 end
 
+-- A phrase as one short line of a hint.
+local function Brief(text, limit)
+    text = tostring(text or ''):gsub('%s+', ' ')
+    if #text <= limit then return text end
+    local cut = limit
+    while cut > 0 and text:byte(cut + 1) and text:byte(cut + 1) >= 128 and text:byte(cut + 1) < 192 do cut = cut - 1 end
+    return text:sub(1, cut) .. '...'
+end
+
+-- On a row of the order list the keys of the quick phrases work while the
+-- cursor is on it. Holding Shift there shows which key sends which phrase,
+-- in place of the chat history.
+local function WantsKeyHints(anchor)
+    return type(anchor) == 'table' and anchor.hironExplanationRow == true
+        and IsShiftKeyDown ~= nil and IsShiftKeyDown() and true or false
+end
+
 function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, header, includeBinds)
     if not self.tooltip then
         self.tooltip = CreateFrame('GameTooltip', name, UIParent, 'GameTooltipTemplate')
@@ -1418,12 +1435,26 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     local reagentAudit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.GetForOrder(order)
     local historyCount = #(customerInfo.chat_history or {})
     local greetingSent, requestToken = response.greeting_sent, response.requestToken
+    local keyHints = WantsKeyHints(anchor)
+    -- Shift pressed or let go: the other view at once, not at the next poll.
+    if tooltip.RegisterEvent then
+        tooltip:RegisterEvent('MODIFIER_STATE_CHANGED')
+        tooltip:SetScript('OnEvent', function()
+            if tooltip:IsShown() and anchor.order == order and WantsKeyHints(anchor) ~= keyHints then
+                self:Show(name, anchor, order, header, includeBinds)
+            end
+        end)
+    end
     local elapsed = 0
     tooltip:SetScript('OnUpdate', function(_, delta)
         elapsed = elapsed + delta
         if elapsed < 0.25 then return end
         elapsed = 0
         if anchor.order and anchor.order ~= order then self:Hide(); return end
+        if WantsKeyHints(anchor) ~= keyHints then
+            self:Show(name, anchor, order, header, includeBinds)
+            return
+        end
         local current = HironCraftScan.OrderToResponse(order)
         local info = HironCraftScan.OrderToCustomerInfo(order)
         if not current or not info then self:Hide(); return end
@@ -1436,6 +1467,29 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     tooltip:ClearLines()
 
     tooltip:SetOwner(anchor, 'ANCHOR_TOPLEFT')
+
+    if keyHints then
+        local bindings = HironCraftScan.ExplanationBindings and HironCraftScan.ExplanationBindings.List
+            and HironCraftScan.ExplanationBindings.List() or {}
+        tooltip:AddLine(string.format(L('Quick phrase keys'),
+            HironCraftScan.NameAndRealmToName and HironCraftScan.NameAndRealmToName(order.customerName) or order.customerName), 1, 1, 1)
+        if #bindings == 0 then
+            tooltip:AddLine(L('Quick phrase keys none'), 0.8, 0.8, 0.8, true)
+        else
+            tooltip:AddLine(L('Quick phrase keys help'), 0.8, 0.8, 0.8, true)
+        end
+        local whisper = ChatTypeInfo and ChatTypeInfo['WHISPER'] or { r = 1, g = 0.5, b = 1 }
+        for _, binding in ipairs(bindings) do
+            local key = GetBindingText and GetBindingText(binding.key) or binding.key
+            GameTooltip_AddBlankLineToTooltip(tooltip)
+            tooltip:AddLine('|cffffd100' .. tostring(key) .. '|r  ' .. binding.label, 1, 1, 1)
+            tooltip:AddLine(Brief(binding.text, 160), whisper.r, whisper.g, whisper.b, true)
+        end
+        tooltip:SetMinimumWidth(math.min(GetMaxTextLeftWidth(name), ChatFrame1:GetWidth()))
+        tooltip:Show()
+        if self.reagentTooltip then self.reagentTooltip:Hide() end
+        return
+    end
 
     if response.greeting_sent then
         tooltip:AddDoubleLine(header, L('Chat Help'), 1, 1, 1)

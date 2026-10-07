@@ -68,3 +68,70 @@ currentAudit={orderID=79};history:Show('TestHistoryTooltip',anchor,order,'Histor
 tip.scripts.OnHide(tip)
 assert(not history.reagentTooltip.visible,'hidden chat history left material tooltip behind')
 print('Reagent side tooltip lifecycle tests passed.')
+
+-- A held Shift on a row of the order list shows which key sends which quick
+-- phrase, in place of the chat history.
+do
+    local shift = false
+    function IsShiftKeyDown() return shift end
+    function GetBindingText(key) return (key:gsub('SHIFT%-', 'Shift+')) end
+    Scan.NameAndRealmToName = function(name) return name end
+    -- The real list of phrases with keys.
+    function InCombatLockdown() return false end
+    function ClearOverrideBindings() end
+    Scan.DB = { settings = {
+        explanations = { ['Omw'] = 'On my way!', ['Mats'] = 'Please send  the materials\nwith the order. ' .. string.rep('long ', 60),
+            ['No key'] = 'never shown' },
+        explanation_keys = { ['Omw'] = 'SHIFT-2', ['Mats'] = 'SHIFT-1', ['Gone'] = 'SHIFT-3' },
+    } }
+    local createFrame = CreateFrame
+    CreateFrame = function() return { SetScript = noop, RegisterEvent = noop } end
+    assert(loadfile('Customer/ExplanationBindings.lua'))('HironCraft', Scan)
+    CreateFrame = createFrame
+    local list = Scan.ExplanationBindings.List()
+    assert(#list == 2 and list[1].key == 'SHIFT-1' and list[1].label == 'Mats' and list[2].key == 'SHIFT-2'
+        and list[2].text == 'On my way!', 'the phrases with keys are listed wrong')
+
+    currentAudit = { orderID = 80 }
+    response = { greeting_sent = true, requestToken = 'keys' }
+    info.chat_history = { { message = 'the history line', syncID = 'k1', chatType = 'WHISPER' } }
+    local row = { order = order, hironExplanationRow = true }
+    local events = {}
+    function tip:RegisterEvent(event) events[event] = true end
+    function tip:IsShown() return self.visible end
+    local function text() return table.concat(tip.lines, '\n') end
+
+    -- Without Shift: the history, as ever.
+    history:Show('TestHistoryTooltip', row, order, 'History')
+    assert(text():find('the history line', 1, true) and not text():find('Quick phrase keys', 1, true))
+    assert(events.MODIFIER_STATE_CHANGED and tip.scripts.OnEvent, 'the tooltip does not hear Shift')
+    assert(history.reagentTooltip.visible)
+    -- Shift pressed: the keys at once, by key, each with its phrase cut short.
+    shift = true
+    tip.scripts.OnEvent(tip, 'MODIFIER_STATE_CHANGED')
+    local shown = text()
+    assert(shown:find('Quick phrase keys', 1, true) and not shown:find('the history line', 1, true),
+        'a held Shift still shows the chat history')
+    local first, second = shown:find('Shift+1', 1, true), shown:find('Shift+2', 1, true)
+    assert(first and second and first < second and shown:find('Mats', 1, true) and shown:find('On my way!', 1, true),
+        'the keys and their phrases are not listed: ' .. shown)
+    assert(shown:find('Please send the materials with the order.', 1, true) and shown:find('%.%.%.')
+        and not shown:find(string.rep('long ', 40), 1, true), 'a long phrase is not shown as one short line')
+    assert(not shown:find('never shown', 1, true) and not shown:find('SHIFT-3', 1, true), 'a phrase without a key, or a key without a phrase, is listed')
+    assert(not history.reagentTooltip.visible, 'the material list stayed next to the key hints')
+    -- Shift let go: the history again (also found by the poll alone).
+    shift = false
+    tip.scripts.OnUpdate(tip, 0.25)
+    assert(text():find('the history line', 1, true) and not text():find('Quick phrase keys', 1, true), 'letting Shift go kept the key hints')
+    -- No keys yet: it says where to assign them.
+    Scan.DB.settings.explanation_keys = {}
+    shift = true
+    tip.scripts.OnEvent(tip, 'MODIFIER_STATE_CHANGED')
+    assert(text():find('Quick phrase keys none', 1, true), 'no hint on how to assign keys')
+    -- Elsewhere (the request banner) Shift changes nothing.
+    history:Show('TestHistoryTooltip', anchor, order, 'History')
+    assert(text():find('the history line', 1, true) and not text():find('Quick phrase keys', 1, true),
+        'a tooltip that is not a row of the list shows key hints')
+    shift = false
+end
+print('Quick phrase key hints passed (Shift on a row, order of keys, long phrases, no keys, other tooltips).')

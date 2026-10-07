@@ -177,6 +177,9 @@ CO.GetQueueMinProfitCopper = function() return nil end
 CO.GetKnowledgeMinProfitCopper = function() return nil end
 CO.GetBagRewardValueCopper = function() return nil end
 CO.GetKnowledgePointValueCopper = function() return nil end
+local rejectConfirmCopper = 5000 * 10000
+CO.GetRejectConfirmTipCopper = function() return rejectConfirmCopper end
+CO.SetRejectConfirmTipCopper = function(_, value) rejectConfirmCopper = value end
 CO.IsAutoQueueOnOpen = function() return true end
 CO.IsAutoShoppingOnOpen = function() return true end
 
@@ -206,6 +209,10 @@ assert(craft.scroll:IsVisible() and not queue.scroll:IsVisible())
 assert(panel.reagentSeg:GetParent() == craft.body)
 assert(panel.bestQualityToggle:GetParent() == craft.body, 'tool escaped the scroll page')
 assert(panel.minProfitInput:GetParent() == queue.body)
+-- The tip above which a decline asks first sits with the other gold values.
+assert(panel.rejectConfirmInput and panel.rejectConfirmInput:GetParent() == queue.body
+    and panel.rejectConfirmInput.text == '5000', 'the decline confirmation limit is not shown: '
+    .. tostring(panel.rejectConfirmInput and panel.rejectConfirmInput.text))
 assert(panel.runActionButton:GetParent() == panel.footer)
 for _, button in ipairs({panel.selectAllButton, panel.clearSelectedButton}) do
     assert(button:GetParent() == panel.queueActions and button:IsVisible(), 'common action requires a settings-tab click')

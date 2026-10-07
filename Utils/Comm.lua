@@ -182,6 +182,15 @@ local function CompactOrderPayload(data)
     return compact
 end
 
+-- "Claimed" and "crafted" are steps on the way to the final mark. Each took
+-- a packet of two addon messages and an ACK of the server's small per-prefix
+-- allowance (a burst of about ten, then one a second), and the final mark
+-- queued behind them when orders followed each other. They are shown on the
+-- crafter's own list only; a linked account gets the final mark alone.
+local function IsProgressMark(entry)
+    return type(entry) == 'table' and (entry.status == 'claimed' or entry.status == 'crafted')
+end
+
 local function HaveTarget()
     if remoteTargets then
         for _, target in pairs(remoteTargets) do
@@ -254,6 +263,12 @@ function HironCraftScanComm:PrepareOrderStatusDelivery(entry)
     if HironCraftScan.BattleNet and HironCraftScan.BattleNet.IsCustomer(entry.customerName) then
         entry.deliveryPending = nil
         entry.materialsPending = nil
+        return false
+    end
+    if IsProgressMark(entry) then
+        entry.deliveryPending = nil
+        entry.materialsPending = nil
+        entry.deliveryConfirmedAt = nil
         return false
     end
 
@@ -440,7 +455,8 @@ local function ShareCharacterData_(state, target)
         end
         orderStatuses = CompactOrderPayload(NewestOrderEntries(
             HironCraftScan.OrderFulfillment:GetStatuses(),
-            RECENT_ORDER_STATUS_LIMIT
+            RECENT_ORDER_STATUS_LIMIT,
+            function(entry) return not IsProgressMark(entry) end
         ))
     end
 
@@ -1326,7 +1342,9 @@ local function SendPendingOrderStatuses(accountID, target)
     end
 
     local function Pending(entry)
-        return PendingForAccount(entry, accountID) and ShouldSendStatus(entry, accountID, target)
+        -- A progress mark saved as pending by an older version is not sent.
+        return PendingForAccount(entry, accountID) and not IsProgressMark(entry)
+            and ShouldSendStatus(entry, accountID, target)
     end
 
     -- Outcomes draw the final green/red mark and matter most to the operator,

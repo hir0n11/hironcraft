@@ -430,6 +430,77 @@ function CO:ResolveRejectionIdentity(order, claimed)
     return resolved
 end
 
+-- Declining an order with a large tip asks first. The row buttons are made
+-- to be clicked through, and one click too many must not send back an order
+-- worth thousands: above the limit (5,000 gold unless set, 0 = never ask) a
+-- dialog asks, and the click-through helper leaves that dialog alone. The
+-- answer holds for the order for a minute, so the release that comes before
+-- a decline, and the decline itself, are asked about once.
+local REJECT_CONFIRM_DIALOG = "HIRONCRAFT_CONFIRM_REJECT_ORDER"
+local REJECT_CONFIRM_SECONDS = 60
+CO.DEFAULT_REJECT_CONFIRM_TIP_COPPER = 5000 * 10000
+
+function CO:GetRejectConfirmTipCopper()
+    local options = self.GetQueueOptions and self:GetQueueOptions()
+    local value = options and tonumber(options.rejectConfirmTipCopper)
+    if value == nil then return CO.DEFAULT_REJECT_CONFIRM_TIP_COPPER end
+    return value
+end
+
+function CO:SetRejectConfirmTipCopper(value)
+    local options = self.GetQueueOptions and self:GetQueueOptions()
+    if not options then return end
+    value = tonumber(value)
+    -- Empty goes back to the default; 0 switches the question off.
+    options.rejectConfirmTipCopper = value and math.max(0, value) or nil
+end
+
+function CO:NeedsRejectConfirmation(order)
+    local limit = self:GetRejectConfirmTipCopper()
+    local tip = order and tonumber(order.tipAmount) or 0
+    if (issecretvalue and order and issecretvalue(order.tipAmount)) or limit <= 0 or tip <= limit then return false end
+    local confirmed = self.rejectConfirmedUntil and self.rejectConfirmedUntil[OrderKey(order.orderID)]
+    return not (confirmed and confirmed > (GetTime and GetTime() or 0))
+end
+
+local function TipText(copper)
+    local gold = math.floor((tonumber(copper) or 0) / 10000)
+    local text = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
+    return text .. "g"
+end
+
+function CO:AskRejectConfirmation(order, pageFrame, releasedForReject, rejectionReason)
+    local customer = order.customerName
+    if type(customer) ~= "string" or customer == "" or (issecretvalue and issecretvalue(customer)) then customer = "?" end
+    local text = string.format(T("COA_REJECT_CONFIRM_TEXT", "The order of %s carries a tip of %s.\nDecline it anyway?"),
+        customer, TipText(order.tipAmount))
+    self:SetStatus(string.format(T("COA_STATUS_REJECT_CONFIRM", "Declining needs your answer: the tip is %s."),
+        TipText(order.tipAmount)))
+    if not (StaticPopupDialogs and StaticPopup_Show) then return false end
+    StaticPopupDialogs[REJECT_CONFIRM_DIALOG] = StaticPopupDialogs[REJECT_CONFIRM_DIALOG] or {
+        text = "%s",
+        button1 = T("COA_REJECT_CONFIRM_YES", "Decline"),
+        button2 = CANCEL or "Cancel",
+        OnAccept = function(_, data)
+            if type(data) ~= "table" or not data.order then return end
+            CO.rejectConfirmedUntil = CO.rejectConfirmedUntil or {}
+            CO.rejectConfirmedUntil[OrderKey(data.order.orderID)] = (GetTime and GetTime() or 0) + REJECT_CONFIRM_SECONDS
+            CO:RejectOrder(data.order, data.pageFrame, data.releasedForReject, data.rejectionReason)
+        end,
+        -- No accepting with Enter, and a moment before the button works: the
+        -- dialog must not be answered by the click that raised it.
+        acceptDelay = 1,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        showAlert = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show(REJECT_CONFIRM_DIALOG, text, nil, { order = order, pageFrame = pageFrame,
+        releasedForReject = releasedForReject, rejectionReason = rejectionReason })
+    return false
+end
+
 function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
@@ -449,6 +520,10 @@ function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     then
         self:SetStatus(T("COA_STATUS_REJECT_UNAVAILABLE", "This order cannot be declined."))
         return false
+    end
+
+    if self:NeedsRejectConfirmation(order) then
+        return self:AskRejectConfirmation(order, pageFrame, releasedForReject, rejectionReason)
     end
 
     rejectionReason = rejectionReason or "missing_customer_reagents"
