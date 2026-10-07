@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## `/hcchatlimit` says what stops it (0.4.120)
+
+The first run of `/hcchatlimit` in the game printed its opening line and
+then nothing: it broke on its first step and did not say so. It is rewritten
+to take nothing for granted about the game:
+
+- A send that raises an error is caught and its text is printed; a step
+  that breaks stops the measuring with a line that says why.
+- It starts with a short whisper to yourself and stops with the game's own
+  words when that does not arrive.
+- A long message may be cut, dropped or refused: when it is not cut, the
+  longest whisper that arrives is searched, and what a link and its quality
+  icon take is tried out with whispers that fill one exactly.
+- Where an addon may whisper only on a key press, it says so and asks for
+  the command again for every step.
+- A run that died is not waited for: after a minute the command starts over.
+
 ## A greeting for several crafters: a whisper per crafter again (0.4.119)
 
 0.4.118 joined everything one click sends into one whisper, also a greeting
