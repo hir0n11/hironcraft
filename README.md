@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Five linked items in one whisper (0.4.117)
+
+0.4.116 still counted the quality icon inside an item's name in full (about
+50 letters) and kept a message under 500 bytes, until that was checked. It
+was: a whisper of eight links of a reagent with its quality icon, 1016
+bytes, arrived whole. So an icon is counted as 4 letters (the most that
+whisper leaves for it) and a message may take as many bytes as that one.
+
+- The reply about materials holds about five linked items in one whisper
+  (two in 0.4.116); more take a second one.
+
 ## Item links in the reply about materials (0.4.116)
 
 The reply about an order's materials writes an item as its link again, where

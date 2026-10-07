@@ -1000,7 +1000,7 @@ local before=#sent
 assert(Scan.Utils.SendResponses({'valid first line', '|Hitem:1001:0|h[broken'}, 'Buyer', true)==false)
 assert(#sent==before, 'invalid later line was detected only after partially sending the group')
 -- More bytes than a message is known to carry, whatever is shown of them.
-local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',500))
+local oversizedLink=recraftLink:gsub('Player%-0000%-00000000', string.rep('9',1000))
 assert(not Scan.Utils.FitsChatMessage(oversizedLink) and Scan.Utils.ChatLength(oversizedLink)<=255)
 assert(Scan.Utils.SendResponses(Scan.Utils.SplitResponse(oversizedLink), 'Buyer', true)==false)
 assert(#sent==before, 'oversized indivisible link was sent')
