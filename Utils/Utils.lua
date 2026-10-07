@@ -1475,15 +1475,23 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
             HironCraftScan.NameAndRealmToName and HironCraftScan.NameAndRealmToName(order.customerName) or order.customerName), 1, 1, 1)
         if #bindings == 0 then
             tooltip:AddLine(L('Quick phrase keys none'), 0.8, 0.8, 0.8, true)
-        else
-            tooltip:AddLine(L('Quick phrase keys help'), 0.8, 0.8, 0.8, true)
         end
+        -- A line a phrase: the key, then the phrase as it would go to this
+        -- customer. Its name is added only where the phrase does not begin
+        -- with it ("Reload: Try ..." but just "Big ty for your tip").
         local whisper = ChatTypeInfo and ChatTypeInfo['WHISPER'] or { r = 1, g = 0.5, b = 1 }
+        local explanations = HironCraftScan.CustomExplanations
         for _, binding in ipairs(bindings) do
             local key = GetBindingText and GetBindingText(binding.key) or binding.key
-            GameTooltip_AddBlankLineToTooltip(tooltip)
-            tooltip:AddLine('|cffffd100' .. tostring(key) .. '|r  ' .. binding.label, 1, 1, 1)
-            tooltip:AddLine(Brief(binding.text, 160), whisper.r, whisper.g, whisper.b, true)
+            local text = binding.text
+            if explanations and explanations.Render then
+                local ok, rendered = pcall(explanations.Render, explanations, text, order.customerName, order)
+                if ok and type(rendered) == 'string' and rendered ~= '' then text = rendered end
+            end
+            text = Brief(text, 90)
+            local named = text:lower():find(binding.label:lower(), 1, true) == 1
+            tooltip:AddLine('|cffffd100' .. tostring(key) .. '|r  '
+                .. (named and '' or ('|cffffffff' .. binding.label .. ':|r ')) .. text, whisper.r, whisper.g, whisper.b, true)
         end
         tooltip:SetMinimumWidth(math.min(GetMaxTextLeftWidth(name), ChatFrame1:GetWidth()))
         tooltip:Show()

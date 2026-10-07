@@ -25,6 +25,36 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The window closes at the table's edge; no dot after a crafter's name; shorter key hints (0.4.129)
+
+**The crafting window after leaving the table.** Flying off from the
+crafting table closed the window on some days and not on others. The game
+closes a window that was opened at the table. One opened any other way (the
+spellbook, a key, a profession button) only loses its Orders tab: the game
+turns it to Recipes and leaves it open. Now both end the same way: when the
+orders page goes away because the table is out of reach, the window closes.
+Choosing another tab at the table, or a fight, leaves it alone.
+
+**No full stop after a crafter's name.** `Send to Favu. You choose the
+price.` had customers asking whether the order goes to `Favu.` with the dot
+or without. Wherever a message is filled from a template (greetings, quick
+replies, the phrases of the "Custom Explanations" button), the dot right
+after the crafter's name is taken away:
+
+- before more words it becomes a dash that stands apart from the name:
+  `Send to Favu - You choose the price.`;
+- at the end of the message it is dropped: `[Ring] Send to Favu`;
+- the name with its realm counts too (`Favu-Kazzak.`), and so does the same
+  name typed by hand in that text.
+
+The templates themselves are not rewritten: `{crafter}.` may stay in them.
+Commas, question marks and dots elsewhere are not touched.
+
+**Key hints, one line a phrase.** The hints a held Shift shows on a row of
+the chat orders list are a line each now: the key, then the phrase as it
+would go to that customer (tags filled in), cut to one line. The name of a
+phrase is added only where the phrase does not begin with it.
+
 ## The third mark: its own channel, one message, no wait (0.4.128)
 
 Three more things that held the final mark of an order back on its way to a

@@ -81,16 +81,22 @@ do
     function ClearOverrideBindings() end
     Scan.DB = { settings = {
         explanations = { ['Omw'] = 'On my way!', ['Mats'] = 'Please send  the materials\nwith the order. ' .. string.rep('long ', 60),
-            ['No key'] = 'never shown' },
-        explanation_keys = { ['Omw'] = 'SHIFT-2', ['Mats'] = 'SHIFT-1', ['Gone'] = 'SHIFT-3' },
+            ['No key'] = 'never shown', ['Big ty'] = 'Big ty for your tip <3', ['Reload'] = 'Try {crafter}-Kazzak or relog' },
+        explanation_keys = { ['Omw'] = 'SHIFT-2', ['Mats'] = 'SHIFT-1', ['Gone'] = 'SHIFT-3', ['Big ty'] = 'SHIFT-4',
+            ['Reload'] = 'SHIFT-5' },
     } }
     local createFrame = CreateFrame
     CreateFrame = function() return { SetScript = noop, RegisterEvent = noop } end
     assert(loadfile('Customer/ExplanationBindings.lua'))('HironCraft', Scan)
     CreateFrame = createFrame
     local list = Scan.ExplanationBindings.List()
-    assert(#list == 2 and list[1].key == 'SHIFT-1' and list[1].label == 'Mats' and list[2].key == 'SHIFT-2'
-        and list[2].text == 'On my way!', 'the phrases with keys are listed wrong')
+    assert(#list == 4 and list[1].key == 'SHIFT-1' and list[1].label == 'Mats' and list[2].key == 'SHIFT-2'
+        and list[2].text == 'On my way!' and list[4].key == 'SHIFT-5', 'the phrases with keys are listed wrong')
+    -- A phrase is shown as it would go to this customer.
+    Scan.CustomExplanations = { Render = function(_, text, customer, forOrder)
+        assert(customer == 'Buyer' and forOrder == order, 'the phrase is not rendered for the hovered row')
+        return (text:gsub('{crafter}', 'Vamo'))
+    end }
 
     currentAudit = { orderID = 80 }
     response = { greeting_sent = true, requestToken = 'keys' }
@@ -118,6 +124,15 @@ do
     assert(shown:find('Please send the materials with the order.', 1, true) and shown:find('%.%.%.')
         and not shown:find(string.rep('long ', 40), 1, true), 'a long phrase is not shown as one short line')
     assert(not shown:find('never shown', 1, true) and not shown:find('SHIFT-3', 1, true), 'a phrase without a key, or a key without a phrase, is listed')
+    -- Compact: the title and one line a phrase, nothing between them. The
+    -- name of a phrase is there only where the phrase does not begin with it,
+    -- and tags are filled in for the customer of the row.
+    assert(#tip.lines == 5, 'the hints take ' .. #tip.lines .. ' lines for four phrases')
+    assert(tip.lines[4]:find('Shift+4', 1, true) and tip.lines[4]:find('Big ty for your tip <3', 1, true)
+        and not tip.lines[4]:find('Big ty:', 1, true), 'a phrase that begins with its name repeats the name')
+    assert(tip.lines[5]:find('Reload:', 1, true) and tip.lines[5]:find('Try Vamo-Kazzak or relog', 1, true)
+        and not shown:find('{crafter}', 1, true), 'a phrase is not shown as it would be sent')
+    assert(tip.lines[3]:find('Omw:', 1, true) and tip.lines[3]:find('On my way!', 1, true))
     assert(not history.reagentTooltip.visible, 'the material list stayed next to the key hints')
     -- Shift let go: the history again (also found by the poll alone).
     shift = false

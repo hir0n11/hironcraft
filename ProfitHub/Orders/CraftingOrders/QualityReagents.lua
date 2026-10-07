@@ -1833,6 +1833,37 @@ function CO:ProtectVisibleRows()
     self:ProtectOrderHeaderLabels(pageFrame)
 end
 
+-- Leaving the crafting table. A window that was opened at the table is
+-- closed by the game. One opened any other way (the spellbook, a key, a
+-- profession button) only loses its Orders tab: the game turns it to Recipes
+-- and leaves it open, so flying off closed the window on some days and not on
+-- others. Here both end the same way: when the orders page goes away because
+-- the table is out of reach, the window closes. Turning to another tab at
+-- the table, or closing the window, is nobody leaving.
+function CO:CloseAfterLeavingTable()
+    local frame = ProfessionsFrame
+    if not frame or not frame.IsShown or not frame:IsShown() then return false end
+    local function TableOutOfReach()
+        local info = frame.professionInfo
+        local profession = type(info) == "table" and info.profession or nil
+        if not profession or not C_TradeSkillUI or type(C_TradeSkillUI.IsNearProfessionSpellFocus) ~= "function" then
+            return false
+        end
+        local ok, near = pcall(C_TradeSkillUI.IsNearProfessionSpellFocus, profession)
+        return ok and near == false
+    end
+    if not TableOutOfReach() then return false end
+    local function Close()
+        -- Still open, still away, and not in a fight (panels are locked then).
+        if not frame:IsShown() or not TableOutOfReach() then return end
+        if InCombatLockdown and InCombatLockdown() then return end
+        if type(HideUIPanel) == "function" then HideUIPanel(frame) else frame:Hide() end
+    end
+    -- Not from inside the game's own change of tabs.
+    if C_Timer and C_Timer.After then C_Timer.After(0, Close) else Close() end
+    return true
+end
+
 function CO:StartPageProtector(pageFrame)
     if not self:IsEnabled() then return end
     self:LockOrderTableColumns()
@@ -2186,6 +2217,7 @@ function CO:EnsurePageBindingHooks(pageFrame)
             if CO.controlPanel then CO.controlPanel:Hide() end
             CO._autoRanForOpen = false
             CO._autoToolRanForOpen = false
+            CO:CloseAfterLeavingTable()
         end)
     end
 

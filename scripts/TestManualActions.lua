@@ -317,6 +317,50 @@ assert(CO:RejectOrder(order,page),'game decline did not run')
 assert(#rejectionErrors==1 and tostring(rejectionErrors[1][2]):find('7011',1,true),
     'a failed rejection record was silently treated as success')
 
+-- Leaving the crafting table closes the window also when the game only
+-- takes the Orders tab away (a window that was not opened at the table).
+do
+    local near, shown, hidden, combat = true, true, 0, false
+    local savedTimers = timers
+    timers = {}
+    ProfessionsFrame = { professionInfo = { profession = 5 }, IsShown = function() return shown end }
+    C_TradeSkillUI = { IsNearProfessionSpellFocus = function(profession) assert(profession == 5); return near end }
+    HideUIPanel = function(frame) assert(frame == ProfessionsFrame); hidden = hidden + 1; shown = false end
+    InCombatLockdown = function() return combat end
+    local function leave()
+        local asked = CO:CloseAfterLeavingTable()
+        local pending = timers; timers = {}
+        for _, fn in ipairs(pending) do fn() end
+        return asked
+    end
+    -- Another tab chosen at the table: the window stays.
+    assert(leave() == false and hidden == 0, 'turning to another tab at the table closed the window')
+    -- The table out of reach: closed, once, after the game's own change of tabs.
+    near = false
+    assert(CO:CloseAfterLeavingTable() == true and hidden == 0 and #timers == 1, 'the window was closed inside the change of tabs')
+    timers[1](); timers = {}
+    assert(hidden == 1, 'the window stayed open after leaving the table')
+    -- Already closing: nothing to do.
+    assert(leave() == false and hidden == 1)
+    -- Back at the table before the moment came, or in a fight: left alone.
+    shown = true
+    CO:CloseAfterLeavingTable(); near = true
+    timers[1](); timers = {}
+    assert(hidden == 1, 'the window was closed although the table is in reach again')
+    near, combat = false, true
+    leave()
+    assert(hidden == 1, 'the window was closed during a fight')
+    combat = false
+    -- The game does not say: nothing is guessed.
+    ProfessionsFrame.professionInfo = nil
+    assert(leave() == false and hidden == 1)
+    ProfessionsFrame.professionInfo = { profession = 5 }
+    C_TradeSkillUI.IsNearProfessionSpellFocus = function() error('not now') end
+    assert(leave() == false and hidden == 1, 'an error of the game closed the window')
+    ProfessionsFrame, C_TradeSkillUI, HideUIPanel, InCombatLockdown = nil, nil, nil, nil
+    timers = savedTimers
+end
+
 -- Missing identity must fail *before* Release/Reject, without deselecting the
 -- row or scheduling the destructive action for a later event/timer.
 local identityDeclines, identityRecords = 0, 0

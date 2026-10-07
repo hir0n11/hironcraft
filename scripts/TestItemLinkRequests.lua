@@ -524,7 +524,7 @@ assert(not response(generalID) and response(164) and countRows()==1,
 assert(response(164).destination_only_greeting,
     'generic-request clarification was offered another full introduction')
 Scan.GreetCustomer('LeftButton',order(164))
-assert(#sent==2 and sent[2].message=='Profession 164 Send to Seller.',
+assert(#sent==2 and sent[2].message=='Profession 164 Send to Seller',
     'generic-request clarification did not use the compact destination reply')
 
 reset()
@@ -617,9 +617,9 @@ assert(countRows()==3 and #Scan.DB.customers.Buyer.chat_history==2, 'repeat dupl
 Scan.GreetCustomer('LeftButton', order(102)) -- Clicking any row sends the block in source order.
 -- A whisper per crafter: joined into one line they are hard to read.
 assert(#sent==3)
-assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller.')
-assert(sent[2].message==b .. ' Send to Tailor.')
-assert(sent[3].message==c .. ' Send to Seller.')
+assert(sent[1].message=='Hi! Send ' .. a .. ' to Seller')
+assert(sent[2].message==b .. ' Send to Tailor')
+assert(sent[3].message==c .. ' Send to Seller')
 for _, id in ipairs({101,102,103}) do
     assert(response(id).greeting_sent and response(id).conversationCharacter=='Seller-Realm')
     Scan.GreetCustomer('LeftButton', order(id))
@@ -635,7 +635,7 @@ do
     greetings.GREETING_I_CAN_CRAFT_ITEM='Hi!\nSend {item} to {crafter}.\nYou choose the price.'
     scan(a)
     Scan.GreetCustomer('LeftButton', order(101))
-    assert(#sent==1 and sent[1].message=='Hi! Send ' .. a .. ' to Seller. You choose the price.',
+    assert(#sent==1 and sent[1].message=='Hi! Send ' .. a .. ' to Seller - You choose the price.',
         'the lines of one greeting went out as ' .. #sent .. ' whispers')
     greetings.GREETING_I_CAN_CRAFT_ITEM=written
 end
@@ -769,7 +769,7 @@ assert(countRows()==2 and response(164) and response(197), 'a list of profession
 assert(response(164).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'one message was shared as two requests')
 Scan.GreetCustomer('LeftButton', order(164))
-assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor',
     'the professions were not answered together: '..tostring(sent[2] and sent[2].message))
 -- Commas, "&" and a question mark separate words like spaces do.
 reset()
@@ -818,7 +818,7 @@ assert(countRows()==2 and response(101) and response(197),
 assert(response(101).crafterFullName=='Seller-Realm' and response(197).crafterFullName=='Tailor-Realm')
 assert(#shared==1, 'two recipe links were shared as two requests')
 Scan.GreetCustomer('LeftButton', order(101))
-assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor.',
+assert(#sent==2 and sent[2].message=='Profession 197 Send to Tailor',
     'the second recipe was not answered with the first: '..tostring(sent[2] and sent[2].message))
 assert(response(101).greeting_sent and response(197).greeting_sent)
 -- A recipe link and an item link of the same craft are one request.
@@ -850,7 +850,7 @@ reset()
 scan(a .. b)
 Scan.DismissOrder(order(101))
 Scan.GreetCustomer('LeftButton', order(102))
-assert(#sent==1 and sent[1].message=='Hi! Send ' .. b .. ' to Tailor.', 'dismissed row was sent')
+assert(#sent==1 and sent[1].message=='Hi! Send ' .. b .. ' to Tailor', 'dismissed row was sent')
 
 -- A right click on a row takes one mark at a time: the customer's answer,
 -- then the order's status (a decline's cross or the delivered mark), and
@@ -943,7 +943,7 @@ response(101).itemLink=recraftLink
 response(103).itemLink=secondRecraft
 Scan.GreetCustomer('LeftButton', order(101))
 assert(#sent==2 and response(101).greeting_sent and response(103).greeting_sent)
-assert(sent[1].message:find(a, 1, true) and sent[2].message==c .. ' Send to Seller.',
+assert(sent[1].message:find(a, 1, true) and sent[2].message==c .. ' Send to Seller',
     'saved broken replies were not rebuilt using complete base-item links')
 
 reset(); Scan.auto_replies_enabled=true
@@ -1131,7 +1131,7 @@ now=1100
 Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist?','Buyer','Buyer-GUID')
 assert(offered==1 and countRows()==1, 'new whisper row did not trigger its Quick Reply')
 assert(Scan.SendOrderGreeting(order(164),true))
-assert(#sent==1 and sent[1].message=='Profession 164 Send to Seller.',
+assert(#sent==1 and sent[1].message=='Profession 164 Send to Seller',
     'follow-up profession request did not use the compact destination reply')
 assert(response(164).greeting_sent and not response(164).destination_only_greeting,
     'compact destination reply did not finish greeting state')
@@ -1582,8 +1582,8 @@ scan('LF wrist and chest')
 response('equipment:164:INVTYPE_WRIST').destination_only_greeting=true
 response('equipment:164:INVTYPE_CHEST').destination_only_greeting=true
 Scan.GreetCustomer('LeftButton',order('equipment:164:INVTYPE_WRIST'))
-assert(#sent==1 and (sent[1].message=='Chest and Wrist Send to Smith.'
-    or sent[1].message=='Wrist and Chest Send to Smith.'), 'short lines were not joined: '..tostring(sent[1].message))
+assert(#sent==1 and (sent[1].message=='Chest and Wrist Send to Smith'
+    or sent[1].message=='Wrist and Chest Send to Smith'), 'short lines were not joined: '..tostring(sent[1].message))
 classByGUID['Buyer-GUID']=nil
 
 -- Requests narrow down: "LF tailor" then "can you craft chest?" is one
@@ -1624,7 +1624,7 @@ assert(not response(wristID) and response(201) and response(205) and countRows()
     'linked wrists did not replace just the compatible placeholder')
 assert(response(201).destination_only_greeting and not response(201).greeting_sent)
 assert(Scan.SendOrderGreeting(order(201),true))
-assert(sent[#sent].message==link(1201)..' Send to Smith.', 'replacement item repeated the full greeting')
+assert(sent[#sent].message==link(1201)..' Send to Smith', 'replacement item repeated the full greeting')
 scan('need wrist')
 assert(not response(wristID) and countRows()==2, 'known item was downgraded to a generic slot')
 -- Once that item is delivered the slot is done for a while: "it is ur wrist
@@ -1965,7 +1965,7 @@ Scan.OnMessage('CHAT_MSG_WHISPER',link(1201),'Buyer','Buyer-GUID')
 assert(response(201).destination_only_greeting and not response(201).greeting_sent,
     'first customer-initiated whisper was offered a full greeting')
 assert(Scan.SendOrderGreeting(order(201),true))
-assert(sent[1].message==link(1201)..' Send to Smith.', 'first whisper greeting still contained Hi')
+assert(sent[1].message==link(1201)..' Send to Smith', 'first whisper greeting still contained Hi')
 
 -- Battle.net event -> matcher -> rows -> manual greeting -> same transport.
 loadSource('Customer/BattleNet.lua')
@@ -2018,7 +2018,7 @@ assert(Scan.ColorizePlayerName(key):find('friend#1234',1,true))
 assert(Scan.Utils.SendResponses({'hi'},key)==false and #bnetSent==0)
 Scan.GreetCustomer('LeftButton',firstOrder)
 assert(#bnetSent==2 and #sent==0 and bnetSent[1].id==70 and bnetSent[2].id==70)
-assert(bnetSent[2].text:find('Send to Tailor.',1,true) and info.responses[101].greeting_sent)
+assert(bnetSent[2].text:find('Send to Tailor',1,true) and info.responses[101].greeting_sent)
 bn('our reply',70,'CHAT_MSG_BN_WHISPER_INFORM')
 assert(info.chat_history[#info.chat_history].chatType=='BN_WHISPER_INFORM')
 local quickCount=0
