@@ -766,11 +766,14 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         if HironCraftScan.Generous and not isBattleNet then
             local tips = HironCraftScan.Generous
             local mark = tips.MarkOf(target)
-            local function Set(value)
-                tips.SetManual(target, value)
+            local function Redraw()
                 if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
                     HironCraftScanCraftingOrderPage:ShowGeneric()
                 end
+            end
+            local function Set(value)
+                tips.SetManual(target, value)
+                Redraw()
             end
             local function Tooltip(tooltip)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(
@@ -787,6 +790,18 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                     function() Set(marked and 'none' or choice.mark) end)
                 button:SetTooltip(Tooltip)
             end
+            -- Apart from the coin: a mark of the crafter's own, next to it.
+            local problem = tips.IsProblem(target)
+            local problemButton = subMenu:CreateButton(
+                prefix .. L(problem and 'Unmark problem customer' or 'Mark as problem customer'),
+                function()
+                    tips.SetProblem(target, not problem)
+                    Redraw()
+                end)
+            problemButton:SetTooltip(function(tooltip)
+                GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(
+                    tips.ProblemIcon() .. ' ' .. L('Problem customer tooltip')))
+            end)
         end
 
         do

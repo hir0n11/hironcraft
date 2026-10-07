@@ -25,6 +25,13 @@ local ICONS = {
     stingy = '|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:0:0|t',
 }
 
+-- A problem customer: a mark the crafter sets by hand, apart from the coin
+-- (someone can tip well and still be hard work). A toy monkey that claps its
+-- cymbals, for nobody being home. It says nothing about tips and changes
+-- nothing but what is shown. The picture is drawn by
+-- scripts/MakeProblemCustomerIcon.py.
+local PROBLEM_ICON = '|TInterface\\AddOns\\HironCraft\\Media\\ProblemCustomer:16:16:0:0|t'
+
 local function Key(name)
     if type(name) ~= 'string' or name == '' or (issecretvalue and issecretvalue(name)) then return nil end
     return (name:match('^([^-]+)') or name):lower()
@@ -186,10 +193,39 @@ function M.Icon(mark)
     return ICONS[mark or 'generous']
 end
 
--- The name as shown in a list, with the mark in front when there is one.
+function M.IsProblem(name)
+    local entry = Entry(name)
+    return entry ~= nil and entry.problem == true
+end
+
+-- By hand, and only by hand: nothing sets or clears it on its own.
+function M.SetProblem(name, on)
+    local key = Key(name)
+    if not key then return end
+    local store = Store()
+    local entry = type(store[key]) == 'table' and store[key] or { orders = {} }
+    store[key] = entry
+    entry.name = entry.name or name
+    entry.problem = on and true or nil
+end
+
+function M.ProblemIcon()
+    return PROBLEM_ICON
+end
+
+-- What stands in front of a name: the coin, then the problem mark. nil when
+-- there is neither.
+function M.Marks(name)
+    local coin = ICONS[M.MarkOf(name) or '']
+    local problem = M.IsProblem(name) and PROBLEM_ICON or nil
+    if coin and problem then return coin .. problem end
+    return coin or problem
+end
+
+-- The name as shown in a list, with its marks in front when there are any.
 function M.Decorate(name, text)
-    local icon = ICONS[M.MarkOf(name) or '']
-    if icon then return icon .. ' ' .. (text or name) end
+    local marks = M.Marks(name)
+    if marks then return marks .. ' ' .. (text or name) end
     return text or name
 end
 
@@ -203,17 +239,25 @@ end
 function M.Describe(name)
     local entry = Entry(name)
     local mark = Mark(entry)
-    if not entry or (not mark and (tonumber(entry.count) or 0) == 0) then return nil end
+    local problem = entry ~= nil and entry.problem == true
+    if not entry or (not mark and (tonumber(entry.count) or 0) == 0 and not problem) then return nil end
     local L = Scan.LOCAL and function(key) return Scan.LOCAL:GetText(key) end or function(key) return key end
     local title = mark == 'diamond' and L('Diamond customer')
         or mark == 'generous' and L('Generous customer')
         or mark == 'stingy' and L('Stingy customer')
         or mark == 'regular' and L('Regular customer') or L('Customer tips')
     local manual = entry.manual == 'generous' or entry.manual == 'stingy' or entry.manual == true
+    local text
     if (tonumber(entry.count) or 0) > 0 then
-        return string.format(L('%s: average tip %s, largest %s, total %s over %d orders'), title,
+        text = string.format(L('%s: average tip %s, largest %s, total %s over %d orders'), title,
             Gold(M.AverageTip(entry)), Gold(entry.max), Gold(entry.total), tonumber(entry.count) or 0)
             .. (manual and (' ' .. L('(marked by hand)')) or '')
+    elseif mark then
+        text = manual and (title .. ' ' .. L('(marked by hand)')) or title
     end
-    return manual and (title .. ' ' .. L('(marked by hand)')) or title
+    if problem then
+        local line = PROBLEM_ICON .. ' ' .. L('Problem customer') .. ' ' .. L('(marked by hand)')
+        text = text and (text .. '\n' .. line) or line
+    end
+    return text
 end

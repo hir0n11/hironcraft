@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Problem customer: a mark set by hand (0.4.123)
+
+A customer who is hard work can be marked by hand. The mark is a toy monkey
+that claps its cymbals, shown next to the tip coin.
+
+- **Setting it.** The menu of a player's name in chat, where the generous
+  and stingy marks are: `Mark as problem customer` / `Unmark problem
+  customer`.
+- **Where it shows.** Wherever the coin does: in front of the name in the
+  list of chat orders, in the list of crafting orders and in the customers
+  tab of the analytics window, after the coin; alone when the customer has
+  no coin. The tooltip of the customer names it.
+- It is apart from the coin: tips do not set or clear it, and it does not
+  change the coin, the pause for stingy customers or anything else.
+- Like the coin, it is kept for the whole account by the character's name
+  without the realm. It is not passed on to linked accounts.
+- The picture is `Media/ProblemCustomer.tga`, drawn by
+  `scripts/MakeProblemCustomerIcon.py`.
+
 ## The real size of a whisper (0.4.122)
 
 `/hcchatlimit` ran in the game (patch 12.0) and the measure in

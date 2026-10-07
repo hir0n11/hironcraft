@@ -142,4 +142,48 @@ assert(G.MarkOf('Friendly')=='generous','diamond changed an explicit manual gold
 G.SetHoldingStingy(true)
 assert(not G.IsGreetingHeld('SingleOld'),'a diamond customer was held by the copper pause')
 
-print('Customer tip tests passed (diamond 10,000+, gold/silver/copper; exact averages, repeats, manual priority, saved data, pause).')
+-- A problem customer: a mark of the crafter's own, next to the coin.
+do
+    local monkey = 'Media\\ProblemCustomer'
+    assert(G.ProblemIcon():find(monkey, 1, true), 'the problem mark is not the picture of the addon')
+    -- Someone without a coin: the mark alone, in front of the name.
+    assert(not G.IsProblem('Dull') and G.Decorate('Dull', 'Dull') == 'Dull' and G.Describe('Dull') == nil)
+    G.SetProblem('Dull-Realm', true)
+    assert(G.IsProblem('Dull') and G.IsProblem('dull-Otherrealm'), 'the mark is not kept by the name without its realm')
+    assert(G.Decorate('Dull', 'Dull') == G.ProblemIcon() .. ' Dull', 'the mark does not stand in front of the name')
+    assert(G.MarkOf('Dull') == nil and not G.IsStingy('Dull') and not G.IsGenerous('Dull'), 'the problem mark gave a coin')
+    assert(G.Describe('Dull'):find('Problem customer (marked by hand)', 1, true), 'the tooltip does not name the problem mark')
+    -- Someone with a coin: the coin first, the mark next to it.
+    G.SetProblem('Top', true)
+    local shown = G.Decorate('Top', 'Top')
+    local coin, mark = shown:find('UI-GoldIcon', 1, true), shown:find(monkey, 1, true)
+    assert(coin and mark and coin < mark and shown:find('|t Top$'), 'the mark is not next to the coin: ' .. shown)
+    assert(G.Marks('Top') == G.Icon('generous') .. G.ProblemIcon() and G.Marks('Stranger') == nil)
+    local described = G.Describe('Top')
+    assert(described:find('Generous customer: average tip', 1, true) and described:find('\n', 1, true)
+        and described:find('Problem customer', 1, true), 'the tooltip lost the tips or the problem mark')
+    -- Tips and the coin set by hand leave it alone, and it leaves them alone.
+    assert(G.IsGenerous('Top'), 'the problem mark changed the coin')
+    G.RecordTip('Dull', 5000 * GOLD, 901)
+    assert(G.IsProblem('Dull') and G.IsGenerous('Dull'), 'a tip cleared the problem mark or was not counted')
+    G.SetManual('Dull', 'none')
+    assert(G.IsProblem('Dull') and G.MarkOf('Dull') == nil and G.Decorate('Dull', 'Dull') == G.ProblemIcon() .. ' Dull',
+        'clearing the coin cleared the problem mark')
+    -- Cleared by hand: gone, the coin stays.
+    G.SetProblem('Top', false)
+    assert(not G.IsProblem('Top') and G.Decorate('Top', 'Top'):find('UI-GoldIcon', 1, true)
+        and not G.Decorate('Top', 'Top'):find(monkey, 1, true), 'the problem mark was not cleared')
+    G.SetProblem('Dull', nil)
+    assert(not G.IsProblem('Dull') and G.Describe('Dull'):find('average tip', 1, true)
+        and not G.Describe('Dull'):find('Problem', 1, true))
+    G.SetProblem('', true); G.SetProblem(nil, true)
+    -- The picture ships with the addon: 64x64, 32 bits, like the addon's own icon.
+    local file = assert(io.open('Media/ProblemCustomer.tga', 'rb'), 'the picture of the problem mark is missing')
+    local header = file:read(18)
+    local size = file:seek('end')
+    file:close()
+    assert(header:byte(3) == 2 and header:byte(13) == 64 and header:byte(15) == 64 and header:byte(17) == 32
+        and size == 18 + 64 * 64 * 4, 'the picture is not a 64x64 32-bit TGA')
+end
+
+print('Customer tip tests passed (diamond 10,000+, gold/silver/copper; exact averages, repeats, manual priority, saved data, pause, problem mark).')

@@ -254,6 +254,10 @@ local CUSTOMER_COLUMNS = {
     { key = 'name', label = 'Customer', fill = true, align = 'LEFT',
         text = function(row)
             local coin = Coin(row.mark)
+            -- The problem mark set by hand, next to the coin.
+            if Scan.Generous and Scan.Generous.IsProblem and Scan.Generous.IsProblem(row.name) then
+                coin = coin .. Scan.Generous.ProblemIcon()
+            end
             return (coin ~= '' and (coin .. ' ') or '') .. (Scan.NameAndRealmToName and Scan.NameAndRealmToName(row.name) or row.name)
         end,
         value = function(row) return row.key end },
