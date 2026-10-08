@@ -25,6 +25,22 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable request timers in recycled scanner rows (0.4.138)
+
+- Fixed fresh chat-order rows occasionally showing another order's age (for
+  example jumping from seconds to 11 minutes and back). Pooled time cells now
+  release the previous request's update callback before being reused.
+- Stale callbacks and callbacks from hidden/replaced cells cannot change a
+  current row. Reopening the window immediately resumes its timer; hiding an
+  older cell cannot detach a newer cell showing the same request.
+- Timer refreshes resolve the current stored response instead of retaining
+  an object replaced by linked-account synchronization. Missing/invalid times
+  are shown as unavailable; future times are clamped rather than wrapped.
+- Request timestamps, status marks, sorting and the five-second refresh
+  interval are unchanged. No list rebuild or extra per-frame timer was added.
+- Reproduced the exact 11-minute failure against 0.4.137 and verified the fix,
+  pooled/reordered rows, response replacement and hide/show lifecycle.
+
 ## Classic overview and unified game-native styling (0.4.137)
 
 - Character overview uses native WoW frames, a gold title, a separate toolbar,

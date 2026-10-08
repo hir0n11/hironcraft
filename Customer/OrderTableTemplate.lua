@@ -225,7 +225,12 @@ end
 HironCraftScanCrafterTableCellTimeMixin = CreateFromMixins(TableBuilderCellMixin);
 
 local function UpdateAge(self, response)
-    local age = math.floor(time() - response.time)
+    local stamp = response and tonumber(response.time)
+    if not stamp or stamp ~= stamp or stamp == math.huge or stamp == -math.huge then
+        HironCraftScanTableCellTextMixin.SetText(self, "—")
+        return
+    end
+    local age = math.max(0, math.floor(time() - stamp))
     local text;
     if (age < 60) then
         text = string.format("%us", math.floor(age / 5) * 5)
@@ -238,14 +243,52 @@ local function UpdateAge(self, response)
     HironCraftScanTableCellTextMixin.SetText(self, text);
 end
 
-function HironCraftScanCrafterTableCellTimeMixin:Populate(rowData, dataIndex)
-    local order = rowData.order;
-    local response = HironCraftScan.OrderToResponse(order);
-    local liveResponse = HironCraftScan.OrderToLiveResponse(order, true)
-    liveResponse.updateAge = function()
-        UpdateAge(self, response)
+local function ClearAgeBinding(self)
+    local liveResponse = self._ageLiveResponse
+    if liveResponse and liveResponse.updateAge == self._ageUpdate then
+        liveResponse.updateAge = nil
     end
-    UpdateAge(self, response)
+    self._ageLiveResponse = nil
+    self._ageUpdate = nil
+end
+
+function HironCraftScanCrafterTableCellTimeMixin:Populate(rowData, dataIndex)
+    -- TableBuilder pools cells. A previous request must release its callback
+    -- before this physical cell is assigned to another row.
+    ClearAgeBinding(self)
+    local order = rowData and rowData.order
+    self._ageOrder = order
+    if not order or not HironCraftScan.OrderToResponse(order) then
+        UpdateAge(self, nil)
+        return
+    end
+
+    local liveResponse = HironCraftScan.OrderToLiveResponse(order, true)
+    local update
+    update = function()
+        -- Also reject callbacks already copied by an in-flight refresh and
+        -- callbacks belonging to an older cell showing the same request.
+        if self._ageUpdate ~= update or self._ageLiveResponse ~= liveResponse
+            or liveResponse.updateAge ~= update then return end
+        if self.IsVisible and not self:IsVisible() then return end
+        local row = self.GetParent and self:GetParent()
+        if row and row.order and (row.order.customerName ~= order.customerName
+            or row.order.responseID ~= order.responseID) then return end
+        -- Linked-account updates can replace the stored response table.
+        UpdateAge(self, HironCraftScan.OrderToResponse(order))
+    end
+    self._ageLiveResponse = liveResponse
+    self._ageUpdate = update
+    liveResponse.updateAge = update
+    update()
+end
+
+function HironCraftScanCrafterTableCellTimeMixin:OnHide()
+    ClearAgeBinding(self)
+end
+
+function HironCraftScanCrafterTableCellTimeMixin:OnShow()
+    if self._ageOrder then self:Populate({ order = self._ageOrder }) end
 end
 
 HironCraftScanCrafterTableCellCustomerNameMixin = CreateFromMixins(TableBuilderCellMixin);
