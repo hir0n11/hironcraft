@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A customer who comes back with a question (0.4.131)
+
+`what about mail feet ?` from a customer whose ring had just been delivered
+made no row: once an order is done, a whisper without `LF` is not read as a
+request on its words alone, so that `the ring looks great` does not make
+one. A whisper that asks is a request again:
+
+- it has a question mark or one of the openers `what about`, `how about`,
+  `can you`, `could you`, `do you`, `would you`, `also`, `another`, `one
+  more`, `as well`;
+- it comes from someone there is a row for, or whose order was delivered or
+  declined within the last day;
+- and it names something a crafter makes (a slot, an armor type, a
+  profession, an item), as before.
+
+Thanks and remarks still make nothing, and neither does the same question
+from a stranger.
+
 ## Analytics charts keep their scale from day to day (0.4.130)
 
 A chart was drawn to its own tallest bar, so a slow day and a busy one

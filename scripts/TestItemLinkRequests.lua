@@ -1829,6 +1829,63 @@ reset()
 Scan.QuickReplies.HasUnfinishedOrders=function() return false end
 Scan.OnMessage('CHAT_MSG_WHISPER','wrist for ? and ring for ?','Buyer','Buyer-GUID')
 assert(countRows()==0,'a whisper without LF became a request outside a conversation')
+-- A customer whose order is done comes back for something else without
+-- saying LF: a whisper that asks ("what about ... ?") is a request again.
+do
+    local function served(id)
+        reset()
+        classByGUID['Buyer-GUID']='WARRIOR'
+        scan('LF ring')
+        assert(response(ringID),'the ring that was delivered has no row')
+        Scan.QuickReplies.HasUnfinishedOrders=function() return false end
+    end
+    served()
+    Scan.OnMessage('CHAT_MSG_WHISPER','what about plate wrist ?','Buyer','Buyer-GUID')
+    assert(response('equipment:164:INVTYPE_WRIST'),'"what about plate wrist ?" after the order made no row')
+    assert(#sent==0,'the follow-up question sent something by itself')
+    -- The whisper this was made for: the armor is named, so the customer's
+    -- class does not decide, and the row is the leatherworker's.
+    served()
+    Scan.OnMessage('CHAT_MSG_WHISPER','what about mail feet ?','Buyer','Buyer-GUID')
+    assert(response('equipment:165:INVTYPE_FEET') and response(ringID) and countRows()==2,
+        '"what about mail feet ?" did not add the leatherworker\'s row beside the delivered ring')
+    -- An opener without a question mark asks as well.
+    served()
+    Scan.OnMessage('CHAT_MSG_WHISPER','can you also do wrist','Buyer','Buyer-GUID')
+    assert(response('equipment:164:INVTYPE_WRIST'),'"can you also do wrist" after the order made no row')
+    -- Thanks and remarks are not requests, whatever they name.
+    served()
+    local before=countRows()
+    for _,remark in ipairs({'the ring looks great','ty for the wrist!','wrist and ring are perfect, thanks'}) do
+        Scan.OnMessage('CHAT_MSG_WHISPER',remark,'Buyer','Buyer-GUID')
+    end
+    assert(countRows()==before and not response('equipment:164:INVTYPE_WRIST'),'a remark after the order made a row')
+    -- A question that names nothing a crafter makes is only a question.
+    Scan.OnMessage('CHAT_MSG_WHISPER','how long will it take?','Buyer','Buyer-GUID')
+    assert(countRows()==before,'a question about nothing craftable made a row')
+    -- The rows have left the list, but the order was delivered today: still ours.
+    reset()
+    classByGUID['Buyer-GUID']='WARRIOR'
+    Scan.QuickReplies.HasUnfinishedOrders=function() return false end
+    local savedFulfillment=Scan.OrderFulfillment
+    local statuses={done={customerName='Buyer',responseID=1,status='fulfilled',updatedAt=now-3600}}
+    Scan.OrderFulfillment={Status={Fulfilled='fulfilled',Rejected='rejected'},GetStatuses=function() return statuses end,
+        GetStatus=function() return nil end}
+    Scan.OnMessage('CHAT_MSG_WHISPER','what about plate wrist ?','Buyer','Buyer-GUID')
+    assert(response('equipment:164:INVTYPE_WRIST'),'a customer served an hour ago was not recognised')
+    -- Served long ago, or never: the same words from them are no request.
+    reset()
+    classByGUID['Buyer-GUID']='WARRIOR'
+    statuses.done.updatedAt=now-25*3600
+    Scan.OnMessage('CHAT_MSG_WHISPER','what about plate wrist ?','Buyer','Buyer-GUID')
+    assert(countRows()==0,'a customer of yesterday was still taken for a current one')
+    statuses.done.updatedAt=now-3600
+    Scan.OnMessage('CHAT_MSG_WHISPER','what about plate wrist ?','Passerby','Passerby-GUID')
+    assert(not Scan.DB.customers.Passerby,'a stranger asking without LF became a customer')
+    Scan.OrderFulfillment=savedFulfillment
+    Scan.QuickReplies.HasUnfinishedOrders=nil
+    reset()
+end
 -- The customer's class is not known yet: the ring needs no class and is
 -- routed at once, the wrist waits for it instead of losing the whole message.
 reset()

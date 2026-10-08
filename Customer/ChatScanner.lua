@@ -2667,6 +2667,45 @@ function HironCraftScan.Scanner.RequestRecraft(delivery, options, onDone)
     }, nil, onDone)
 end
 
+-- A customer whose order is done comes back for something else: "what about
+-- mail feet ?", "can you also do a ring". They do not say LF again, and after
+-- the craft a whisper is no longer read as a request on its words alone
+-- ("the ring looks great" must not make a row). A whisper that asks is: it
+-- has a question mark or one of these openers, and comes from someone we have
+-- a row for or served within the last day. What it asks for still has to be
+-- something a crafter makes.
+local FOLLOWUP_OPENERS = {
+    ['what about'] = true, ['how about'] = true, ['can you'] = true, ['can u'] = true, ['could you'] = true,
+    ['could u'] = true, ['do you'] = true, ['do u'] = true, ['would you'] = true, ['also'] = true,
+    ['another'] = true, ['one more'] = true, ['as well'] = true,
+    ['а что насчет'] = true, ['а что насчёт'] = true, ['как насчет'] = true, ['как насчёт'] = true,
+    ['можешь'] = true, ['сможешь'] = true, ['еще'] = true, ['ещё'] = true,
+}
+local FOLLOWUP_SERVED_SECONDS = 24 * 60 * 60
+
+local function AsksForMore(message)
+    if type(message) ~= 'string' or (issecretvalue and issecretvalue(message)) then return false end
+    local text = message:lower()
+    return text:find('?', 1, true) ~= nil or HasDelimitedPhrase(text, FOLLOWUP_OPENERS)
+end
+
+local function IsOurCustomer(customer, customerInfo)
+    if type(customerInfo) == 'table' and type(customerInfo.responses) == 'table' and next(customerInfo.responses) then
+        return true
+    end
+    local fulfillment = HironCraftScan.OrderFulfillment
+    if not fulfillment or not fulfillment.GetStatuses then return false end
+    local now = time()
+    for _, entry in pairs(fulfillment:GetStatuses() or {}) do
+        if type(entry) == 'table' and entry.customerName == customer
+            and (entry.status == 'fulfilled' or entry.status == 'rejected')
+            and now - (tonumber(entry.updatedAt) or 0) <= FOLLOWUP_SERVED_SECONDS then
+            return true
+        end
+    end
+    return false
+end
+
 function HironCraftScan.OnMessage(event, message, customer, customerGuid, overrides)
     if not message or not customer then
         return false
@@ -2703,6 +2742,11 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
         -- items without saying LF again. Only while something of theirs is
         -- still open - after the craft, "the ring looks great" is not a new
         -- order.
+        overrides.genericFollowup = true
+    elseif (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER')
+        and AsksForMore(message) and IsOurCustomer(customer, customerInfo)
+    then
+        -- ...unless they ask: "what about mail feet ?" (see AsksForMore).
         overrides.genericFollowup = true
     end
     -- A line the crafter linked by hand is their own decision, not a customer
