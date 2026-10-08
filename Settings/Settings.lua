@@ -241,7 +241,6 @@ HironCraftScan.Utils.onLoad(function()
                 HironCraftScan.Notifications.GetOptions, L('Select a sound to preview it.'),
                 function(value) HironCraftScan.Notifications.Play(value, true) end)
         end
-        Checkbox('name_without_dot', 'No dot after a crafter name', 'No dot after a crafter name tooltip', false)
         Checkbox('personal_order_icons', 'Personal order profession icons',
             'Replace the minimap hammer with counts for the current character only. Disable to restore the standard indicator.', true,
             function() HironCraftScan.PersonalOrdersIndicator.Update(true) end)

@@ -36,10 +36,11 @@ function Scan.BuildOrderDestinationMessage(response, subjects)
     local subject = subjects and JoinSubjects(subjects) or Subject(response)
     local crafter = Scan.NameAndRealmToName(response.crafterFullName)
     if not subject or not crafter then return nil end
-    -- With the setting, no full stop after the name: customers took it for
-    -- a part of it.
-    local stop = Scan.Utils.WantsNameWithoutDot and Scan.Utils.WantsNameWithoutDot() and '' or '.'
-    return subject .. ' Send to ' .. crafter .. stop
+    -- The addon's own line, which nobody can edit: it ends with the name
+    -- and no full stop, because customers took the dot for a part of the
+    -- name ("do i send it to Favu. with the dot?"). Texts a crafter can
+    -- edit are not touched anywhere.
+    return subject .. ' Send to ' .. crafter
 end
 
 local function SameCrafter(lhs, rhs)
@@ -108,7 +109,7 @@ local function BuildGreeting(order)
         for _, line in ipairs(Scan.Utils.PackMessages(lines)) do messages[#messages + 1] = line end
     end
 
-    -- The rest, one line per crafter: "Shield and Sword Send to Favu."
+    -- The rest, one line per crafter: "Shield and Sword Send to Favu"
     for index, response in ipairs(pending) do
         if not covered[response] then
             local subjects = {}

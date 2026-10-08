@@ -25,17 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
-## The dot after a crafter's name stays unless you ask (0.4.132)
+## Texts go out as written; only the addon's own line has no dot (0.4.133)
 
-Since 0.4.129 the dot right after a crafter's name was taken out of every
-message, for everyone who uses the addon: `Send to {crafter}. You choose the
-price` went out as `Send to Inscri - You choose the price`, whether its
-author wanted that or not. A text goes out as it is written again.
+0.4.129 took the dot after a crafter's name out of every message, and
+0.4.132 turned that into a setting. Both are gone.
 
-The rule is a setting now, **off by default**: `No dot after a crafter's
-name` in the addon's settings. Switched on, it works as described for
-0.4.129 below; switched off, nothing is changed in a text, and the short
-line `[Ring] Send to Favu.` ends with its dot as before.
+- A text that can be edited (greetings, quick replies, the phrases of the
+  "Custom Explanations" button) is sent exactly as it is written: `Send to
+  {crafter}. You choose the price` goes out with its dot. Whoever does not
+  want a dot there takes it out of the text.
+- The one line nobody can edit is the short one the addon writes itself,
+  `Boots and Belt Send to Favu`. It ends with the name and no full stop, so
+  that a customer does not ask whether the order goes to `Favu.` with the
+  dot.
+
+The setting `No dot after a crafter's name` of 0.4.132 is removed.
 
 ## A customer who comes back with a question (0.4.131)
 
@@ -87,8 +91,8 @@ Choosing another tab at the table, or a fight, leaves it alone.
 price.` had customers asking whether the order goes to `Favu.` with the dot
 or without. Wherever a message is filled from a template (greetings, quick
 replies, the phrases of the "Custom Explanations" button), the dot right
-after the crafter's name is taken away (since 0.4.132 only with the setting
-`No dot after a crafter's name` switched on):
+after the crafter's name is taken away (withdrawn in 0.4.133: texts are sent
+as written, only the addon's own `[Ring] Send to Favu` has no dot):
 
 - before more words it becomes a dash that stands apart from the name:
   `Send to Favu - You choose the price.`;

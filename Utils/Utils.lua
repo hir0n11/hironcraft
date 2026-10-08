@@ -864,6 +864,8 @@ local function UpgradePersistentConfig()
     HironCraftScan.DB.settings.recraft_request_keywords = nil
     -- What /hcchatlimit measured (0.4.118 - 0.4.124); it is in Utils/ChatLength.lua.
     HironCraftScan.DB.settings.chat_limit_probe = nil
+    -- The switch for the dot after a crafter's name (0.4.132 only).
+    HironCraftScan.DB.settings.name_without_dot = nil
 
     -- Upgrade the profession configuration to create a normalized 'parent
     -- profession' node. The professionIDs we usually deal with are 'Dragon

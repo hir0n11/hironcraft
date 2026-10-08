@@ -1,35 +1,11 @@
 local HironCraftScan = select(2, ...)
 
--- Optional (the setting name_without_dot, off unless switched on: a text is
--- sent as its author wrote it). With it, a crafter's name does not touch a
--- full stop: "Send to Favu. You choose the
--- price" had customers asking whether the order goes to "Favu." with the dot
--- or without. Where the name ends the message the dot is dropped; before
--- more words (also on the next line: lines may go out as one whisper) it
--- becomes a dash, which stands apart from the name: "Send to Favu - You
--- choose the price". The name may carry its realm.
-local function NameWithoutDot(text, name)
-    if type(name) ~= 'string' or name == '' or not text:find(name, 1, true) then return text end
-    local escaped = name:gsub('%p', '%%%0')
-    local word = '(' .. escaped .. "[%-%w'\128-\255]*)%."
-    text = text:gsub(word .. '(%s*)$', '%1%2')
-    text = text:gsub(word .. '(%s+)', '%1 -%2')
-    return text
-end
-HironCraftScan.Utils.NameWithoutDot = NameWithoutDot
-
-local function WantsNameWithoutDot()
-    local settings = HironCraftScan.DB and HironCraftScan.DB.settings
-    return type(settings) == 'table' and settings.name_without_dot == true
-end
-HironCraftScan.Utils.WantsNameWithoutDot = WantsNameWithoutDot
-
+-- Fills the tags of a text and changes nothing else in it: what a crafter
+-- wrote is sent as written, punctuation included.
 local function f(s, dict)
-    local text = s:gsub("{(.-)}", function(key)
+    return (s:gsub("{(.-)}", function(key)
         return dict[key] or "{"..key.."}"
-    end)
-    if WantsNameWithoutDot() then text = NameWithoutDot(text, dict.crafter) end
-    return text
+    end))
 end
 
 HironCraftScan.Utils.FString = f;
