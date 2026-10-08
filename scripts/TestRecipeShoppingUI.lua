@@ -73,8 +73,8 @@ local form=Widget('Frame')
 form.GetRecipeInfo=function() return recipeInfo end
 form.GetTransaction=function() return transaction end
 ProfessionsFrame.CraftingPage.SchematicForm=form
-dofile('ProfitHub/Shop/Core/RecipeShopping.lua')
-dofile('ProfitHub/Shop/UI/RecipeShopping_UI.lua')
+dofile('Workflow/Shop/Core/RecipeShopping.lua')
+dofile('Workflow/Shop/UI/RecipeShopping_UI.lua')
 local RS=HironCraftProfit.RecipeShopping
 RS:OnRecipeSelected()
 RS.controls.button:Run('OnClick','LeftButton')

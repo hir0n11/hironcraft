@@ -1,11 +1,11 @@
--- Builds ProfitHub/Core/DB/SpecStats_MID.lua from CraftSim's specialization
+-- Builds Workflow/Core/DB/SpecStats_MID.lua from CraftSim's specialization
 -- data (which specialization nodes and perks affect each recipe, and what
 -- stats they give). CraftSim is MIT-licensed; see LICENSE-CraftSim.txt.
 --
 -- Run from the addon root after CraftSim was updated for a new patch:
 --   lua5.1 scripts/ImportCraftSimSpecData.lua "<AddOns>/CraftSim" [output file]
 local source = arg[1]
-local output = arg[2] or 'ProfitHub/Core/DB/SpecStats_MID.lua'
+local output = arg[2] or 'Workflow/Core/DB/SpecStats_MID.lua'
 assert(source, 'usage: lua ImportCraftSimSpecData.lua <path to CraftSim> [output file]')
 
 local PROFESSIONS = { 'Alchemy', 'Blacksmithing', 'Enchanting', 'Engineering', 'Inscription', 'Jewelcrafting',

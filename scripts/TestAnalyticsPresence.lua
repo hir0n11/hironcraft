@@ -1,6 +1,6 @@
 -- Exact local presence, immutable sync records, fast relogs and interval union.
 strmatch = string.match
-assert(loadfile('ProfitHub/Core/Libs/LibStub/LibStub.lua'))()
+assert(loadfile('Workflow/Core/Libs/LibStub/LibStub.lua'))()
 assert(loadfile('Libs/LibSerialize.lua'))()
 assert(loadfile('Libs/LibDeflate.lua'))()
 local base = os.time({ year = 2026, month = 9, day = 28, hour = 12, min = 4, sec = 17 })

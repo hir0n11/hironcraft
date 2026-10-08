@@ -29,7 +29,7 @@ local E=setmetatable({PT={},S=S,GetTime=function() return now end,
     },
 },{__index=_G})
 HironCraftProfitShoppingListEnv=E
-dofile('ProfitHub/Shop/Core/ShoppingList_Selling.lua')
+dofile('Workflow/Shop/Core/ShoppingList_Selling.lua')
 S.isAuctionHouseOpen=true
 S.sell.selected={itemID=1001,isCommodity=true,itemName='Reagent'}
 local tier={price=100,qty=4}
@@ -91,7 +91,7 @@ local GE=setmetatable({HironCraftProfit={config={_forceEnableGoldDepositorV2=tru
     UnitName=function() return 'Crafter' end, GetRealmName=function() return 'Realm' end,
 },{__index=_G})
 SlashCmdList={}
-local bankModule=assert(loadfile('ProfitHub/GoldDeposit/GoldDepositor.lua'))
+local bankModule=assert(loadfile('Workflow/GoldDeposit/GoldDepositor.lua'))
 setfenv(bankModule,GE); bankModule('HironCraft')
 local GD=GE.HironCraftProfit.GoldDepositor
 local isAuto=assert(findHelper(GD.HandleCommand,'IsAutoDepositEnabled'))
@@ -121,11 +121,11 @@ local OE=setmetatable({PT={},CO=CO,T=function(_,fallback) return fallback end,
 },{__index=_G})
 HironCraftProfitCraftingOrdersEnv=OE
 SlashCmdList={}
-dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
-dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
+dofile('Workflow/Orders/CraftingOrders/QualityReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/Actions.lua')
 local realGetEffectiveOrder=CO.GetEffectiveOrder
 CO.CreateHotkeyProxy=noop; CO.HookBlizzardProfessions=noop; CO.ApplyEnabledState=noop
-dofile('ProfitHub/Orders/CraftingOrders/HooksEvents.lua')
+dofile('Workflow/Orders/CraftingOrders/HooksEvents.lua')
 
 CO.FindOrderPageFrame=function() return page end
 CO.GetClaimedOrder=function() return claimed end
@@ -234,7 +234,7 @@ do
     CO:SetRejectConfirmTipCopper(nil)
     assert(CO:GetRejectConfirmTipCopper()==5000*10000,'an emptied limit did not return to the default')
     -- The click-through helper must leave this dialog alone.
-    local source=assert(io.open('ProfitHub/Buttons/ConfirmButtons.lua','rb')):read('*a')
+    local source=assert(io.open('Workflow/Buttons/ConfirmButtons.lua','rb')):read('*a')
     assert(source:find('HIRONCRAFT_CONFIRM_REJECT_ORDER = true',1,true),'the click-through helper may cover the decline question')
     -- A claimed order asks before it is released, not after.
     options.rejectConfirmTipCopper=nil

@@ -56,7 +56,7 @@ local E = setmetatable({
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
-dofile("ProfitHub/Orders/CraftingOrders/Actions.lua")
+dofile("Workflow/Orders/CraftingOrders/Actions.lua")
 
 local page = {}
 local order = { orderID = 7001, orderState = 1 }

@@ -130,7 +130,7 @@ HironCraftProfitCraftingOrdersEnv = {
 }
 setmetatable(HironCraftProfitCraftingOrdersEnv, { __index = _G })
 local CO = HironCraftProfitCraftingOrdersEnv.CO
-dofile("ProfitHub/Orders/CraftingOrders/QueueShopping.lua")
+dofile("Workflow/Orders/CraftingOrders/QueueShopping.lua")
 
 function CO:IsAutoFinishingEnabled() return enabled end
 function CO:GetAutoFinishingMaxSkillBonus() return maxAllowed end
@@ -147,7 +147,7 @@ function CO:BuildQualityInfoFromOperationInfo(_, info)
 end
 function CO:InvalidateOrderCaches(orderID) invalidatedOrderID = orderID end
 
-dofile("ProfitHub/Orders/CraftingOrders/FinishingReagents.lua")
+dofile("Workflow/Orders/CraftingOrders/FinishingReagents.lua")
 
 local order = {
     orderID = 42,

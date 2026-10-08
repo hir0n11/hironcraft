@@ -36,22 +36,22 @@ local migrations = {
     {
         sourceName = "AhUI_DB",
         targetName = "HironCraftProfit_DB",
-        label = "ProfitHUB account data",
+        label = "legacy account data",
     },
     {
         sourceName = "AhUI_Config",
         targetName = "HironCraftProfit_Config",
-        label = "ProfitHUB UI settings",
+        label = "legacy UI settings",
     },
     {
         sourceName = "AhUI_PriceDB",
         targetName = "HironCraftProfit_PriceDB",
-        label = "ProfitHUB prices",
+        label = "legacy prices",
     },
     {
         sourceName = "AhUI_CharConfig",
         targetName = "HironCraftProfit_CharConfig",
-        label = "ProfitHUB character settings",
+        label = "legacy character settings",
     },
 }
 
@@ -90,7 +90,7 @@ local function PrintMigrationResult(imported, forced)
     if forced then
         print("|cffffd200HironCraft:|r выполните /reload, чтобы применить импорт.")
     else
-        print("|cffffd200HironCraft:|r после проверки отключите оригинальные CraftScan и ProfitHUB-модули.")
+        print("|cffffd200HironCraft:|r после проверки отключите оригинальные CraftScan и AhUI-модули. Оставьте HironCraft включённым.")
     end
 end
 
@@ -102,7 +102,7 @@ SlashCmdList.HIRONCRAFTMIGRATE = function(message)
         return
     end
 
-    print("|cffffd200HironCraft:|r /hcmigrate force — повторно импортировать данные из включенных CraftScan/ProfitHUB.")
+    print("|cffffd200HironCraft:|r /hcmigrate force — повторно импортировать данные из включенных CraftScan/AhUI.")
 end
 
 if HironCraft.migration.didImport then

@@ -29,10 +29,10 @@ local E=setmetatable({CO=CO,PT={},T=function(_,fallback) return fallback end,
     FormatProfitCopper=function(copper) return tostring(copper) end,
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv=E
-dofile('ProfitHub/Orders/CraftingOrders/State.lua')
-dofile('ProfitHub/Orders/CraftingOrders/SelectionMemory.lua')
-dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
-dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')
+dofile('Workflow/Orders/CraftingOrders/State.lua')
+dofile('Workflow/Orders/CraftingOrders/SelectionMemory.lua')
+dofile('Workflow/Orders/CraftingOrders/QualityReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/QueueShopping.lua')
 E.GetAuctionatorItemPrice=function(itemID) return prices[itemID] end
 CO.GetSelectedProfessionExpansionKey=function() return 'midnight' end
 CO.FindOrderPageFrame=function() return page end

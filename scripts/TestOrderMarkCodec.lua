@@ -2,7 +2,7 @@
 -- mark with its completion notice is one addon message (255 bytes) on the
 -- wire, with the real serializer and compressor.
 strmatch = string.match
-assert(loadfile('ProfitHub/Core/Libs/LibStub/LibStub.lua'))()
+assert(loadfile('Workflow/Core/Libs/LibStub/LibStub.lua'))()
 assert(loadfile('Libs/LibSerialize.lua'))()
 assert(loadfile('Libs/LibDeflate.lua'))()
 local Serialize, Deflate = LibStub('LibSerialize'), LibStub('LibDeflate')

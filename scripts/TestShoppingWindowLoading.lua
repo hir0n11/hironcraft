@@ -7,7 +7,7 @@ local lib={DoesIDExist=function() return true end,
 local session={active=true,rows={{itemID=123,quantity=20}}}
 HironCraftProfit={ShoppingList={session=session,LibAHTab=lib}}
 function CreateFrame() error('auction templates are not loaded') end
-assert(loadfile('ProfitHub/Shop/UI/ShoppingList_UI.lua'))()
+assert(loadfile('Workflow/Shop/UI/ShoppingList_UI.lua'))()
 local S=HironCraftProfit.ShoppingList
 for i=1,3 do S:ShowWindow() end
 assert(S:CreateWindow()==nil and not S.frame and not S.isAuctionHouseOpen)

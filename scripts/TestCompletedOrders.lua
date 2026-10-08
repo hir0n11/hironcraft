@@ -36,10 +36,10 @@ local E = setmetatable({
     },
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv=E
-dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
-dofile('ProfitHub/Orders/CraftingOrders/Actions.lua')
+dofile('Workflow/Orders/CraftingOrders/QualityReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/Actions.lua')
 CO.CreateHotkeyProxy, CO.HookBlizzardProfessions, CO.ApplyEnabledState=noop, noop, noop
-dofile('ProfitHub/Orders/CraftingOrders/HooksEvents.lua')
+dofile('Workflow/Orders/CraftingOrders/HooksEvents.lua')
 CO.FindOrderPageFrame=function() return page end
 CO.GetRecipeKnownState=function() return true end
 CO.IsAtUsableCraftingOrderTable=function() return true end

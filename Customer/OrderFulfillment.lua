@@ -1963,7 +1963,7 @@ local function RegisterEvents()
         end
 
         -- A decline made with Blizzard's own button (or any other addon) used
-        -- to leave the chat row without its cross. ProfitHub records its own
+        -- to leave the chat row without its cross. HironCraft records its own
         -- declines with their reason, marked in rejectedOrderIDs just before
         -- the call, so only record the others here.
         if C_CraftingOrders and type(C_CraftingOrders.RejectOrder) == 'function' then
@@ -2269,7 +2269,7 @@ HironCraftScan.Utils.onLoad(function()
     end
 end)
 
--- ProfitHUB's selected Orders module is loaded earlier in the same addon. The
+-- HironCraft's selected Orders module is loaded earlier in the same addon. The
 -- bridge lets its safe reject action feed the CraftScan status journal without
 -- coupling either module to the other's private Lua environment.
 _G.HironCraft = _G.HironCraft or {}

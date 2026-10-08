@@ -54,7 +54,7 @@ local E = setmetatable({
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
-dofile("ProfitHub/Orders/CraftingOrders/OneButton.lua")
+dofile("Workflow/Orders/CraftingOrders/OneButton.lua")
 
 CO.fulfilledOrderIDs = { [1001] = true }
 local returned, count = CO:GetOneButtonPersonalOrders()

@@ -20,7 +20,7 @@ local function advance(seconds)
     error('unbounded timer loop')
 end
 
-assert(loadfile('ProfitHub/Core/Core/Prices.lua'))()
+assert(loadfile('Workflow/Core/Core/Prices.lua'))()
 local P = HironCraftProfit.Prices
 
 -- Nobody listens: storing a price schedules nothing.

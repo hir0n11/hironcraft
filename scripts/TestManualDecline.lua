@@ -1,5 +1,5 @@
--- A decline made outside ProfitHub (Blizzard's own button) must still mark the
--- chat row as rejected; ProfitHub's own declines are not recorded twice.
+-- A decline made outside HironCraft (Blizzard's own button) must still mark the
+-- chat row as rejected; HironCraft's own declines are not recorded twice.
 local now = 2000000000
 local events, hooks = {}, {}
 local Scan = {DB={settings={my_uuid='local'},realm={},customers={},listed_orders={}},
@@ -56,7 +56,7 @@ local profit=chatRow(2,'Other-Realm')
 listed[#listed+1]={orderID=901,spellID=123,itemID=321,customerName='Other-Realm',reagents={}}
 HironCraftProfitCraftingOrders={rejectedOrderIDs={['901']=now+5}}
 hooks.RejectOrder(901,'',164)
-assert(not F:GetStatus(profit),'ProfitHub decline was recorded a second time by the hook')
+assert(not F:GetStatus(profit),'HironCraft decline was recorded a second time by the hook')
 
 hooks.RejectOrder(999,'',164) -- unknown order: nothing to record, no error
 
@@ -176,4 +176,4 @@ assert(F:RepairOrderRowNotices()==1,'the lost notice was not rebuilt')
 assert(noticeFor(906) and noticeFor(906).updatedAt==declinedAt,'the rebuilt notice has the wrong time')
 assert(F:RepairOrderRowNotices()==0,'a notice was rebuilt twice')
 
-print('Manual decline tests passed (Blizzard button marks the row, ProfitHub declines not duplicated, late material lists recovered, rows for orders nobody asked about).')
+print('Manual decline tests passed (Blizzard button marks the row, HironCraft declines not duplicated, late material lists recovered, rows for orders nobody asked about).')

@@ -21,8 +21,8 @@ local E=setmetatable({PT={},CO=CO,SlashCmdList={},
     Enum={CraftingOrderType={Personal=2,Npc=4},CraftingOrderReagentsType={None=0,Some=1,All=2}},
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv=E
-dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
-dofile('ProfitHub/Orders/CraftingOrders/FinishingReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/QualityReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/FinishingReagents.lua')
 local q, known, supply, enabled, candidates, ready, effective
 local function forbidden() error('Painting an order took a crafting action') end
 CO.GetOrderEngine,CO.MarkOrderReadyForQualityRejection=forbidden,forbidden

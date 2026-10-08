@@ -27,7 +27,7 @@ C_TradeSkillUI={
         return answer(grade[1],grade[2],concentration==true)
     end,
 }
-assert(loadfile('ProfitHub/Core/CraftEngine/Engine.lua'))()
+assert(loadfile('Workflow/Core/CraftEngine/Engine.lua'))()
 local CE=HironCraftProfit.CraftEngine
 local function info(quality,cost) return {craftingQuality=math.floor(quality),quality=quality,concentrationCost=cost or 0} end
 local function grades(plan) return plan.tierByDataSlot[1]..','..plan.tierByDataSlot[2] end

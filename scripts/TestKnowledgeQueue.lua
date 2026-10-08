@@ -52,7 +52,7 @@ local E = setmetatable({
     end},
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv = E
-dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')
+dofile('Workflow/Orders/CraftingOrders/QueueShopping.lua')
 
 -- The production helper must preserve nil while Blizzard's quality data is
 -- still loading; nil must never collapse into the safe value false.

@@ -41,8 +41,8 @@ C_AuctionHouse = {
 CreateFrame = function()
     return {RegisterEvent=noop, SetScript=function(_,event,fn) if event=='OnEvent' then eventHandler=fn end end}
 end
-dofile('ProfitHub/Shop/Core/ShoppingList_Core.lua')
-dofile('ProfitHub/Shop/Core/RecipeShopping.lua')
+dofile('Workflow/Shop/Core/ShoppingList_Core.lua')
+dofile('Workflow/Shop/Core/RecipeShopping.lua')
 local S, RS = HironCraftProfit.ShoppingList, HironCraftProfit.RecipeShopping
 S.isAuctionHouseOpen=false
 local shopShows=0

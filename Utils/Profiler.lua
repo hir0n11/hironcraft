@@ -1,5 +1,5 @@
 -- On-demand hitch profiler. `/hcprof` wraps the functions exposed by the
--- ProfitHub order modules and the HironCraft modules, then reports which of
+-- HironCraft order modules and the HironCraft modules, then reports which of
 -- them consumed the time of any frame that took longer than the threshold.
 -- Nothing is wrapped until it is enabled, and disabled wrappers only forward.
 -- Times are inclusive (a caller includes its callees), so the deepest entry

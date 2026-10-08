@@ -1,6 +1,6 @@
 ## Interface: 120100
 ## Title: |cffffd200HironCraft|r
-## Version: 0.4.136
+## Version: 0.4.137
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -18,110 +18,111 @@ Libs\classic.lua
 Libs\LibSerialize.lua
 Libs\LibDeflate.lua
 
-ProfitHub\Core\Libs\LibStub\LibStub.lua
-ProfitHub\Core\Libs\LibAHTab\LibAHTab.lua
-ProfitHub\Core\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
-ProfitHub\Core\Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
-ProfitHub\Core\Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Workflow\Core\Libs\LibStub\LibStub.lua
+Workflow\Core\Libs\LibAHTab\LibAHTab.lua
+Workflow\Core\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Workflow\Core\Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Workflow\Core\Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
-# Profit workflow core
-ProfitHub\Core\Core\Core.lua
-ProfitHub\Core\Core\Prices.lua
-ProfitHub\Core\Core\EscClose.lua
+# Crafting workflow core
+Workflow\Core\Core\Core.lua
+Workflow\Core\Core\Prices.lua
+Workflow\Core\Core\EscClose.lua
 
-ProfitHub\Core\CraftEngine\Engine.lua
-ProfitHub\Core\CraftEngine\EnchantData.lua
-ProfitHub\Core\CraftEngine\SpecCal.lua
-ProfitHub\Core\CraftEngine\Simulator.lua
-ProfitHub\Core\CraftEngine\SpecInfo.lua
+Workflow\Core\CraftEngine\Engine.lua
+Workflow\Core\CraftEngine\EnchantData.lua
+Workflow\Core\CraftEngine\SpecCal.lua
+Workflow\Core\CraftEngine\Simulator.lua
+Workflow\Core\CraftEngine\SpecInfo.lua
 
-ProfitHub\Core\Locales\enUS.lua
-ProfitHub\Core\Locales\ruRU.lua
+Workflow\Core\Locales\enUS.lua
+Workflow\Core\Locales\ruRU.lua
 
-ProfitHub\Core\UI\Dropdown.lua
-ProfitHub\Core\UI\Tooltip.lua
-ProfitHub\Core\UI\Welcome.lua
-ProfitHub\Core\Core\Professions.lua
-ProfitHub\Core\Core\Data.lua
-ProfitHub\Core\Core\Tracker.lua
-ProfitHub\Core\Core\SkinningCheck_Core.lua
-ProfitHub\Core\Core\ConcentrationData.lua
-ProfitHub\Core\Core\AccountOverview.lua
-ProfitHub\Core\Core\AccountOverview_Data.lua
+Workflow\Core\UI\ClassicTheme.lua
+Workflow\Core\UI\Dropdown.lua
+Workflow\Core\UI\Tooltip.lua
+Workflow\Core\UI\Welcome.lua
+Workflow\Core\Core\Professions.lua
+Workflow\Core\Core\Data.lua
+Workflow\Core\Core\Tracker.lua
+Workflow\Core\Core\SkinningCheck_Core.lua
+Workflow\Core\Core\ConcentrationData.lua
+Workflow\Core\Core\AccountOverview.lua
+Workflow\Core\Core\AccountOverview_Data.lua
 
-ProfitHub\Core\DB\DF.lua
-ProfitHub\Core\DB\TWW.lua
-ProfitHub\Core\DB\MID.lua
-ProfitHub\Core\DB\SpecMap_DF.lua
-ProfitHub\Core\DB\SpecMap_TWW.lua
-ProfitHub\Core\DB\SpecMap_MID.lua
-ProfitHub\Core\DB\SpecStats_MID.lua
+Workflow\Core\DB\DF.lua
+Workflow\Core\DB\TWW.lua
+Workflow\Core\DB\MID.lua
+Workflow\Core\DB\SpecMap_DF.lua
+Workflow\Core\DB\SpecMap_TWW.lua
+Workflow\Core\DB\SpecMap_MID.lua
+Workflow\Core\DB\SpecStats_MID.lua
 
-ProfitHub\Core\UI\Minimap.lua
-ProfitHub\Core\UI\Fonts.lua
-ProfitHub\Core\UI\Concentration.lua
-ProfitHub\Core\UI\AccountOverview_UI.lua
-ProfitHub\Core\UI\FirstCraft.lua
-ProfitHub\Core\UI\KnowledgeBar.lua
-ProfitHub\Core\UI\MailOpenAll.lua
-ProfitHub\Core\UI\CraftSimulator_UI.lua
-ProfitHub\Core\UI\CraftSimulator_Sim.lua
-ProfitHub\Core\UI\CraftSimulator_Spec.lua
-ProfitHub\Core\UI\UI.lua
-ProfitHub\Core\UI\AtlasGallery.lua
-ProfitHub\Core\UI\SkinningCheck_UI.lua
-ProfitHub\Core\UI\SkinningTargets.lua
-ProfitHub\Core\Core\MapPins.lua
-ProfitHub\Core\UI\MapPins.xml
-ProfitHub\Core\Settings\Settings.lua
-ProfitHub\Core\Settings\Customization.lua
+Workflow\Core\UI\Minimap.lua
+Workflow\Core\UI\Fonts.lua
+Workflow\Core\UI\Concentration.lua
+Workflow\Core\UI\AccountOverview_UI.lua
+Workflow\Core\UI\FirstCraft.lua
+Workflow\Core\UI\KnowledgeBar.lua
+Workflow\Core\UI\MailOpenAll.lua
+Workflow\Core\UI\CraftSimulator_UI.lua
+Workflow\Core\UI\CraftSimulator_Sim.lua
+Workflow\Core\UI\CraftSimulator_Spec.lua
+Workflow\Core\UI\UI.lua
+Workflow\Core\UI\AtlasGallery.lua
+Workflow\Core\UI\SkinningCheck_UI.lua
+Workflow\Core\UI\SkinningTargets.lua
+Workflow\Core\Core\MapPins.lua
+Workflow\Core\UI\MapPins.xml
+Workflow\Core\Settings\Settings.lua
+Workflow\Core\Settings\Customization.lua
 
 # Buttons
-ProfitHub\Buttons\Locale.lua
-ProfitHub\Buttons\ConfirmButtons.lua
-ProfitHub\Buttons\ConfirmButtons_Settings.lua
+Workflow\Buttons\Locale.lua
+Workflow\Buttons\ConfirmButtons.lua
+Workflow\Buttons\ConfirmButtons_Settings.lua
 
 # Gold Deposit
-ProfitHub\GoldDeposit\Locale.lua
-ProfitHub\GoldDeposit\GoldDepositor.lua
+Workflow\GoldDeposit\Locale.lua
+Workflow\GoldDeposit\GoldDepositor.lua
 
 # Shop (loaded before Orders and QuestShopping)
-ProfitHub\Shop\Locale.lua
-ProfitHub\Shop\Core\ShoppingList_Core.lua
-ProfitHub\Shop\Core\ShoppingList_Selling.lua
-ProfitHub\Shop\Core\ShoppingList_Cancelling.lua
-ProfitHub\Shop\UI\ShoppingList_UI.lua
-ProfitHub\Shop\UI\ShoppingList_Selling_UI.lua
-ProfitHub\Shop\UI\ShoppingList_Cancelling_UI.lua
-ProfitHub\Shop\Core\RecipeShopping.lua
-ProfitHub\Shop\UI\RecipeShopping_UI.lua
+Workflow\Shop\Locale.lua
+Workflow\Shop\Core\ShoppingList_Core.lua
+Workflow\Shop\Core\ShoppingList_Selling.lua
+Workflow\Shop\Core\ShoppingList_Cancelling.lua
+Workflow\Shop\UI\ShoppingList_UI.lua
+Workflow\Shop\UI\ShoppingList_Selling_UI.lua
+Workflow\Shop\UI\ShoppingList_Cancelling_UI.lua
+Workflow\Shop\Core\RecipeShopping.lua
+Workflow\Shop\UI\RecipeShopping_UI.lua
 
 # Orders
-ProfitHub\Orders\Locale.lua
-ProfitHub\Orders\Core\CraftingOrders_Core.lua
-ProfitHub\Orders\CraftingOrders\Table.lua
-ProfitHub\Orders\CraftingOrders\State.lua
-ProfitHub\Orders\CraftingOrders\SelectionMemory.lua
-ProfitHub\Orders\CraftingOrders\QualityReagents.lua
-ProfitHub\Orders\CraftingOrders\FinishingReagents.lua
-ProfitHub\Orders\CraftingOrders\Rows.lua
-ProfitHub\Orders\CraftingOrders\ClassicTheme.lua
-ProfitHub\Orders\CraftingOrders\ExpansionQuest.lua
-ProfitHub\Orders\CraftingOrders\QueueShopping.lua
-ProfitHub\Orders\CraftingOrders\Panel.lua
-ProfitHub\Orders\CraftingOrders\Actions.lua
-ProfitHub\Orders\CraftingOrders\CustomList.lua
-ProfitHub\Orders\CraftingOrders\HooksEvents.lua
-ProfitHub\Orders\CraftingOrders\OneButton.lua
+Workflow\Orders\Locale.lua
+Workflow\Orders\Core\CraftingOrders_Core.lua
+Workflow\Orders\CraftingOrders\Table.lua
+Workflow\Orders\CraftingOrders\State.lua
+Workflow\Orders\CraftingOrders\SelectionMemory.lua
+Workflow\Orders\CraftingOrders\QualityReagents.lua
+Workflow\Orders\CraftingOrders\FinishingReagents.lua
+Workflow\Orders\CraftingOrders\Rows.lua
+Workflow\Orders\CraftingOrders\ClassicTheme.lua
+Workflow\Orders\CraftingOrders\ExpansionQuest.lua
+Workflow\Orders\CraftingOrders\QueueShopping.lua
+Workflow\Orders\CraftingOrders\Panel.lua
+Workflow\Orders\CraftingOrders\Actions.lua
+Workflow\Orders\CraftingOrders\CustomList.lua
+Workflow\Orders\CraftingOrders\HooksEvents.lua
+Workflow\Orders\CraftingOrders\OneButton.lua
 
 # Quest Shopping
-ProfitHub\QuestShopping\Locale.lua
-ProfitHub\QuestShopping\QuestShopping.lua
-ProfitHub\QuestShopping\QuestShopping_Settings.lua
+Workflow\QuestShopping\Locale.lua
+Workflow\QuestShopping\QuestShopping.lua
+Workflow\QuestShopping\QuestShopping_Settings.lua
 
 # Stack Assist
-ProfitHub\StackAssist\Locale.lua
-ProfitHub\StackAssist\Core\StackAssist.lua
+Workflow\StackAssist\Locale.lua
+Workflow\StackAssist\Core\StackAssist.lua
 
 # Chat scanner
 Consts.lua

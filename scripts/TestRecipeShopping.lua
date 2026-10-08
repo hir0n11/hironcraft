@@ -55,7 +55,7 @@ HironCraftProfit.ShoppingList = {
     end,
 }
 
-assert(loadfile("ProfitHub/Shop/Core/RecipeShopping.lua"))("HironCraft", {})
+assert(loadfile("Workflow/Shop/Core/RecipeShopping.lua"))("HironCraft", {})
 local RS = HironCraftProfit.RecipeShopping
 
 local schematicOne = {

@@ -66,7 +66,7 @@ local E = setmetatable({
     },
 }, { __index = _G })
 HironCraftProfitShoppingListEnv = E
-dofile('ProfitHub/Shop/Core/ShoppingList_Selling.lua')
+dofile('Workflow/Shop/Core/ShoppingList_Selling.lua')
 S.isAuctionHouseOpen = true
 S.shopTab = 'sell'
 

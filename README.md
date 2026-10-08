@@ -1,6 +1,6 @@
 # HironCraft
 
-Standalone personal World of Warcraft addon combining the customized chat scanner with the selected ProfitHUB workflow modules.
+Standalone personal World of Warcraft addon combining the customized chat scanner with the selected AhUI workflow modules.
 
 Included modules:
 
@@ -23,7 +23,25 @@ Conversation ownership is stored per request and shared with linked accounts.
 Legacy requests without recorded ownership do not offer this reply until a
 local conversation establishes the owner; the crafting character is not guessed.
 
-The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
+The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
+
+## Classic overview and unified game-native styling (0.4.137)
+
+- Character overview uses native WoW frames, a gold title, a separate toolbar,
+  red controls and warm table highlights. Columns fill the window width; saved
+  sizes, scale, character order, filters and notes are preserved.
+- Shared tooltips, dropdowns, note editing, welcome, gold deposit, calibration,
+  reagent mix selection and utility dialogs no longer use the old purple skin.
+  Class, rarity, currency and warning colours retain their meaning.
+- Removed obsolete logos and the old design selector. HironCraft branding is
+  used throughout the interface, help and chat output.
+- Internal modules moved to `Workflow`; saved asset/font paths are migrated
+  automatically. SavedVariables names remain unchanged. Original source
+  attribution remains in `THIRD-PARTY-NOTICE.md`.
+- Verified narrow/wide overview layouts and actions in Russian and English,
+  native order widgets, loaded files, assets and Lua 5.1 syntax. The unrelated
+  long-message wording test still fails its splitting assertion on both this
+  version and the unmodified 0.4.136 baseline.
 
 ## Profit mode no longer buys the best grades for nothing (0.4.136)
 
@@ -1406,7 +1424,7 @@ request.
   profession - how often, how many, the price each and the worth - with the
   period, profession and crafter filters, search and CSV export.
 - The worth is counted at the price of the moment each came back:
-  Auctionator, else TSM, else ProfitHub's own scans. Reagents without any
+  Auctionator, else TSM, else HironCraft's own scans. Reagents without any
   price are counted but left out of the worth; currencies are left out.
 - Returns from the customer's reagents (yours to keep) and from your own
   (a saving) are summed apart, and the chance - order crafts with a return
@@ -1892,7 +1910,7 @@ request.
 - A decline of an order from a customer this client never talked to got no
   cross on the linked account that held the conversation: that account finds
   its row only through the notice, and an error in a listener of the status
-  change stopped the notice from being recorded (ProfitHub swallowed it).
+  change stopped the notice from being recorded (HironCraft swallowed it).
   Listeners can no longer break the code that raised the event.
 - Errors in listeners are kept in SavedVariables (`error_log`, newest 20) and
   still reported through the game's error handler.
@@ -2238,13 +2256,13 @@ request.
   already open is selected like the ones present at opening; an order you
   unchecked yourself stays unchecked.
 - A decline made with Blizzard's own button now also marks the chat row with
-  the rejected cross and keeps its material list. ProfitHub's own declines are
+  the rejected cross and keeps its material list. HironCraft's own declines are
   still recorded once, with their reason.
 
 ## Hitch profiler (0.3.65)
 
 - `/hcprof [ms]` (default 150) reports every frame slower than the threshold
-  in chat, with the ProfitHub order and HironCraft functions that consumed its
+  in chat, with the HironCraft order and HironCraft functions that consumed its
   time (inclusive, with call counts). `/hcprof off` stops it. Nothing is
   wrapped until the first `/hcprof`; disabled wrappers only forward the call.
 - Recordings showed the game freezing for about 9 seconds while the Personal
@@ -3139,9 +3157,9 @@ interface changes.
 ## First start and settings migration
 
 1. Install the `HironCraft` folder on both WoW clients.
-2. For the first login, leave the original CraftScan and ProfitHUB addons enabled. HironCraft imports their loaded SavedVariables into its own uniquely named databases.
-3. Log in once on every character whose per-character ProfitHUB settings must be copied.
-4. Log out or run `/reload`, disable the original CraftScan and all ProfitHUB modules, and keep only HironCraft enabled.
+2. For the first login, leave the original CraftScan and AhUI addons enabled. HironCraft imports their loaded SavedVariables into its own uniquely named databases.
+3. Log in once on every character whose per-character AhUI settings must be copied.
+4. Log out or run `/reload`, disable the original CraftScan and all AhUI modules, and keep only HironCraft enabled.
 5. Repeat the installation and migration on the second linked account. Both accounts must run HironCraft to use its isolated `HIRONCRAFT_SCAN` communication channel.
 
 If the first login was made with the originals disabled, enable them and run `/hcmigrate force`, then `/reload`.
@@ -3155,7 +3173,7 @@ Commands:
 
 ## Updating
 
-Only update or replace the `HironCraft` folder. Updates to `CraftScan`, `AhUI` or the old ProfitHUB module folders do not change this addon.
+Only update or replace the `HironCraft` folder. Updates to `CraftScan`, `AhUI` or the old AhUI module folders do not change this addon.
 
 Run `scripts/Build.ps1` to create a clean versioned ZIP without repository and development files.
 

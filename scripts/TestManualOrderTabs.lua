@@ -94,7 +94,7 @@ CO.UpdateControlPanelVisibility=noop
 CO.UpdateControlPanel=noop
 CO.ApplyTemporaryBinding=noop
 CO.SelectAllVisibleOrders=function() selected=selected+1 end
-dofile('ProfitHub/Orders/CraftingOrders/OneButton.lua')
+dofile('Workflow/Orders/CraftingOrders/OneButton.lua')
 
 local function tick()
     local timer=table.remove(timers,1)

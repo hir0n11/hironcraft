@@ -34,8 +34,8 @@ local E = setmetatable({
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
-dofile("ProfitHub/Orders/CraftingOrders/Actions.lua")
-dofile("ProfitHub/Orders/CraftingOrders/FinishingReagents.lua")
+dofile("Workflow/Orders/CraftingOrders/Actions.lua")
+dofile("Workflow/Orders/CraftingOrders/FinishingReagents.lua")
 
 -- GetOrderEngine must preserve only an explicitly staged transaction.
 local setOrderCalls = 0

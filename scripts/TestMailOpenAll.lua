@@ -86,7 +86,8 @@ HironCraftProfit = {
 }
 HironCraftProfit_DB = nil
 
-assert(loadfile('ProfitHub/Core/UI/MailOpenAll.lua'))()
+assert(loadfile('Workflow/Core/UI/ClassicTheme.lua'))()
+assert(loadfile('Workflow/Core/UI/MailOpenAll.lua'))()
 local M = HironCraftProfit.MailOpenAll
 assert(handlers and handlers.events.MAIL_SHOW and handlers.events.PLAYER_REGEN_ENABLED, 'no event frame')
 local function fire(event, ...) handlers.scripts.OnEvent(handlers, event, ...) end

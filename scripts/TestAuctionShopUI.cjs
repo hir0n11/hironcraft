@@ -1,12 +1,12 @@
 const fs = require("fs");
 
-const ui = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_UI.lua", "utf8");
-const sellUi = fs.readFileSync("ProfitHub/Shop/UI/ShoppingList_Selling_UI.lua", "utf8");
-const core = fs.readFileSync("ProfitHub/Shop/Core/ShoppingList_Core.lua", "utf8");
-const recipeShopping = fs.readFileSync("ProfitHub/Shop/Core/RecipeShopping.lua", "utf8");
+const ui = fs.readFileSync("Workflow/Shop/UI/ShoppingList_UI.lua", "utf8");
+const sellUi = fs.readFileSync("Workflow/Shop/UI/ShoppingList_Selling_UI.lua", "utf8");
+const core = fs.readFileSync("Workflow/Shop/Core/ShoppingList_Core.lua", "utf8");
+const recipeShopping = fs.readFileSync("Workflow/Shop/Core/RecipeShopping.lua", "utf8");
 const recipeMenu = fs.readFileSync("Config/RecipeSchematicMenu.lua", "utf8");
-const locale = fs.readFileSync("ProfitHub/Shop/Locale.lua", "utf8");
-const tabLib = fs.readFileSync("ProfitHub/Core/Libs/LibAHTab/LibAHTab.lua", "utf8");
+const locale = fs.readFileSync("Workflow/Shop/Locale.lua", "utf8");
+const tabLib = fs.readFileSync("Workflow/Core/Libs/LibAHTab/LibAHTab.lua", "utf8");
 
 function check(condition, message) {
   if (!condition) throw new Error(message);

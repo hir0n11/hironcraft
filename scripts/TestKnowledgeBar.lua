@@ -90,7 +90,7 @@ CreateFrame = NewFrame
 local hooks = {}
 function hooksecurefunc(target, name, fn) hooks[#hooks + 1] = { target = target, name = name, fn = fn } end
 
-assert(loadfile('ProfitHub/Core/UI/KnowledgeBar.lua'))()
+assert(loadfile('Workflow/Core/UI/KnowledgeBar.lua'))()
 local KB = HironCraftProfit.KnowledgeBar
 
 -- Counting ------------------------------------------------------------------

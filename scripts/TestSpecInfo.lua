@@ -82,7 +82,7 @@ PT.SpecStats = {
     recipes = { [1000] = list, [1001] = list, [1002] = list, [1003] = list, [2000] = { 50, 51 } },
     icons = { [10] = 111, [20] = 222 },
 }
-assert(loadfile('ProfitHub/Core/CraftEngine/SpecInfo.lua'))()
+assert(loadfile('Workflow/Core/CraftEngine/SpecInfo.lua'))()
 local I = assert(PT.SpecInfo, 'the module did not load')
 
 local function Stats(info)
@@ -272,7 +272,7 @@ print('Specialization info passed (stats now and maxed, perks by rank, ranks tri
 -- The data generated from CraftSim ---------------------------------------------------
 
 PT.SpecStats = nil
-assert(loadfile('ProfitHub/Core/DB/SpecStats_MID.lua'))()
+assert(loadfile('Workflow/Core/DB/SpecStats_MID.lua'))()
 local data = assert(PT.SpecStats, 'the data did not load')
 assert(tostring(data.source):match('^CraftSim %d'), 'the data does not say where it is from')
 local nodeCount, perkCount = 0, 0

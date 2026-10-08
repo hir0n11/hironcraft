@@ -24,8 +24,8 @@ local E = setmetatable({
     wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
-dofile('ProfitHub/Orders/CraftingOrders/QualityReagents.lua')
-dofile('ProfitHub/Orders/CraftingOrders/State.lua')
+dofile('Workflow/Orders/CraftingOrders/QualityReagents.lua')
+dofile('Workflow/Orders/CraftingOrders/State.lua')
 
 local bindingCalls = 0
 CO.ApplyTemporaryBinding = function()

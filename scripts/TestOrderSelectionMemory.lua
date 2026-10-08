@@ -41,9 +41,9 @@ local E=setmetatable({CO=CO,PT={},T=function(_,fallback) return fallback end,
     C_Timer={After=function(delay,callback) timers[#timers+1]={at=clock+delay,callback=callback} end},
 }, {__index=_G})
 HironCraftProfitCraftingOrdersEnv=E
-dofile('ProfitHub/Orders/CraftingOrders/State.lua')
-dofile('ProfitHub/Orders/CraftingOrders/SelectionMemory.lua')
-dofile('ProfitHub/Orders/CraftingOrders/QueueShopping.lua')
+dofile('Workflow/Orders/CraftingOrders/State.lua')
+dofile('Workflow/Orders/CraftingOrders/SelectionMemory.lua')
+dofile('Workflow/Orders/CraftingOrders/QueueShopping.lua')
 CO.GetSelectedProfessionExpansionKey=function() return expansion end
 CO.FindOrderPageFrame=function() return page end
 CO.GetVisibleOrderButtonsSorted=function()
@@ -281,7 +281,7 @@ for _,name in ipairs({'CreateHotkeyProxy','InstallProfitSortHooks','ApplyEnabled
 CO.IsEnabled=function() return true end
 local shopping=0
 CO.CreateShoppingListForSelectedOrders=function() shopping=shopping+1;return true end
-dofile('ProfitHub/Orders/CraftingOrders/HooksEvents.lua')
+dofile('Workflow/Orders/CraftingOrders/HooksEvents.lua')
 CO:SetAutoShoppingOnOpen(true)
 CO._autoRanForOpen=false;mixin.ShowGeneric(page);drain(.7)
 assert(#requests==1 and shopping==0)

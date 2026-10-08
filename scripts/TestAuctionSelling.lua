@@ -86,7 +86,7 @@ E.C_AuctionHouse = {
     CalculateItemDeposit = function() return 100 end,
 }
 HironCraftProfitShoppingListEnv = E
-dofile('ProfitHub/Shop/Core/ShoppingList_Selling.lua')
+dofile('Workflow/Shop/Core/ShoppingList_Selling.lua')
 
 local function advance(seconds)
     local untilTime = now + seconds
@@ -229,7 +229,7 @@ check(#S.sell.items == 1 and S.sell.selected.itemID == 1002, 'empty/bound slots 
 reset()
 local oldRefresh = S.RefreshSellUI
 local uiEnv = setmetatable({ HironCraftProfit = { ShoppingList = S } }, { __index = E })
-local ui = assert(loadfile('ProfitHub/Shop/UI/ShoppingList_Selling_UI.lua'))
+local ui = assert(loadfile('Workflow/Shop/UI/ShoppingList_Selling_UI.lua'))
 setfenv(ui, uiEnv); ui()
 S.RefreshSellUI = oldRefresh
 local function widget()

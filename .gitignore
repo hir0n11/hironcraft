@@ -1,3 +1,4 @@
 *.zip
 .build/
 artwork/classic-orders-*.png
+artwork/classic-overview.png

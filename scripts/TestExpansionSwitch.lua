@@ -28,7 +28,7 @@ C_TradeSkillUI = {
     GetBaseProfessionInfo = function() return { profession = base } end,
     GetChildProfessionInfos = function() return children end,
 }
-dofile('ProfitHub/Orders/CraftingOrders/ExpansionQuest.lua')
+dofile('Workflow/Orders/CraftingOrders/ExpansionQuest.lua')
 assert(CO.GetAvailableProfessionExpansions, 'the list of expansions did not load')
 
 local function keys(minExpansionID)

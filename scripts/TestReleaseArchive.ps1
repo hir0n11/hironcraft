@@ -32,7 +32,7 @@ try {
 }
 finally { $zip.Dispose() }
 foreach ($required in @('HironCraft/HironCraft.toc', 'HironCraft/Bindings.xml',
-    'HironCraft/ProfitHub/Shop/Core/RecipeShopping.lua')) {
+    'HironCraft/Workflow/Shop/Core/RecipeShopping.lua', 'HironCraft/Workflow/Core/UI/ClassicTheme.lua')) {
     if (-not $manifest.ContainsKey($required)) { throw "Missing release file: $required" }
 }
 

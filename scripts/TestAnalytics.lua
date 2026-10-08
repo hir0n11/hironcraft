@@ -10,7 +10,7 @@ local side = 'Alliance'
 function UnitFactionGroup() return side end
 
 strmatch = string.match
-assert(loadfile("ProfitHub/Core/Libs/LibStub/LibStub.lua"))()
+assert(loadfile("Workflow/Core/Libs/LibStub/LibStub.lua"))()
 assert(loadfile('Libs/LibSerialize.lua'))()
 assert(loadfile('Libs/LibDeflate.lua'))()
 

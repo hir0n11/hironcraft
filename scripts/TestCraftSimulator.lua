@@ -137,9 +137,9 @@ C_CurrencyInfo = { GetCurrencyInfo = function(currencyID) return { name = 'Crest
 HironCraftProfit = { L = {}, FONT = 'Addon/default.ttf',
     Prices = { GetItemPrice = function(_, itemID) return prices[itemID] end } }
 SlashCmdList = {}
-assert(loadfile('ProfitHub/Core/CraftEngine/Engine.lua'))()
-assert(loadfile('ProfitHub/Core/CraftEngine/Simulator.lua'))()
-assert(loadfile('ProfitHub/Core/CraftEngine/SpecInfo.lua'))()
+assert(loadfile('Workflow/Core/CraftEngine/Engine.lua'))()
+assert(loadfile('Workflow/Core/CraftEngine/Simulator.lua'))()
+assert(loadfile('Workflow/Core/CraftEngine/SpecInfo.lua'))()
 local PT = HironCraftProfit
 local S, CE = PT.CraftSimulator, PT.CraftEngine
 assert(S and CE and CE.Evaluate, 'the engine or the simulator did not load')
@@ -486,11 +486,11 @@ MenuUtil = { CreateContextMenu = function(owner, generator) opened = { owner = o
 HironCraftProfit_DB = nil
 
 local before = #frames
-assert(loadfile('ProfitHub/Core/UI/CraftSimulator_UI.lua'))()
+assert(loadfile('Workflow/Core/UI/CraftSimulator_UI.lua'))()
 local UI = S.UI
 eq(#frames, before + 1, 'only the event frame exists after loading')
-assert(loadfile('ProfitHub/Core/UI/CraftSimulator_Sim.lua'))()
-assert(loadfile('ProfitHub/Core/UI/CraftSimulator_Spec.lua'))()
+assert(loadfile('Workflow/Core/UI/CraftSimulator_Sim.lua'))()
+assert(loadfile('Workflow/Core/UI/CraftSimulator_Spec.lua'))()
 eq(#frames, before + 1, 'what the panel shows builds nothing at load')
 eq(HironCraftProfit_DB, nil, 'saved variables created at load')
 local events = frames[#frames]
@@ -1153,8 +1153,8 @@ do
         file:close()
         return text
     end
-    assert(not Slurp('ProfitHub/Core/Locales/ruRU.lua'):find('L%["CRAFTSIM_'), 'the panel has Russian strings again')
-    local english = Slurp('ProfitHub/Core/Locales/enUS.lua')
+    assert(not Slurp('Workflow/Core/Locales/ruRU.lua'):find('L%["CRAFTSIM_'), 'the panel has Russian strings again')
+    local english = Slurp('Workflow/Core/Locales/enUS.lua')
     for _, key in ipairs({ 'CRAFTSIM_TITLE', 'CRAFTSIM_TAB_SPEC', 'CRAFTSIM_SPEC_TRIED', 'CRAFTSIM_SPEC_OWN' }) do
         assert(english:find('L["' .. key .. '"]', 1, true), key .. ' is missing from the English strings')
     end
