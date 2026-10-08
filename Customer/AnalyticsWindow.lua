@@ -546,7 +546,9 @@ local function CreateChart(parent, count, labelOf)
         chart.bars[index] = bar
     end
 
-    function chart:SetValues(values, infos, shares, labels, selected, metric)
+    -- floor: what the scale has to reach at least, whatever these values are
+    -- (see FixedScale). Without it the scale follows the values alone.
+    function chart:SetValues(values, infos, shares, labels, selected, metric, floor)
         metric = metric or 'orders'
         self.metric = metric
         self.infos = infos or {}
@@ -563,7 +565,8 @@ local function CreateChart(parent, count, labelOf)
                 maximum = math.max(maximum, values[index] or 0)
             end
         end
-        local ceiling, step = ChartScale(maximum)
+        self.dataMaximum = maximum
+        local ceiling, step = ChartScale(math.max(maximum, tonumber(floor) or 0))
         self.maximum = ceiling
         for index, grid in ipairs(self.grid) do
             local tick = (index - 1) * step
@@ -890,6 +893,36 @@ local function YearDetail()
     return month, day
 end
 
+-- One scale for bars of one kind. A chart drawn to its own tallest bar
+-- looks the same on a slow day and on a busy one: 40 an hour fills it as 80
+-- does. So the scale is kept: for the hours of a single day, for days and for
+-- months, each with the stage and the filters that are shown, it is the
+-- largest value that kind of bar has had so far. It only grows; "reset"
+-- forgets it. Hours summed over several days have no day to be compared
+-- with, and follow their own values. view.scale = 'auto' is the old way.
+local function ScaleKey(unit, metric)
+    local view = View()
+    local parts = { unit, metric }
+    for _, key in ipairs({ 'ppID', 'crafter', 'side', 'tier', 'profile' }) do
+        parts[#parts + 1] = tostring(view[key] ~= nil and view[key] or '')
+    end
+    return table.concat(parts, '|')
+end
+
+local function FixedScale(unit, metric)
+    local view = View()
+    if not unit or view.scale == 'auto' then return nil end
+    return type(view.scales) == 'table' and tonumber(view.scales[ScaleKey(unit, metric)]) or 0
+end
+
+local function RememberScale(unit, metric, chart)
+    local view = View()
+    if not unit or view.scale == 'auto' then return end
+    view.scales = type(view.scales) == 'table' and view.scales or {}
+    local key = ScaleKey(unit, metric)
+    view.scales[key] = math.max(tonumber(view.scales[key]) or 0, tonumber(chart.dataMaximum) or 0)
+end
+
 local function UpdateCharts()
     if not report or not calendarReport or (loading and not backgroundLoad) then return end
     local metric = View().metric or 'overview'
@@ -942,7 +975,8 @@ local function UpdateCharts()
         frame.HourChart.kind, frame.HourChart.buckets = 'days', buckets
         frame.HourTitle:SetText(L('By day of month') .. ' — '
             .. RangeLabel(detailMonth, select(2, Scan.AnalyticsReport.CalendarRange('month', detailMonth))))
-        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric)
+        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric, FixedScale('day', metric))
+        RememberScale('day', metric, frame.HourChart)
     else
         local values, infos, shares = Infos(24, function(index)
             local stats = {}
@@ -956,7 +990,15 @@ local function UpdateCharts()
         end
         frame.HourChart.kind, frame.HourChart.buckets = 'hours', nil
         frame.HourTitle:SetText(L('By hour of day') .. ' — ' .. range)
-        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric)
+        -- The hours of one day compare with those of another day; the hours
+        -- of a longer period are sums.
+        local unit = nil
+        if from and to and from > 0 then
+            local dayStart, dayEnd = Scan.AnalyticsReport.CalendarRange('day', from)
+            if dayStart and dayEnd and from >= dayStart and to <= dayEnd then unit = 'hour' end
+        end
+        frame.HourChart:SetValues(values, infos, shares, labels, nil, metric, FixedScale(unit, metric))
+        RememberScale(unit, metric, frame.HourChart)
     end
 
     local mode, anchor = CalendarState()
@@ -977,7 +1019,9 @@ local function UpdateCharts()
             and 'Click to view this month' or 'Click to view this day')
     end
     frame.DayChart.buckets = buckets
-    frame.DayChart:SetValues(values, infos, shares, labels, selected, metric)
+    local calendarUnit = mode == 'year' and 'month' or 'day'
+    frame.DayChart:SetValues(values, infos, shares, labels, selected, metric, FixedScale(calendarUnit, metric))
+    RememberScale(calendarUnit, metric, frame.DayChart)
     frame.CalendarTitle:SetText(RangeLabel(first, last))
     frame.CalendarNext:SetEnabled(last < time())
     frame.CalendarPrevious:SetEnabled(date('*t', first).year > 1970)
@@ -1771,6 +1815,21 @@ local function Create()
     frame.MetricDropdown = Dropdown(frame.Charts, 170, Entries(METRICS),
         function() return View().metric end, function(value) View().metric = value UpdateCharts() end)
     frame.MetricDropdown:SetPoint('TOPRIGHT', frame.Charts, 'TOPRIGHT', -10, -6)
+    -- The scale of the charts: kept from day to day, or drawn to each view's
+    -- own tallest bar. "Reset" forgets what was kept (a freak hour).
+    frame.ScaleDropdown = Dropdown(frame.Charts, 170, function()
+        return { { text = L('Chart scale: kept'), value = 'fixed' }, { text = L('Chart scale: automatic'), value = 'auto' },
+            { text = L('Chart scale: reset'), value = 'reset' } }
+    end, function() return View().scale == 'auto' and 'auto' or 'fixed' end, function(value)
+        local view = View()
+        if value == 'reset' then
+            view.scales = {}
+        else
+            view.scale = value == 'auto' and 'auto' or nil
+        end
+        UpdateCharts()
+    end)
+    frame.ScaleDropdown:SetPoint('RIGHT', frame.MetricDropdown, 'LEFT', -8, 0)
     local hourTitle = frame.Charts:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
     frame.HourTitle = hourTitle
     hourTitle:SetPoint('TOPLEFT', 14, -10)
@@ -1806,7 +1865,7 @@ local function Create()
     frame.HourChart:SetHeight(184)
     frame.DetailBack = CreateFrame('Button', nil, frame.Charts, 'UIPanelButtonTemplate')
     frame.DetailBack:SetSize(136, 22)
-    frame.DetailBack:SetPoint('RIGHT', frame.MetricDropdown, 'LEFT', -8, 0)
+    frame.DetailBack:SetPoint('RIGHT', frame.ScaleDropdown, 'LEFT', -8, 0)
     frame.DetailBack:SetText(L('Back to month days'))
     frame.DetailBack:SetScript('OnClick', function()
         local month = frame.HourChart.detailMonth

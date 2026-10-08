@@ -25,6 +25,24 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Analytics charts keep their scale from day to day (0.4.130)
+
+A chart was drawn to its own tallest bar, so a slow day and a busy one
+looked alike: 40 orders in an hour filled the chart as 80 did, and only the
+numbers on the axis told them apart.
+
+- **The scale is kept.** For bars of one kind (the hours of a single day,
+  days, months) the scale is the largest value that kind of bar has had so
+  far. A quiet day is drawn to the scale of the busiest one seen, so two
+  days compare by eye. It only grows.
+- Each stage (`All stages`, `Requests`, ...) and each filter (profession,
+  crafter, side, coin, profile) has a scale of its own.
+- Hours summed over a longer period are not a day and follow their own
+  values, as before.
+- A new list beside the stages: `Scale: kept` (the default), `Scale:
+  automatic` (the old way) and `Reset the scale`, which forgets what was kept
+  (after a freak hour, say).
+
 ## The window closes at the table's edge; no dot after a crafter's name; shorter key hints (0.4.129)
 
 **The crafting window after leaving the table.** Flying off from the

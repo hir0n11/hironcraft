@@ -919,6 +919,97 @@ do
 end
 print('Analytics profiles in the window passed (list, first profile, empty profile, ticking, typed names, rename, delete).')
 
+-- The scale of a chart is kept from day to day: a quiet day is drawn to the
+-- scale of the busiest one seen, so the bars of two days compare by eye.
+do
+    view.side, view.ppID, view.crafter, view.tier, view.profile = nil, nil, nil, nil, nil
+    view.metric, view.scale, view.scales = 'orders', nil, nil
+    local busy, quiet = At(2024, 5, 6), At(2024, 5, 7)
+    for n = 1, 9 do Log.Record({ k = 'd', st = 'f', o = 5000 + n, c = 'Busy' .. n, p = 197, f = 'H', t = busy + 10 * 3600 + n }) end
+    for n = 1, 2 do Log.Record({ k = 'd', st = 'f', o = 5100 + n, c = 'Quiet' .. n, p = 197, f = 'H', t = quiet + 11 * 3600 + n }) end
+    local function show(from, to)
+        view.preset, view.from, view.to = 'custom', from, to
+        W.Reload(); RunTimers()
+        return frame.HourChart
+    end
+    local function scale(wanted)
+        local chosen
+        frame.ScaleDropdown.menu(frame.ScaleDropdown, { CreateRadio = function(_, _, isSelected, action, value)
+            if value == wanted then chosen = action end
+        end })
+        assert(chosen, 'the scale menu has no entry ' .. wanted); chosen(); RunTimers()
+    end
+    local function selectedScale()
+        local found
+        frame.ScaleDropdown.menu(frame.ScaleDropdown, { CreateRadio = function(_, _, isSelected, _, value)
+            if isSelected() then found = value end
+        end })
+        return found
+    end
+    assert(frame.ScaleDropdown.anchor == frame.MetricDropdown and frame.DetailBack.anchor == frame.ScaleDropdown,
+        'the scale switch is not beside the stage list')
+    assert(selectedScale() == 'fixed', 'the kept scale is not the default')
+
+    -- The quiet day first: nothing bigger is known yet.
+    local chart = show(quiet, quiet + 86399)
+    local alone = chart.maximum
+    assert(chart.kind == 'hours' and chart.dataMaximum == 2 and alone < 9, 'a quiet day alone is drawn too small: ' .. alone)
+    -- The busy day sets the scale...
+    chart = show(busy, busy + 86399)
+    local tall = chart.maximum
+    assert(chart.dataMaximum == 9 and tall >= 9)
+    -- ...and the quiet day is drawn to it now: its two orders are short bars.
+    chart = show(quiet, quiet + 86399)
+    assert(chart.maximum == tall and chart.dataMaximum == 2, 'a quiet day is still drawn to its own tallest bar')
+    local height = chart:GetHeight() - 40
+    assert(math.abs(chart.bars[12].fill.height - height * 2 / tall) < 0.001, 'the bars do not follow the kept scale')
+    assert(chart.grid[1].label.text == 0, 'the axis lost its zero')
+
+    -- Automatic: the old way, each view to its own values.
+    scale('auto')
+    assert(selectedScale() == 'auto' and frame.HourChart.maximum == alone, 'the automatic scale kept the remembered one')
+    scale('fixed')
+    assert(selectedScale() == 'fixed' and frame.HourChart.maximum == tall, 'the kept scale was lost by looking at the automatic one')
+    -- Reset forgets it; the choice stays "kept".
+    scale('reset')
+    assert(selectedScale() == 'fixed' and frame.HourChart.maximum == alone, 'reset did not forget the scale')
+    show(busy, busy + 86399)
+    assert(show(quiet, quiet + 86399).maximum == tall)
+
+    -- Another stage and another filter have scales of their own.
+    view.metric = 'requests'; W.Rebuild(); RunTimers()
+    assert(frame.HourChart.maximum < tall, 'the orders set the scale of the requests')
+    view.metric = 'orders'; view.ppID = 164; W.Rebuild(); RunTimers()
+    assert(frame.HourChart.maximum < tall, 'the scale of all professions is used for one of them')
+    view.ppID = nil; W.Rebuild(); RunTimers()
+    assert(frame.HourChart.maximum == tall)
+
+    -- Hours summed over several days are not a day: they follow their values,
+    -- and do not raise what a single day is drawn to.
+    chart = show(busy, quiet + 86399)
+    assert(chart.dataMaximum == 9 and chart.maximum == tall)
+    for n = 1, 30 do Log.Record({ k = 'd', st = 'f', o = 5200 + n, c = 'More' .. n, p = 197, f = 'H', t = quiet + 10 * 3600 + n }) end
+    chart = show(busy, quiet + 86399)
+    assert(chart.dataMaximum == 39 and chart.maximum >= 39, 'a sum over two days was cut to the scale of one')
+    local summed = chart.maximum
+    chart = show(busy, busy + 86399)
+    assert(chart.maximum == tall and chart.maximum < summed, 'a sum over several days raised the scale of a single day')
+
+    -- The days of the calendar below keep theirs too: a week with few orders
+    -- after a look at a busy one.
+    view.calendarMode = 'week'
+    W.SelectCalendarPeriod('week', quiet); RunTimers()
+    local busyWeek = frame.DayChart.maximum
+    assert(frame.DayChart.dataMaximum >= 32 and busyWeek >= 32)
+    W.SelectCalendarPeriod('week', At(2024, 3, 4)); RunTimers()
+    assert(frame.DayChart.dataMaximum == 0 and frame.DayChart.maximum == busyWeek, 'an empty week is drawn to a scale of its own')
+    scale('auto')
+    assert(frame.DayChart.maximum < busyWeek)
+    scale('fixed')
+    view.metric = 'overview'
+end
+print('Chart scale passed (kept from day to day, automatic, reset, per stage and filter, sums over days, calendar).')
+
 Scan.AnalyticsWindow.Toggle()
 assert(not Scan.AnalyticsWindow.IsShown() and #frame.Items.rows == 0, 'closing kept the data')
 print('Analytics window passed (open, tabs, filters, sorting, dates, CSV, close).')
