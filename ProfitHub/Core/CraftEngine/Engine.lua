@@ -699,16 +699,31 @@ function CE:SolveTierPerSlot(spellID, targetQ, orderID, getPrice, locked)
         return self:Evaluate(spellID, self:MakeReagents(basics, pick, locked), { orderID = orderID, useConcentration = useConc })
     end
 
+    local function reaches(norm)
+        return norm ~= nil and norm.quality ~= nil and norm.quality >= targetQ
+    end
+    local function lowest() setAll(function() return 1 end) end
+    local function highest() setAll(function(s) return s.qualityCount end) end
+
+    -- Returns the evaluation the grades were settled on and whether the
+    -- requested quality is reached. nil when the client gives no answer for
+    -- this recipe: that is not "out of reach", and nothing may be concluded
+    -- from it. Whenever the quality is not reached the grades are left at the
+    -- lowest: paying for the best ones buys nothing then.
     local function greedy(useConc)
-        setAll(function() return 1 end)
+        lowest()
         local cur = evalConc(useConc)
-        if cur and cur.quality and cur.quality >= targetQ then return cur, true end
+        if not (cur and cur.quality) then return nil end
+        if reaches(cur) then return cur, true end
 
-        setAll(function(s) return s.qualityCount end)
+        highest()
         local mx = evalConc(useConc)
-        if not (mx and mx.quality and mx.quality >= targetQ) then return mx, false end
+        if not reaches(mx) then
+            lowest()
+            return cur, false
+        end
 
-        setAll(function() return 1 end)
+        lowest()
         local guard = 0
         while guard < 200 do
             guard = guard + 1
@@ -735,20 +750,27 @@ function CE:SolveTierPerSlot(spellID, targetQ, orderID, getPrice, locked)
             local s = basics.basicSlots[bestI]
             tierByDS[s.dataSlotIndex] = tierByDS[s.dataSlotIndex] + 1
         end
-        return evalConc(useConc), true
+        -- No single step helps any more, or the steps ran out. The best
+        -- grades are known to reach the quality; anything less is not.
+        cur = evalConc(useConc)
+        if reaches(cur) then return cur, true end
+        highest()
+        return mx, true
     end
 
     local cur, ok = greedy(false)
+    if not cur then return nil end
     local needsConc, concCost, reachable = false, 0, ok
     if not ok then
-        cur, ok = greedy(true)
-        needsConc, reachable = true, ok
-        concCost = cur and cur.concentrationCost or 0
+        local withConc, okConc = greedy(true)
+        needsConc, reachable = true, okConc == true
+        concCost = withConc and withConc.concentrationCost or 0
         if concCost <= 0 then
             local withoutAppliedConcentration = evalConc(false)
             concCost = withoutAppliedConcentration
                 and withoutAppliedConcentration.concentrationCost or 0
         end
+        cur = withConc or cur
     end
 
     local tierMap = {}
@@ -762,13 +784,15 @@ function CE:SolveTierPerSlot(spellID, targetQ, orderID, getPrice, locked)
     }
 end
 
+local CONC_MISS_TTL = 1
+
 function CE:NeedsConcentrationCached(spellID, targetQ, orderID, mode, locked, ttl)
     ttl = ttl or 30
     self._concCache = self._concCache or {}
     local key = tostring(spellID) .. ":" .. tostring(targetQ) .. ":" .. tostring(orderID) .. ":" .. tostring(mode or "max")
     local now = GetTime()
     local hit = self._concCache[key]
-    if hit and hit.expires > now then return hit.value end
+    if hit and hit.expires > now then return hit.value or nil end
 
     local value
     if mode == "profit" then
@@ -776,9 +800,10 @@ function CE:NeedsConcentrationCached(spellID, targetQ, orderID, mode, locked, tt
     else
         value = self:NeedsConcentration(spellID, targetQ, orderID, self:TierPickerForMode(mode), locked)
     end
-    if value then
-        self._concCache[key] = { value = value, expires = now + ttl }
-    end
+    -- "No answer" is remembered too, for a moment: a row asks once per slot
+    -- every time it is drawn, and a recipe the client does not price would be
+    -- asked about on every one of them.
+    self._concCache[key] = { value = value or false, expires = now + (value and ttl or CONC_MISS_TTL) }
     return value
 end
 

@@ -25,6 +25,32 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Profit mode no longer buys the best grades for nothing (0.4.136)
+
+With `Profit` two patron orders showed a far worse profit than with `T1`
+(-721g against -281g, -3222g against -1272g) and asked for concentration
+that `T1` did not.
+
+`Profit` asks the craft engine for the cheapest grades that reach the
+requested quality. The engine tries the lowest grades, then the best ones,
+then works its way up. For some recipes the client gives no answer about
+quality at all while reagents are attached. The engine read that silence as
+"not reached", found the best grades "not reaching" either, and returned
+them - the most expensive set there is - together with "concentration
+needed, quality out of reach". The same came out for an order whose quality
+really is out of reach.
+
+- No answer from the client is no plan: `Profit` then takes the cheapest
+  grade by price, and the concentration cell is filled the way it is in the
+  other modes.
+- A quality that is out of reach whatever is used leaves the lowest grades,
+  not the best: paying for the best buys nothing there.
+- When stepping up one grade at a time shows no gain but the best grades do
+  reach the quality, the best grades are returned. The plan used to stop on
+  the way and be called enough.
+- "No answer" is remembered for a second, so a recipe the client does not
+  price is not asked about again for every slot of every row drawn.
+
 ## Reagent modes: what each button does, and six places where it did not (0.4.135)
 
 The five buttons under `Reagents` on the order queue panel:
