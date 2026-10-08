@@ -36,8 +36,10 @@ function Scan.BuildOrderDestinationMessage(response, subjects)
     local subject = subjects and JoinSubjects(subjects) or Subject(response)
     local crafter = Scan.NameAndRealmToName(response.crafterFullName)
     if not subject or not crafter then return nil end
-    -- No full stop after the name: customers took it for a part of it.
-    return subject .. ' Send to ' .. crafter
+    -- With the setting, no full stop after the name: customers took it for
+    -- a part of it.
+    local stop = Scan.Utils.WantsNameWithoutDot and Scan.Utils.WantsNameWithoutDot() and '' or '.'
+    return subject .. ' Send to ' .. crafter .. stop
 end
 
 local function SameCrafter(lhs, rhs)

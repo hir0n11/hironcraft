@@ -1,6 +1,8 @@
 local HironCraftScan = select(2, ...)
 
--- A crafter's name must not touch a full stop. "Send to Favu. You choose the
+-- Optional (the setting name_without_dot, off unless switched on: a text is
+-- sent as its author wrote it). With it, a crafter's name does not touch a
+-- full stop: "Send to Favu. You choose the
 -- price" had customers asking whether the order goes to "Favu." with the dot
 -- or without. Where the name ends the message the dot is dropped; before
 -- more words (also on the next line: lines may go out as one whisper) it
@@ -16,11 +18,18 @@ local function NameWithoutDot(text, name)
 end
 HironCraftScan.Utils.NameWithoutDot = NameWithoutDot
 
+local function WantsNameWithoutDot()
+    local settings = HironCraftScan.DB and HironCraftScan.DB.settings
+    return type(settings) == 'table' and settings.name_without_dot == true
+end
+HironCraftScan.Utils.WantsNameWithoutDot = WantsNameWithoutDot
+
 local function f(s, dict)
     local text = s:gsub("{(.-)}", function(key)
         return dict[key] or "{"..key.."}"
     end)
-    return NameWithoutDot(text, dict.crafter)
+    if WantsNameWithoutDot() then text = NameWithoutDot(text, dict.crafter) end
+    return text
 end
 
 HironCraftScan.Utils.FString = f;

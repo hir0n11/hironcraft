@@ -1,8 +1,20 @@
 -- A crafter's name never touches a full stop in a message filled from a
 -- template: customers asked whether an order goes to "Favu." with the dot.
-local Scan = { Utils = {} }
+local Scan = { Utils = {}, DB = { settings = {} } }
 assert(loadfile('Utils/FStrings.lua'))('HironCraft', Scan)
 local F, Undot = Scan.Utils.FString, Scan.Utils.NameWithoutDot
+
+-- Off unless switched on: a text goes out as its author wrote it.
+assert(F('Send to {crafter}. You choose the price.', { crafter = 'Favu' }) == 'Send to Favu. You choose the price.',
+    'the dot was taken out although nobody asked for it')
+assert(F('Send to {crafter}.', { crafter = 'Favu' }) == 'Send to Favu.' and not Scan.Utils.WantsNameWithoutDot())
+Scan.DB.settings.name_without_dot = false
+assert(F('Send to {crafter}.', { crafter = 'Favu' }) == 'Send to Favu.')
+Scan.DB = nil
+assert(F('Send to {crafter}.', { crafter = 'Favu' }) == 'Send to Favu.', 'without settings the dot was taken out')
+-- Switched on, from here.
+Scan.DB = { settings = { name_without_dot = true } }
+assert(Scan.Utils.WantsNameWithoutDot())
 
 local function check(template, values, expected, what)
     local got = F(template, values)
@@ -39,4 +51,4 @@ check('I have {profession}. Ok', { profession = 'Tailoring' }, 'I have Tailoring
 assert(Undot('Send to Favu.', nil) == 'Send to Favu.' and Undot('Send to Favu.', '') == 'Send to Favu.')
 assert(Undot('nothing here.', 'Favu') == 'nothing here.')
 
-print('Name without a dot passed (before words, at the end, across lines, with realm, by hand, other letters; untouched cases).')
+print('Name without a dot passed (off by default; before words, at the end, across lines, with realm, by hand, other letters; untouched cases).')

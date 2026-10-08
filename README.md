@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## The dot after a crafter's name stays unless you ask (0.4.132)
+
+Since 0.4.129 the dot right after a crafter's name was taken out of every
+message, for everyone who uses the addon: `Send to {crafter}. You choose the
+price` went out as `Send to Inscri - You choose the price`, whether its
+author wanted that or not. A text goes out as it is written again.
+
+The rule is a setting now, **off by default**: `No dot after a crafter's
+name` in the addon's settings. Switched on, it works as described for
+0.4.129 below; switched off, nothing is changed in a text, and the short
+line `[Ring] Send to Favu.` ends with its dot as before.
+
 ## A customer who comes back with a question (0.4.131)
 
 `what about mail feet ?` from a customer whose ring had just been delivered
@@ -75,7 +87,8 @@ Choosing another tab at the table, or a fight, leaves it alone.
 price.` had customers asking whether the order goes to `Favu.` with the dot
 or without. Wherever a message is filled from a template (greetings, quick
 replies, the phrases of the "Custom Explanations" button), the dot right
-after the crafter's name is taken away:
+after the crafter's name is taken away (since 0.4.132 only with the setting
+`No dot after a crafter's name` switched on):
 
 - before more words it becomes a dash that stands apart from the name:
   `Send to Favu - You choose the price.`;
