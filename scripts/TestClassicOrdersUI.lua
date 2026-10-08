@@ -652,6 +652,50 @@ for _,itemRow in ipairs(PT.Dropdown.frame.items) do
 end
 PT.Dropdown:Hide()
 CO.GetAutoFinishingLabel=originalLabel
+-- Reagent mode buttons. Off the Patron tab "Auto" and "Profit" do not exist:
+-- they are drawn dimmed and a click changes nothing (it used to set T1
+-- without a word). The tooltip says why.
+do
+    local function segment(value)
+        for _,button in ipairs(panel.reagentSeg.buttons) do
+            if button.segValue==value then return button end
+        end
+        error('no reagent mode button '..value)
+    end
+    local savedType,savedSet,savedTooltip=page.orderType,CO.SetQueueReagentMode,Tooltip
+    local set,lines={},{}
+    CO.SetQueueReagentMode=function(_,mode) set[#set+1]=mode end
+    Tooltip={Clear=function() lines={} end,AddLine=function(_,text) lines[#lines+1]=text end}
+    local savedShow=ShowStyledTooltip
+    ShowStyledTooltip=noop
+    page.orderType=Enum.CraftingOrderType.Personal
+    CO:UpdateSegmentedControl(panel.reagentSeg)
+    for _,value in ipairs({'auto','profit'}) do
+        assert(segment(value).text.color[1]==0.55,value..' is not dimmed off the Patron tab')
+        segment(value):Click()
+        segment(value).scripts.OnEnter(segment(value))
+        assert(lines[#lines]==PT.L['COA_REAGENT_TIP_PATRON_ONLY'],value..' does not say where it works')
+    end
+    assert(#set==0,'a mode that does not exist on this tab was set: '..tostring(set[1]))
+    for _,value in ipairs({'t1','t2','manual'}) do
+        assert(segment(value).text.color[1]==1,value..' is dimmed on a tab that has it')
+        segment(value):Click()
+        segment(value).scripts.OnEnter(segment(value))
+        assert(lines[#lines]==PT.L['COA_REAGENT_TIP_DESC'])
+    end
+    assert(table.concat(set,',')=='t1,t2,manual')
+    page.orderType=Enum.CraftingOrderType.Npc
+    CO:UpdateSegmentedControl(panel.reagentSeg)
+    set={}
+    for _,value in ipairs({'auto','t1','t2','profit','manual'}) do
+        assert(segment(value).text.color[1]==1,value..' is dimmed on the Patron tab')
+        segment(value):Click()
+    end
+    assert(table.concat(set,',')=='auto,t1,t2,profit,manual')
+    CO.SetQueueReagentMode,Tooltip,ShowStyledTooltip=savedSet,savedTooltip,savedShow
+    page.orderType=savedType
+    CO:UpdateSegmentedControl(panel.reagentSeg)
+end
 -- Restore the lightweight row-fixture boundaries after testing real settings.
 CO.GetOrderProblemReason=nil
 CO.IsOrderCraftableForActionSort=nil
@@ -930,6 +974,30 @@ assert(row.concBtn.text.text=='?','unloaded data lost its own marker')
 engineAnswer={needs=false,reachable=true,concentrationCost=0}
 CL:PopulateRow(row,{orderID=54,spellID=1234,minQuality=5})
 assert(not row.concBtn:IsShown(),'an order without concentration kept the cell')
+-- Manual mode: the engine is asked about the reagents picked by hand, under a
+-- name of their own, and not at all when a slot holds a mix.
+do
+    local asked
+    _G.HironCraft.CraftEngine.NeedsConcentrationCached=function(_,_,_,_,mode,locked)
+        asked={mode=mode,locked=locked};return engineAnswer
+    end
+    local savedMode,savedManual=CO.GetQueueReagentMode,CO.BuildManualReagentsForEngine
+    CO.GetQueueReagentMode=function() return 'manual' end
+    CO.BuildManualReagentsForEngine=function() return {[1]={itemID=102,quantity=5}},'manual:1=102' end
+    engineAnswer={needs=true,reachable=true,concentrationCost=77}
+    CL:PopulateRow(row,{orderID=55,spellID=1234,minQuality=5})
+    assert(asked and asked.mode=='manual:1=102' and asked.locked[1].itemID==102,
+        'manual mode asked the engine about a grade rule: '..tostring(asked and asked.mode))
+    assert(row.concBtn.text.text=='77')
+    CO.BuildManualReagentsForEngine=function() return nil end
+    asked=nil
+    CL:PopulateRow(row,{orderID=56,spellID=1234,minQuality=5})
+    assert(asked==nil,'the engine was asked to price a mix')
+    CO.GetQueueReagentMode=function() return 't2' end
+    CL:PopulateRow(row,{orderID=57,spellID=1234,minQuality=5})
+    assert(asked and asked.mode=='t2','a fixed grade is not passed to the engine as it is')
+    CO.GetQueueReagentMode,CO.BuildManualReagentsForEngine=savedMode,savedManual
+end
 _G.HironCraft=previousEngine
 CO.GetOrderRequestedQuality=previousQuality
 

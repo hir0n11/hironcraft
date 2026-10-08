@@ -925,6 +925,10 @@ function CO:CreateSegmentedControl(parent, segments, totalWidth, getValue, setVa
     holder.buttons = {}
     holder.getValue = getValue
     holder.setValue = setValue
+    -- opts.isAvailable(value): a segment that does not exist where the
+    -- control is shown now is drawn dimmed and does nothing, instead of
+    -- quietly setting another value.
+    holder.isAvailable = opts.isAvailable
     holder:SetSize(totalWidth, #rowCounts * rowH + (#rowCounts - 1) * gap)
 
     local function AttachTip(b)
@@ -934,6 +938,9 @@ function CO:CreateSegmentedControl(parent, segments, totalWidth, getValue, setVa
             Tooltip:Clear()
             Tooltip:AddLine(opts.tipTitle, 13, 1, 0.82, 0.35)
             if opts.tipDesc then Tooltip:AddLine(opts.tipDesc, 11, 0.85, 0.85, 0.85) end
+            if opts.unavailableTip and holder.isAvailable and not holder.isAvailable(self2.segValue) then
+                Tooltip:AddLine(opts.unavailableTip, 11, 1, 0.65, 0.25)
+            end
             ShowStyledTooltip(self2)
         end)
         b:SetScript("OnLeave", HideStyledTooltip)
@@ -959,6 +966,7 @@ function CO:CreateSegmentedControl(parent, segments, totalWidth, getValue, setVa
                 b:SetPoint("TOPLEFT", x, -(rowIndex - 1) * (rowH + gap))
                 b.segValue = seg.value
                 b:SetScript("OnClick", function(self2)
+                    if holder.isAvailable and not holder.isAvailable(self2.segValue) then return end
                     if holder.setValue then holder.setValue(self2.segValue) end
                     CO:UpdateQueueSettingWidgets()
                     CO:RefreshVisibleRowsSafe()
@@ -1055,7 +1063,11 @@ function CO:UpdateSegmentedControl(holder)
     if not holder or not holder.buttons then return end
     local cur = holder.getValue and holder.getValue()
     for _, b in ipairs(holder.buttons) do
-        CO:StyleWidget(b, b.segValue == cur)
+        if holder.isAvailable and not holder.isAvailable(b.segValue) and CO.StyleClassicButton then
+            CO:StyleClassicButton(b, false, true)
+        else
+            CO:StyleWidget(b, b.segValue == cur)
+        end
     end
 end
 
@@ -1353,8 +1365,12 @@ function CO:EnsureControlPanel(pageFrame)
         { value = "manual", label = T("COA_QUEUE_REAGENT_MODE_MANUAL", "Ручной") },
     }, INNER, function() return CO:GetQueueReagentMode() end, function(v) CO:SetQueueReagentMode(v) end,
     { rows = { 3, 2 },
+      isAvailable = function(value)
+          return not CO.IsQueueReagentModeAvailable or CO:IsQueueReagentModeAvailable(value)
+      end,
+      unavailableTip = T("COA_REAGENT_TIP_PATRON_ONLY", "«Авто» и «Профит» работают только на вкладке заказов покровителей. У остальных вкладок своя настройка: T1, T2 или «Ручной»."),
       tipTitle = T("COA_REAGENT_TIP_TITLE", "Режим реагентов"),
-      tipDesc = T("COA_REAGENT_TIP_DESC", "Авто (эконом) — автоподбор самых дешёвых реагентов под нужное качество. T1 / T2 — принудительно этот грейд для всех слотов. Проф — грейды под максимальную выгоду. Руч — не трогать выбранные вручную реагенты.") })
+      tipDesc = T("COA_REAGENT_TIP_DESC", "Авто (эконом) — в каждом слоте самый дешёвый по цене грейд; из сумок берётся то, что есть, грейды можно смешивать. Качество не подбирается: если его не хватает, нужна концентрация. T1 / T2 — этот грейд во всех слотах. Профит — самые дешёвые грейды, с которыми нужное качество выходит без концентрации. Ручной — грейды выбираются кликом по реагенту в строке заказа и сами не меняются.") })
     panel.reagentSeg:SetPoint("TOPLEFT", PADX, y)
     y = y - 50
 

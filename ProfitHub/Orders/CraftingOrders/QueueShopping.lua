@@ -438,6 +438,28 @@ function CO:GetQueueReagentModeLabel(mode)
     return T("COA_QUEUE_REAGENT_MODE_AUTO", "Эконом")
 end
 
+-- The Patron tab has all five modes. The other tabs keep a setting of their
+-- own with three: a fixed grade or the choice by hand.
+function CO:IsQueueReagentModeAvailable(mode)
+    if self:IsNpcTab() then return true end
+    return mode == "t1" or mode == "t2" or mode == "manual"
+end
+
+-- Row drawing applies the mode order by order as rows appear. The checks and
+-- the shopping list are about all the checked orders at once, so after a
+-- switch those are brought to the new mode in one go. The other orders wait
+-- for their rows: a long list is not worth pricing on a click.
+function CO:ApplyQueueReagentModeToCheckedOrders()
+    if not (C_CraftingOrders and C_CraftingOrders.GetCrafterOrders) then return end
+    local ok, orders = pcall(C_CraftingOrders.GetCrafterOrders)
+    if not ok or type(orders) ~= "table" then return end
+    for _, order in ipairs(orders) do
+        if type(order) == "table" and order.orderID and order.spellID and self:IsOrderSelected(order.orderID) then
+            self:ApplyQueueReagentModeToOrder(order)
+        end
+    end
+end
+
 function CO:SetQueueReagentMode(mode)
     local opts = self:GetQueueOptions()
     if self:IsNpcTab() then
@@ -449,9 +471,15 @@ function CO:SetQueueReagentMode(mode)
     end
     self.queueReagentPriceCache = {}
     self:SetStatus(string.format(T("COA_STATUS_QUEUE_REAGENT_MODE", "Queue reagent mode: %s."), self:GetQueueReagentModeLabel(mode)))
+    -- The orders were priced, checked and put on the shopping list with the
+    -- grades of the mode before: other grades mean other profits and other
+    -- things to buy.
+    self:ApplyQueueReagentModeToCheckedOrders()
     if self.CustomList and self.CustomList.Refresh and self.activePageFrame then
         self.CustomList:Refresh(self.activePageFrame)
     end
+    self:RecheckQueuedSelections(nil, true)
+    self:RebuildShoppingListSoon()
 end
 
 function CO:GetQueueConcMode()
@@ -839,7 +867,22 @@ function CO:FindAvailableCrafterReagent(order, reagentEntry)
         return selected
     end
 
-    if reagentEntry.itemID and self:GetItemCountForShopping(reagentEntry.itemID) >= quantity then
+    -- The chosen grade is not in the bags. A better one may stand in for it:
+    -- the quality the order was judged at is still reached. A worse one may
+    -- not - the craft would come out below what was counted on - so the
+    -- order then simply lacks reagents until the chosen grade is bought.
+    local wanted = selected and selected.itemID
+        and (NormalizeQualityTier(selected.qualityTier) or ReadProfessionQualityFromItem(selected.itemID))
+        or nil
+    local function goodEnough(tier)
+        if not wanted then return true end
+        tier = NormalizeQualityTier(tier)
+        return tier ~= nil and tier >= wanted
+    end
+
+    if reagentEntry.itemID and self:GetItemCountForShopping(reagentEntry.itemID) >= quantity
+        and goodEnough(reagentEntry.qualityTier or ReadProfessionQualityFromItem(reagentEntry.itemID))
+    then
         return {
             itemID = reagentEntry.itemID,
             qualityTier = reagentEntry.qualityTier,
@@ -853,7 +896,9 @@ function CO:FindAvailableCrafterReagent(order, reagentEntry)
 
     local best
     for _, candidate in ipairs(self:GetReagentCandidates(order, reagentEntry)) do
-        if candidate and candidate.itemID and self:GetItemCountForShopping(candidate.itemID) >= quantity then
+        if candidate and candidate.itemID and self:GetItemCountForShopping(candidate.itemID) >= quantity
+            and goodEnough(self:GetQueueReagentCandidateTier(candidate))
+        then
             if not best then
                 best = candidate
             else
@@ -927,6 +972,32 @@ function CO:BuildLockedReagentsForEngine(order)
         end
     end
     return locked
+end
+
+-- The manual mode for the engine. The engine knows grades by rule (first,
+-- second, cheapest, cheapest that reaches the quality), not the ones picked
+-- by hand, and would answer for the cheapest. So every crafter slot is locked
+-- to what the craft will really use: the grade picked, or the slot's first
+-- one where nothing was picked. Returns the locked table and a name for the
+-- engine's cache that changes with the picks; nil when a slot is filled with
+-- several grades, which the engine cannot price.
+function CO:BuildManualReagentsForEngine(order)
+    local locked = self:BuildLockedReagentsForEngine(order)
+    local picks = {}
+    for _, reagentEntry in ipairs(self:BuildDisplayReagents(order)) do
+        if IsCrafterProvidedReagent(reagentEntry) and not IsCustomerProvidedReagent(reagentEntry) then
+            local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
+            if selected and type(selected.mix) == "table" and #selected.mix > 1 then return nil end
+            local dataSlotIndex = reagentEntry.dataSlotIndex or reagentEntry.slotIndex
+            local itemID = selected and selected.itemID or reagentEntry.itemID
+            if dataSlotIndex and itemID then
+                locked[dataSlotIndex] = { itemID = itemID, quantity = tonumber(reagentEntry.quantity) or 0 }
+                picks[#picks + 1] = tostring(dataSlotIndex) .. "=" .. tostring(itemID)
+            end
+        end
+    end
+    table.sort(picks)
+    return locked, "manual:" .. table.concat(picks, ",")
 end
 
 function CO:ChooseQueueReagentCandidate(order, reagentEntry, mode)
@@ -1013,7 +1084,11 @@ function CO:ApplyQueueReagentModeToOrder(order)
                     local slotIndex = reagentEntry.slotIndex or candidate.slotIndex or dataSlotIndex
                     local qualityTier = self:GetQueueReagentCandidateTier(candidate)
                     local current = self.selectedReagents[selectionKey]
+                    -- A mode names one grade for a slot. A mix left from a craft
+                    -- attempt in the automatic mode, or picked by hand, is not it
+                    -- even when its first part is.
                     if not current
+                       or current.mix ~= nil
                        or current.itemID ~= candidate.itemID
                        or current.quantity ~= quantity
                        or current.slotIndex ~= slotIndex
@@ -1087,10 +1162,11 @@ function CO:OrderPassesQueueProfitRule(order, knowledge, opts)
     return ignore ~= false or self:OrderPassesQueueProfitFilter(order)
 end
 
--- The shopping list was made for the orders that were checked. When one of
--- them loses its check its reagents must leave the list before they are
--- bought. Only a list of ours that is still open is rebuilt, and only while
--- the rows are there to build it from.
+-- The shopping list was made for the orders that were checked, with the
+-- grades of the reagent mode of that moment. When an order loses its check,
+-- or the mode is switched, the list has to follow before anything is bought.
+-- Only a list of ours that is still open is rebuilt, and only while the rows
+-- are there to build it from.
 function CO:RebuildShoppingListAfterDrop()
     local shopping = PT and PT.ShoppingList
     local session = shopping and shopping.session
@@ -1111,6 +1187,17 @@ function CO:RebuildShoppingListAfterDrop()
     return true
 end
 
+-- A moment later, once: the rows have to be redrawn first, and several
+-- reasons to rebuild usually come together.
+function CO:RebuildShoppingListSoon()
+    if not (C_Timer and C_Timer.After) then return end
+    self._shoppingRebuildSerial = (self._shoppingRebuildSerial or 0) + 1
+    local serial = self._shoppingRebuildSerial
+    C_Timer.After(0.1, function()
+        if self._shoppingRebuildSerial == serial then self:RebuildShoppingListAfterDrop() end
+    end)
+end
+
 -- Drops the queue's checks that no longer pass (the rule itself is in
 -- SelectionMemory.lua), says so and brings the shopping list in line. strict
 -- is for a threshold the crafter has just changed.
@@ -1119,13 +1206,7 @@ function CO:RecheckQueuedSelections(orders, strict)
     if dropped == 0 then return 0 end
     self:SetStatus(string.format(
         T("COA_STATUS_CHECKS_DROPPED", "Unchecked orders: %d - profit is below the minimum at current prices."), dropped))
-    if C_Timer and C_Timer.After then
-        self._shoppingRebuildSerial = (self._shoppingRebuildSerial or 0) + 1
-        local serial = self._shoppingRebuildSerial
-        C_Timer.After(0.1, function()
-            if self._shoppingRebuildSerial == serial then self:RebuildShoppingListAfterDrop() end
-        end)
-    end
+    self:RebuildShoppingListSoon()
     if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
     if self.UpdateControlPanel then self:UpdateControlPanel() end
     return dropped
@@ -1249,9 +1330,24 @@ function CO:CanSupplyCrafterReagentsForQueue(order, saveSelections)
                 end
 
                 if saveSelections then
+                    -- What was found in the bags is what the craft is made of:
+                    -- the chosen grade, or a better one standing in for it. Left
+                    -- on a grade that is not owned, the craft would be sent
+                    -- with a reagent the bags do not hold.
                     local slotIndex = reagentEntry.slotIndex or reagentEntry.dataSlotIndex
-                    if slotIndex and available.itemID and available.itemID ~= reagentEntry.itemID then
-                        self:SetSelectedReagentForEntry(order.orderID, reagentEntry, available)
+                    local current = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
+                    local currentID = current and current.itemID or reagentEntry.itemID
+                    if slotIndex and available.itemID ~= currentID then
+                        self:SetSelectedReagentForEntry(order.orderID, reagentEntry, {
+                            itemID = available.itemID,
+                            quantity = tonumber(reagentEntry.quantity) or tonumber(available.quantity) or 0,
+                            slotIndex = slotIndex,
+                            dataSlotIndex = reagentEntry.dataSlotIndex or available.dataSlotIndex,
+                            qualityTier = available.qualityTier,
+                            maxQualityTier = available.maxQualityTier,
+                            expansionID = available.expansionID,
+                            qualityKind = available.qualityKind,
+                        })
                     end
                 end
             end

@@ -25,6 +25,52 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Reagent modes: what each button does, and six places where it did not (0.4.135)
+
+The five buttons under `Reagents` on the order queue panel:
+
+- **Auto** - in every slot the grade that is cheapest by price; at the craft
+  whatever is in the bags is used, grades mixed if need be. Quality is not
+  aimed at: when it falls short, concentration is needed.
+- **T1 / T2** - that grade in every slot.
+- **Profit** - the cheapest grades that reach the requested quality without
+  concentration.
+- **Manual** - grades are picked by clicking a reagent in the order's row
+  and are never changed for you.
+
+The Patron tab has all five. The other tabs keep a setting of their own with
+three of them (T1, T2, Manual).
+
+What was wrong:
+
+- **Auto and Profit off the Patron tab** looked like any other button and
+  quietly set T1. They are dimmed there now, do nothing, and the tooltip
+  says where they work.
+- **A worse grade stood in for the chosen one.** With T2 (or a grade Profit
+  or the crafter had chosen) not in the bags, any owned grade made the order
+  "ready", and the craft either used it - coming out below the quality the
+  order was judged at - or, when the owned grade was the slot's first one,
+  was sent with the chosen grade nobody owned. Now only a better grade may
+  stand in (the judged quality is still reached); otherwise the order lacks
+  reagents until the chosen grade is bought, which is what the row and the
+  shopping list already said.
+- **Manual mode and concentration.** The concentration cell of a row was
+  computed for the cheapest grades instead of the ones picked by hand. It is
+  computed for the picks now.
+- **A slot filled with several grades** was priced as its first grade times
+  the whole quantity. Each grade costs its own price now.
+- **A mix survived a switch to a fixed grade** when it happened to start
+  with that grade. A mode names one grade for a slot again.
+- **Switching the mode** changed the rows as they were redrawn, but the
+  checked orders kept their checks and the shopping list kept the grades of
+  the mode before. The checked orders are brought to the new mode at once,
+  the queue's checks are asked their threshold again, and the shopping list
+  made for them is rebuilt.
+
+The tooltip of the buttons described Auto as the mode that picks grades for
+the requested quality. It never did; that is Profit. The tooltip says what
+the modes do.
+
 ## A check the queue made follows the prices (0.4.134)
 
 An order at -1419g stayed checked with `Knowledge: min. profit` at -1000g.

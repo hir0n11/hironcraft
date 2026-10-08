@@ -4494,13 +4494,20 @@ function CO:GetOrderProfitInfo(order)
             if not seenSlots[slotKey] then
                 seenSlots[slotKey] = true
                 local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
-                local itemID = selected and selected.itemID or reagentEntry.itemID
-                local quantity = tonumber(reagentEntry.quantity) or 0
-                local price = GetAuctionatorItemPrice(itemID, nil)
-                if price then
-                    reagentCost = reagentCost + (price * quantity)
+                local function addCost(itemID, quantity)
+                    local price = GetAuctionatorItemPrice(itemID, nil)
+                    if price then
+                        reagentCost = reagentCost + (price * (tonumber(quantity) or 0))
+                    else
+                        missingPrices = true
+                    end
+                end
+                if selected and type(selected.mix) == "table" and #selected.mix > 0 then
+                    -- A slot filled with several grades costs what each of them
+                    -- costs, not its first grade times the whole quantity.
+                    for _, part in ipairs(selected.mix) do addCost(part.itemID, part.quantity) end
                 else
-                    missingPrices = true
+                    addCost(selected and selected.itemID or reagentEntry.itemID, reagentEntry.quantity)
                 end
             end
         end

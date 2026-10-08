@@ -1432,8 +1432,17 @@ function CL:PopulateRow(row, order)
     local concInfo
     if CE and order.spellID and target > 0 then
         local mode = CO.GetQueueReagentMode and CO:GetQueueReagentMode() or "auto"
-        local locked = CO.BuildLockedReagentsForEngine and CO:BuildLockedReagentsForEngine(order) or nil
-        concInfo = CE:NeedsConcentrationCached(order.spellID, target, order.orderID, mode, locked)
+        local locked
+        if mode == "manual" and CO.BuildManualReagentsForEngine then
+            -- Asked about the reagents picked by hand, not about a grade rule;
+            -- not asked at all when a slot is a mix (mode is nil then).
+            locked, mode = CO:BuildManualReagentsForEngine(order)
+        else
+            locked = CO.BuildLockedReagentsForEngine and CO:BuildLockedReagentsForEngine(order) or nil
+        end
+        if mode then
+            concInfo = CE:NeedsConcentrationCached(order.spellID, target, order.orderID, mode, locked)
+        end
     end
 
     local needsConc, engineCost
