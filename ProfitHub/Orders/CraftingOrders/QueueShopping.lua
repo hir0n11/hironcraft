@@ -188,6 +188,7 @@ end
 
 function CO:SetKnowledgeProfitIgnored(value)
     self:GetQueueOptions().knowledgeIgnoreProfit = value == true
+    self:RecheckQueuedSelections(nil, true)
 end
 
 function CO:SetAutoShoppingOnOpen(value)
@@ -227,6 +228,7 @@ function CO:SetKnowledgeMinProfitCopper(value)
     else
         self:SetStatus(T("COA_STATUS_KNOWLEDGE_PROFIT_FILTER_OFF", "Knowledge profit filter disabled."))
     end
+    self:RecheckQueuedSelections(nil, true)
     if self.UpdateControlPanel then self:UpdateControlPanel() end
 end
 
@@ -262,6 +264,7 @@ function CO:SetQueueMinProfitCopper(value)
         opts.minProfitCopper = nil
         self:SetStatus(T("COA_STATUS_QUEUE_PROFIT_FILTER_OFF", "Queue profit filter disabled."))
     end
+    self:RecheckQueuedSelections(nil, true)
     if self.UpdateControlPanel then self:UpdateControlPanel() end
 end
 
@@ -1070,6 +1073,70 @@ function CO:OrderPassesQueueProfitFilter(order, minProfitOverride)
     return tonumber(info.profit) >= minProfit
 end
 
+-- The profit threshold an order has to pass to be checked by the queue: the
+-- ordinary minimum, or for a knowledge order its own (see
+-- GetKnowledgeMinProfitCopper). Asked when the check is made and again
+-- whenever prices or thresholds have moved (RecheckQueuedSelections).
+function CO:OrderPassesQueueProfitRule(order, knowledge, opts)
+    if not knowledge then return self:OrderPassesQueueProfitFilter(order) end
+    local knowledgeMinProfit = self:GetKnowledgeMinProfitCopper()
+    if knowledgeMinProfit then
+        return self:OrderPassesQueueProfitFilter(order, knowledgeMinProfit)
+    end
+    local ignore = (opts or self:GetQueueOptions()).knowledgeIgnoreProfit
+    return ignore ~= false or self:OrderPassesQueueProfitFilter(order)
+end
+
+-- The shopping list was made for the orders that were checked. When one of
+-- them loses its check its reagents must leave the list before they are
+-- bought. Only a list of ours that is still open is rebuilt, and only while
+-- the rows are there to build it from.
+function CO:RebuildShoppingListAfterDrop()
+    local shopping = PT and PT.ShoppingList
+    local session = shopping and shopping.session
+    if not (session and session.active and session.temporary and session.sourceKind == "crafting_orders") then
+        return false
+    end
+    local rowsShown = false
+    for btn in pairs(self.visibleRowButtons or {}) do
+        if btn and btn.orderID and btn:IsShown() then rowsShown = true break end
+    end
+    if not rowsShown then return false end
+    local materials = self:HasSelectedOrders() and self:BuildShoppingMaterialsForSelectedOrders()
+    if materials and #materials > 0 then
+        return self:CreateShoppingListForSelectedOrders()
+    end
+    if type(shopping.CreateTemporaryImportedList) ~= "function" then return false end
+    shopping:CreateTemporaryImportedList(T("COA_SHOPPING_LIST_NAME", "Crafting orders"), {}, "crafting_orders", true)
+    return true
+end
+
+-- Drops the queue's checks that no longer pass (the rule itself is in
+-- SelectionMemory.lua), says so and brings the shopping list in line. strict
+-- is for a threshold the crafter has just changed.
+function CO:RecheckQueuedSelections(orders, strict)
+    local dropped = self.DropQueuedSelectionsBelowProfit and self:DropQueuedSelectionsBelowProfit(orders, strict) or 0
+    if dropped == 0 then return 0 end
+    self:SetStatus(string.format(
+        T("COA_STATUS_CHECKS_DROPPED", "Unchecked orders: %d - profit is below the minimum at current prices."), dropped))
+    if C_Timer and C_Timer.After then
+        self._shoppingRebuildSerial = (self._shoppingRebuildSerial or 0) + 1
+        local serial = self._shoppingRebuildSerial
+        C_Timer.After(0.1, function()
+            if self._shoppingRebuildSerial == serial then self:RebuildShoppingListAfterDrop() end
+        end)
+    end
+    if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+    return dropped
+end
+
+if PT and PT.Prices and PT.Prices.OnPricesChanged then
+    local function PricesMoved() CO:RecheckQueuedSelections() end
+    PT.Prices:OnPricesChanged(PricesMoved)
+    if PT.Prices.OnScanDone then PT.Prices:OnScanDone(PricesMoved) end
+end
+
 function CO:OrderRequiresConcentrationForQueue(order, pageFrame)
     if not order or not order.orderID then return nil end
 
@@ -1296,7 +1363,9 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
 
     self.selectedOrders[key] = true
     self.useConcentration[key] = analysis and analysis.useConcentration == true or nil
-    if self.RememberOrderSelection then self:RememberOrderSelection(order.orderID, true, order) end
+    if self.RememberOrderSelection then
+        self:RememberOrderSelection(order.orderID, true, order, analysis and analysis.profitRule, analysis and analysis.profit)
+    end
     self.currentQueueOrderID = self.currentQueueOrderID or order.orderID
 
     return true
@@ -1316,17 +1385,7 @@ function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     -- deliberately concentration-free even when the normal queue allows it.
     if needsConcentration == nil then return false end
     if needsConcentration == true and not concentrationAllowed then return false end
-    if knowledgeOnly then
-        local knowledgeMinProfit = self:GetKnowledgeMinProfitCopper()
-        if knowledgeMinProfit then
-            if not self:OrderPassesQueueProfitFilter(order, knowledgeMinProfit) then return false end
-        elseif opts.knowledgeIgnoreProfit == false
-            and not self:OrderPassesQueueProfitFilter(order) then
-            return false
-        end
-    elseif not self:OrderPassesQueueProfitFilter(order) then
-        return false
-    end
+    if not self:OrderPassesQueueProfitRule(order, knowledgeOnly, opts) then return false end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
     return rank == 1 or rank == 2 or (rank == 3 and concentrationAllowed)
@@ -1346,12 +1405,15 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
     end
     if not self:ShouldQueueOrderByAvailabilityColor(order, opts) then return nil end
 
+    -- Which threshold the order has just passed: its check is held to it.
+    local profitRule = opts and opts.knowledgeOnly and 'knowledge' or 'profit'
     local analysis = self:AnalyzeOrderForQueue(order, orderType, opts, pageFrame)
     if analysis and analysis.queued then
         local profit = tonumber((self:GetOrderProfitInfo(order) or {}).profit)
         if profit then
             analysis.score = profit
         end
+        analysis.profitRule, analysis.profit = profitRule, profit
         return analysis
     end
 
@@ -1363,10 +1425,13 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
     if self:OrderRequiresConcentrationForQueue(order, pageFrame) ~= false then
         return nil
     end
+    local profit = tonumber((self:GetOrderProfitInfo(order) or {}).profit)
     return {
         queued = true,
         useConcentration = false,
-        score = tonumber((self:GetOrderProfitInfo(order) or {}).profit) or tonumber(order and order.tipAmount) or 0,
+        score = profit or tonumber(order and order.tipAmount) or 0,
+        profitRule = profitRule,
+        profit = profit,
     }
 end
 

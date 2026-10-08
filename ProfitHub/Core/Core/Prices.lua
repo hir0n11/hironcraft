@@ -138,6 +138,27 @@ function P:ListRealms()
     return out
 end
 
+-- Prices also change one at a time, outside any scan: the shopping list
+-- stores what it sees while it searches. Whoever keeps decisions made from
+-- prices (the order queue's checks) hears about it once the burst is over.
+P._changeListeners = P._changeListeners or {}
+function P:OnPricesChanged(fn)
+    if type(fn) == "function" then
+        table.insert(self._changeListeners, fn)
+    end
+end
+
+local PRICES_QUIET_SECONDS = 0.6
+local function PricesChangedSoon()
+    if #P._changeListeners == 0 or not (C_Timer and C_Timer.After) then return end
+    P._changeSerial = (P._changeSerial or 0) + 1
+    local serial = P._changeSerial
+    C_Timer.After(PRICES_QUIET_SECONDS, function()
+        if P._changeSerial ~= serial then return end
+        for _, fn in ipairs(P._changeListeners) do pcall(fn) end
+    end)
+end
+
 function P:UpdateItem(idOrKey, minPrice, marketPrice, qty)
     if not idOrKey then return false end
     minPrice = tonumber(minPrice)
@@ -157,6 +178,7 @@ function P:UpdateItem(idOrKey, minPrice, marketPrice, qty)
     rec.t = time()
     if qty ~= nil then rec.q = tonumber(qty) end
     db.lastPartial = time()
+    PricesChangedSoon()
     return true
 end
 

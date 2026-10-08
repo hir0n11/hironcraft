@@ -25,6 +25,34 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and ProfitHUB folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A check the queue made follows the prices (0.4.134)
+
+An order at -1419g stayed checked with `Knowledge: min. profit` at -1000g.
+The queue asks the profit threshold once, when it checks an order, at the
+prices saved at that moment. Then the shopping list searches the auction
+house and stores what it finds, the profit in the row follows the new price,
+and nothing asked the threshold again. Outside the current expansion this
+happens all the time: those reagents are not in the reagent price scan, the
+saved price is the cheapest lot of the day it was seen, and on a thin market
+that lot is gone by the next visit.
+
+A check the queue made is now held to the threshold it passed:
+
+- it is asked again when prices change (after the shopping scan or a price
+  scan), when the list is refreshed, and when a threshold is changed;
+- an order that no longer passes loses its check, the chat says how many
+  were unchecked, and the shopping list made for the checked orders is
+  rebuilt without its reagents (or emptied when nothing is left);
+- on a price change an order whose reagents are already in the bags keeps
+  its check: buying them is what takes the cheap lots away, and the purchase
+  is made. A changed threshold applies to it as to any other;
+- a check made by hand is never taken away, nor is an order already claimed;
+- an order dropped this way is not remembered as unchecked by hand, so the
+  next automatic pass takes it again once it passes.
+
+For every check the queue makes, the saved choice now also keeps the
+threshold it passed and the profit the order showed at that moment.
+
 ## Texts go out as written; only the addon's own line has no dot (0.4.133)
 
 0.4.129 took the dot after a crafter's name out of every message, and

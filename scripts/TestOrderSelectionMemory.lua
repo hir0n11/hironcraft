@@ -151,6 +151,108 @@ CO:SetKnowledgeProfitIgnored(true)
 auto();selected('1,2,6,7')
 assert(db.queue.knowledgeIgnoreProfit==true)
 
+-- A check the queue made is held to the threshold it passed. Prices move
+-- after the check is made (the shopping scan brings today's), and so do the
+-- thresholds: the order that no longer passes loses its check. A check made
+-- by hand is never taken away.
+do
+    local bucket=CO._orderSelectionBucket
+    E.FormatProfitCopper=function(copper) return tostring(copper) end
+    local function toBuy(flag,...) for _,id in ipairs({...}) do patronOrders[id].missingReagents=flag end end
+    assert(bucket.choices['1'].rule=='profit' and bucket.choices['1'].profit==500
+        and bucket.choices['2'].rule=='knowledge' and bucket.choices['2'].profit==-200,
+        'the queue did not record under which threshold it checked an order')
+    -- The threshold moves: -700 does not pass -500.
+    CO:SetKnowledgeMinProfitCopper(-500);selected('1,2,7')
+    assert(bucket.choices['6']==nil,'a dropped check was remembered as unchecked by hand')
+    assert(CO.status:find('1',1,true) and CO.status:find('below',1,true),'the dropped check was not reported: '..tostring(CO.status))
+    -- Prices move before the reagents are bought: +500 became -50 and the
+    -- knowledge order fell to -900.
+    toBuy(true,1,2,7)
+    CO:SetOrderSelected(3,true) -- by hand, at -400
+    assert(bucket.choices['3'].rule==nil)
+    patronOrders[1].profit,patronOrders[2].profit=-50,-900
+    assert(CO:RecheckQueuedSelections()==2);selected('3,7')
+    assert(CO:RecheckQueuedSelections()==0)
+    -- A list refresh does the same for checks remembered from before.
+    patronOrders[7].profit=-1
+    CO:RestoreOrderSelection(page,orders);selected('3')
+    -- Reagents already in the bags: buying them is what moved the price, and
+    -- the check stays...
+    toBuy(false,1,2,7)
+    patronOrders[1].profit,patronOrders[2].profit,patronOrders[7].profit=500,-200,200
+    CO:SetKnowledgeMinProfitCopper(nil)
+    CO:ResetQueueCheckboxes();wipe(bucket.choices)
+    auto();selected('1,2,6,7')
+    patronOrders[1].profit=-50
+    assert(CO:RecheckQueuedSelections()==0);selected('1,2,6,7')
+    CO:RestoreOrderSelection(page,orders);selected('1,2,6,7')
+    -- ...but a threshold the crafter changes applies to it as to any other,
+    -- and reaches only the queue's own checks.
+    CO:SetOrderSelected(3,true)
+    CO:SetQueueMinProfitCopper(300);selected('2,3,6')
+    CO:SetKnowledgeProfitIgnored(false);selected('3')
+    CO:SetQueueMinProfitCopper(100000);selected('3')
+    CO:SetKnowledgeProfitIgnored(true);CO:SetQueueMinProfitCopper(100)
+    CO:SetOrderSelected(3,false)
+    patronOrders[1].profit=500
+    -- An order already claimed is not let go, and nothing is while an action runs.
+    toBuy(true,1,7)
+    auto();selected('1,2,6,7')
+    patronOrders[1].profit,patronOrders[7].profit=-50,-50
+    CO.GetClaimedOrder=function() return patronOrders[1] end
+    CO.IsOrderActionInProgress=function() return true end
+    assert(CO:RecheckQueuedSelections()==0);selected('1,2,6,7')
+    CO.IsOrderActionInProgress=function() return false end
+    assert(CO:RecheckQueuedSelections()==1);selected('1,2,6')
+    CO.GetClaimedOrder=function() return nil end
+    -- Once it passes again, a later automatic pass takes the dropped order back.
+    patronOrders[1].profit,patronOrders[7].profit=500,200
+    auto();selected('1,2,6,7')
+    -- Other tabs have no profit threshold: nothing is dropped there.
+    page.orderType=3
+    patronOrders[7].profit=-50
+    assert(CO:RecheckQueuedSelections()==0);selected('1,2,6,7')
+    page.orderType=4
+
+    -- The shopping list made for the checked orders follows them.
+    local rebuilt,emptied,materials=0,0,{{itemID=1}}
+    local realBuild,realCreate=CO.BuildShoppingMaterialsForSelectedOrders,CO.CreateShoppingListForSelectedOrders
+    CO.BuildShoppingMaterialsForSelectedOrders=function() return materials,#materials end
+    CO.CreateShoppingListForSelectedOrders=function() rebuilt=rebuilt+1;return true end
+    E.PT.ShoppingList={session={active=true,temporary=true,sourceKind='crafting_orders'},
+        CreateTemporaryImportedList=function(_,_,list,kind,allowEmpty)
+            assert(#list==0 and kind=='crafting_orders' and allowEmpty==true);emptied=emptied+1;return true
+        end}
+    local rowShown=true
+    CO.visibleRowButtons={[{orderID=1,IsShown=function() return rowShown end}]=true}
+    timers={}
+    assert(CO:RecheckQueuedSelections()==1);selected('1,2,6')
+    assert(rebuilt==0,'the shopping list was rebuilt inside the list refresh');drain(.2)
+    assert(rebuilt==1 and emptied==0,'the shopping list kept the reagents of an order that lost its check')
+    -- Two drops in a row are one rebuild.
+    patronOrders[1].profit=-50;assert(CO:RecheckQueuedSelections()==1)
+    CO:SetKnowledgeMinProfitCopper(-100);selected('')
+    materials={};drain(.2)
+    assert(rebuilt==1 and emptied==1,'nothing is left to buy, but the list was not emptied')
+    -- Somebody else's list, or no rows to build from: left as it is.
+    CO:SetKnowledgeMinProfitCopper(nil)
+    patronOrders[1].profit,patronOrders[7].profit=500,200
+    auto();selected('1,2,6,7')
+    patronOrders[7].profit=-50;rowShown=false
+    assert(CO:RecheckQueuedSelections()==1);drain(.2)
+    rowShown=true;E.PT.ShoppingList.session.sourceKind='quest'
+    patronOrders[1].profit=-50
+    assert(CO:RecheckQueuedSelections()==1);drain(.2)
+    assert(rebuilt==1 and emptied==1,'a list that is not ours, or one with no rows behind it, was rebuilt')
+    E.PT.ShoppingList=nil
+    CO.BuildShoppingMaterialsForSelectedOrders,CO.CreateShoppingListForSelectedOrders=realBuild,realCreate
+    CO.visibleRowButtons=nil
+    toBuy(nil,1,2,7)
+    patronOrders[1].profit,patronOrders[7].profit=500,200
+    auto();selected('1,2,6,7')
+end
+
 -- Server-backed selection and late callbacks: closing/changing context must
 -- not mutate another tab or a later selection, nor start shopping prematurely.
 E.C_CraftingOrders.RequestCrafterOrders=function(request) requests[#requests+1]=request end
@@ -200,4 +302,4 @@ selected('9')
 switch(4,1,'Player-A','midnight');assert(not CO:IsOrderSelected(10),'auto-selection leaked outside Personal')
 CO.IsOneButtonPersonalEnabled=function() return false end
 switch(3,1,'Player-A','midnight',{{orderID=11,spellID=111,orderType=3}});selected('')
-print('Order selection memory tests passed (shopping/reopen, manual exclusions, characters/professions/tabs/expansions, reload, knowledge union, stale callbacks).')
+print('Order selection memory tests passed (shopping/reopen, manual exclusions, characters/professions/tabs/expansions, reload, knowledge union, checks held to their threshold, stale callbacks).')

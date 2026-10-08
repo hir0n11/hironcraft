@@ -47,7 +47,10 @@ function CO:EnsureOrderSelectionContext(pageFrame)
     return bucket
 end
 
-function CO:RememberOrderSelection(orderID, checked, order)
+-- rule is given for a check the queue made: 'profit' or 'knowledge', the
+-- threshold the order passed. A check made by hand has none. profit is what
+-- the order showed at that moment, kept to tell afterwards why it was checked.
+function CO:RememberOrderSelection(orderID, checked, order, rule, profit)
     local bucket = self._orderSelectionBucket
     local key = OrderKey(orderID)
     if not bucket or not key then return end
@@ -58,7 +61,52 @@ function CO:RememberOrderSelection(orderID, checked, order)
         checked=checked == true,
         spellID=order and order.spellID or (previous and previous.spellID),
         updatedAt=Now(),
+        rule=checked == true and rule or nil,
+        profit=checked == true and rule and tonumber(profit) or nil,
     }
+end
+
+-- A check the queue made stands only while the order passes the rule it was
+-- checked under, at the profit its row shows now. Both sides move after the
+-- check is made. Prices: a saved price is the cheapest lot of the day it was
+-- seen, on a thin market that lot is gone by the next visit, and the shopping
+-- scan brings today's price right after the queue has been filled from the
+-- old one. Thresholds: the crafter changes them. A check made by hand has no
+-- rule and is never taken away, and neither is an order already claimed.
+-- An order whose reagents are already in the bags keeps its check when it is
+-- a price that moved: buying them is what takes the cheap lots away and
+-- raises the price, and the purchase is made. A changed threshold (strict)
+-- applies to it as to any other.
+-- Returns how many checks were dropped. A dropped order is not remembered as
+-- unchecked by hand, so a later automatic pass may take it again.
+function CO:DropQueuedSelectionsBelowProfit(orders, strict)
+    local bucket = self._orderSelectionBucket
+    if not bucket or not self.OrderPassesQueueProfitRule then return 0 end
+    if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then return 0 end
+    if type(orders) ~= 'table' and C_CraftingOrders and C_CraftingOrders.GetCrafterOrders then
+        local ok, list = pcall(C_CraftingOrders.GetCrafterOrders)
+        orders = ok and list or nil
+    end
+    if type(orders) ~= 'table' then return 0 end
+    local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
+    local dropped = 0
+    for _, order in ipairs(orders) do
+        local key = type(order) == 'table' and OrderKey(order.orderID)
+        local choice = key and bucket.choices[key]
+        if choice and choice.checked == true and choice.rule and self.selectedOrders[key]
+            and not (claimed and SameOrderID(claimed.orderID, order.orderID))
+            and not self:OrderPassesQueueProfitRule(order, choice.rule == 'knowledge')
+            and (strict or not (self.CanSupplyCrafterReagentsForQueue and self:CanSupplyCrafterReagentsForQueue(order, false)))
+        then
+            self.selectedOrders[key] = nil
+            bucket.choices[key] = nil
+            if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, order.orderID) then
+                self.currentQueueOrderID = nil
+            end
+            dropped = dropped + 1
+        end
+    end
+    return dropped
 end
 
 function CO:IsOrderManuallyExcluded(orderID)
@@ -107,6 +155,9 @@ function CO:RestoreOrderSelection(pageFrame, orders)
     if self.currentQueueOrderID and not self:IsOrderSelected(self.currentQueueOrderID) then
         self.currentQueueOrderID = nil
     end
+    -- A check remembered from an earlier look at the list was made at the
+    -- prices and thresholds of that moment.
+    if self.RecheckQueuedSelections then self:RecheckQueuedSelections(orders) end
 end
 
 function CO:ForgetCompletedOrderSelection(orderID)
