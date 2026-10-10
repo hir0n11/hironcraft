@@ -1271,6 +1271,12 @@ function CO:UpdateCraftableOrderBorder(row, btn, order)
     border:Hide()
 end
 
+function GetOrderQualityDataSignature(order)
+    local child = order.hironPatronChildID or (C_TradeSkillUI and C_TradeSkillUI.GetProfessionChildSkillLineID
+        and C_TradeSkillUI.GetProfessionChildSkillLineID())
+    return BuildOrderReagentCacheSignature(order) .. ":" .. tostring(child)
+end
+
 function CO:GetCachedOrderQualityInfo(order, applyConcentrationOverride)
     if not order then return nil, false end
 
@@ -1292,7 +1298,8 @@ function CO:GetCachedOrderQualityInfo(order, applyConcentrationOverride)
     for _, suffix in ipairs(suffixes) do
         local cacheKey = key .. ":" .. (useConc and "1" or "0") .. ":" .. tostring(revision) .. ":" .. suffix
         local cached = self.qualityCache and self.qualityCache[cacheKey]
-        if cached and cached.expiresAt and cached.expiresAt > now then
+        if cached and cached.expiresAt and cached.expiresAt > now
+            and (not cached.reagentSignature or cached.reagentSignature == GetOrderQualityDataSignature(order)) then
             if cached.value ~= nil then
                 return cached.value, true
             end
@@ -1329,6 +1336,7 @@ function CO:GetConcentrationRequirementCacheKey(order)
     if requestedQuality <= 0 then return nil end
 
     return key .. ":" .. tostring(GetOrderRevision(self, order.orderID)) .. ":" .. tostring(requestedQuality)
+        .. ":" .. GetOrderQualityDataSignature(order)
 end
 
 function CO:GetCachedConcentrationRequirement(order)
@@ -3358,6 +3366,74 @@ function CO:SetEngineConcentration(engine, useConcentration)
     return true
 end
 
+-- Regular reagents and modified reagents have separate data-slot namespaces.
+-- Only ModifiedReagent slots belong in an operation-info request, just as in
+-- Blizzard's transaction:CreateCraftingReagentInfoTbl(). Never let a fixed
+-- reagent at regular slot 1 replace a ranked reagent at modified slot 1.
+function IsOperationInfoReagentSlot(slot)
+    if not slot then return false end
+    local types = Enum and Enum.TradeskillSlotDataType
+    if slot.dataSlotType ~= nil and types and types.ModifiedReagent ~= nil then
+        return slot.dataSlotType == types.ModifiedReagent
+    end
+    return true -- Older schematics/tests do not expose the slot type.
+end
+
+function CO:GetOperationRecipeSchematic(order)
+    if not order or not order.spellID or not C_TradeSkillUI or not C_TradeSkillUI.GetRecipeSchematic then return nil end
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, order.spellID, order.isRecraft == true)
+    return ok and type(schematic) == "table" and schematic or nil
+end
+
+function GetOperationInfoDataSlot(schematic, reagentInfo)
+    local slots = schematic and schematic.reagentSlotSchematics
+    if type(slots) ~= "table" then return tonumber(GetOrderReagentDataSlotIndex(reagentInfo)) end
+    local itemID = tonumber(GetOrderReagentItemID(reagentInfo))
+    local function Matches(slot)
+        if not slot then return false end
+        for _, choice in ipairs(GetSchematicReagentChoices(slot) or {}) do
+            if tonumber(GetSchematicChoiceItemID(choice)) == itemID then return true end
+        end
+        return false
+    end
+    -- The outer slotIndex is an absolute schematic index. The nested
+    -- dataSlotIndex is not, and must not be used to index the schematic.
+    local index = tonumber(reagentInfo.schematicIndex or GetOrderReagentSlotIndex(reagentInfo))
+    local slot = index and slots[index]
+    if not Matches(slot) then
+        slot = nil
+        for _, candidate in ipairs(slots) do
+            if Matches(candidate) then slot = candidate; break end
+        end
+    end
+    if slot and IsOperationInfoReagentSlot(slot) then
+        return tonumber(slot.dataSlotIndex or slot.slotIndex or index), slot
+    end
+    -- Preserve legacy payloads only for schematics without explicit types.
+    for _, candidate in ipairs(slots) do
+        if candidate.dataSlotType ~= nil then return nil end
+    end
+    return tonumber(GetOrderReagentDataSlotIndex(reagentInfo))
+end
+
+function CO:IsCompleteOperationReagentInfoTbl(order, reagents, schematic)
+    schematic = schematic or self:GetOperationRecipeSchematic(order)
+    local quantities = {}
+    for _, entry in ipairs(reagents or {}) do
+        local ds = tonumber(entry.dataSlotIndex)
+        if ds then quantities[ds] = (quantities[ds] or 0) + (tonumber(entry.quantity) or 0) end
+    end
+    for _, slot in ipairs(schematic and schematic.reagentSlotSchematics or {}) do
+        if slot.dataSlotType ~= nil and IsOperationInfoReagentSlot(slot)
+            and IsRequiredCraftingOrderReagentSlot(slot) then
+            local ds = tonumber(slot.dataSlotIndex or slot.slotIndex)
+            local required = tonumber(slot.quantityRequired) or 0
+            if required > 0 and (not ds or (quantities[ds] or 0) < required) then return false end
+        end
+    end
+    return true
+end
+
 function CO:BuildCraftingReagentInfoTbl(order)
     local list = {}
     if not order then return list end
@@ -3382,24 +3458,29 @@ function CO:BuildCraftingReagentInfoTbl(order)
         return list
     end
 
-    local seenSlot = {}
+    local schematic = self:GetOperationRecipeSchematic(order)
+    local seenItem = {}
 
     -- Since 12.0 CraftingReagentInfo no longer accepts itemID at the top
     -- level. Operation-info APIs require a nested CraftingReagent payload.
-    local function AddCraftingReagent(itemID, dataSlotIndex, quantity)
+    local function AddCraftingReagent(itemID, dataSlotIndex, quantity, original)
         itemID = tonumber(itemID)
-        dataSlotIndex = tonumber(dataSlotIndex)
+        dataSlotIndex = GetOperationInfoDataSlot(schematic, original or { itemID = itemID, dataSlotIndex = dataSlotIndex })
         quantity = tonumber(quantity)
-        if not itemID or not dataSlotIndex or not quantity or quantity <= 0
-            or seenSlot[dataSlotIndex] then
+        if not itemID or not dataSlotIndex or not quantity or quantity <= 0 then
             return false
         end
-        seenSlot[dataSlotIndex] = true
+        local partKey = tostring(dataSlotIndex) .. ":" .. tostring(itemID)
+        if seenItem[partKey] then
+            seenItem[partKey].quantity = seenItem[partKey].quantity + quantity
+            return true
+        end
         list[#list + 1] = {
             reagent = { itemID = itemID },
             dataSlotIndex = dataSlotIndex,
             quantity = quantity,
         }
+        seenItem[partKey] = list[#list]
         return true
     end
 
@@ -3408,7 +3489,7 @@ function CO:BuildCraftingReagentInfoTbl(order)
             AddCraftingReagent(
                 GetOrderReagentItemID(r),
                 GetOrderReagentDataSlotIndex(r) or GetOrderReagentSlotIndex(r),
-                GetOrderReagentQuantity(r)
+                GetOrderReagentQuantity(r), r
             )
         end
     end
@@ -3420,7 +3501,16 @@ function CO:BuildCraftingReagentInfoTbl(order)
             local quantity = (selected and selected.quantity) or reagentEntry.quantity or 0
             local dataSlotIndex = (selected and selected.dataSlotIndex) or reagentEntry.dataSlotIndex or reagentEntry.slotIndex
 
-            AddCraftingReagent(itemID, dataSlotIndex, quantity)
+            local function AddPart(id, qty)
+                AddCraftingReagent(id, dataSlotIndex, qty, { itemID = id,
+                    slotIndex = reagentEntry.schematicIndex or reagentEntry.slotIndex,
+                    dataSlotIndex = dataSlotIndex })
+            end
+            if selected and type(selected.mix) == "table" and #selected.mix > 0 then
+                for _, part in ipairs(selected.mix) do AddPart(part.itemID, part.quantity) end
+            else
+                AddPart(itemID, quantity)
+            end
         end
     end
 
@@ -3438,6 +3528,12 @@ function CO:BuildFastCraftingReagentInfoTbl(order)
     local list = {}
     if not order or not order.spellID then return list end
 
+    local schematic = self:GetOperationRecipeSchematic(order)
+    if schematic then
+        for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+            if slot.dataSlotType ~= nil then return self:BuildSchematicCraftingReagentInfoTbl(order) end
+        end
+    end
     local providedSlots = {}
     local seenSlot = {}
     local function AddCraftingReagent(itemID, dataSlotIndex, quantity)
@@ -3502,19 +3598,24 @@ function CO:BuildOrderOnlyCraftingReagentInfoTbl(order)
     local list = {}
     if type(order) ~= "table" or type(order.reagents) ~= "table" then return list end
 
-    local seenSlot = {}
+    local schematic = self:GetOperationRecipeSchematic(order)
+    local seenItem = {}
     for _, reagentInfo in ipairs(order.reagents) do
         local itemID = tonumber(GetOrderReagentItemID(reagentInfo))
-        local dataSlotIndex = tonumber(GetOrderReagentDataSlotIndex(reagentInfo)
-            or GetOrderReagentSlotIndex(reagentInfo))
+        local dataSlotIndex = GetOperationInfoDataSlot(schematic, reagentInfo)
         local quantity = tonumber(GetOrderReagentQuantity(reagentInfo))
-        if itemID and dataSlotIndex and quantity and quantity > 0 and not seenSlot[dataSlotIndex] then
-            seenSlot[dataSlotIndex] = true
-            list[#list + 1] = {
-                reagent = { itemID = itemID },
-                dataSlotIndex = dataSlotIndex,
-                quantity = quantity,
-            }
+        local partKey = tostring(dataSlotIndex) .. ":" .. tostring(itemID)
+        if itemID and dataSlotIndex and quantity and quantity > 0 then
+            if seenItem[partKey] then
+                seenItem[partKey].quantity = seenItem[partKey].quantity + quantity
+            else
+                list[#list + 1] = {
+                    reagent = { itemID = itemID },
+                    dataSlotIndex = dataSlotIndex,
+                    quantity = quantity,
+                }
+                seenItem[partKey] = list[#list]
+            end
         end
     end
 
@@ -3541,7 +3642,7 @@ function CO:BuildSchematicCraftingReagentInfoTbl(order)
     local seenSlot = {}
 
     for index, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
-        if IsBasicOrAutomaticReagentSlot(slotSchematic)
+        if IsOperationInfoReagentSlot(slotSchematic) and IsBasicOrAutomaticReagentSlot(slotSchematic)
             and IsRequiredCraftingOrderReagentSlot(slotSchematic)
         then
             local choices = GetSchematicReagentChoices(slotSchematic)
@@ -3702,23 +3803,18 @@ function CO:GetFastConcentrationCost(order)
     return self:ResolveConcentrationCost(order)
 end
 
-function CO:GetOrderOperationInfo(order, applyConcentration)
+function CO:GetOrderOperationInfo(order, applyConcentration, reagentOverride)
     if not order or not order.spellID or not C_TradeSkillUI or not C_TradeSkillUI.GetCraftingOperationInfoForOrder then
         return nil
     end
 
-    local reagentTbl = self:BuildCraftingReagentInfoTbl(order)
-    local attempts = {
-        { order.spellID, reagentTbl, order.orderID, applyConcentration == true },
-        { order.spellID, reagentTbl, order.orderID },
-        { order.spellID, nil, order.orderID, applyConcentration == true },
-        { order.spellID, nil, order.orderID },
-    }
-
-    for _, args in ipairs(attempts) do
-        local ok, info = pcall(C_TradeSkillUI.GetCraftingOperationInfoForOrder, unpack(args))
-        if ok and info then return info end
-    end
+    local reagentTbl = reagentOverride or self:BuildCraftingReagentInfoTbl(order)
+    if not self:IsCompleteOperationReagentInfoTbl(order, reagentTbl) then return nil end
+    -- No nil/empty fallback and no call that drops the concentration flag.
+    -- A base-recipe answer is not evidence for the quality of this order.
+    local ok, info = pcall(C_TradeSkillUI.GetCraftingOperationInfoForOrder,
+        order.spellID, reagentTbl, order.orderID, applyConcentration == true)
+    if ok and type(info) == "table" and (not info.recipeID or info.recipeID == order.spellID) then return info end
 
     return nil
 end
@@ -3812,6 +3908,7 @@ function CO:GetOrderQualityInfoFromPreparedOrderView(order, useConc)
 
     if not self:PrepareOrderForQueueAnalysis(order, pageFrame) then return nil end
     local engine = pageFrame.OrderView
+    if not engine.order or not SameOrderID(engine.order.orderID, order.orderID) then return nil end
 
     self:ApplySelectedReagentsToEngine(engine, order)
     self:SetEngineConcentration(engine, useConc)
@@ -3822,7 +3919,23 @@ function CO:GetOrderQualityInfoFromPreparedOrderView(order, useConc)
         return self:BuildQualityInfoFromOperationInfo(order, info, useConc)
     end
 
-    local form = engine.OrderDetails and engine.OrderDetails.SchematicForm
+    local transaction, form = self:GetTransactionFromEngine(engine)
+    if transaction and transaction.GetRecipeID and transaction:GetRecipeID() ~= order.spellID then return nil end
+    if transaction and transaction.CreateCraftingReagentInfoTbl then
+        local ok, reagents = pcall(transaction.CreateCraftingReagentInfoTbl, transaction)
+        if ok and type(reagents) == "table" then
+            info = self:GetOrderOperationInfo(order, useConc, reagents)
+            if info then return self:BuildQualityInfoFromOperationInfo(order, info, useConc) end
+        end
+    end
+    if form and form.GetRecipeOperationInfo then
+        local ok, value = pcall(form.GetRecipeOperationInfo, form)
+        if ok and type(value) == "table" and (not value.recipeID or value.recipeID == order.spellID)
+            and self:IsCompleteOperationReagentInfoTbl(order, self:BuildCraftingReagentInfoTbl(order)) then
+            return self:BuildQualityInfoFromOperationInfo(order, value, useConc)
+        end
+        return nil -- The quality meter can still show the previous recipe.
+    end
     local details = form and form.Details
     info = ReadProjectedQualityFromDetails(details)
     if info then
@@ -3846,9 +3959,11 @@ function CO:GetOrderQualityInfo(order, applyConcentrationOverride, allowPrepared
     local revision = GetOrderRevision(self, order.orderID)
     local cacheKey = key and (key .. ":" .. (useConc and "1" or "0") .. ":" .. tostring(revision) .. ":" .. (allowPreparedOrderView and "p" or "f"))
     local now = CacheNow()
+    local reagentSignature = GetOrderQualityDataSignature(order)
     if cacheKey then
         local cached = self.qualityCache and self.qualityCache[cacheKey]
-        if cached and cached.expiresAt and cached.expiresAt > now then
+        if cached and cached.expiresAt and cached.expiresAt > now
+            and (not cached.reagentSignature or cached.reagentSignature == reagentSignature) then
             return cached.value
         end
     end
@@ -3874,6 +3989,7 @@ function CO:GetOrderQualityInfo(order, applyConcentrationOverride, allowPrepared
         self.qualityCache[storeCacheKey] = {
             value = result,
             expiresAt = expiresAt,
+            reagentSignature = reagentSignature,
         }
 
 
@@ -3882,6 +3998,7 @@ function CO:GetOrderQualityInfo(order, applyConcentrationOverride, allowPrepared
             self.qualityCache[fastCacheKey] = {
                 value = result,
                 expiresAt = expiresAt,
+                reagentSignature = reagentSignature,
             }
         end
     end
@@ -3964,6 +4081,8 @@ function CO:ShowRowButtonTooltip(btn)
     end
 
     Tooltip:AddLine(T("COA_TOOLTIP_QUEUE_STATE", "In queue:") .. " " .. (self:IsOrderSelected(btn.orderID) and T("COA_YES", "Yes") or T("COA_NO", "No")), 11, 0.85, 0.85, 0.85)
+    local queueReason = self.GetQueueSkipReason and self:GetQueueSkipReason(order)
+    if queueReason then Tooltip:AddLine(queueReason, 11, 1, 0.82, 0.35) end
     Tooltip:AddLine(" ", 4, 1, 1, 1)
     Tooltip:AddLine(T("COA_ROW_TOOLTIP_INLINE", "Left click: perform this row step. Assigned key works only on checked orders."), 11, 0.85, 0.85, 0.85)
     Tooltip:AddLine(T("COA_ROW_TOOLTIP_RELEASE", "Right click: release the claimed order."), 11, 0.85, 0.85, 0.85)

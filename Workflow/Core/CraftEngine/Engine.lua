@@ -244,6 +244,19 @@ local function AsReagent(opt)
     return { itemID = opt }
 end
 
+local function AppendLockedReagents(out, ds, locked, defaultQuantity)
+    if type(locked.mix) == "table" and #locked.mix > 0 then
+        for _, part in ipairs(locked.mix) do
+            if part.itemID and (tonumber(part.quantity) or 0) > 0 then
+                out[#out + 1] = { reagent = { itemID = part.itemID }, dataSlotIndex = ds, quantity = part.quantity }
+            end
+        end
+    else
+        out[#out + 1] = { reagent = { itemID = locked.itemID }, dataSlotIndex = ds,
+            quantity = locked.quantity or defaultQuantity or 1 }
+    end
+end
+
 function CE:MakeReagents(basics, pickTier, locked)
     local out = {}
     if not basics or not basics.basicSlots then return out end
@@ -252,11 +265,7 @@ function CE:MakeReagents(basics, pickTier, locked)
         local ds = slot.dataSlotIndex
         local lk = locked and locked[ds]
         if lk and lk.itemID then
-            out[#out + 1] = {
-                reagent       = { itemID = lk.itemID },
-                dataSlotIndex = ds,
-                quantity      = lk.quantity or slot.quantity,
-            }
+            AppendLockedReagents(out, ds, lk, slot.quantity)
             usedDS[ds] = true
         else
             local t = pickTier(slot) or 1
@@ -269,17 +278,14 @@ function CE:MakeReagents(basics, pickTier, locked)
                     dataSlotIndex = ds,
                     quantity      = slot.quantity,
                 }
+                usedDS[ds] = true
             end
         end
     end
     if locked then
         for ds, lk in pairs(locked) do
             if not usedDS[ds] and lk.itemID then
-                out[#out + 1] = {
-                    reagent       = { itemID = lk.itemID },
-                    dataSlotIndex = ds,
-                    quantity      = lk.quantity or 1,
-                }
+                AppendLockedReagents(out, ds, lk)
             end
         end
     end
@@ -789,7 +795,20 @@ local CONC_MISS_TTL = 1
 function CE:NeedsConcentrationCached(spellID, targetQ, orderID, mode, locked, ttl)
     ttl = ttl or 30
     self._concCache = self._concCache or {}
+    local signature = {}
+    for ds, entry in pairs(locked or {}) do
+        if type(entry.mix) == "table" and #entry.mix > 0 then
+            for _, part in ipairs(entry.mix) do
+                signature[#signature + 1] = tostring(ds) .. "/" .. tostring(part.itemID) .. "/" .. tostring(part.quantity)
+            end
+        else
+            signature[#signature + 1] = tostring(ds) .. "/" .. tostring(entry.itemID) .. "/" .. tostring(entry.quantity)
+        end
+    end
+    table.sort(signature)
+    local child = C_TradeSkillUI and C_TradeSkillUI.GetProfessionChildSkillLineID and C_TradeSkillUI.GetProfessionChildSkillLineID()
     local key = tostring(spellID) .. ":" .. tostring(targetQ) .. ":" .. tostring(orderID) .. ":" .. tostring(mode or "max")
+        .. ":" .. tostring(child) .. ":" .. table.concat(signature, ",")
     local now = GetTime()
     local hit = self._concCache[key]
     if hit and hit.expires > now then return hit.value or nil end
@@ -950,7 +969,7 @@ function CE:BuildReagentsFromMix(basics, mixByDS, extraByDS, locked, includeFixe
         local ds = slot.dataSlotIndex
         local lk = locked and locked[ds]
         if lk and lk.itemID then
-            out[#out + 1] = { reagent = { itemID = lk.itemID }, dataSlotIndex = ds, quantity = lk.quantity or slot.quantity }
+            AppendLockedReagents(out, ds, lk, slot.quantity)
         else
             local mix = mixByDS and mixByDS[ds]
             local any = false

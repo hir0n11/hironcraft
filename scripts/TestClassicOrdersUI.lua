@@ -645,6 +645,19 @@ assert((stableRow.hideCalls or 0)==hideCalls and (stableRow.showCalls or 0)==sho
     'unchanged rows were hidden/shown during background refresh')
 assert(tooltipHides==0, 'background refresh dismissed the hovered row tooltip')
 GameTooltip=oldTooltip
+-- The reason for an unchecked patron row is available even without a Personal
+-- readiness warning. Hovering the checkbox/row only reads recorded analysis.
+local queueTooltipLines = {}
+GameTooltip = { SetOwner = noop, ClearLines = function() queueTooltipLines = {} end,
+    AddLine = function(_, text) queueTooltipLines[#queueTooltipLines + 1] = text end, Show = noop, Hide = noop }
+CO:SetQueueSkipReason(stableRow._order, 'quality_unknown')
+stableRow.checkbox.scripts.OnEnter(stableRow.checkbox)
+local queueReason = CO:GetQueueSkipReason(stableRow._order)
+assert(queueReason and queueTooltipLines[#queueTooltipLines] == queueReason,
+    'unchecked patron checkbox did not explain the queue skip')
+CO:SetQueueSkipReason(stableRow._order, nil)
+assert(not CO:GetQueueSkipReason(stableRow._order), 'cleared queue analysis retained an old reason')
+GameTooltip = oldTooltip
 local oldBuildDisplayReagents,oldItemAPI=CO.BuildDisplayReagents,C_Item
 CO.BuildDisplayReagents=function() return {{itemID=11,quantity=1},{itemID=12,quantity=1}} end
 C_Item={GetItemIconByID=function(id) return tostring(id) end,GetItemCount=function() return 0 end}

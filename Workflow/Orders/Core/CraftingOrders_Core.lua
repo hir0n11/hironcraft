@@ -257,6 +257,9 @@ end
 
 function CO:InvalidateOrderCaches(orderID)
     local key = OrderKey(orderID)
+    if self.queueSkipReasons then
+        if key then self.queueSkipReasons[key] = nil else wipe(self.queueSkipReasons) end
+    end
     if not key then
         self:HoldOrderVisualState(ORDER_VISUAL_STALE_HOLD_TTL)
     end

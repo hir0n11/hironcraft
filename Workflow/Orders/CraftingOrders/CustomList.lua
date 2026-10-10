@@ -569,6 +569,8 @@ function CL:CreateRow(parent, index)
         GameTooltip:Hide()
         if PT.Tooltip and PT.Tooltip.Clear then PT.Tooltip:Clear() end
     end)
+    row.checkbox:SetScript("OnEnter", function() CL:ShowOrderProblemTooltip(row) end)
+    row.checkbox:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     return row
 end
@@ -1093,17 +1095,22 @@ end
 
 function CL:ShowOrderProblemTooltip(row)
     local state, reason = row._readinessState, row._problemReason
-    if not reason and not state then return end
+    local queueReason = CO.GetQueueSkipReason and CO:GetQueueSkipReason(row._order)
+    if not reason and not state and not queueReason then return end
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     GameTooltip:ClearLines()
     if state == "ready" then
         GameTooltip:AddLine(L("COA_STATE_READY_TITLE", "Ready to craft"), 0.35, 1, 0.45)
     elseif state == "concentration" then
         GameTooltip:AddLine(L("COA_STATE_CONCENTRATION_TITLE", "Concentration needed"), 1, 0.82, 0.25)
-    else
+    elseif reason or state then
         GameTooltip:AddLine(L("COA_PROBLEM_TITLE", "Order needs attention"), 1, 0.35, 0.30)
     end
     if reason then GameTooltip:AddLine(reason, 1, 0.92, 0.85, true) end
+    if queueReason then
+        GameTooltip:AddLine(L("COA_QUEUE_SKIP_TITLE", "Not added to the queue"), 1, 0.82, 0.25)
+        GameTooltip:AddLine(queueReason, 1, 0.92, 0.85, true)
+    end
     GameTooltip:Show()
 end
 

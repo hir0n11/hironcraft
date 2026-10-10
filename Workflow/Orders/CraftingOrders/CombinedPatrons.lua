@@ -274,6 +274,7 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
         if not order then Finish(); return end
         local key = OrderKey(order.orderID)
         if self.selectedOrders[key] or (opts.automatic and self:IsOrderManuallyExcluded(order.orderID)) then
+            if not self.selectedOrders[key] then self:SetQueueSkipReason(order, "manual") end
             Later(0.02, function() Step(index + 1, 0) end)
             return
         end
@@ -304,6 +305,7 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
             local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, order.orderType, opts, page)
             if not ok then
                 selection.unknown = selection.unknown + 1
+                self:SetQueueSkipReason(order, "quality_unknown")
             elseif analysis and analysis.queued then
                 local marked, result = pcall(self.MarkOrderQueuedForCheckbox, self, order, analysis, page)
                 if marked and result then selection.selected = selection.selected + 1

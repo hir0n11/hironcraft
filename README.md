@@ -25,6 +25,21 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Actual patron reagent quality (0.4.142)
+
+- Operation-info requests keep regular and modified reagent slots separate.
+  A fixed ingredient can no longer overwrite a ranked ingredient with the same
+  numeric data-slot index. Customer grades and mixed quantities are preserved.
+- Profit/manual plans lock customer reagents by the schematic's modified slot,
+  not its absolute UI position. Concentration caches distinguish customer
+  allocations and expansion context; visual holds cannot decide queue admission.
+- Quality checks never replace an unanswered actual allocation with a base
+  recipe, empty allocation or stale quality meter. Requested quality and
+  concentration restrictions remain in force; unknown data is not assumed safe.
+- Hover an unchecked row or its checkbox to see the recorded queue skip reason:
+  concentration restriction, unavailable quality data, profit threshold,
+  knowledge-only selection or a manual exclusion. Tooltips are read-only.
+
 ## Stable manual order actions (0.4.141)
 
 - Fast presses cannot rebind or switch to another order while claim, craft,

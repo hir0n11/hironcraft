@@ -968,14 +968,20 @@ end
 function CO:BuildLockedReagentsForEngine(order)
     local locked = {}
     if not order or type(order.reagents) ~= "table" then return locked end
+    local schematic = self.GetOperationRecipeSchematic and self:GetOperationRecipeSchematic(order)
     for _, r in ipairs(order.reagents) do
-        local reagentInfo = r.reagentInfo or r
-        local reagent = reagentInfo and reagentInfo.reagent
-        local slot = r.slotIndex or (reagentInfo and reagentInfo.dataSlotIndex)
-        local itemID = reagent and reagent.itemID
-        local qty = (reagentInfo and reagentInfo.quantity) or r.quantity or 1
-        if slot and itemID then
-            locked[slot] = { itemID = itemID, quantity = qty }
+        local slot = GetOperationInfoDataSlot and GetOperationInfoDataSlot(schematic, r)
+            or (not schematic and (GetOrderReagentDataSlotIndex and GetOrderReagentDataSlotIndex(r) or r.slotIndex))
+        local itemID = GetOrderReagentItemID and GetOrderReagentItemID(r)
+        local qty = tonumber(GetOrderReagentQuantity and GetOrderReagentQuantity(r)) or 0
+        if slot and itemID and qty > 0 then
+            local entry = locked[slot]
+            if not entry then
+                locked[slot] = { itemID = itemID, quantity = qty, mix = { { itemID = itemID, quantity = qty } } }
+            else
+                entry.quantity = entry.quantity + qty
+                entry.mix[#entry.mix + 1] = { itemID = itemID, quantity = qty }
+            end
         end
     end
     return locked
@@ -990,13 +996,17 @@ end
 -- several grades, which the engine cannot price.
 function CO:BuildManualReagentsForEngine(order)
     local locked = self:BuildLockedReagentsForEngine(order)
+    local schematic = self.GetOperationRecipeSchematic and self:GetOperationRecipeSchematic(order)
     local picks = {}
     for _, reagentEntry in ipairs(self:BuildDisplayReagents(order)) do
         if IsCrafterProvidedReagent(reagentEntry) and not IsCustomerProvidedReagent(reagentEntry) then
             local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
             if selected and type(selected.mix) == "table" and #selected.mix > 1 then return nil end
-            local dataSlotIndex = reagentEntry.dataSlotIndex or reagentEntry.slotIndex
             local itemID = selected and selected.itemID or reagentEntry.itemID
+            local dataSlotIndex = GetOperationInfoDataSlot and GetOperationInfoDataSlot(schematic, {
+                itemID = itemID, slotIndex = reagentEntry.schematicIndex or reagentEntry.slotIndex,
+                dataSlotIndex = reagentEntry.dataSlotIndex or reagentEntry.slotIndex })
+                or (not schematic and (reagentEntry.dataSlotIndex or reagentEntry.slotIndex))
             if dataSlotIndex and itemID then
                 locked[dataSlotIndex] = { itemID = itemID, quantity = tonumber(reagentEntry.quantity) or 0 }
                 picks[#picks + 1] = tostring(dataSlotIndex) .. "=" .. tostring(itemID)
@@ -1227,11 +1237,8 @@ end
 
 function CO:OrderRequiresConcentrationForQueue(order, pageFrame)
     if not order or not order.orderID then return nil end
-
-    if self.GetCachedConcentrationRequirementVisualState then
-        local visualNeeded, hasVisualState = self:GetCachedConcentrationRequirementVisualState(order)
-        if hasVisualState then return visualNeeded == true end
-    end
+    -- The visual hold survives reagent changes to prevent flicker. It is not
+    -- an authoritative quality result and must never decide queue admission.
 
     local requestedQuality = self:GetOrderRequestedQuality(order)
     if requestedQuality <= 0 then return false end
@@ -1474,35 +1481,78 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
     return true
 end
 
+function CO:SetQueueSkipReason(order, code)
+    local key = order and OrderKey(order.orderID)
+    if not key then return end
+    self.queueSkipReasons = self.queueSkipReasons or {}
+    self.queueSkipReasons[key] = code and { code = code, spellID = order.spellID,
+        signature = GetOrderQualityDataSignature and GetOrderQualityDataSignature(order),
+        target = self.GetOrderRequestedQuality and self:GetOrderRequestedQuality(order) or tonumber(order.minQuality) or 0 } or nil
+end
+
+-- Read-only: tooltips never stage a transaction, switch expansions or compute
+-- quality. Reasons are recorded by the explicit/automatic queue analysis.
+function CO:GetQueueSkipReason(order)
+    local key = order and OrderKey(order.orderID)
+    if not key or (self.selectedOrders and self.selectedOrders[key]) then return nil end
+    local saved = self.queueSkipReasons and self.queueSkipReasons[key]
+    local target = self.GetOrderRequestedQuality and self:GetOrderRequestedQuality(order) or tonumber(order.minQuality) or 0
+    if not saved or saved.spellID ~= order.spellID or saved.target ~= target then return nil end
+    if saved.signature and GetOrderQualityDataSignature and saved.signature ~= GetOrderQualityDataSignature(order) then return nil end
+    local code = saved.code
+    if code == "quality_unknown" then
+        return T("COA_QUEUE_SKIP_QUALITY_UNKNOWN", "Quality with the actual reagents could not be confirmed. The order was not queued; try Queue again after the data loads.")
+    elseif code == "concentration" then
+        return T("COA_QUEUE_SKIP_CONCENTRATION", "The actual reagents do not reach the requested quality without concentration. This queue does not allow concentration.")
+    elseif code == "quality" then
+        return T("COA_QUEUE_SKIP_QUALITY", "The requested quality could not be reached with the allowed concentration and current reagents.")
+    elseif code == "profit" then
+        return T("COA_QUEUE_SKIP_PROFIT", "Profit is below the queue minimum, or its price is unavailable.")
+    elseif code == "knowledge" then
+        return T("COA_QUEUE_SKIP_KNOWLEDGE", "This queue selects knowledge rewards only; this order does not give knowledge.")
+    elseif code == "manual" then
+        return T("COA_QUEUE_SKIP_MANUAL", "You unchecked this order. Automatic selection preserves that choice.")
+    elseif code == "recipe" then
+        return T("COA_ACTION_UNKNOWN_RECIPE", "Unknown recipe")
+    elseif code == "reagents" then
+        return T("COA_QUEUE_SKIP_REAGENTS", "The required reagent grade could not be selected.")
+    end
+    return T("COA_QUEUE_SKIP_UNAVAILABLE", "The order is not available for this queue.")
+end
+
 function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
     if not order or not order.orderID then return false end
     local knowledgeOnly = opts and opts.knowledgeOnly
-    if knowledgeOnly and not self:OrderGivesKnowledge(order) then return false end
+    if knowledgeOnly and not self:OrderGivesKnowledge(order) then self:SetQueueSkipReason(order, "knowledge"); return false end
     if not self.GetOrderActionAvailabilitySortRank then return false end
-    if not self:ApplyQueueReagentModeToOrder(order) then return false end
+    if not self:ApplyQueueReagentModeToOrder(order) then self:SetQueueSkipReason(order, "reagents"); return false end
     local needsConcentration = self:OrderRequiresConcentrationForQueue(order)
     local concentrationAllowed = not knowledgeOnly
         and opts
         and (opts.allowConcentration == true or opts.forceConcentration == true)
     -- Never queue an order until concentration is known. Knowledge orders are
     -- deliberately concentration-free even when the normal queue allows it.
-    if needsConcentration == nil then return false end
-    if needsConcentration == true and not concentrationAllowed then return false end
-    if not self:OrderPassesQueueProfitRule(order, knowledgeOnly, opts) then return false end
+    if needsConcentration == nil then self:SetQueueSkipReason(order, "quality_unknown"); return false end
+    if needsConcentration == true and not concentrationAllowed then self:SetQueueSkipReason(order, "concentration"); return false end
+    if not self:OrderPassesQueueProfitRule(order, knowledgeOnly, opts) then self:SetQueueSkipReason(order, "profit"); return false end
 
     local rank = self:GetOrderActionAvailabilitySortRank(order)
-    return rank == 1 or rank == 2 or (rank == 3 and concentrationAllowed)
+    local allowed = rank == 1 or rank == 2 or (rank == 3 and concentrationAllowed)
+    if not allowed then self:SetQueueSkipReason(order, "recipe") end
+    return allowed
 end
 
 function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
+    self:SetQueueSkipReason(order, nil)
     if opts and opts.automatic then
-        if self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(order.orderID) then return nil end
+        if self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(order.orderID) then self:SetQueueSkipReason(order, "manual"); return nil end
         if opts.includeKnowledge and orderType == Enum.CraftingOrderType.Npc and self:OrderGivesKnowledge(order) then
             local knowledgeOptions = {}
             for key, value in pairs(opts) do knowledgeOptions[key] = value end
             knowledgeOptions.knowledgeOnly = true
             opts = knowledgeOptions
         elseif not opts.includeProfit then
+            self:SetQueueSkipReason(order, "knowledge")
             return nil
         end
     end
@@ -1526,6 +1576,7 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
     -- otherwise a still-loading or concentration order could be claimed from
     -- a queue that was built without concentration.
     if self:OrderRequiresConcentrationForQueue(order, pageFrame) ~= false then
+        self:SetQueueSkipReason(order, "quality")
         return nil
     end
     local profit = tonumber((self:GetOrderProfitInfo(order) or {}).profit)
