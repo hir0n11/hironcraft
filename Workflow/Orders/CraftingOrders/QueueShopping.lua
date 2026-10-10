@@ -801,6 +801,11 @@ function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
     -- background warming. Combined queue selection activates each child first.
     if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return false end
 
+    pageFrame = self:FindOrderPageFrame(pageFrame) or self:FindOrderPageFrame(self.activePageFrame)
+    if not pageFrame or not self:CanPrepareOrderView(pageFrame) then return false end
+    if self.IsSafeToPrepareOrderViewForAnalysis
+        and not self:IsSafeToPrepareOrderViewForAnalysis(pageFrame) then return false end
+
     -- Do not let background quality warming rebuild the live transaction after
     -- the first click has staged a finishing reagent for this order.
     if self.preparedFinisherOrderID
@@ -809,13 +814,12 @@ function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
         return true
     end
 
-    pageFrame = self:FindOrderPageFrame(pageFrame) or self:FindOrderPageFrame(self.activePageFrame)
-    if not pageFrame or not self:CanPrepareOrderView(pageFrame) then return false end
-
     self.queuePreparedOrders = self.queuePreparedOrders or {}
     local key = OrderKey(order.orderID)
     local prepKey = key and (key .. ":" .. tostring(order.spellID or "") .. ":" .. tostring(order.isRecraft == true))
-    if prepKey and self.queuePreparedOrders[prepKey] then
+    local boundOrder = pageFrame.OrderView and pageFrame.OrderView.order
+    if prepKey and self.queuePreparedOrders[prepKey] and boundOrder
+        and SameOrderID(boundOrder.orderID, order.orderID) then
         return true
     end
 

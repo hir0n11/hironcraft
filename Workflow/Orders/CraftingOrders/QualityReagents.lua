@@ -899,7 +899,7 @@ function CO:GetEffectiveOrder(orderID, fallback)
         self:RememberOrderIdentity(fallback)
     end
     local claimed = self:GetClaimedOrder()
-    if claimed and claimed.orderID == orderID then
+    if claimed and SameOrderID(claimed.orderID, orderID) then
         if self.RememberOrderIdentity then self:RememberOrderIdentity(claimed) end
         return claimed
     end
@@ -916,6 +916,7 @@ function CO:GetEffectiveOrder(orderID, fallback)
 end
 
 function CO:IsOrderActionInProgress()
+    if self.IsOrderSubmissionPending then return self:IsOrderSubmissionPending() end
     return self.pendingClaimOrderID ~= nil
         or self.pendingCraftOrderID ~= nil
         or self.pendingFulfillOrderID ~= nil
@@ -948,7 +949,9 @@ function CO:GetRowAction(orderID, fallbackOrder)
     local claimed = self:GetClaimedOrder()
 
     if claimed and SameOrderID(claimed.orderID, orderID) then
-        self.pendingClaimOrderID = nil
+        if self.pendingClaimOrderID and SameOrderID(self.pendingClaimOrderID, orderID) then
+            self.pendingClaimOrderID = nil
+        end
         self.rowStates[orderID] = self.rowStates[orderID] or {}
         self.rowStates[orderID].order = claimed
         order = claimed
@@ -986,6 +989,9 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
     if self.pendingReleaseOrderID and SameOrderID(self.pendingReleaseOrderID, orderID) then
         return "pending", T("COA_STATUS_RELEASING", "Releasing order..."), order, false
+    end
+    if self:IsOrderActionInProgress() then
+        return "pending", T("COA_ACTION_BUSY", "Busy"), order, false
     end
 
     local rejectedKey = OrderKey(orderID)
@@ -2212,6 +2218,7 @@ function CO:EnsurePageBindingHooks(pageFrame)
         end)
 
         pageFrame:HookScript("OnHide", function()
+            if CO.listActionContext and CO.listActionContext.page == pageFrame then CO.listActionContext = nil end
             CO._autoQueueStamp = (CO._autoQueueStamp or 0) + 1
             if CO.CancelQueueSelection then CO:CancelQueueSelection() end
             if CO.activePageFrame == pageFrame then
@@ -2231,6 +2238,8 @@ function CO:EnsurePageBindingHooks(pageFrame)
         if frame and frame.HookScript and not frame.ahuiCraftingOrdersVisibilityHooked then
             frame.ahuiCraftingOrdersVisibilityHooked = true
             frame:HookScript("OnShow", function()
+                if frame == pageFrame.OrderView and CO.RestoreListActionView
+                    and CO:RestoreListActionView(pageFrame) then return end
                 if frame == pageFrame.OrderView then
                     pageFrame.ahuiCraftingOrdersOrderOpen = true
                 elseif frame == pageFrame.BrowseFrame then
@@ -2266,6 +2275,7 @@ end
 
 function CO:SetActiveRowButton(btn)
     if not btn then return end
+    if self.IsOrderSubmissionPending and self:IsOrderSubmissionPending() then return end
     self.activeRowButton = btn
     self.activeOrderID = btn.orderID or self.activeOrderID
     self.activePageFrame = btn.pageFrame or self.activePageFrame
@@ -3800,8 +3810,8 @@ function CO:GetOrderQualityInfoFromPreparedOrderView(order, useConc)
     if not self:IsCraftingOrdersPageOpen(pageFrame) then return nil end
     if self.IsSafeToPrepareOrderViewForAnalysis and not self:IsSafeToPrepareOrderViewForAnalysis(pageFrame) then return nil end
 
-    local engine = self:GetOrderEngine(pageFrame, order)
-    if not engine then return nil end
+    if not self:PrepareOrderForQueueAnalysis(order, pageFrame) then return nil end
+    local engine = pageFrame.OrderView
 
     self:ApplySelectedReagentsToEngine(engine, order)
     self:SetEngineConcentration(engine, useConc)

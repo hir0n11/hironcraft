@@ -95,6 +95,11 @@ local previousReagent=CO.selectedReagents['3:1']
 CO.IsOrderActionInProgress=function() return true end
 CO:RestoreOrderSelection(page,{});selected('2,3,6')
 CO.IsOrderActionInProgress=function() return false end
+-- Craft-ready is between submissions, but the authoritative claimed order
+-- still owns the list: a partial refresh must not remove its queue checks.
+CO.GetClaimedOrder=function() return orders[2] end
+CO:RestoreOrderSelection(page,{});selected('2,3,6')
+CO.GetClaimedOrder=function() return nil end
 CO:RestoreOrderSelection(page,{});selected('')
 page.shown=false;page.shown=true
 auto();selected('2,3,6')

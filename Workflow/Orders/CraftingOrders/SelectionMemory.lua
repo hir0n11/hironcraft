@@ -168,6 +168,8 @@ function CO:RestoreOrderSelection(pageFrame, orders)
         end
     end
     local inFlight = self.IsOrderActionInProgress and self:IsOrderActionInProgress()
+    local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
+    inFlight = inFlight or (claimed and not (self.IsOrderFulfilled and self:IsOrderFulfilled(claimed.orderID)))
     for key in pairs(self.selectedOrders) do
         -- Claim/craft refreshes can briefly expose an empty/partial API list.
         -- Completion handlers remove the actual finished order explicitly.

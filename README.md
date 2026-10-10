@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Stable manual order actions (0.4.141)
+
+- Fast presses cannot rebind or switch to another order while claim, craft,
+  completion or release is pending. Completion waits for both the server
+  response and claimed-order removal, in either event order.
+- List-driven actions retain the browse view when Blizzard opens an order
+  automatically. Explicit row inspection still opens the normal order card.
+  View recovery never submits a protected action or rebuilds its transaction.
+- Quality/concentration analysis no longer overwrites an open or claimed
+  transaction. Preparation caches are reused only when the live view is bound
+  to that same order; partial refreshes retain checks while an order is claimed.
+- Late cast-stop callbacks cannot stop a subsequent craft. Failed release
+  responses unlock the next explicit retry instead of leaving the queue stuck.
+
 ## Complete combined patron queues (0.4.140)
 
 - Fixed combined queues skipping the other expansion's orders. Queue analysis

@@ -1611,6 +1611,10 @@ function CL:PopulateRow(row, order)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", function(self, button)
         if button == "RightButton" then return end
+        if CO.IsOrderActionInProgress and CO:IsOrderActionInProgress() then return end
+        -- An explicit inspection ends list ownership. Automatic native view
+        -- changes during queue actions must not have the same effect.
+        CO.listActionContext = nil
         if CO.SetActiveRowButton then CO:SetActiveRowButton(row.action) end
         local pf = CO.activePageFrame
         if not pf or not pf.OrderView then return end

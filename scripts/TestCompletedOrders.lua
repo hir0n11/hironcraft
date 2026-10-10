@@ -108,6 +108,7 @@ end
 -- A synchronous API exception produces no response event to clear pending
 -- state. It must also leave the next explicit retry available.
 local failedOrder={orderID=889999,orderState=2,isFulfillable=true}
+claimed=failedOrder
 local submit=E.C_CraftingOrders.FulfillOrder
 E.C_CraftingOrders.FulfillOrder=function() error('submission failed') end
 assert(not CO:FulfillOrder(failedOrder,page) and not CO.pendingFulfillOrderID,

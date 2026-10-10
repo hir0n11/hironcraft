@@ -113,6 +113,7 @@ local function Current(session)
 end
 
 function CO:IsCombinedPatronActionBusy()
+    if self.IsOrderSubmissionPending and self:IsOrderSubmissionPending() then return true end
     if self.pendingClaimOrderID or self.pendingCraftOrderID or self.pendingFulfillOrderID
         or self.pendingReleaseOrderID or self.progressOrderID then return true end
     local claimed = self.GetClaimedOrder and self:GetClaimedOrder()

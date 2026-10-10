@@ -204,9 +204,57 @@ function CO:StopRowProgressTicker()
     end
 end
 
+-- A submission owns the whole workflow, not just its row. In particular,
+-- completion response and claimed-order removal can arrive in either order.
+function CO:IsOrderSubmissionPending()
+    return self.pendingClaimOrderID ~= nil or self.pendingCraftOrderID ~= nil
+        or self.pendingFulfillOrderID ~= nil or self.pendingReleaseOrderID ~= nil
+        or self.progressActive == true or self.terminalAction ~= nil
+end
+
+function CO:BeginListAction(pageFrame)
+    if not self.IsOrderListOpen or not self:IsOrderListOpen(pageFrame) then return false end
+    self.listActionContext = {
+        page=pageFrame, profession=GetProfessionFromPage(pageFrame), orderType=pageFrame.orderType,
+        owner=UnitGUID and UnitGUID('player'), selectionContext=self._orderSelectionContext,
+    }
+    return true
+end
+
+function CO:RestoreListActionView(pageFrame)
+    local context = self.listActionContext
+    if not context or context.page ~= pageFrame then return false end
+    if (self.IsEnabled and not self:IsEnabled())
+        or not pageFrame.IsShown or not pageFrame:IsShown()
+        or context.profession ~= GetProfessionFromPage(pageFrame)
+        or context.orderType ~= pageFrame.orderType
+        or (context.owner and context.owner ~= (UnitGUID and UnitGUID('player')))
+        or context.selectionContext ~= self._orderSelectionContext then
+        self.listActionContext = nil
+        return false
+    end
+    -- Keep the transaction intact. CloseOrder() starts another server search;
+    -- only presentation needs restoring after an automatic native ViewOrder.
+    if pageFrame.OrderView and pageFrame.OrderView.Hide then pageFrame.OrderView:Hide() end
+    if pageFrame.BrowseFrame and pageFrame.BrowseFrame.Show then pageFrame.BrowseFrame:Show() end
+    pageFrame.ahuiCraftingOrdersOrderOpen = false
+    if self.UpdateControlPanelVisibility then self:UpdateControlPanelVisibility(pageFrame) end
+    return true
+end
+
+function CO:RestoreListActionViewSoon()
+    local context = self.listActionContext
+    if not context then return end
+    local function restore()
+        if CO.listActionContext == context then CO:RestoreListActionView(context.page) end
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0, restore) else restore() end
+end
+
 function CO:GetQueueButton()
     local claimed = self:GetClaimedOrder()
-    if claimed and self:IsOrderSelected(claimed.orderID) then
+    if claimed and not (self.IsOrderFulfilled and self:IsOrderFulfilled(claimed.orderID))
+        and self:IsOrderSelected(claimed.orderID) then
         local claimedBtn = self:GetVisibleButtonForOrder(claimed.orderID)
         if claimedBtn then return claimedBtn end
     end
@@ -239,6 +287,13 @@ function CO:GetOrderEngine(pageFrame, order)
     if not order then
         return nil, T("COA_STATUS_NO_ENGINE", "Crafting order view is not available.")
     end
+    -- Read-only analysis and clicks on another row must not steal the live
+    -- transaction from a pending or already claimed order.
+    local ownedID = self.pendingClaimOrderID or self.pendingCraftOrderID
+        or self.pendingFulfillOrderID or self.pendingReleaseOrderID
+    local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
+    ownedID = ownedID or (claimed and claimed.orderID)
+    if ownedID and not SameOrderID(ownedID, order.orderID) then return nil end
 
     pageFrame = self:FindOrderPageFrame(pageFrame)
     if pageFrame then
@@ -304,6 +359,7 @@ function CO:GetOrderEngine(pageFrame, order)
 end
 
 function CO:ReleaseOrder(order, pageFrame, forRejection)
+    if self:IsOrderSubmissionPending() then return false end
     order = order or self:GetClaimedOrder()
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
@@ -666,6 +722,8 @@ function CO:MarkClaimedOrderReady(orderID, claimed)
     if not orderID or not claimed or not SameOrderID(claimed.orderID, orderID) then
         return false
     end
+    if self.IsOrderFulfilled and self:IsOrderFulfilled(orderID) then return false end
+    if self.pendingClaimOrderID and not SameOrderID(self.pendingClaimOrderID, orderID) then return false end
 
     if self.pendingClaimOrderID and SameOrderID(self.pendingClaimOrderID, orderID) then
         self.pendingClaimOrderID = nil
@@ -724,6 +782,10 @@ end
 
 function CO:ClaimOrder(order, pageFrame)
     if not order or not order.orderID then return false end
+    if self:IsOrderSubmissionPending() then return false end
+    local claimed = self:GetClaimedOrder()
+    if claimed then return false end
+    if self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID) then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not self:IsAtUsableCraftingOrderTable(pageFrame) then
         self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
@@ -915,6 +977,8 @@ end
 
 function CO:CraftOrderFromRow(order, pageFrame, btn)
     if not order or not order.orderID then return false end
+    if self:IsOrderSubmissionPending() then return false end
+    if self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID) then return false end
     if self.GetEffectiveOrder then
         order = self:GetEffectiveOrder(order.orderID, order) or order
     end
@@ -1226,10 +1290,13 @@ end
 
 function CO:FulfillOrder(order, pageFrame)
     if not order or not order.orderID then return false end
+    if self:IsOrderSubmissionPending() then return false end
     if (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID))
         or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, order.orderID)) then
         return false
     end
+    local claimed = self:GetClaimedOrder()
+    if not claimed or not SameOrderID(claimed.orderID, order.orderID) then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not self:IsAtUsableCraftingOrderTable(pageFrame) then
         self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
@@ -1243,6 +1310,7 @@ function CO:FulfillOrder(order, pageFrame)
     end
 
     self.pendingFulfillOrderID = order.orderID
+    self.terminalAction = {orderID=order.orderID, removalSeen=false, responseSeen=false}
     self.currentQueueOrderID = order.orderID
     self.activeOrderID = order.orderID
     self.activePageFrame = pageFrame
@@ -1254,6 +1322,7 @@ function CO:FulfillOrder(order, pageFrame)
     end)
     if not ok and self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, order.orderID) then
         self.pendingFulfillOrderID = nil
+        self.terminalAction = nil
         self:SetStatus(T("COA_STATUS_FULFILL_FAILED", "Could not complete the order."))
         self:RefreshVisibleRowsSoon()
     end
@@ -1264,15 +1333,11 @@ function CO:RunRowButtonAction(btn)
     if not btn or not btn.orderID then return end
     if self.IsOrderFulfilled and self:IsOrderFulfilled(btn.orderID) then return end
 
-    -- Repeated presses while the protected craft/completion is pending must not
-    -- rebuild bindings or re-enter the order state machine. This also removes
-    -- the misleading "No available action" spam during the cast.
-    if (self.pendingCraftOrderID and SameOrderID(self.pendingCraftOrderID, btn.orderID))
-        or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, btn.orderID))
-    then
-        return
-    end
+    -- No rebinding, expansion switching or diagnostic spam during any pending
+    -- stage, even when another row is clicked or refreshed under the pointer.
+    if self:IsOrderSubmissionPending() then return end
 
+    self:BeginListAction(btn.pageFrame or self.activePageFrame)
     self:SetActiveRowButton(btn)
 
     if self.PrepareCombinedPatronAction and not self:PrepareCombinedPatronAction(btn.order, btn.pageFrame) then return end
@@ -1314,8 +1379,8 @@ function CO:RunRowButtonAction(btn)
 end
 
 function CO:RunActiveRowAction()
-
-
+    if self:IsOrderSubmissionPending() then return end
+    if self.listActionContext then self:RestoreListActionView(self.listActionContext.page) end
     if not self:HasSelectedOrders() then
         if self.HandleEmptyPersonalOrdersHotkey and self:HandleEmptyPersonalOrdersHotkey() then
             return

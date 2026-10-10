@@ -54,4 +54,10 @@ CO.WarmVisibleOrderQualitySoon = function() end
 CO:SetOrderTablePresence(true, page)
 assert(bindingCalls == 2, 'crafting-table presence did not apply the hotkey')
 
+CO.IsOrderSubmissionPending=function() return true end
+local activeID,activePage=CO.activeOrderID,CO.activePageFrame
+CO:SetActiveRowButton({orderID=999,pageFrame={}})
+assert(bindingCalls==2 and CO.activeOrderID==activeID and CO.activePageFrame==activePage,
+    'hovering another row rebound the hotkey during a pending action')
+
 print('Order hotkey binding tests passed.')

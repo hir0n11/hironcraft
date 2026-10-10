@@ -236,6 +236,7 @@ function CO:HookBlizzardProfessions()
 
     hooksecurefunc(ProfessionsCraftingOrderPageMixin, "ViewOrder", function(pageFrame)
         if pageFrame then
+            if CO.RestoreListActionView and CO:RestoreListActionView(pageFrame) then return end
             CO.activePageFrame = pageFrame
             CO:EnsurePageBindingHooks(pageFrame)
             pageFrame.ahuiCraftingOrdersOrderOpen = true
@@ -470,7 +471,15 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED" then
-        local orderID = self.pendingReleaseOrderID or self.pendingFulfillOrderID
+        local terminal = self.terminalAction
+        local orderID = (terminal and terminal.orderID) or self.pendingReleaseOrderID or self.pendingFulfillOrderID
+        -- A duplicate/unowned removal must not stop a later craft's progress.
+        if not orderID and ((self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
+            or self:GetClaimedOrder()) then return end
+        if terminal then
+            terminal.removalSeen = true
+            if terminal.responseSeen then self.terminalAction = nil end
+        end
         local manualRejection = self.pendingReleaseForReject and self.pendingReleaseOrderID
             and orderID and SameOrderID(self.pendingReleaseOrderID, orderID)
         self.pendingReleaseForReject = nil
@@ -495,9 +504,8 @@ function CO:OnEvent(event, ...)
                 self.pendingCraftSpellID = nil
                 self.craftSubmissionAcknowledgedOrderID = nil
             end
-            if self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID) then
-                self.pendingFulfillOrderID = nil
-            end
+            -- Removal is not the fulfillment response. Keep the request lock
+            -- until that response too, so a late response cannot hit a new job.
             if self.pendingReleaseOrderID and SameOrderID(self.pendingReleaseOrderID, orderID) then
                 self.pendingReleaseOrderID = nil
             end
@@ -515,6 +523,7 @@ function CO:OnEvent(event, ...)
             and T("COA_STATUS_CONFIRM_REJECT", "Order released. Press Action again to decline it.")
             or T("COA_STATUS_DONE", "Order completed or released."))
         self:StopRowProgress()
+        if self.RestoreListActionViewSoon then self:RestoreListActionViewSoon() end
         self:UpdateControlPanel()
         local terminalRefreshScheduled = self.RefreshPersonalOrdersAfterTerminalAction
             and self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
@@ -532,11 +541,17 @@ function CO:OnEvent(event, ...)
 
     if event == "CRAFTINGORDERS_FULFILL_ORDER_RESPONSE" then
         local result, orderID = ...
+        local terminal = self.terminalAction
+        if not orderID and terminal then orderID = terminal.orderID end
         if self.pendingFulfillOrderID and (not orderID or SameOrderID(orderID, self.pendingFulfillOrderID)) then
             self.pendingFulfillOrderID = nil
         end
         if orderID then self:InvalidateOrderCaches(orderID) end
         if Enum and Enum.CraftingOrderResult and result == Enum.CraftingOrderResult.Ok then
+            if terminal and SameOrderID(terminal.orderID, orderID) then
+                terminal.responseSeen = true
+                if terminal.removalSeen then self.terminalAction = nil end
+            end
             if orderID then
                 self.fulfilledOrderIDs = self.fulfilledOrderIDs or {}
                 self.fulfilledOrderIDs[orderID] = true
@@ -556,9 +571,22 @@ function CO:OnEvent(event, ...)
                 self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
             end
         else
+            if terminal and SameOrderID(terminal.orderID, orderID) then self.terminalAction = nil end
             self:SetStatus(T("COA_STATUS_FULFILL_FAILED", "Could not complete the order."))
         end
+        if self.RestoreListActionViewSoon then self:RestoreListActionViewSoon() end
         self:RefreshVisibleRowsSoon()
+        return
+    end
+
+    if event == "CRAFTINGORDERS_RELEASE_ORDER_RESPONSE" then
+        local result, orderID = ...
+        if self.pendingReleaseOrderID and (not orderID or SameOrderID(orderID, self.pendingReleaseOrderID))
+            and not IsResultOk(result) then
+            self.pendingReleaseOrderID, self.pendingReleaseForReject = nil, nil
+            self:SetStatus(T("COA_STATUS_RELEASE_FAILED", "Could not release the order."))
+            self:RefreshVisibleRowsSoon()
+        end
         return
     end
 
@@ -645,11 +673,14 @@ function CO:OnEvent(event, ...)
         local expectedSpellID = tonumber(self.pendingCraftSpellID)
         if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
         local pendingID = self.pendingCraftOrderID or self.progressOrderID
+        local token = self._craftWatchToken
         C_Timer.After(0.25, function()
+            if CO._craftWatchToken ~= token then return end
             CO:StopRowProgress()
             if pendingID and CO.pendingCraftOrderID and SameOrderID(CO.pendingCraftOrderID, pendingID) then
                 C_Timer.After(5.0, function()
-                    if CO.pendingCraftOrderID and SameOrderID(CO.pendingCraftOrderID, pendingID) then
+                    if CO._craftWatchToken == token and CO.pendingCraftOrderID
+                        and SameOrderID(CO.pendingCraftOrderID, pendingID) then
                         CO.pendingCraftButton = nil
                         CO.pendingCraftOrderID = nil
                         CO.pendingCraftSpellID = nil
@@ -666,7 +697,9 @@ function CO:OnEvent(event, ...)
 
     if event == "UPDATE_TRADESKILL_CAST_STOPPED" then
         local pendingID = self.pendingCraftOrderID or self.progressOrderID
+        local token = self._craftWatchToken
         C_Timer.After(0.25, function()
+            if CO._craftWatchToken ~= token then return end
             CO:StopRowProgress()
             if not pendingID then
                 CO.pendingCraftButton = nil
@@ -744,6 +777,7 @@ SafeRegisterEvent(eventFrame, "PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 SafeRegisterEvent(eventFrame, "TRADE_SKILL_SHOW")
 SafeRegisterEvent(eventFrame, "TRADE_SKILL_CLOSE")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIM_ORDER_RESPONSE")
+SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_RELEASE_ORDER_RESPONSE")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_ADDED")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_UPDATED")
