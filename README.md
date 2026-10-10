@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Complete combined patron queues (0.4.140)
+
+- Fixed combined queues skipping the other expansion's orders. Queue analysis
+  now activates each selected child profession before checking its live recipe,
+  reagent quality and concentration data, instead of checking all orders in one
+  active expansion. Temporarily missing quality data is retried, not assumed safe.
+- Queue selection and shopping use the full owned order list, including orders
+  without a visible row button. Shared bag stock is still reserved only once.
+- Manual exclusions, profit thresholds and concentration restrictions remain
+  in force. Order actions and automatic shopping wait for analysis to finish;
+  closing/changing the page cancels it, without background crafting.
+
 ## Combined patron expansions (0.4.139)
 
 - In the orders side-panel settings, `Patron expansions` lets you select

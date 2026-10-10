@@ -203,7 +203,8 @@ function CO:HookBlizzardProfessions()
                     local function whenReady()
                         if not current() or not CO:IsAutoShoppingOnOpen() then return end
                         if CO.queueSelectionRunning then
-                            if (GetTime() - startedAt) < 6 then C_Timer.After(0.2, whenReady) end
+                            local limit = CO.combinedPatronQueue and 60 or 6
+                            if (GetTime() - startedAt) < limit then C_Timer.After(0.2, whenReady) end
                             return
                         end
                         if CO.HasSelectedOrders and not CO:HasSelectedOrders() then return end

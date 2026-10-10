@@ -933,6 +933,9 @@ function CO:IsSafeToPrepareOrderViewForAnalysis(pageFrame)
 end
 
 function CO:GetRowAction(orderID, fallbackOrder)
+    if self.combinedPatronQueue then
+        return "pending", T("COA_STATUS_QUEUE_BUILDING", "Building work order queue..."), fallbackOrder, false
+    end
     if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then
         return "pending", T("COA_PATRON_LOADING", "Loading patron orders from selected expansions..."), fallbackOrder, false
     end

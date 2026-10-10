@@ -132,6 +132,7 @@ function CO:SwitchCombinedPatronChild(childID)
 end
 
 function CO:CancelCombinedPatronLoad()
+    if self.CancelCombinedPatronSelection then self:CancelCombinedPatronSelection() end
     local session = self.combinedPatrons
     if not session then return end
     CancelCallback(session)
@@ -169,6 +170,10 @@ end
 -- Called only from a user's row/queue action. Switching is never followed by
 -- protected actions from a timer; the existing live validations still run.
 function CO:PrepareCombinedPatronAction(order, page)
+    if self.combinedPatronQueue then
+        self:SetStatus(T('COA_STATUS_QUEUE_BUILDING', 'Building work order queue...'))
+        return false
+    end
     if not self:IsCombinedPatronListReady(page) then
         self:SetStatus(T('COA_PATRON_LOADING', 'Loading patron orders from selected expansions...'))
         return false
@@ -187,6 +192,130 @@ function CO:PrepareCombinedPatronAction(order, page)
     self._patronActionReadyAt = CacheNow() + 0.2
     self:SetStatus(T('COA_PATRON_SWITCH_READY', 'Order expansion selected. Press Action again to continue.'))
     return false
+end
+
+local OriginalCancelQueueSelection = CO.CancelQueueSelection
+
+function CO:CancelCombinedPatronSelection()
+    local selection = self.combinedPatronQueue
+    if not selection then return end
+    self.combinedPatronQueue = nil
+    OriginalCancelQueueSelection(self)
+    if selection.owner == (UnitGUID and UnitGUID('player'))
+        and selection.profession == self:GetActiveBaseProfessionID(selection.page)
+        and not self:IsCombinedPatronActionBusy() then
+        self:SwitchCombinedPatronChild(selection.originalChild)
+    end
+end
+
+function CO:CancelQueueSelection()
+    self:CancelCombinedPatronSelection()
+    OriginalCancelQueueSelection(self)
+end
+
+function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
+    local combined = self.combinedPatrons
+    if not combined or not self:IsCombinedPatronListReady(page) or self.queueSelectionRunning then return end
+    if self:IsCombinedPatronActionBusy() then
+        self:SetStatus(T('COA_PATRON_WAIT_ACTION', 'Finish the current order before changing expansions.'))
+        return
+    end
+    OriginalCancelQueueSelection(self)
+    local selection = { page = page, combined = combined, owner = UnitGUID and UnitGUID('player'),
+        profession = self:GetActiveBaseProfessionID(page), originalChild = Child(),
+        token = self._queueSelectionToken, context = self._orderSelectionContext, selected = 0, unknown = 0 }
+    self.combinedPatronQueue = selection
+    self.queueSelectionRunning = true
+    self.qualityWarmSerial = (self.qualityWarmSerial or 0) + 1
+    if not knowledgeOnly and not (mode and mode.automatic) then self:ResetQueueCheckboxes() end
+    self.queueReagentPriceCache = {}
+    wipe(self.queuePreparedOrders or {})
+    self.queuePreparedOrders = self.queuePreparedOrders or {}
+    local opts = self:GetQueueSelectionOptions(knowledgeOnly, mode)
+    local orders, seen = {}, {}
+    for _, order in ipairs(self:GetCombinedPatronOrders(page) or {}) do
+        local key = OrderKey(order.orderID)
+        if key and not seen[key] then orders[#orders + 1] = order; seen[key] = true end
+    end
+    -- Read the owned union, not pooled/visible row buttons. Keep each child
+    -- contiguous so its recipes, quality and concentration are checked live.
+    table.sort(orders, function(a, b)
+        if a.hironPatronChildID ~= b.hironPatronChildID then
+            return (a.hironPatronExpansionID or 0) > (b.hironPatronExpansionID or 0)
+        end
+        return tostring(a.orderID) < tostring(b.orderID)
+    end)
+    self:SetStatus(T('COA_STATUS_QUEUE_BUILDING', 'Building work order queue...'))
+    if self.controlPanel and self.controlPanel.selectAllButton then self.controlPanel.selectAllButton:Disable() end
+
+    local function Alive()
+        if self.combinedPatronQueue ~= selection then return false end
+        if not Current(combined) or self._queueSelectionToken ~= selection.token
+            or self._orderSelectionContext ~= selection.context or self:IsCombinedPatronActionBusy() then
+            self:CancelCombinedPatronSelection()
+            return false
+        end
+        return true
+    end
+    local function Finish()
+        if not Alive() then return end
+        self:SwitchCombinedPatronChild(selection.originalChild)
+        self.combinedPatronQueue = nil
+        self:FinishQueueWorkOrdersSelection(selection)
+        if selection.unknown > 0 then
+            self:SetStatus(string.format(T('COA_PATRON_QUEUE_UNKNOWN', '%d orders still lack quality data. Press Queue again to retry.'), selection.unknown))
+        end
+    end
+    local Step
+    Step = function(index, retry)
+        if not Alive() then return end
+        local order = orders[index]
+        if not order then Finish(); return end
+        local key = OrderKey(order.orderID)
+        if self.selectedOrders[key] or (opts.automatic and self:IsOrderManuallyExcluded(order.orderID)) then
+            Later(0.02, function() Step(index + 1, 0) end)
+            return
+        end
+        if self:IsInactivePatronOrder(order) then
+            if not self:SwitchCombinedPatronChild(order.hironPatronChildID) then
+                selection.unknown = selection.unknown + 1
+                Later(0.02, function() Step(index + 1, 0) end)
+            else
+                Later(0.15, function() Step(index, retry) end)
+            end
+            return
+        end
+        -- Clear an "unknown" cached while this order's expansion was inactive.
+        -- Preparing the matching order view may itself need another frame.
+        if self.InvalidateOrderCaches then self:InvalidateOrderCaches(order.orderID) end
+        wipe(self.queuePreparedOrders)
+        if order.spellID and C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+            local found, info = pcall(C_TradeSkillUI.GetRecipeInfo, order.spellID)
+            if found and info then order.recipeInfo = Copy(info) end
+        end
+        -- Stage the matching transaction before choosing reagent grades.
+        -- Its operation data may arrive on the next frame even though the
+        -- child-profession setter has already returned the correct child ID.
+        pcall(self.PrepareOrderForQueueAnalysis, self, order, page)
+        Later(0.05, function()
+            if not Alive() then return end
+            if self:IsInactivePatronOrder(order) then Step(index, retry); return end
+            local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, order.orderType, opts, page)
+            if not ok then
+                selection.unknown = selection.unknown + 1
+            elseif analysis and analysis.queued then
+                local marked, result = pcall(self.MarkOrderQueuedForCheckbox, self, order, analysis, page)
+                if marked and result then selection.selected = selection.selected + 1
+                elseif not marked then selection.unknown = selection.unknown + 1 end
+            elseif self:GetRecipeKnownState(order) ~= false
+                and self:OrderRequiresConcentrationForQueue(order, page) == nil then
+                if (retry or 0) < 3 then Later(0.15, function() Step(index, (retry or 0) + 1) end); return end
+                selection.unknown = selection.unknown + 1
+            end
+            Later(0.02, function() Step(index + 1, 0) end)
+        end)
+    end
+    Later(0.15, function() Step(1, 0) end)
 end
 
 function CO:HandleCombinedPatronRequest(page, request)
@@ -209,7 +338,7 @@ function CO:HandleCombinedPatronRequest(page, request)
     local previous = self.combinedPatrons
     if previous and previous.identity == identity and previous.page == page and Current(previous) then
         if previous.loading then return true end
-        if previous.ready and ((tonumber(request.offset) or 0) > 0 or self._patronPageInitializing
+        if previous.ready and ((tonumber(request.offset) or 0) > 0 or self._patronPageInitializing or self.combinedPatronQueue
             or self:IsCombinedPatronActionBusy()) then
             page.lastRequest, page.expectMoreRows = Copy(request), false
             if page.ShowOrders then page:ShowOrders(0, true) end

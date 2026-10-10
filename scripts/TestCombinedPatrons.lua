@@ -98,6 +98,13 @@ local function settle()
     end
     error('load never settled')
 end
+local function settleQueue()
+    for _ = 1, 500 do
+        if not CO.queueSelectionRunning then return end
+        tick()
+    end
+    error('queue never settled')
+end
 local function begin()
     local request = { orderType = page.orderType, profession = profession, forCrafter = true, offset = 0 }
     return CO:HandleCombinedPatronRequest(page, request)
@@ -155,10 +162,12 @@ child = 2907
 
 -- Existing automatic rules on the complete union, without another server
 -- request that would overwrite the single shared API buffer.
+local limitedRows = false
 CO.GetVisibleOrderButtonsSorted = function()
     local buttons = {}
     wipe(CO.visibleRowButtons)
-    for _, value in ipairs(published) do
+    for index, value in ipairs(published) do
+        if limitedRows and index > 2 then break end
         local button = { orderID = value.orderID, order = value, pageFrame = page, IsShown = function() return true end }
         buttons[#buttons + 1] = button; CO.visibleRowButtons[button] = true
     end
@@ -167,17 +176,53 @@ end
 CO.GetOrderProfitInfo = function(_, value) return { profit = value.profit } end
 CO.PrepareOrderForQueueAnalysis = function() return false end
 CO.CanSupplyCrafterReagentsForQueue = function() return true end
-CO.OrderRequiresConcentrationForQueue = function() return false end
-CO.GetOrderQualityInfo = function() return { quality = 5 } end
+-- Keep the production concentration decision, including its unknown state.
+-- Simulate the game's order-quality data requiring the active child context.
+CO.GetCachedConcentrationRequirementVisualState = function() return nil, false end
+CO.GetCachedConcentrationRequirement = function() return nil, false end
+CO.SetCachedConcentrationRequirement = noop
+CO.GetCachedOrderQualityInfo = function() return nil, false end
+local checkedChildren = {}
+CO.GetOrderQualityInfo = function(_, value, useConcentration)
+    checkedChildren[#checkedChildren + 1] = { id = value.orderID, child = child }
+    if child ~= value.hironPatronChildID or value.qualityUnavailable then return nil end
+    if value.qualityDelayed then
+        value.firstQualityCheck = value.firstQualityCheck or clock
+        if clock < value.firstQualityCheck + 0.2 then return nil end
+    end
+    return { quality = value.needsConcentration and not useConcentration and 1 or 5,
+        concentrationCost = useConcentration and 10 or nil }
+end
+for _, value in ipairs(published) do value.minQuality = 3 end
 CO.ApplyQueueReagentModeToOrder = function() return true end
 CO.GetOrderActionAvailabilitySortRank = function() return 1 end
+CO.GetQueueConcentrationAmount = function() return 20 end
 CO:RestoreOrderSelection(page, published)
+CO:GetVisibleOrderButtonsSorted()
 CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
+eq(CO.queueSelectionRunning, true, 'asynchronous whole-list analysis')
+eq(CO:PrepareCombinedPatronAction(published[3], page), false, 'no row action during analysis')
+CO:CreateShoppingListForSelectedOrders() -- No partial import before analysis ends.
+settleQueue()
 eq(CO.selectedOrders['1'], nil, 'manual exclusion retained')
 eq(CO.selectedOrders['2'], true)
 eq(CO.selectedOrders['3'], true, 'inactive expansion auto-selected')
 eq(CO.selectedOrders['4'], nil, 'negative profit excluded')
 eq(#requests, 0, 'selection uses union, not another request')
+eq(child, 2907, 'queue restored original child')
+local twwChecked = false
+for _, check in ipairs(checkedChildren) do
+    if check.id == 3 and check.child == 2872 then twwChecked = true end
+end
+eq(twwChecked, true, 'TWW quality checked in TWW context')
+
+-- Separately remove all TWW row buttons: the queue still uses the owned union.
+limitedRows = true
+CO:GetVisibleOrderButtonsSorted()
+CO.selectedOrders['3'], CO._orderSelectionBucket.choices['3'] = nil, nil
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
+settleQueue()
+eq(CO.selectedOrders['3'], true, 'offscreen TWW order selected without a row button')
 
 -- One global inventory reservation, not one subtraction per expansion.
 CO.BuildDisplayReagents = function(_, value) return value.materials end
@@ -187,6 +232,46 @@ local materials, count = CO:BuildShoppingMaterialsForSelectedOrders()
 eq(count, 2)
 eq(#materials, 1)
 eq(materials[1].quantity, 5, 'two orders need 8, bag has 3 once')
+
+-- Real concentration/unknown guards must still win, even on a profitable
+-- order in the second expansion. A delayed answer is retried in that context.
+local function addTww(id)
+    local value = order(id)
+    value.minQuality = 3
+    value.hironPatronChildID, value.hironPatronExpansionID, value.hironPatronExpansionKey = 2872, 10, 'tww'
+    value.recipeInfo = { learned = true }
+    CO.combinedPatrons.orders[#CO.combinedPatrons.orders + 1] = value
+    return value
+end
+local concentrationKnowledge = addTww(5)
+concentrationKnowledge.needsConcentration = true
+concentrationKnowledge.npcOrderRewards = { { itemID = 900 } }
+addTww(6).qualityUnavailable = true
+addTww(7).qualityDelayed = true
+addTww(8).needsConcentration = true
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true, includeKnowledge = true })
+settleQueue()
+eq(CO.selectedOrders['5'], nil, 'knowledge orders never force concentration')
+eq(CO.selectedOrders['6'], nil, 'unknown quality is not treated as safe')
+eq(CO.selectedOrders['7'], true, 'delayed quality data retried')
+eq(CO.selectedOrders['8'], nil, 'normal concentration disabled')
+db.queue.allowConcentration = true
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true, includeKnowledge = true })
+settleQueue()
+eq(CO.selectedOrders['5'], nil, 'knowledge concentration still prohibited')
+eq(CO.selectedOrders['8'], true, 'normal order may use allowed concentration')
+eq(CO.useConcentration['8'], true)
+eq(CO.selectedOrders['1'], nil, 'manual exclusion remains intact')
+
+-- Cancellation while the second child is active restores the initial child,
+-- unlocks controls, and late scheduled steps cannot continue selecting orders.
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true, includeKnowledge = true })
+for _ = 1, 100 do if child == 2872 then break end; tick() end
+eq(child, 2872)
+CO:CancelQueueSelection()
+eq(CO.combinedPatronQueue, nil)
+eq(CO.queueSelectionRunning, false)
+eq(child, 2907, 'cancel restores original child')
 
 -- Only a user action switches the target child and enters the old action
 -- path. Pending operations prevent both refresh switches and setting changes.

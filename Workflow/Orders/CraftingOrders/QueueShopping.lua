@@ -797,8 +797,8 @@ end
 
 function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
     if not order or not order.orderID then return false end
-    -- Recipe-ID operation APIs work across expansions; an inactive expansion
-    -- must not replace the live order-view transaction just for background warming.
+    -- An inactive expansion must not replace the live transaction just for
+    -- background warming. Combined queue selection activates each child first.
     if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return false end
 
     -- Do not let background quality warming rebuild the live transaction after
@@ -1626,7 +1626,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     if self.GetPatronExpansionScope and self:GetPatronExpansionScope(pageFrame) then
-        if self:IsCombinedPatronListReady(pageFrame) then self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode) end
+        if self:IsCombinedPatronListReady(pageFrame) then self:QueueCombinedPatronSelection(knowledgeOnly, mode, pageFrame) end
         return
     end
     local profession = GetProfessionFromPage(pageFrame)
@@ -1932,6 +1932,16 @@ function CO:BuildShoppingMaterialsForSelectedOrders()
     local orderCount = 0
     local seenOrders = {}
     local virtualInventory = {}
+    local buttons = self.visibleRowButtons or {}
+    local combined = self.GetCombinedPatronOrders and self:GetCombinedPatronOrders(self.activePageFrame)
+    if combined then
+        -- The complete selection can include orders below the viewport whose
+        -- pooled row button has not been created (or has already been reused).
+        buttons = {}
+        for _, order in ipairs(combined) do
+            buttons[{ orderID = order.orderID, order = order, IsShown = function() return true end }] = true
+        end
+    end
 
     local function ReserveFromVirtualInventory(itemID, want)
         itemID = tonumber(itemID)
@@ -1949,7 +1959,7 @@ function CO:BuildShoppingMaterialsForSelectedOrders()
     for _ in pairs(self.visibleRowButtons or {}) do visibleCount = visibleCount + 1 end
     DPrint("visibleRowButtons=" .. visibleCount)
 
-    for btn in pairs(self.visibleRowButtons or {}) do
+    for btn in pairs(buttons) do
         if btn and btn:IsShown() and btn.orderID and self:IsOrderSelected(btn.orderID) then
             local orderKey = OrderKey(btn.orderID)
             local order = btn.order
@@ -2220,6 +2230,7 @@ function CO:UpdateShoppingCostText()
 end
 
 function CO:CreateShoppingListForSelectedOrders()
+    if self.combinedPatronQueue then return end
     if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then return end
     if not self:HasSelectedOrders() then
         self:SetStatus(T("COA_STATUS_SHOP_NO_SELECTED", "Check orders first."))
