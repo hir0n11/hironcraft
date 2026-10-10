@@ -1134,6 +1134,8 @@ function CO:UpdateQueueSettingWidgets()
     self:UpdateCheckToggle(panel.autoKnowledgeCheck)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
+    self:UpdateCheckToggle(panel.patronMidnightCheck)
+    self:UpdateCheckToggle(panel.patronTwwCheck)
 
     if panel.minProfitInput and panel.minProfitInput.RefreshValue then
         panel.minProfitInput:RefreshValue()
@@ -1588,6 +1590,27 @@ function CO:EnsureControlPanel(pageFrame)
     panel.autoKnowledgeCheck:HookScript("OnLeave", HideStyledTooltip)
     y = y - 24
 
+    AddHeader(T("COA_PATRON_EXPANSIONS", "Патроны дополнений"))
+    panel.patronMidnightCheck = self:CreateCheckToggle(body, "Midnight",
+        function() return CO.IsPatronExpansionSelected and CO:IsPatronExpansionSelected('midnight') end,
+        function(v) if CO.SetPatronExpansionSelected then CO:SetPatronExpansionSelected('midnight', v) end end, INNER / 2)
+    panel.patronMidnightCheck:SetPoint("TOPLEFT", PADX, y)
+    panel.patronTwwCheck = self:CreateCheckToggle(body, "TWW",
+        function() return CO.IsPatronExpansionSelected and CO:IsPatronExpansionSelected('tww') end,
+        function(v) if CO.SetPatronExpansionSelected then CO:SetPatronExpansionSelected('tww', v) end end, INNER / 2)
+    panel.patronTwwCheck:SetPoint("TOPLEFT", PADX + INNER / 2, y)
+    for _, check in ipairs({ panel.patronMidnightCheck, panel.patronTwwCheck }) do
+        check:HookScript("OnEnter", function(owner)
+            if not Tooltip then return end
+            Tooltip:Clear()
+            Tooltip:AddLine(T("COA_PATRON_EXPANSIONS", "Патроны дополнений"), 13, 1, 0.82, 0.35)
+            Tooltip:AddLine(T("COA_PATRON_EXPANSIONS_TIP", "Selected expansions share one patron list, queue and shopping list. Only trained expansions are loaded."), 11, 0.85, 0.85, 0.85)
+            ShowStyledTooltip(owner)
+        end)
+        check:HookScript("OnLeave", HideStyledTooltip)
+    end
+    y = y - 24
+
     body:SetHeight(-y + 8)
     body = panel.queueActions
     y = -6
@@ -1836,6 +1859,8 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateCheckToggle(panel.autoKnowledgeCheck)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
+    self:UpdateCheckToggle(panel.patronMidnightCheck)
+    self:UpdateCheckToggle(panel.patronTwwCheck)
     for _, w in ipairs({ panel.minProfitInput, panel.knowledgeMinProfitInput,
         panel.bagValueInput, panel.kpValueInput, panel.rejectConfirmInput }) do
         if w then self:StyleWidget(w) end
@@ -1870,6 +1895,9 @@ function CO:UpdateExpansionSwitch(pageFrame)
     local switch = panel and panel.expansionSwitch
     if not switch then return end
     pageFrame = pageFrame or panel.pageFrame or self.activePageFrame
+    -- The combined list is controlled by the persistent checkboxes, not by
+    -- the transient child profession used for the next manual craft.
+    if self.GetPatronExpansionScope and self:GetPatronExpansionScope(pageFrame) then switch:Hide(); return end
 
     local isPatron = pageFrame ~= nil and Enum and Enum.CraftingOrderType
         and pageFrame.orderType == Enum.CraftingOrderType.Npc

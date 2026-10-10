@@ -588,6 +588,15 @@ function CO:GetOrderProfessionExpansionID(order)
 end
 
 function CO:OrderMatchesSelectedProfessionExpansion(order, allowUnknown)
+    local scope, options
+    if self.GetPatronExpansionScope then scope, options = self:GetPatronExpansionScope(self.activePageFrame) end
+    if scope then
+        local expansionID = order and order.hironPatronExpansionID or self:GetOrderProfessionExpansionID(order)
+        for _, option in ipairs(options) do
+            if tonumber(expansionID) == option.expansionID then return true end
+        end
+        return not expansionID and allowUnknown == true
+    end
     local selectedExpansionID = self:GetSelectedProfessionExpansionID()
     local orderExpansionID = self:GetOrderProfessionExpansionID(order)
     if not orderExpansionID then return allowUnknown == true end

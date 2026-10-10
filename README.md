@@ -25,6 +25,25 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Combined patron expansions (0.4.139)
+
+- In the orders side-panel settings, `Patron expansions` lets you select
+  Midnight, TWW or both. Opening Patron then loads the selected trained
+  expansions into one list. Each row identifies its expansion; the existing
+  automatic profit/knowledge selection and manual exclusions still apply.
+- The selected orders generate one shopping list. Shared reagents are added
+  together and existing bag inventory is reserved once across the entire queue.
+- Row actions and the existing queue bind switch to the order's child
+  profession before the normal live checks. Crossing expansions takes a
+  separate press to switch, then another press to act after the UI settles.
+  Claiming, crafting and completion
+  still require player input; none run in background load callbacks.
+- Expansions are read sequentially, with bounded retries, pagination and stale
+  callback guards. Partial/failed reads cannot produce a partial shopping list
+  or active queue. Personal, Guild and Public tabs keep their existing flow.
+- The choice persists through reloads. Until configured, the previous
+  single-expansion behavior remains unchanged.
+
 ## Stable request timers in recycled scanner rows (0.4.138)
 
 - Fixed fresh chat-order rows occasionally showing another order's age (for

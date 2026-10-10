@@ -797,6 +797,9 @@ end
 
 function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
     if not order or not order.orderID then return false end
+    -- Recipe-ID operation APIs work across expansions; an inactive expansion
+    -- must not replace the live order-view transaction just for background warming.
+    if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return false end
 
     -- Do not let background quality warming rebuild the live transaction after
     -- the first click has staged a finishing reagent for this order.
@@ -1622,6 +1625,10 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
 
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
+    if self.GetPatronExpansionScope and self:GetPatronExpansionScope(pageFrame) then
+        if self:IsCombinedPatronListReady(pageFrame) then self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode) end
+        return
+    end
     local profession = GetProfessionFromPage(pageFrame)
     if not profession or not C_CraftingOrders or type(C_CraftingOrders.RequestCrafterOrders) ~= "function" then
         self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
@@ -2213,6 +2220,7 @@ function CO:UpdateShoppingCostText()
 end
 
 function CO:CreateShoppingListForSelectedOrders()
+    if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then return end
     if not self:HasSelectedOrders() then
         self:SetStatus(T("COA_STATUS_SHOP_NO_SELECTED", "Check orders first."))
         return false

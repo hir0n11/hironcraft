@@ -12,7 +12,8 @@ function CO:GetOrderSelectionContext(pageFrame)
     local owner = UnitGUID and UnitGUID('player')
     local profession = pageFrame and GetProfessionFromPage(pageFrame)
     if not owner or not profession or not pageFrame.orderType then return end
-    local expansion = self.GetSelectedProfessionExpansionKey and self:GetSelectedProfessionExpansionKey() or 'current'
+    local expansion = self.GetPatronExpansionScope and self:GetPatronExpansionScope(pageFrame)
+        or (self.GetSelectedProfessionExpansionKey and self:GetSelectedProfessionExpansionKey() or 'current')
     local scope = table.concat({tostring(profession), tostring(pageFrame.orderType), expansion}, ':')
     return owner .. ':' .. scope, owner, scope
 end
@@ -31,6 +32,26 @@ function CO:EnsureOrderSelectionContext(pageFrame)
     scopes[scope] = scopes[scope] or { choices={} }
     local bucket = scopes[scope]
     bucket.choices = bucket.choices or {}
+    if scope:find(':patrons-', 1, true) then
+        -- Turning on the combined view must not erase manual exclusions or
+        -- selections made in either old expansion's patron list.
+        local prefix = tostring(GetProfessionFromPage(pageFrame)) .. ':' .. tostring(pageFrame.orderType) .. ':'
+        for otherScope, saved in pairs(scopes) do
+            if otherScope ~= scope and otherScope:sub(1, #prefix) == prefix then
+                for id, choice in pairs(saved.choices or {}) do
+                    local previous = bucket.choices[id]
+                    if type(choice) == 'table' and (not previous
+                        or (tonumber(choice.updatedAt) or 0) > (tonumber(previous.updatedAt) or 0)
+                        or (saved == self._orderSelectionBucket
+                            and (tonumber(choice.updatedAt) or 0) == (tonumber(previous.updatedAt) or 0))) then
+                        local copy = {}
+                        for key, value in pairs(choice) do copy[key] = value end
+                        bucket.choices[id] = copy
+                    end
+                end
+            end
+        end
+    end
     -- Missing/expired orders never enter the active selection. Keep their
     -- decisions briefly in case a filtered or still-loading list omitted them.
     local cutoff = Now() - 30 * 24 * 60 * 60

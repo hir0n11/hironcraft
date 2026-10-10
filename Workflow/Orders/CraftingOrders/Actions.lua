@@ -235,6 +235,7 @@ function CO:GetQueueButton()
 end
 
 function CO:GetOrderEngine(pageFrame, order)
+    if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return nil end
     if not order then
         return nil, T("COA_STATUS_NO_ENGINE", "Crafting order view is not available.")
     end
@@ -1274,6 +1275,7 @@ function CO:RunRowButtonAction(btn)
 
     self:SetActiveRowButton(btn)
 
+    if self.PrepareCombinedPatronAction and not self:PrepareCombinedPatronAction(btn.order, btn.pageFrame) then return end
     local action, _, order, enabled = self:GetRowAction(btn.orderID, btn.order)
     if not enabled then
         self:SetStatus(T("COA_STATUS_NO_ACTION", "No available action."))

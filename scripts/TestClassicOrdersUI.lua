@@ -590,6 +590,21 @@ for _,check in ipairs({panel.autoKnowledgeCheck,panel.knowledgeProfitCheck}) do
     assert(check.label:GetStringWidth()<=check.label:GetWidth(), 'knowledge setting label is clipped')
 end
 
+-- The expansion picker belongs to the same scrollable settings page and
+-- routes each checkbox independently. It must fit at the narrow sidebar width.
+local patronChoices = { midnight = true }
+CO.IsPatronExpansionSelected = function(_, key) return patronChoices[key] == true end
+CO.SetPatronExpansionSelected = function(_, key, value) patronChoices[key] = value == true end
+CO:UpdateQueueSettingWidgets()
+panel.patronTwwCheck:Click()
+assert(patronChoices.tww and patronChoices.midnight, 'TWW toggle changed Midnight')
+panel.patronMidnightCheck:Click()
+assert(patronChoices.tww and not patronChoices.midnight, 'Midnight toggle changed TWW')
+for _, check in ipairs({ panel.patronMidnightCheck, panel.patronTwwCheck }) do
+    assert(check:GetParent() == queue.body, 'patron expansion escaped queue settings')
+    assert(check.label:GetStringWidth() <= check.label:GetWidth(), 'patron expansion label is clipped')
+end
+
 -- Selecting a lower row may repaint it, but must not promote it above the
 -- list order (the recorded regression was the third row jumping to first).
 local sortOrders = {

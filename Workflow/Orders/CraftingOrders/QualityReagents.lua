@@ -933,6 +933,9 @@ function CO:IsSafeToPrepareOrderViewForAnalysis(pageFrame)
 end
 
 function CO:GetRowAction(orderID, fallbackOrder)
+    if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then
+        return "pending", T("COA_PATRON_LOADING", "Loading patron orders from selected expansions..."), fallbackOrder, false
+    end
     -- The server or a preserved row can still expose a claimed/fulfillable
     -- snapshot after success. Completion is terminal regardless of that data.
     if self:IsOrderFulfilled(orderID) then
@@ -4933,6 +4936,8 @@ function CO:InstallProfitSortHooks()
         local ok = pcall(function()
             C_CraftingOrders.GetCrafterOrders = function(...)
                 local results = { originalGet(...) }
+                local combined = CO.GetCombinedPatronOrders and CO:GetCombinedPatronOrders()
+                if combined then results[1] = combined end
                 local orders = results[1]
                 if CO:IsEnabled() and CO.ahuiSortCrafterOrdersByAction and type(orders) == "table" then
                     local sorted = {}

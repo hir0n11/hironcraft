@@ -1142,12 +1142,17 @@ function CL:PopulateRow(row, order)
 
     local spellID = order.spellID
     local recipeInfo = spellID and C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(spellID)
+    recipeInfo = recipeInfo or order.recipeInfo
     local icon = recipeInfo and recipeInfo.icon or (spellID and GetSpellTexture and GetSpellTexture(spellID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
     row.icon:SetTexture(icon)
     row.name:SetText((recipeInfo and recipeInfo.name) or ("Recipe " .. tostring(spellID)))
     local customerText = order.customerName or order.npcCustomerName or ""
     local generous = type(AddonScan) == "table" and AddonScan.Generous
     if generous and order.customerName then customerText = generous.Decorate(order.customerName, customerText) end
+    if order.hironPatronExpansionKey then
+        local expansionLabel = order.hironPatronExpansionKey == 'tww' and 'TWW' or 'Midnight'
+        customerText = customerText .. ' |cffb5a78a[' .. expansionLabel .. ']|r'
+    end
     row.customer:SetText(customerText)
     self:PlaceNameLines(row)
 
@@ -1643,6 +1648,7 @@ local function ListScopeKey(pageFrame)
     end
     local expansion = CO.GetSelectedProfessionExpansionKey
         and CO:GetSelectedProfessionExpansionKey() or "current"
+    if CO.GetPatronExpansionScope then expansion = CO:GetPatronExpansionScope(pageFrame) or expansion end
     return table.concat({
         tostring(profession or "unknown"),
         tostring(pageFrame and pageFrame.orderType or "unknown"),
@@ -1654,6 +1660,7 @@ function CL:ScopeKey(pageFrame) return ListScopeKey(pageFrame) end
 
 local UnregisterRow
 function CL:ClearScope(pageFrame)
+    if CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
     pageFrame.ahuiScopedOrders = { scope = ListScopeKey(pageFrame), orders = {} }
     if pageFrame.requestCallback then
         pageFrame.requestCallback:Cancel()
@@ -1992,6 +1999,11 @@ function CL:Refresh(pageFrame)
         local pb = isActiveCraft(b) and 1 or 0
         if pa ~= pb then return pa > pb end
 
+        if not sortCol and a.hironPatronExpansionID and b.hironPatronExpansionID
+            and a.hironPatronExpansionID ~= b.hironPatronExpansionID then
+            return a.hironPatronExpansionID > b.hironPatronExpansionID
+        end
+
         if sortCol then
             local va, vb
             if sortCol == "name" then
@@ -2165,6 +2177,7 @@ local function AttachHooks()
             local send = target.SendOrderRequest
             target.SendOrderRequest = function(pageFrame, request, ...)
                 pageFrame.ahuiRequestedScope = ListScopeKey(pageFrame)
+                if CO.HandleCombinedPatronRequest and CO:HandleCombinedPatronRequest(pageFrame, request) then return end
                 return send(pageFrame, request, ...)
             end
         end
@@ -2196,10 +2209,20 @@ local function AttachHooks()
             local original = target.Init
             target.Init = function(pageFrame, info, ...)
                 local previous = pageFrame.professionInfo
-                if CO:IsEnabled() and (not previous or not info or previous.professionID ~= info.professionID) then
+                local samePatronProfession = CO.GetPatronExpansionScope and CO:GetPatronExpansionScope(pageFrame)
+                    and previous and info and previous.profession ~= nil and previous.profession == info.profession
+                if CO:IsEnabled() and not samePatronProfession
+                    and (not previous or not info or previous.professionID ~= info.professionID) then
                     CL:ClearScope(pageFrame)
                 end
-                return original(pageFrame, info, ...)
+                -- A delayed Blizzard Init from our child switch must not
+                -- start another two-expansion load after that load just ended.
+                local previousFlag = CO._patronPageInitializing
+                if samePatronProfession then CO._patronPageInitializing = true end
+                local result = { pcall(original, pageFrame, info, ...) }
+                CO._patronPageInitializing = previousFlag
+                if not result[1] then error(result[2], 0) end
+                return unpack(result, 2)
             end
         end
     end
@@ -2244,6 +2267,7 @@ local function AttachHooks()
     if ProfessionsFrame and ProfessionsFrame.HookScript and not ProfessionsFrame.ahuiCustomListHidehooked then
         ProfessionsFrame.ahuiCustomListHidehooked = true
         ProfessionsFrame:HookScript("OnHide", function()
+            if CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
             if CO.visibleRowButtons then
                 wipe(CO.visibleRowButtons)
             end
