@@ -289,8 +289,7 @@ function CO:GetOneButtonPersonalOrders()
     for _, order in ipairs(orders) do
         local fulfilled = type(order) == "table"
             and order.orderID
-            and self.fulfilledOrderIDs
-            and self.fulfilledOrderIDs[order.orderID]
+            and self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID)
         if type(order) == "table" and order.orderID
             and (personalType == nil or order.orderType == nil or order.orderType == personalType)
             and not fulfilled

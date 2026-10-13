@@ -1631,6 +1631,7 @@ function CL:PopulateRow(row, order)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", function(self, button)
         if button == "RightButton" then return end
+        if CO.IsOrderUnavailable and CO:IsOrderUnavailable(order.orderID) then return end
         if CO.IsOrderActionInProgress and CO:IsOrderActionInProgress() then return end
         -- An explicit inspection ends list ownership. Automatic native view
         -- changes during queue actions must not have the same effect.
@@ -1813,18 +1814,21 @@ local function CopyOrderList(orders)
     return copy
 end
 
-local function IsFulfilledOrder(order)
+local function IsUnavailableOrder(order)
     local orderID = order and order.orderID
     local fulfilled = CO.fulfilledOrderIDs
-    return orderID and fulfilled
+    local declined = CO.declinedOrderIDs
+    return orderID and ((fulfilled
         and (fulfilled[orderID] == true or fulfilled[tostring(orderID)] == true
-            or fulfilled[tonumber(orderID)] == true)
+            or fulfilled[tonumber(orderID)] == true)) or (declined
+        and (declined[orderID] == true or declined[tostring(orderID)] == true
+            or declined[tonumber(orderID)] == true)))
 end
 
-local function WithoutFulfilledOrders(orders)
+local function WithoutUnavailableOrders(orders)
     local remaining = {}
     for _, order in ipairs(orders or {}) do
-        if not IsFulfilledOrder(order) then remaining[#remaining + 1] = order end
+        if not IsUnavailableOrder(order) then remaining[#remaining + 1] = order end
     end
     return remaining
 end
@@ -1857,7 +1861,7 @@ function CL:StabilizeOrdersDuringAction(container, orders)
         local key = oldOrder and oldOrder.orderID and tostring(oldOrder.orderID)
         if key and not used[key] then
             local order = latest[key] or oldOrder
-            if not IsFulfilledOrder(order) then
+            if not IsUnavailableOrder(order) then
                 merged[#merged + 1] = order
                 used[key] = true
             end
@@ -1865,7 +1869,7 @@ function CL:StabilizeOrdersDuringAction(container, orders)
     end
     for _, order in ipairs(orders or {}) do
         local key = order and order.orderID and tostring(order.orderID)
-        if key and not used[key] and not IsFulfilledOrder(order) then
+        if key and not used[key] and not IsUnavailableOrder(order) then
             merged[#merged + 1] = order
             used[key] = true
         end
@@ -2031,8 +2035,8 @@ function CL:Refresh(pageFrame)
         orders = filtered
     end
 
-    if CO.fulfilledOrderIDs and #orders > 0 then
-        orders = WithoutFulfilledOrders(orders)
+    if (CO.fulfilledOrderIDs or CO.declinedOrderIDs) and #orders > 0 then
+        orders = WithoutUnavailableOrders(orders)
     end
 
     orders = self:StabilizeOrdersDuringAction(container, orders)
@@ -2047,7 +2051,7 @@ function CL:Refresh(pageFrame)
             and container._lastGoodScope == currentScope then
             -- Anti-blink snapshots may outlive the last order's successful
             -- completion. Never resurrect that row after filtering it above.
-            orders = WithoutFulfilledOrders(container._lastGoodOrders)
+            orders = WithoutUnavailableOrders(container._lastGoodOrders)
             container._lastGoodOrders = orders
             if #orders > 0 and not container._emptyRetryQueued and C_Timer and C_Timer.After then
                 container._emptyRetryQueued = true

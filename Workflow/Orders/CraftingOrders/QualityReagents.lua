@@ -894,6 +894,38 @@ function CO:IsOrderFulfilled(orderID)
             or fulfilled[tonumber(orderID)] == true)
 end
 
+function CO:IsOrderUnavailable(orderID)
+    local declined = self.declinedOrderIDs
+    return self:IsOrderFulfilled(orderID) or (orderID ~= nil and declined ~= nil
+        and (declined[orderID] == true or declined[tostring(orderID)] == true
+            or declined[tonumber(orderID)] == true))
+end
+
+-- Only an ID-bearing successful server response is terminal. Native buttons
+-- do not create our terminalAction, but must retire the same cached rows and
+-- remembered selections. Never infer identity from recipe or customer name.
+function CO:RetireOrder(orderID, declined)
+    if not orderID then return false end
+    local changed = not self:IsOrderUnavailable(orderID)
+    local field = declined and "declinedOrderIDs" or "fulfilledOrderIDs"
+    self[field] = self[field] or {}
+    self[field][orderID] = true
+    local key = OrderKey(orderID)
+    for _, fieldName in ipairs({"rowStates", "selectedOrders", "orderIssues", "rejectedOrderIDs"}) do
+        local values = self[fieldName]
+        if values then
+            values[orderID], values[key] = nil, nil
+            local numericID = tonumber(orderID)
+            if numericID then values[numericID] = nil end
+        end
+    end
+    if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(orderID) end
+    if self.InvalidateOrderCaches then self:InvalidateOrderCaches(orderID) end
+    if SameOrderID(self.currentQueueOrderID, orderID) then self.currentQueueOrderID = nil end
+    if SameOrderID(self.craftedOrderID, orderID) then self.craftedOrderID = nil end
+    return changed
+end
+
 function CO:GetEffectiveOrder(orderID, fallback)
     if self.RememberOrderIdentity and fallback and SameOrderID(fallback.orderID, orderID) then
         self:RememberOrderIdentity(fallback)
@@ -951,8 +983,9 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
     -- The server or a preserved row can still expose a claimed/fulfillable
     -- snapshot after success. Completion is terminal regardless of that data.
-    if self:IsOrderFulfilled(orderID) then
-        return "none", T("COA_STATUS_FULFILLED", "Order completed."), fallbackOrder, false
+    if self:IsOrderUnavailable(orderID) then
+        return "none", self:IsOrderFulfilled(orderID) and T("COA_STATUS_FULFILLED", "Order completed.")
+            or T("COA_ROW_NOT_AVAILABLE", "Order is no longer available."), fallbackOrder, false
     end
     local order = self:GetEffectiveOrder(orderID, fallbackOrder)
     local claimed = self:GetClaimedOrder()

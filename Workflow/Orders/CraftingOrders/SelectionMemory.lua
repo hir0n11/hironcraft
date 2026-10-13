@@ -159,7 +159,7 @@ function CO:RestoreOrderSelection(pageFrame, orders)
     for _, order in ipairs(orders) do
         local key = OrderKey(order.orderID)
         if key and (not order.orderType or order.orderType == pageFrame.orderType)
-            and not (self.fulfilledOrderIDs and self.fulfilledOrderIDs[order.orderID]) then
+            and not (self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID)) then
             present[key] = true
             local choice = bucket.choices[key]
             if choice and choice.spellID and order.spellID and choice.spellID ~= order.spellID then
@@ -179,7 +179,7 @@ function CO:RestoreOrderSelection(pageFrame, orders)
     end
     local inFlight = self.IsOrderActionInProgress and self:IsOrderActionInProgress()
     local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
-    inFlight = inFlight or (claimed and not (self.IsOrderFulfilled and self:IsOrderFulfilled(claimed.orderID)))
+    inFlight = inFlight or (claimed and not (self.IsOrderUnavailable and self:IsOrderUnavailable(claimed.orderID)))
     for key in pairs(self.selectedOrders) do
         -- Claim/craft refreshes can briefly expose an empty/partial API list.
         -- Completion handlers remove the actual finished order explicitly.

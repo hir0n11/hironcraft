@@ -5,7 +5,7 @@ local frames, methods, frame, bounds, noop = model.frames, model.methods, model.
 methods.Disable = noop
 for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
 
-local CO, PT = {}, { L = {} }
+local CO, PT = {}, { L = {}, version = '9.8.7-test' }
 PT.CraftingOrders = CO
 HironCraftProfit = PT
 STANDARD_TEXT_FONT = 'Fonts/FRIZQT__.TTF'
@@ -85,6 +85,30 @@ anchor:SetPoint('BOTTOMRIGHT', -8, 8)
 page.BrowseFrame.OrderList = anchor
 CO:EnsureControlPanel(page)
 local panel = CO.controlPanel
+assert(page.hironVersionLabel and page.hironVersionLabel.text == 'HironCraft 9.8.7-test',
+    'crafting window does not show the loaded addon version')
+local versionLabel = page.hironVersionLabel
+CO:EnsureControlPanel(page)
+assert(page.hironVersionLabel == versionLabel, 'reopening the panel duplicated the version label')
+assert(versionLabel.fontFlags == '' and versionLabel.fontSize == 10,
+    'version label is not small plain text')
+assert(versionLabel:GetParent() == page and versionLabel.anchors.TOPRIGHT[1] == page,
+    'version label depends on the sidebar or browse list')
+page.BrowseFrame:Hide()
+assert(versionLabel:IsVisible(), 'native detail view hid the version label')
+page.BrowseFrame:Show()
+page:Hide()
+assert(not versionLabel:IsVisible(), 'version label leaked outside the orders page')
+page:Show()
+CO.IsEnabled = function() return false end
+CO:EnsureVersionLabel(page)
+assert(not versionLabel:IsShown(), 'disabled order module retained its version label')
+CO.IsEnabled = function() return true end
+PT.version = '9.8.8-test'
+CO:EnsureControlPanel(page)
+assert(versionLabel.text == 'HironCraft 9.8.8-test', 'version label hardcodes a release number')
+PT.version = '9.8.7-test'
+CO:EnsureVersionLabel(page)
 local container = CL:EnsureScrollFrame(page)
 local personalCols = CL:ActiveCols()
 assert(not personalCols.reward and not container.header.cols.reward:IsVisible(),
@@ -956,48 +980,51 @@ CL:Refresh(page)
 -- left. Unfinished rows still retain their frames through transient empties.
 do
     local previousOrders, previousFulfilled = CL.GetOrders, CO.fulfilledOrderIDs
-    for _, orderType in ipairs({1, 2, 3, 4}) do
-        page.orderType = orderType
-        CO.fulfilledOrderIDs = {}
-        CL.GetOrders = function() return {sortOrders[1], sortOrders[2]} end
-        container._listScope = nil
-        CL:Refresh(page)
-        local survivor = container.rowsByOrderID['102']
-        CO.fulfilledOrderIDs[101] = true
-        CL:Refresh(page)
-        assert(#container.rows == 1 and container.rows[1] == survivor,
-            'completing one order removed or reassigned a surviving row')
+    for _, terminalField in ipairs({'fulfilledOrderIDs', 'declinedOrderIDs'}) do
+        for _, orderType in ipairs({1, 2, 3, 4}) do
+            page.orderType = orderType
+            CO.fulfilledOrderIDs = {}
+            CL.GetOrders = function() return {sortOrders[1], sortOrders[2]} end
+            container._listScope = nil
+            CL:Refresh(page)
+            local survivor = container.rowsByOrderID['102']
+            CO[terminalField] = {[101]=true}
+            CL:Refresh(page)
+            assert(#container.rows == 1 and container.rows[1] == survivor,
+                'completing one order removed or reassigned a surviving row')
 
-        -- The last row must not be restored from the anti-blink snapshot,
-        -- whether the server still returns it or has already removed it.
-        CO.fulfilledOrderIDs['102'] = true
-        CL:Refresh(page)
-        assert(#container.rows == 0 and container.emptyText:IsShown(),
-            'the last completed order was revived by the empty-list fallback')
-        assert(not survivor:IsShown() and not CO.visibleRowButtons[survivor.action]
-            and not CO.rowButtonsByOrderID['102'], 'completed row kept its click/hotkey target')
-        CL.GetOrders = function() return {} end
-        CL:Refresh(page)
-        assert(#container.rows == 0, 'an empty server answer revived a completed order')
+            -- The last row must not be restored from the anti-blink snapshot,
+            -- whether the server still returns it or has already removed it.
+            CO[terminalField]['102'] = true
+            CL:Refresh(page)
+            assert(#container.rows == 0 and container.emptyText:IsShown(),
+                'the last completed order was revived by the empty-list fallback')
+            assert(not survivor:IsShown() and not CO.visibleRowButtons[survivor.action]
+                and not CO.rowButtonsByOrderID['102'], 'completed row kept its click/hotkey target')
+            CL.GetOrders = function() return {} end
+            CL:Refresh(page)
+            assert(#container.rows == 0, 'an empty server answer revived a completed order')
 
-        -- A genuine transient empty snapshot still keeps unfinished rows.
-        CO.fulfilledOrderIDs = {}
-        CL.GetOrders = function() return {sortOrders[3]} end
-        CL:Refresh(page)
-        local unfinished = container.rows[1]
-        CL.GetOrders = function() return {} end
-        CL:Refresh(page)
-        assert(#container.rows == 1 and container.rows[1] == unfinished,
-            'the completed-order fix disabled anti-blink protection for unfinished orders')
+            -- A genuine transient empty snapshot still keeps unfinished rows.
+            CO[terminalField] = {}
+            CL.GetOrders = function() return {sortOrders[3]} end
+            CL:Refresh(page)
+            local unfinished = container.rows[1]
+            CL.GetOrders = function() return {} end
+            CL:Refresh(page)
+            assert(#container.rows == 1 and container.rows[1] == unfinished,
+                'the completed-order fix disabled anti-blink protection for unfinished orders')
 
-        -- Completion wins even while another action keeps the old snapshot.
-        CO.IsOrderActionInProgress = function() return true end
-        CL:Refresh(page)
-        CO.fulfilledOrderIDs[103] = true
-        CL:Refresh(page)
-        assert(#container.rows == 0, 'the action-settle snapshot revived a completed order')
-        CO.IsOrderActionInProgress = nil
-        container._actionOrders, container._actionHoldUntil = nil, nil
+            -- Completion wins even while another action keeps the old snapshot.
+            CO.IsOrderActionInProgress = function() return true end
+            CL:Refresh(page)
+            CO[terminalField][103] = true
+            CL:Refresh(page)
+            assert(#container.rows == 0, 'the action-settle snapshot revived a completed order')
+            CO.IsOrderActionInProgress = nil
+            container._actionOrders, container._actionHoldUntil = nil, nil
+        end
+        CO[terminalField] = nil
     end
     CL.GetOrders, CO.fulfilledOrderIDs = previousOrders, previousFulfilled
     page.orderType = Enum.CraftingOrderType.Personal

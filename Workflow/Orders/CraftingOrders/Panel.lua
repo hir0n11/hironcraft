@@ -1356,7 +1356,30 @@ function CO:AnchorControlPanelToOrderList(panel, pageFrame)
     end
 end
 
+function CO:EnsureVersionLabel(pageFrame)
+    if not pageFrame then return end
+    local label = pageFrame.hironVersionLabel
+    if not self:IsEnabled() then
+        if label then label:Hide() end
+        return
+    end
+    if not label then
+        label = pageFrame:CreateFontString(nil, "OVERLAY")
+        ApplyFont(label, 10, "")
+        label:SetShadowOffset(0, 0)
+        label:SetTextColor(0.58, 0.58, 0.58)
+        label:SetJustifyH("RIGHT")
+        -- Both the browse list and native order detail belong to this page.
+        -- Keep the label outside the collapsible sidebar and away from Close.
+        label:SetPoint("TOPRIGHT", _G.ProfessionsFrame or pageFrame, "TOPRIGHT", -36, -11)
+        pageFrame.hironVersionLabel = label
+    end
+    label:SetText("HironCraft " .. tostring(PT.version or "?"))
+    label:Show()
+end
+
 function CO:EnsureControlPanel(pageFrame)
+    self:EnsureVersionLabel(pageFrame)
     if not self:IsEnabled() then
         if self.controlPanel then
             self.controlPanel:Hide()

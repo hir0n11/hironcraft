@@ -294,7 +294,7 @@ function CO:HookBlizzardProfessions()
 end
 
 function CO:MarkOrderCraftedReady(orderID)
-    if not orderID or (self.IsOrderFulfilled and self:IsOrderFulfilled(orderID)) then return false end
+    if not orderID or (self.IsOrderUnavailable and self:IsOrderUnavailable(orderID)) then return false end
     if self.pendingFulfillOrderID or self.terminalAction then return false end
     if self.pendingCraftOrderID and not SameOrderID(self.pendingCraftOrderID, orderID) then return false end
 
@@ -561,16 +561,49 @@ function CO:OnEvent(event, ...)
         return
     end
 
+    if event == "CRAFTINGORDERS_REJECT_ORDER_RESPONSE" then
+        local result, orderID = ...
+        if not orderID then return end
+        if Enum and Enum.CraftingOrderResult and result == Enum.CraftingOrderResult.Ok then
+            local changed = self:RetireOrder(orderID, true)
+            -- A late response can remove its own stale row, but must not
+            -- restart a search or change the status of a different craft.
+            if changed and not self:IsOrderActionInProgress() then
+                if self.RefreshPersonalOrdersAfterTerminalAction then
+                    self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
+                end
+                self:UpdateControlPanel()
+                self:RefreshVisibleRowsSoon()
+            end
+        elseif self.rejectedOrderIDs then
+            self.rejectedOrderIDs[OrderKey(orderID)] = nil
+            self:RefreshVisibleRowsSoon()
+        end
+        return
+    end
+
     if event == "CRAFTINGORDERS_FULFILL_ORDER_RESPONSE" then
         local result, orderID = ...
         local terminal = self.terminalAction
-        if terminal and terminal.kind == "release" then return end
-        if not orderID and terminal then orderID = terminal.orderID end
+        if not orderID and terminal and terminal.kind == "fulfill" then orderID = terminal.orderID end
+        local changed = false
+        if orderID and Enum and Enum.CraftingOrderResult and result == Enum.CraftingOrderResult.Ok then
+            changed = self:RetireOrder(orderID, false)
+        end
         local ownsResponse = (terminal and SameOrderID(terminal.orderID, orderID))
             or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID))
         -- A late/duplicate completion for an old order cannot finish a newer
         -- transition, replace its status, or trigger a list refresh mid-craft.
-        if not ownsResponse then return end
+        if not ownsResponse or (terminal and terminal.kind == "release") then
+            if changed and not self:IsOrderActionInProgress() then
+                if self.RefreshPersonalOrdersAfterTerminalAction then
+                    self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
+                end
+                self:UpdateControlPanel()
+                self:RefreshVisibleRowsSoon()
+            end
+            return
+        end
         if self.pendingFulfillOrderID and (not orderID or SameOrderID(orderID, self.pendingFulfillOrderID)) then
             self.pendingFulfillOrderID = nil
         end
@@ -609,6 +642,22 @@ function CO:OnEvent(event, ...)
 
     if event == "CRAFTINGORDERS_RELEASE_ORDER_RESPONSE" then
         local result, orderID = ...
+        if orderID and IsResultOk(result) then
+            -- Native Cancel/Release has no pendingReleaseOrderID. Its cached
+            -- Claimed row must not override the next fresh Created snapshot.
+            if self.rowStates then
+                self.rowStates[orderID], self.rowStates[tostring(orderID)] = nil, nil
+                local numericID = tonumber(orderID)
+                if numericID then self.rowStates[numericID] = nil end
+            end
+            self:InvalidateOrderCaches(orderID)
+            if not self:IsOrderActionInProgress() then
+                if self.RefreshPersonalOrdersAfterTerminalAction then
+                    self:RefreshPersonalOrdersAfterTerminalAction(self.activePageFrame)
+                end
+                self:RefreshVisibleRowsSoon()
+            end
+        end
         if self.pendingReleaseOrderID and (not orderID or SameOrderID(orderID, self.pendingReleaseOrderID))
             and not IsResultOk(result) then
             self.pendingReleaseOrderID, self.pendingReleaseForReject = nil, nil
@@ -805,6 +854,7 @@ SafeRegisterEvent(eventFrame, "TRADE_SKILL_SHOW")
 SafeRegisterEvent(eventFrame, "TRADE_SKILL_CLOSE")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIM_ORDER_RESPONSE")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_RELEASE_ORDER_RESPONSE")
+SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_REJECT_ORDER_RESPONSE")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_ADDED")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED")
 SafeRegisterEvent(eventFrame, "CRAFTINGORDERS_CLAIMED_ORDER_UPDATED")

@@ -165,6 +165,10 @@ function CO:IsOrderSelected(orderID)
 end
 
 function CO:SetOrderSelected(orderID, selected)
+    if selected and self.IsOrderUnavailable and self:IsOrderUnavailable(orderID) then
+        if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
+        return
+    end
     if self.queueSelectionRunning or self._autoQueuePending then
         if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
         return
@@ -230,7 +234,7 @@ function CO:SelectAllVisibleOrders(pageFrame, automatic)
     for _, o in ipairs(orders) do
         if type(o) == "table" and o.orderID then
             local typeOk = (currentType == nil) or (o.orderType == nil) or (o.orderType == currentType)
-            local fulfilled = self.fulfilledOrderIDs and self.fulfilledOrderIDs[o.orderID]
+            local fulfilled = self.IsOrderUnavailable and self:IsOrderUnavailable(o.orderID)
             if typeOk and not fulfilled then
                 local key = OrderKey(o.orderID)
                 if key and not (automatic and self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(o.orderID)) then

@@ -303,7 +303,7 @@ end
 
 function CO:GetQueueButton()
     local claimed = self:GetClaimedOrder()
-    if claimed and not (self.IsOrderFulfilled and self:IsOrderFulfilled(claimed.orderID))
+    if claimed and not (self.IsOrderUnavailable and self:IsOrderUnavailable(claimed.orderID))
         and self:IsOrderSelected(claimed.orderID) then
         local claimedBtn = self:GetVisibleButtonForOrder(claimed.orderID)
         if claimedBtn then return claimedBtn end
@@ -616,6 +616,7 @@ function CO:AskRejectConfirmation(order, pageFrame, releasedForReject, rejection
 end
 
 function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
+    if order and self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID) then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
         self:SetStatus(T("COA_STATUS_NO_ORDER", "Select an order first."))
@@ -779,7 +780,7 @@ function CO:MarkClaimedOrderReady(orderID, claimed)
     if not orderID or not claimed or not SameOrderID(claimed.orderID, orderID) then
         return false
     end
-    if self.IsOrderFulfilled and self:IsOrderFulfilled(orderID) then return false end
+    if self.IsOrderUnavailable and self:IsOrderUnavailable(orderID) then return false end
     if self.pendingClaimOrderID and not SameOrderID(self.pendingClaimOrderID, orderID) then return false end
 
     if self.pendingClaimOrderID and SameOrderID(self.pendingClaimOrderID, orderID) then
@@ -843,7 +844,7 @@ function CO:ClaimOrder(order, pageFrame)
     if not self:IsOrderListReadyForAction(pageFrame) then return false end
     local claimed = self:GetClaimedOrder()
     if claimed then return false end
-    if self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID) then return false end
+    if self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID) then return false end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not self:IsAtUsableCraftingOrderTable(pageFrame) then
         self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
@@ -1038,7 +1039,7 @@ end
 function CO:CraftOrderFromRow(order, pageFrame, btn)
     if not order or not order.orderID then return false end
     if self:IsOrderSubmissionPending() then return false end
-    if self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID) then return false end
+    if self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID) then return false end
     if self.GetEffectiveOrder then
         order = self:GetEffectiveOrder(order.orderID, order) or order
     end
@@ -1380,7 +1381,7 @@ end
 function CO:FulfillOrder(order, pageFrame)
     if not order or not order.orderID then return false end
     if self:IsOrderSubmissionPending() then return false end
-    if (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID))
+    if (self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID))
         or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, order.orderID)) then
         return false
     end
@@ -1428,7 +1429,7 @@ end
 
 function CO:RunRowButtonAction(btn)
     if not btn or not btn.orderID then return end
-    if self.IsOrderFulfilled and self:IsOrderFulfilled(btn.orderID) then return end
+    if self.IsOrderUnavailable and self:IsOrderUnavailable(btn.orderID) then return end
 
     -- No rebinding, expansion switching or diagnostic spam during any pending
     -- stage, even when another row is clicked or refreshed under the pointer.

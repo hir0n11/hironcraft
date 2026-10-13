@@ -34,6 +34,7 @@ local frame = {
 local E = setmetatable({
     PT = {},
     CO = CO,
+    SlashCmdList = {},
     T = function(_, fallback) return fallback end,
     OrderKey = function(value) return value and tostring(value) end,
     SameOrderID = function(lhs, rhs)
@@ -54,12 +55,21 @@ local E = setmetatable({
 }, { __index = _G })
 _G.HironCraftProfitCraftingOrdersEnv = E
 
+-- Load the shared terminal-state predicate used by the real counter.
+dofile("Workflow/Orders/CraftingOrders/QualityReagents.lua")
+for key in pairs(CO) do
+    if key ~= 'IsOrderFulfilled' and key ~= 'IsOrderUnavailable' then CO[key] = nil end
+end
 dofile("Workflow/Orders/CraftingOrders/OneButton.lua")
 
 CO.fulfilledOrderIDs = { [1001] = true }
 local returned, count = CO:GetOneButtonPersonalOrders()
 assert(returned == orders)
 assert(count == 1, "cached fulfilled order was counted as an available Personal order")
+CO.declinedOrderIDs = { ['1002'] = true }
+local _, declinedCount = CO:GetOneButtonPersonalOrders()
+assert(declinedCount == 0, "cached declined order was counted as an available Personal order")
+CO.declinedOrderIDs = nil
 
 local page = {
     orderType = personalType,

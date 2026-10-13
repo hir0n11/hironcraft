@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Native order actions and visible version (0.4.149)
+
+- A small gray HironCraft version label now appears in the upper-right corner
+  of the crafting orders window, in both the list and native order detail.
+  It uses the loaded addon metadata and does not depend on the sidebar.
+- Successful server responses now retire manually declined and manually
+  completed orders from row actions, selection memory, personal-order counts
+  and anti-blink snapshots. Two identical items for the same customer remain
+  separate orders, keyed by their order IDs.
+- Failed responses do not retire orders. Duplicate or late terminal responses
+  cannot replace another order's progress or restart its search mid-craft.
+- Releasing through Blizzard clears the old Claimed row cache, but does not
+  retire the order: a fresh available order can be claimed again.
+- Tests cover native and addon completion, declined stale rows, transient
+  empty results, ID normalization, siblings, failures and late responses.
+  These are offline regression checks, not an in-game verification.
+
 ## Patron multiselect and conditional expansion thresholds (0.4.148)
 
 - Selection settings now use one dropdown with independent TWW/Midnight

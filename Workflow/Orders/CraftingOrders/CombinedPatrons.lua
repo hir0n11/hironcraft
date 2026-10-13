@@ -117,7 +117,7 @@ function CO:IsCombinedPatronActionBusy()
     if self.pendingClaimOrderID or self.pendingCraftOrderID or self.pendingFulfillOrderID
         or self.pendingReleaseOrderID or self.progressOrderID then return true end
     local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
-    return claimed and not (self.IsOrderFulfilled and self:IsOrderFulfilled(claimed.orderID)) or false
+    return claimed and not (self.IsOrderUnavailable and self:IsOrderUnavailable(claimed.orderID)) or false
 end
 
 function CO:SwitchCombinedPatronChild(childID)
@@ -153,7 +153,7 @@ function CO:GetCombinedPatronOrders(page)
     if not session or not Current(session) or session.page ~= page or not session.ready then return {} end
     local orders = {}
     for _, order in ipairs(session.orders) do
-        if not (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID)) then
+        if not (self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID)) then
             orders[#orders + 1] = self.GetEffectiveOrder and self:GetEffectiveOrder(order.orderID, order) or order
         end
     end
