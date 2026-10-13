@@ -1240,8 +1240,12 @@ function CL:PopulateRow(row, order)
                             sum = sum + pq
                         end
                         available = ok and sum >= need
-                    elseif (CO.GetQueueReagentMode and CO:GetQueueReagentMode()) == "auto" and CO.BuildOwnedMixForEntry then
-                        local mix, remaining = CO:BuildOwnedMixForEntry(order, reagent, {})
+                    elseif CO.BuildOwnedMixForEntry and CO.GetQueueReagentMode
+                        and (CO:GetQueueReagentMode() == "auto" or (CO:GetQueueReagentMode() == "profit"
+                            and CO:GetQueueFallbackMinimumTier(selected))) then
+                        local minimumTier = CO:GetQueueReagentMode() == "profit"
+                            and CO:GetQueueFallbackMinimumTier(selected) or nil
+                        local mix, remaining = CO:BuildOwnedMixForEntry(order, reagent, {}, minimumTier)
                         available = remaining <= 0
                         if available then mixedCount = #mix else missing = remaining end
                     else
@@ -1422,6 +1426,8 @@ function CL:PopulateRow(row, order)
     elseif action == "pending" or action == "claiming" then actionLabel = "..."
     elseif action == "crafting" then actionLabel = L("COA_ACTION_CRAFTING", "Crafting")
     elseif action == "fulfilling" then actionLabel = L("COA_ACTION_FULFILLING", "Completing")
+    elseif action == "blocked" and CO.GetBlockingClaimedOrderMessage
+        and CO:GetBlockingClaimedOrderMessage(order.orderID) then actionLabel = L("COA_ACTION_BUSY", "Busy")
     end
     row.action.text:SetText(actionLabel)
 
@@ -1631,10 +1637,11 @@ function CL:PopulateRow(row, order)
         if CO.SetActiveRowButton then CO:SetActiveRowButton(row.action) end
         local pf = CO.activePageFrame
         if not pf or not pf.OrderView then return end
+        local currentOrder = CO.GetEffectiveOrder and CO:GetEffectiveOrder(order.orderID, order) or order
         if ProfessionsCraftingOrderPageMixin and ProfessionsCraftingOrderPageMixin.ViewOrder then
-            ProfessionsCraftingOrderPageMixin.ViewOrder(pf, order)
+            ProfessionsCraftingOrderPageMixin.ViewOrder(pf, currentOrder)
         elseif pf.ViewOrder then
-            pf:ViewOrder(order)
+            pf:ViewOrder(currentOrder)
         end
     end)
     if not self:ActiveCols().conc then row.concBtn:Hide() end

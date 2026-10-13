@@ -1262,11 +1262,33 @@ function CO:OrderRequiresConcentrationForQueue(order, pageFrame)
     return needed
 end
 
-function CO:BuildOwnedMixForEntry(order, reagentEntry, vInv)
+function CO:GetQueueFallbackMinimumTier(selected)
+    if not selected then return nil end
+    local tier = NormalizeQualityTier(selected.fallbackMinimumTier or selected.qualityTier)
+        or ReadProfessionQualityFromItem(selected.itemID)
+    if not selected.fallbackMinimumTier and type(selected.mix) == "table" then
+        for _, part in ipairs(selected.mix) do
+            local partTier = NormalizeQualityTier(part.qualityTier) or ReadProfessionQualityFromItem(part.itemID)
+            if not partTier then return nil end
+            tier = tier and math.min(tier, partTier) or partTier
+        end
+    end
+    return tier
+end
+
+function CO:BuildOwnedMixForEntry(order, reagentEntry, vInv, minimumTier)
     local quantity = tonumber(reagentEntry.quantity) or 0
     if quantity <= 0 then return {}, 0 end
 
     local candidates = self:GetReagentCandidates(order, reagentEntry) or {}
+    if minimumTier then
+        local allowed = {}
+        for _, candidate in ipairs(candidates) do
+            local tier = self:GetQueueReagentCandidateTier(candidate)
+            if tier and tier >= minimumTier then allowed[#allowed+1] = candidate end
+        end
+        candidates = allowed
+    end
     table.sort(candidates, function(a, b)
         local pa = tonumber(self:GetQueueReagentAuctionatorPrice(a.itemID)) or math.huge
         local pb = tonumber(self:GetQueueReagentAuctionatorPrice(b.itemID)) or math.huge
@@ -1333,7 +1355,7 @@ function CO:CanSupplyCrafterReagentsForQueue(order, saveSelections)
         if IsCrafterProvidedReagent(reagentEntry) and not IsCustomerProvidedReagent(reagentEntry) then
             local selKey = MakeReagentSelectionKeyForEntry(order.orderID, reagentEntry)
             local sel = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
-            local mix, quantity, itemID, tier
+            local mix, quantity, itemID, tier, fallbackMinimumTier
             if mode == "auto" then
                 local remaining
                 mix, remaining = self:BuildOwnedMixForEntry(order, reagentEntry, inventory)
@@ -1341,6 +1363,26 @@ function CO:CanSupplyCrafterReagentsForQueue(order, saveSelections)
                 quantity = 0
                 for _, part in ipairs(mix) do quantity = quantity + part.quantity end
                 itemID, tier = mix[1].itemID, mix[1].qualityTier
+            elseif mode == "profit" then
+                local available = self:FindAvailableCrafterReagent(order, reagentEntry, inventory)
+                if available and available.itemID then
+                    itemID, tier = available.itemID, available.qualityTier
+                    quantity = self:GetRequiredReagentQuantity(order, reagentEntry, itemID)
+                    if not Reserve(itemID, quantity) then return false end
+                    sel = available
+                else
+                    -- A slot may have 6 of the selected grade and 24 of a
+                    -- higher one: enough for a 30-unit recipe, but no complete
+                    -- single-grade stack. Never mix in a lower/unknown grade.
+                    fallbackMinimumTier = self:GetQueueFallbackMinimumTier(sel)
+                    if not fallbackMinimumTier then return false end
+                    local remaining
+                    mix, remaining = self:BuildOwnedMixForEntry(order, reagentEntry, inventory, fallbackMinimumTier)
+                    if remaining > 0 or #mix == 0 then return false end
+                    quantity = 0
+                    for _, part in ipairs(mix) do quantity = quantity + part.quantity end
+                    itemID, tier = mix[1].itemID, mix[1].qualityTier
+                end
             elseif sel and type(sel.mix) == "table" and #sel.mix > 0 then
                 quantity = self:GetRequiredReagentQuantity(order, reagentEntry, sel.mix[1].itemID)
                 local remaining = quantity
@@ -1369,6 +1411,7 @@ function CO:CanSupplyCrafterReagentsForQueue(order, saveSelections)
                 local pick = {}
                 for key, value in pairs(sel or {}) do pick[key] = value end
                 pick.itemID, pick.quantity, pick.qualityTier, pick.mix = itemID, quantity, tier, mix
+                pick.fallbackMinimumTier = fallbackMinimumTier
                 pick.slotIndex, pick.dataSlotIndex = reagentEntry.schematicIndex or reagentEntry.slotIndex, reagentEntry.dataSlotIndex
                 staged[selKey] = pick
             end

@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Claimed-order navigation and mixed stock (0.4.144)
+
+- Opening a claimed order from the combined list uses the authoritative server
+  claim, not a stale Created row. The native view no longer shows Start Order
+  for an order already owned by the crafter.
+- A claimed patron blocks Personal actions with an explicit finish/cancel
+  message. Reopening the profession and delayed automatic Personal searches
+  preserve its view and transaction; no order is silently released.
+- Profit mode can combine partial stacks of the selected and higher reagent
+  grades when no single stack suffices. Lower/unknown grades remain excluded,
+  variable-quantity alternatives are not mixed, and the live recipe's quality
+  is checked before submission. T1/T2/manual rules remain unchanged.
+- A live allocation that has not met recipe requirements is distinguished
+  from missing bag stock, without starting a fictitious pending craft.
+- Regression checks cover stale row inspection, blocked Personal navigation,
+  absolute transaction slots, atomic plans and 1,029 mixed-stock combinations.
+
 ## Order workflow stability and loading recovery (0.4.143)
 
 - Fixed a loading regression: native callback containers are invoked through

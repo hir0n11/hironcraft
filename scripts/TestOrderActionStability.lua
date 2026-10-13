@@ -176,4 +176,17 @@ CO.pendingCraftOrderID=nil; CO.progressActive=nil
 CO:BeginListAction(page)
 page.orderType=3; page.BrowseFrame:Hide(); page.OrderView:Show()
 assert(not CO:RestoreListActionView(page) and page.OrderView:IsShown())
+
+-- Enough bag stock does not prove that the live transaction is ready. Keep
+-- this a retryable allocation state, not a fabricated shortage or pending cast.
+claimed={orderID=102,spellID=902,orderState=2,orderType=4,minQuality=0}
+CO.fulfilledOrderIDs={}
+CO.CanSupplyCrafterReagentsForQueue=function() return true end
+page.OrderView.OrderDetails={SchematicForm={transaction={HasMetAllRequirements=function() return false end}}}
+local previousClaims,previousCompletions=claims,completions
+assert(not CO:CraftOrderFromRow(claimed,page,buttons['102']))
+assert(not CO.pendingCraftOrderID and claims==previousClaims and completions==previousCompletions
+    and CO.lastStatus:find('allocation',1,true), 'unsettled transaction was called a stock shortage')
+page.OrderView.OrderDetails.SchematicForm.transaction.HasMetAllRequirements=function() error('not ready') end
+assert(not CO:CraftOrderFromRow(claimed,page,buttons['102']) and not CO.pendingCraftOrderID)
 print('Order action stability passed: fast presses, both terminal event orders, view ownership, analysis cache and stale timers.')

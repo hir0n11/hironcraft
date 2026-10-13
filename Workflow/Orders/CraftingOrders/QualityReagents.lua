@@ -1026,7 +1026,7 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
 
     if claimed and not SameOrderID(claimed.orderID, orderID) then
-        return "blocked", T("COA_ACTION_BUSY", "Busy"), order, false
+        return "blocked", self:GetBlockingClaimedOrderMessage(orderID), order, false
     end
 
     local shouldReject = order
@@ -1056,6 +1056,18 @@ function CO:GetRowAction(orderID, fallbackOrder)
     end
 
     return "none", T("COA_ACTION_NONE", "No action"), order, false
+end
+
+function CO:GetBlockingClaimedOrderMessage(orderID)
+    local claimed = self:GetClaimedOrder()
+    if not claimed or (orderID and SameOrderID(claimed.orderID, orderID)) then return nil end
+    local name
+    if C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo and claimed.spellID then
+        local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, claimed.spellID)
+        name = ok and info and info.name
+    end
+    name = name or claimed.orderID
+    return string.format(T("COA_STATUS_OTHER_CLAIMED", "Finish or cancel the already claimed order first: %s."), tostring(name))
 end
 
 function CO:IsActionDebug()

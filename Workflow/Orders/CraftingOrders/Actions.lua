@@ -333,6 +333,7 @@ function CO:GetQueueButton()
 end
 
 function CO:GetOrderEngine(pageFrame, order)
+    if order and self.GetEffectiveOrder then order = self:GetEffectiveOrder(order.orderID, order) or order end
     if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return nil end
     if not order then
         return nil, T("COA_STATUS_NO_ENGINE", "Crafting order view is not available.")
@@ -1186,7 +1187,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     if transaction and transaction.HasMetAllRequirements then
         local ok, ready = pcall(transaction.HasMetAllRequirements, transaction)
         if not ok or not ready then
-            self:SetStatus(T("COA_STATUS_NO_REAGENTS", "Cannot craft: missing reagents."))
+            self:SetStatus(T("COA_STATUS_ALLOCATION_WAIT", "The live recipe has not confirmed reagent allocation. Open the order and check its reagents, then press Action again."))
             self:RefreshVisibleRowsSoon()
             return false
         end
@@ -1440,9 +1441,9 @@ function CO:RunRowButtonAction(btn)
     self:SetActiveRowButton(btn)
 
     if self.PrepareCombinedPatronAction and not self:PrepareCombinedPatronAction(btn.order, btn.pageFrame) then return end
-    local action, _, order, enabled = self:GetRowAction(btn.orderID, btn.order)
+    local action, reason, order, enabled = self:GetRowAction(btn.orderID, btn.order)
     if not enabled then
-        self:SetStatus(T("COA_STATUS_NO_ACTION", "No available action."))
+        self:SetStatus(reason or T("COA_STATUS_NO_ACTION", "No available action."))
         self:DiagnoseRowAction(btn)
         self:RefreshHoveredRowButtonTooltip(btn)
         return

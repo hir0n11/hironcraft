@@ -173,6 +173,66 @@ assert(selection.mix and #selection.mix==2 and selection.mix[1].itemID==101 and 
     and selection.mix[2].itemID==102 and selection.mix[2].quantity==1,'auto did not mix the owned grades')
 bags={}
 
+-- Quick Emerald regression: Profit must accept 6 selected-grade plus 24
+-- higher-grade gemstones without treating either partial stack as 30 owned.
+entry.quantity=30
+enginePlan={tierByDataSlot={[1]=1}}
+CO:SetQueueReagentMode('profit')
+bags={[101]=6,[102]=24}
+assert(CO:CanSupplyCrafterReagentsForQueue(order,false) and picked()==101)
+assert(CO:CanSupplyCrafterReagentsForQueue(order,true))
+id,selection=picked()
+assert(selection.quantity==30 and #selection.mix==2 and selection.fallbackMinimumTier==1)
+assert(selection.mix[1].quantity==6 and selection.mix[2].quantity==24)
+assert(CO:CanSupplyCrafterReagentsForQueue(order,true), 'a repeated click lost the fallback mixture')
+-- A higher selected floor may never borrow the lower-grade partial stack.
+enginePlan={tierByDataSlot={[1]=2}}
+CO:ApplyQueueReagentModeToOrder(order)
+assert(not CO:CanSupplyCrafterReagentsForQueue(order,true) and picked()==102)
+-- Different per-grade recipe quantities are not additive, even in Profit.
+enginePlan={tierByDataSlot={[1]=1}}
+CO:ApplyQueueReagentModeToOrder(order)
+entry.slotSchematic={quantityRequired=30,variableQuantities={{reagent={itemID=102},quantity=20}}}
+bags={[101]=6,[102]=16}
+assert(not CO:CanSupplyCrafterReagentsForQueue(order,true))
+entry.slotSchematic=nil
+-- A later slot failure must not publish a partially changed mixed plan.
+local extra={itemID=201,quantity=1,slotIndex=2,dataSlotIndex=2,schematicIndex=2,
+    selectionToken='schematic:2',source=2,crafterRequired=true,candidates={{itemID=201}}}
+CO.BuildDisplayReagents=function() return {entry,extra} end
+bags={[101]=6,[102]=24}
+local before=CO:GetSelectedReagentForEntry(order.orderID,entry)
+assert(not CO:CanSupplyCrafterReagentsForQueue(order,true)
+    and CO:GetSelectedReagentForEntry(order.orderID,entry)==before)
+CO.BuildDisplayReagents=function() return {entry} end
+entry.quantity=5
+bags={}
+
+-- Exhaustive small inventories: Profit succeeds exactly when the selected
+-- grade and better ones jointly cover a slot, never borrowing lower grades.
+for floor=1,3 do
+    enginePlan={tierByDataSlot={[1]=floor}}
+    for low=0,6 do for middle=0,6 do for high=0,6 do
+        CO.selectedReagents={}
+        bags={[101]=low,[102]=middle,[103]=high}
+        CO:ApplyQueueReagentModeToOrder(order)
+        local original=picked()
+        local allowed=high+(floor<=2 and middle or 0)+(floor==1 and low or 0)
+        assert(CO:CanSupplyCrafterReagentsForQueue(order,false)==(allowed>=5) and picked()==original)
+        assert(CO:CanSupplyCrafterReagentsForQueue(order,true)==(allowed>=5))
+        if allowed>=5 then
+            local _,plan=picked()
+            local total=0
+            for _,part in ipairs(plan.mix or {{itemID=plan.itemID,quantity=plan.quantity}}) do
+                assert(tiers[part.itemID]>=floor and part.quantity<=bags[part.itemID])
+                total=total+part.quantity
+            end
+            assert(total==5, 'a valid inventory produced an incomplete or excessive allocation')
+        end
+    end end end
+end
+bags={}
+
 -- A switch of the mode reaches the checks and the shopping list: T1 leaves
 -- 550 of the tip, T2 leaves 100, and the minimum is 200.
 CO:SetQueueReagentMode('t1')

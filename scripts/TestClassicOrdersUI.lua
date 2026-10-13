@@ -447,6 +447,19 @@ assert(rowCalls == 1, 'row action did not dispatch exactly once')
 row.scripts.OnEnter(row)
 assert(focusCalls == 1, 'row refresh accumulated hover callbacks')
 
+do
+    local oldView, oldViewOrder, oldEffective = page.OrderView, page.ViewOrder, CO.GetEffectiveOrder
+    local authoritative={orderID=42,spellID=1234,orderState=2}
+    local inspected
+    page.OrderView={}
+    page.ViewOrder=function(_,order) inspected=order end
+    CO.GetEffectiveOrder=function(_,id,fallback) return id==42 and authoritative or fallback end
+    CL:PopulateRow(row,{orderID=42,spellID=1234,orderState=1})
+    row:Click()
+    assert(inspected==authoritative, 'manual inspection opened a stale Created snapshot of the claim')
+    page.OrderView,page.ViewOrder,CO.GetEffectiveOrder=oldView,oldViewOrder,oldEffective
+end
+
 -- A warning must remain red when selected, and disappear on row reuse/recovery.
 CO.GetOrderProblemReason=function() return 'Missing customer reagents' end
 CO.IsOrderSelected=function() return true end

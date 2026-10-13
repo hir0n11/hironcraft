@@ -330,6 +330,12 @@ end
 
 function CO:ContinueOneButtonPersonalFlow()
     if not self._oneButtonFlowRunning then return end
+    local blocked = self.GetBlockingClaimedOrderMessage and self:GetBlockingClaimedOrderMessage()
+    if blocked then
+        self:CancelOneButtonPersonalFlow()
+        self:SetStatus(blocked)
+        return
+    end
     if not self:IsOneButtonPersonalEnabled() then
         self:CancelOneButtonPersonalFlow()
         return
@@ -395,6 +401,14 @@ end
 function CO:BeginOneButtonPersonalFlow()
     if not self:IsOneButtonPersonalEnabled() or self._oneButtonPreparedForOpen then return end
 
+    -- Reopening the profession restores the server's claimed order. Do not
+    -- immediately replace its view/transaction with an automatic Personal search.
+    local blocked = self.GetBlockingClaimedOrderMessage and self:GetBlockingClaimedOrderMessage()
+    if blocked then
+        self:SetStatus(blocked)
+        return
+    end
+
     self:InstallFreshOrderSearchHooks()
     self._oneButtonPersonalPage = nil
     self._oneButtonFlowToken = (self._oneButtonFlowToken or 0) + 1
@@ -435,6 +449,13 @@ end
 
 function CO:ContinueEmptyPersonalOrdersRefresh()
     if not self._oneButtonEmptyRefreshRunning then return end
+
+    local blocked = self.GetBlockingClaimedOrderMessage and self:GetBlockingClaimedOrderMessage()
+    if blocked then
+        self:CancelOneButtonPersonalFlow()
+        self:SetStatus(blocked)
+        return
+    end
 
     if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then
         self._oneButtonEmptyRefreshToken = (self._oneButtonEmptyRefreshToken or 0) + 1
@@ -505,6 +526,12 @@ function CO:StartEmptyPersonalOrdersRefresh(pageFrame)
     -- already started; doing so can leave the row marked as claimed while
     -- GetClaimedOrder() is still empty.
     if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then
+        return true
+    end
+
+    local blocked = self.GetBlockingClaimedOrderMessage and self:GetBlockingClaimedOrderMessage()
+    if blocked then
+        self:SetStatus(blocked)
         return true
     end
 
