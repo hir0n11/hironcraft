@@ -770,6 +770,12 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "PLAYER_EQUIPMENT_CHANGED" then
+        self._equipmentPlanCache = nil
+        self.qualityRejectOrderIDs, self.qualityRejectDetails = nil, nil
+        self.preparedFinisherOrderID, self.preparedFinisherReagent = nil, nil
+        self.preparedFinisherReadyAt, self.preparedFinisherUseEngineOrderID = nil, nil
+        self:InvalidateOrderCaches()
+        if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
         self:UpdateControlPanel()
         return
     end

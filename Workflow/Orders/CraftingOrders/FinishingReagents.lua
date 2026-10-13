@@ -283,6 +283,7 @@ function CO:MarkOrderReadyForQualityRejection(order, details)
 end
 
 function CO:IsOrderReadyForQualityRejection(order)
+    if self.GetOrderEquipmentPlan and self:GetOrderEquipmentPlan(order, self.activePageFrame) ~= "ready" then return false end
     local key = OrderKey(order and order.orderID)
     local expiresAt = key and self.qualityRejectOrderIDs and self.qualityRejectOrderIDs[key]
     if not expiresAt then return false end

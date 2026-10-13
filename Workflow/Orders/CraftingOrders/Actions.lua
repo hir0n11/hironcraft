@@ -853,6 +853,7 @@ function CO:ClaimOrder(order, pageFrame)
         self:SetStatus(T("COA_STATUS_UNKNOWN_RECIPE", "This recipe is not known by this character."))
         return false
     end
+    if self.IsOrderEquipmentReadyForSubmission and not self:IsOrderEquipmentReadyForSubmission(order, pageFrame) then return false end
 
     -- Queue selection can be restored before Blizzard has finished loading the
     -- transaction used for its quality calculation. Recheck at the protected
@@ -1051,6 +1052,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         self:SetStatus(T("COA_STATUS_UNKNOWN_RECIPE", "This recipe is not known by this character."))
         return false
     end
+    if self.IsOrderEquipmentReadyForSubmission and not self:IsOrderEquipmentReadyForSubmission(order, pageFrame) then return false end
 
     -- The craft only binds while C_CraftingOrders.GetClaimedOrder() actually returns this order.
     -- Right after claiming (fresh login / fast key presses) the claim is not yet registered
@@ -1442,6 +1444,12 @@ function CO:RunRowButtonAction(btn)
 
     if self.PrepareCombinedPatronAction and not self:PrepareCombinedPatronAction(btn.order, btn.pageFrame) then return end
     local action, reason, order, enabled = self:GetRowAction(btn.orderID, btn.order)
+    -- Ask the normal action gates first: unknown recipes, another claim,
+    -- cached rows, rejection and completed crafts must not trigger a swap.
+    if enabled and (action == "equip" or action == "claim" or action == "craft") and self.PrepareOrderEquipment then
+        if not self:PrepareOrderEquipment(order, btn.pageFrame) then return end
+        action, reason, order, enabled = self:GetRowAction(btn.orderID, order)
+    end
     if not enabled then
         self:SetStatus(reason or T("COA_STATUS_NO_ACTION", "No available action."))
         self:DiagnoseRowAction(btn)

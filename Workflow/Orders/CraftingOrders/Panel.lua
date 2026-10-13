@@ -571,6 +571,7 @@ local function ResourcefulnessLabel()
 end
 
 function CO:AutoEquipResourcefulnessTool(pageFrame, attempt)
+    if self.IsOrderEquipmentOn and self:IsOrderEquipmentOn() then return end
     if not self:IsEnabled() then return end
     if not self.IsAutoToolOn or not self:IsAutoToolOn() then return end
     if InCombatLockdown and InCombatLockdown() then return end
@@ -765,6 +766,7 @@ function CO:UpdateBestQualityToggle(stateOverride)
     local panel = self.controlPanel
     local button = panel and panel.bestQualityToggle
     if not button then return end
+    if button.getValue then self:UpdateCheckToggle(button) end
 
     local on = stateOverride
     if on == nil then
@@ -817,6 +819,7 @@ function CO:UpdateAutoToolToggle()
     local panel = self.controlPanel
     local button = panel and panel.autoToolToggle
     if not button then return end
+    if button.getValue then self:UpdateCheckToggle(button); return end
 
     local on = self.IsAutoToolOn and self:IsAutoToolOn()
     if button.icon then
@@ -1136,6 +1139,22 @@ function CO:UpdateQueueSettingWidgets()
     self:UpdateCheckToggle(panel.autoShopCheck)
     self:UpdateCheckToggle(panel.patronMidnightCheck)
     self:UpdateCheckToggle(panel.patronTwwCheck)
+    self:UpdateCheckToggle(panel.equipmentSwapCheck)
+    self:UpdateCheckToggle(panel.bestQualityToggle)
+    self:UpdateCheckToggle(panel.autoToolToggle)
+    if panel.autoToolToggle then
+        if self.IsOrderEquipmentOn and self:IsOrderEquipmentOn() then panel.autoToolToggle:Disable()
+        else panel.autoToolToggle:Enable() end
+    end
+    for _, input in pairs(panel.knowledgeExpansionInputs or {}) do
+        if input.RefreshValue then input:RefreshValue() end
+    end
+    if panel.equipmentProfileButton then
+        local key = panel.equipmentProfileKey or "midnight"
+        local profile = self.GetProfessionEquipmentProfile and self:GetProfessionEquipmentProfile(key, panel.pageFrame)
+        panel.equipmentProfileButton.text:SetText(T("COA_EQUIPMENT_SET_PREFIX", "Set: ") .. (key == "tww" and "TWW" or key == "df" and "Dragonflight" or "Midnight")
+            .. (profile and T("COA_EQUIPMENT_HAS_SET", " (saved)") or T("COA_EQUIPMENT_UNSET", " (not saved)")))
+    end
 
     if panel.minProfitInput and panel.minProfitInput.RefreshValue then
         panel.minProfitInput:RefreshValue()
@@ -1357,6 +1376,16 @@ function CO:EnsureControlPanel(pageFrame)
         y = y - 22
         return fs
     end
+    local function AddNote(text, height)
+        local note = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        note:SetPoint("TOPLEFT", PADX, y)
+        note:SetSize(INNER, height or 30)
+        ApplyFont(note, 11, "")
+        note:SetJustifyH("LEFT"); note:SetJustifyV("TOP")
+        note:SetTextColor(0.75, 0.72, 0.65); note:SetText(text)
+        y = y - (height or 30) - 6
+        return note
+    end
     -- Reagent mode (two rows)
     AddHeader(T("COA_QUEUE_REAGENTS_HEADER", "Реагенты"))
     panel.reagentSeg = self:CreateSegmentedControl(body, {
@@ -1375,6 +1404,18 @@ function CO:EnsureControlPanel(pageFrame)
       tipDesc = T("COA_REAGENT_TIP_DESC", "Авто (эконом) — в каждом слоте самый дешёвый по цене грейд; из сумок берётся то, что есть, грейды можно смешивать. Качество не подбирается: если его не хватает, нужна концентрация. T1 / T2 — этот грейд во всех слотах. Профит — самые дешёвые грейды, с которыми нужное качество выходит без концентрации. Ручной — грейды выбираются кликом по реагенту в строке заказа и сами не меняются.") })
     panel.reagentSeg:SetPoint("TOPLEFT", PADX, y)
     y = y - 50
+    panel.bestQualityToggle = self:CreateCheckToggle(body, T("COA_BEST_REAGENTS_SHORT", "Blizzard: best reagents"),
+        function() return CO:GetBestQualityState() end, function(v) CO:SetBestQualityState(v) end, INNER)
+    panel.bestQualityToggle:SetPoint("TOPLEFT", PADX, y)
+    panel.bestQualityToggle:HookScript("OnEnter", function(owner)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_BEST_REAGENTS_SHORT", "Blizzard: best reagents"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_BEST_QUALITY_DESC", "Blizzard's default allocation. Explicit reagent modes and manual selections still take priority."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(owner)
+    end)
+    panel.bestQualityToggle:HookScript("OnLeave", HideStyledTooltip)
+    y = y - 28
 
     -- Concentration
     AddHeader(T("COA_QUEUE_CONC_HEADER", "Концентрация"))
@@ -1416,22 +1457,51 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.finisherButton:SetScript("OnLeave", HideStyledTooltip)
     y = y - 26
+    body:SetHeight(-y + 8)
 
-
-    y = y - 12
+    body = panel.classicPages.equipment.body
+    y = -8
     AddHeader(T("COA_CLASSIC_TOOLS", "Profession equipment"))
-    -- Tool icons row (centered): best quality, auto tool, profession tool slot
-    local toolsRowW = PROFESSION_TOOL_SLOT_SIZE * 3 + 8 * 2
-    local toolsStartX = PADX + math.max(0, math.floor((INNER - toolsRowW) / 2))
-    panel.bestQualityToggle = self:CreateBestQualityToggle(body)
-    panel.bestQualityToggle:SetPoint("TOPLEFT", toolsStartX, y)
-    panel.autoToolToggle = self:CreateAutoToolToggle(body)
-    panel.autoToolToggle:SetPoint("LEFT", panel.bestQualityToggle, "RIGHT", 8, 0)
     panel.professionToolSlot = self:CreateProfessionToolSlot(body)
-    panel.professionToolSlot:SetPoint("LEFT", panel.autoToolToggle, "RIGHT", 8, 0)
-    y = y - 44
+    panel.professionToolSlot:SetPoint("TOPLEFT", PADX, y)
+    panel.chooseToolButton = self:CreateTextButton(body, nil, INNER - 42, 30, T("COA_CHOOSE_TOOL", "Choose tool"))
+    panel.chooseToolButton:SetPoint("LEFT", panel.professionToolSlot, "RIGHT", 8, 0)
+    panel.chooseToolButton:SetScript("OnClick", function(owner) CO:OpenProfessionToolMenu(owner) end)
+    y = y - 40
+    panel.autoToolToggle = self:CreateCheckToggle(body, T("COA_RESOURCE_TOOL_SHORT", "Auto resourcefulness tool"),
+        function() return CO:IsAutoToolOn() and not (CO.IsOrderEquipmentOn and CO:IsOrderEquipmentOn()) end,
+        function(v)
+            if CO.IsOrderEquipmentOn and CO:IsOrderEquipmentOn() then return end
+            CO:SetAutoToolOn(v)
+            if v then CO:AutoEquipResourcefulnessTool(panel.pageFrame) end
+        end, INNER)
+    panel.autoToolToggle:SetPoint("TOPLEFT", PADX, y); y = y - 26
+    panel.equipmentSwapCheck = self:CreateCheckToggle(body, T("COA_EQUIPMENT_AUTO", "Use sets for order expansions"),
+        function() return CO.IsOrderEquipmentOn and CO:IsOrderEquipmentOn() end,
+        function(v) if CO.SetOrderEquipmentOn then CO:SetOrderEquipmentOn(v) end end, INNER)
+    panel.equipmentSwapCheck:SetPoint("TOPLEFT", PADX, y); y = y - 28
+    AddNote(T("COA_EQUIPMENT_SETUP", "Equip a set, choose its expansion below, then save. Saved sets take priority over Auto tool."), 56)
+    panel.equipmentProfileKey = "midnight"
+    panel.equipmentProfileButton = self:CreateTextButton(body, nil, INNER, 22, "Midnight")
+    panel.equipmentProfileButton:SetPoint("TOPLEFT", PADX, y); y = y - 28
+    panel.equipmentProfileButton:SetScript("OnClick", function(owner)
+        if not PT.Dropdown or not PT.Dropdown.Show then return end
+        local items = {}
+        for _, option in ipairs(EXPANSION_OPTIONS or {}) do
+            local key = option.key
+            items[#items + 1] = { text = option.fallback, checked = panel.equipmentProfileKey == key,
+                onClick = function() panel.equipmentProfileKey = key; CO:UpdateQueueSettingWidgets() end }
+        end
+        PT.Dropdown:Show({ owner = owner, items = items })
+    end)
+    panel.saveEquipmentButton = self:CreateTextButton(body, nil, INNER, 22, T("COA_EQUIPMENT_SAVE", "Save equipped set"))
+    panel.saveEquipmentButton:SetPoint("TOPLEFT", PADX, y); y = y - 32
+    panel.saveEquipmentButton:SetScript("OnClick", function()
+        if CO.SaveProfessionEquipmentProfile then CO:SaveProfessionEquipmentProfile(panel.equipmentProfileKey, panel.pageFrame) end
+    end)
 
     -- Expansion + weekly quest (bottom of settings block)
+    AddHeader(T("COA_PROFESSION_VIEW_HEADER", "Profession view"))
     panel.expansionButton = self:CreateTextButton(body, nil, COL_W, 20, self:GetSelectedProfessionExpansionLabel())
     if panel.expansionButton.text then ApplyFont(panel.expansionButton.text, 12, "") end
     panel.expansionButton:SetPoint("TOPLEFT", PADX, y)
@@ -1495,6 +1565,39 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.knowledgeMinProfitInput:HookScript("OnLeave", HideStyledTooltip)
     y = y - 26
+    AddHeader(T("COA_KNOWLEDGE_EXPANSION_HEADER", "Knowledge: this profession"))
+    AddNote(T("COA_KNOWLEDGE_EXPANSION_NOTE", "Empty = general rule. 0 = no loss. Negative = allowed loss, in gold."), 54)
+    panel.knowledgeExpansionInputs = {}
+    for _, key in ipairs({ "midnight", "tww" }) do
+        local expansionKey = key
+        local label = body:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetPoint("TOPLEFT", PADX, y - 4)
+        label:SetSize(INNER - 94, 18)
+        ApplyFont(label, 11, "")
+        label:SetText(key == "tww" and "TWW" or "Midnight")
+        local input = self:CreateValueInput(body, 82, 20,
+            function() return CO.GetKnowledgeExpansionProfitOverride and CO:GetKnowledgeExpansionProfitOverride(expansionKey) end,
+            function(value) if CO.SetKnowledgeExpansionProfitOverride then CO:SetKnowledgeExpansionProfitOverride(expansionKey, value) end end)
+        input:SetPoint("TOPRIGHT", -PADX, y)
+        input.placeholder = input:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        input.placeholder:SetPoint("CENTER", input, "CENTER", 0, 0)
+        input.placeholder:SetSize(70, 16)
+        ApplyFont(input.placeholder, 11, "")
+        input.placeholder:SetText(T("COA_KNOWLEDGE_INHERIT", "General"))
+        local refresh = input.RefreshValue
+        input.RefreshValue = function(self)
+            refresh(self)
+            self.placeholder:SetShown(self:GetText() == "" and not self:HasFocus())
+        end
+        input:HookScript("OnEditFocusGained", function(self) self.placeholder:Hide() end)
+        input:HookScript("OnEditFocusLost", function(self) self:RefreshValue() end)
+        input:RefreshValue()
+        panel.knowledgeExpansionInputs[key] = input
+        self:StyleWidget(input)
+        y = y - 26
+    end
+    y = y - 8
+    AddHeader(T("COA_REWARD_VALUES_HEADER", "Reward values"))
 
     -- Bag reward value
     local bagHeader = body:CreateFontString(nil, "OVERLAY")
@@ -1560,7 +1663,7 @@ function CO:EnsureControlPanel(pageFrame)
     AddHeader(T("COA_QUEUE_AUTO_ON_OPEN_HEADER", "При открытии"))
     panel.autoQueueCheck = self:CreateCheckToggle(body, T("COA_AUTO_QUEUE_SHORT", "Очередь"),
         function() return CO:IsAutoQueueOnOpen() end,
-        function(v) CO:SetAutoQueueOnOpen(v) end, 74)
+        function(v) CO:SetAutoQueueOnOpen(v) end, INNER)
     panel.autoQueueCheck:SetPoint("TOPLEFT", PADX, y)
     panel.autoQueueCheck:HookScript("OnEnter", function(self)
         if not Tooltip then return end
@@ -1570,10 +1673,11 @@ function CO:EnsureControlPanel(pageFrame)
         ShowStyledTooltip(self)
     end)
     panel.autoQueueCheck:HookScript("OnLeave", HideStyledTooltip)
+    y = y - 24
     panel.autoShopCheck = self:CreateCheckToggle(body, T("COA_AUTO_SHOP_SHORT", "Закуп"),
         function() return CO:IsAutoShoppingOnOpen() end,
-        function(v) CO:SetAutoShoppingOnOpen(v) end, INNER - 74)
-    panel.autoShopCheck:SetPoint("TOPLEFT", PADX + 74, y)
+        function(v) CO:SetAutoShoppingOnOpen(v) end, INNER)
+    panel.autoShopCheck:SetPoint("TOPLEFT", PADX, y)
     y = y - 24
 
     panel.autoKnowledgeCheck = self:CreateCheckToggle(body, T("COA_AUTO_KNOWLEDGE_SHORT", "Знания (патроны)"),
@@ -1870,11 +1974,11 @@ function CO:EnsureControlPanel(pageFrame)
         panel.selectAllButton, panel.knowledgeButton, panel.selectAllOrdersButton,
         panel.shopButton, panel.clearSelectedButton, panel.runActionButton,
         panel.bindButton, panel.clearButton, panel.expansionButton, panel.weeklyQuestIndicator,
-        panel.finisherButton,
+        panel.finisherButton, panel.chooseToolButton, panel.equipmentProfileButton, panel.saveEquipmentButton,
     }) do
         if w then self:StyleWidget(w) end
     end
-    for _, w in ipairs({ panel.bestQualityToggle, panel.autoToolToggle, panel.professionToolSlot }) do
+    for _, w in ipairs({ panel.bestQualityToggle, panel.autoToolToggle, panel.professionToolSlot, panel.equipmentSwapCheck }) do
         if w then self:StyleWidget(w) end
     end
     pageFrame.ahuiCraftingOrdersPanel = panel

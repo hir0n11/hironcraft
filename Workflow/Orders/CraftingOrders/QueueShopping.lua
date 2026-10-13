@@ -205,8 +205,11 @@ end
 -- they get a threshold of their own. When it is set it decides on its own,
 -- whatever the "knowledge ignores the minimum profit" switch says; when it is
 -- empty that switch keeps deciding as before.
-function CO:GetKnowledgeMinProfitCopper()
+function CO:GetKnowledgeMinProfitCopper(order)
     if not self:IsNpcTab() then return nil end
+    local key = order and self.GetOrderExpansionKey and self:GetOrderExpansionKey(order)
+    local override = key and self.GetKnowledgeExpansionProfitOverride and self:GetKnowledgeExpansionProfitOverride(key)
+    if override ~= nil then return override end
     return tonumber(self:GetQueueOptions().knowledgeMinProfitCopper)
 end
 
@@ -250,6 +253,7 @@ function CO:ParseQueueMinProfitInput(text)
     if not value then return nil, false end
 
     local copper = value * 10000
+    if copper ~= copper or copper == math.huge or copper == -math.huge then return nil, false end
     if copper >= 0 then
         return math.floor(copper + 0.5), true
     end
@@ -1187,7 +1191,7 @@ end
 -- whenever prices or thresholds have moved (RecheckQueuedSelections).
 function CO:OrderPassesQueueProfitRule(order, knowledge, opts)
     if not knowledge then return self:OrderPassesQueueProfitFilter(order) end
-    local knowledgeMinProfit = self:GetKnowledgeMinProfitCopper()
+    local knowledgeMinProfit = self:GetKnowledgeMinProfitCopper(order)
     if knowledgeMinProfit then
         return self:OrderPassesQueueProfitFilter(order, knowledgeMinProfit)
     end
@@ -1547,6 +1551,7 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
     end
 
     self.selectedOrders[key] = true
+    if self.RememberEquipmentQueueAnalysis then self:RememberEquipmentQueueAnalysis(order, analysis) end
     self.useConcentration[key] = analysis and analysis.useConcentration == true or nil
     if self.RememberOrderSelection then
         self:RememberOrderSelection(order.orderID, true, order, analysis and analysis.profitRule, analysis and analysis.profit)
@@ -1591,6 +1596,9 @@ function CO:GetQueueSkipReason(order)
         return T("COA_ACTION_UNKNOWN_RECIPE", "Unknown recipe")
     elseif code == "reagents" then
         return T("COA_QUEUE_SKIP_REAGENTS", "The required reagent grade could not be selected.")
+    elseif code == "equipment" then
+        local _, reason = self:GetOrderEquipmentPlan(order, self.activePageFrame)
+        return reason or T("COA_EQUIPMENT_QUALITY_WAIT", "Quality with this set is not confirmed. Check reagents and concentration.")
     end
     return T("COA_QUEUE_SKIP_UNAVAILABLE", "The order is not available for this queue.")
 end
@@ -1618,6 +1626,7 @@ function CO:ShouldQueueOrderByAvailabilityColor(order, opts)
 end
 
 function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
+    if not order or not order.orderID or not order.spellID then return nil end
     self:SetQueueSkipReason(order, nil)
     if opts and opts.automatic then
         if self.IsOrderManuallyExcluded and self:IsOrderManuallyExcluded(order.orderID) then self:SetQueueSkipReason(order, "manual"); return nil end
@@ -1629,6 +1638,25 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
         elseif not opts.includeProfit then
             self:SetQueueSkipReason(order, "knowledge")
             return nil
+        end
+    end
+    -- A saved set can change the skill/concentration result. Keep this as a
+    -- preparation candidate, NOT a confirmed-quality order, and revalidate
+    -- the original queue rule after the hardware-click equipment step.
+    if self.GetOrderEquipmentPlan then
+        local equipment = self:GetOrderEquipmentPlan(order, pageFrame)
+        if equipment == "swap" and self:GetRecipeKnownState(order) == true
+            and self:OrderMatchesSelectedProfessionExpansion(order, false)
+            and not (order.isFulfillable == false and orderType == Enum.CraftingOrderType.Public) then
+            local knowledge = opts and opts.knowledgeOnly == true
+            if knowledge and not self:OrderGivesKnowledge(order) then self:SetQueueSkipReason(order, "knowledge"); return nil end
+            if not self:OrderPassesQueueProfitRule(order, knowledge, opts) then self:SetQueueSkipReason(order, "profit"); return nil end
+            if not self:ApplyQueueReagentModeToOrder(order) then self:SetQueueSkipReason(order, "reagents"); return nil end
+            local profit = tonumber((self:GetOrderProfitInfo(order) or {}).profit)
+            return { queued = true, needsEquipment = true, equipmentOptions = opts,
+                profitRule = knowledge and "knowledge" or "profit", profit = profit, score = profit }
+        elseif equipment == "blocked" or equipment == "waiting" then
+            self:SetQueueSkipReason(order, "equipment"); return nil
         end
     end
     if not self:ShouldQueueOrderByAvailabilityColor(order, opts) then return nil end
@@ -1721,6 +1749,7 @@ function CO:FinishQueueWorkOrdersSelection(session)
             local pending = session.pendingChecks[key]
             local order, analysis = pending.order, pending.analysis
             self.selectedOrders[key] = true
+            if self.RememberEquipmentQueueAnalysis then self:RememberEquipmentQueueAnalysis(order, analysis) end
             self.useConcentration[key] = analysis and analysis.useConcentration == true or nil
             if self.RememberOrderSelection then
                 self:RememberOrderSelection(order.orderID, true, order, analysis and analysis.profitRule, analysis and analysis.profit)

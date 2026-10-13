@@ -63,6 +63,7 @@ function CO:EnsureOrderSelectionContext(pageFrame)
         end
     end
     self._orderSelectionContext, self._orderSelectionBucket = context, bucket
+    self._equipmentDeferredOrders = nil
     wipe(self.selectedOrders)
     self.currentQueueOrderID, self.currentQueueStep = nil, nil
     return bucket
@@ -74,6 +75,11 @@ end
 function CO:RememberOrderSelection(orderID, checked, order, rule, profit)
     local bucket = self._orderSelectionBucket
     local key = OrderKey(orderID)
+    -- An explicit checkbox replaces the queue rule, including its deferred
+    -- post-equipment quality check. Automatic publication supplies a rule.
+    if key and self._equipmentDeferredOrders and (not checked or not rule) then
+        self._equipmentDeferredOrders[key] = nil
+    end
     if not bucket or not key then return end
     local previous = bucket.choices[key]
     local state = self.rowStates and (self.rowStates[orderID] or self.rowStates[tonumber(orderID)])

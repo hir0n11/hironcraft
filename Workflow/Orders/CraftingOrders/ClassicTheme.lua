@@ -4,7 +4,7 @@ setfenv(1, E)
 
 -- A single, Blizzard-native presentation for the order workflow. The shell
 -- sits outside the Orders page; it never resizes Blizzard's window or list.
-CO.CLASSIC_PANEL_WIDTH = 244
+CO.CLASSIC_PANEL_WIDTH = 276
 CO.CLASSIC_PANEL_GAP = 8
 
 function CO:UpdateClassicPanelToggle(button)
@@ -87,7 +87,7 @@ function CO:CreateClassicPanelShell(panel)
 
     panel.classicPages = {}
     panel.classicTabs = {}
-    for index, key in ipairs({ "craft", "queue" }) do
+    for index, key in ipairs({ "craft", "queue", "equipment" }) do
         local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", 8, -66)
         scroll:SetPoint("BOTTOMRIGHT", panel.queueActions, "TOPRIGHT", -24, 5)
@@ -103,9 +103,12 @@ function CO:CreateClassicPanelShell(panel)
         scroll:HookScript("OnScrollRangeChanged", updateScroll)
         body:HookScript("OnSizeChanged", updateScroll)
         panel.classicPages[key] = { scroll = scroll, body = body }
-        local tab = self:CreateTextButton(panel, nil, 110, 24,
-            index == 1 and T("COA_CLASSIC_CRAFT_TAB", "Crafting") or T("COA_CLASSIC_QUEUE_TAB", "Queue"))
-        tab:SetPoint("TOPLEFT", 10 + (index - 1) * 114, -36)
+        local tabWidth = math.floor((self.CLASSIC_PANEL_WIDTH - 28) / 3)
+        local tab = self:CreateTextButton(panel, nil, tabWidth, 24,
+            key == "craft" and T("COA_CLASSIC_CRAFT_TAB", "Crafting")
+                or key == "queue" and T("COA_CLASSIC_QUEUE_TAB", "Selection")
+                or T("COA_CLASSIC_EQUIPMENT_TAB", "Equipment"))
+        tab:SetPoint("TOPLEFT", 10 + (index - 1) * (tabWidth + 4), -36)
         tab:SetScript("OnClick", function() CO:SelectClassicPanelTab(panel, key) end)
         panel.classicTabs[key] = tab
     end

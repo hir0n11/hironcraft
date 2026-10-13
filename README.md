@@ -25,6 +25,29 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Clear order settings and expansion equipment (0.4.146)
+
+- The wider sidebar separates Crafting, Selection and Equipment. Tool/reagent
+  switches have explicit labels; Select by rules and Next step remain pinned.
+- In Equipment, equip and save a complete tool/accessory set for each order
+  expansion, then enable Match set to order. Sets and this switch are saved per
+  character and base profession, default off, and take priority over the resourcefulness-tool
+  picker. Items must be equipped or in carried bags, not in the bank.
+- Equipment follows the order's expansion, including combined Patron lists.
+  Only an explicit Next step/row press moves items. All saved items are checked
+  first; combat, cursor items, pending submissions and another claim block swaps.
+  No replacement item is guessed from its item ID or quality.
+- Queue candidates needing another set are preparation-only. After the swap,
+  the original quality, concentration and profit rules are checked again before
+  claim/craft. Completed crafts still proceed directly to completion.
+- Knowledge minimum profit can be overridden separately for Midnight and TWW
+  for this character/profession. Empty inherits the existing general knowledge
+  rule; zero excludes losses; a negative gold value permits that loss. Normal
+  profit rules and manual choices keep their existing behavior.
+- Regression checks cover exact item identity, full-set preflight, accessory
+  swaps, delayed/blocked actions, deferred quality/concentration/profit checks,
+  mixed-expansion thresholds, strict rechecks and RU/EN sidebar layouts.
+
 ## Atomic queue preparation and row rendering (0.4.145)
 
 - Queue checks and their saved choices are published together after analysis,

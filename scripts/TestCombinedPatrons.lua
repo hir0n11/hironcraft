@@ -55,7 +55,7 @@ local E = setmetatable({ CO = CO, PT = {}, SlashCmdList = {},
     GetItemInfo = function(id) return 'Item ' .. id end,
 }, { __index = _G })
 HironCraftProfitCraftingOrdersEnv = E
-for _, file in ipairs({ 'State', 'SelectionMemory', 'QualityReagents', 'ExpansionQuest', 'QueueShopping', 'CombinedPatrons', 'Actions' }) do
+for _, file in ipairs({ 'State', 'SelectionMemory', 'QualityReagents', 'ExpansionQuest', 'Equipment', 'QueueShopping', 'CombinedPatrons', 'Actions' }) do
     dofile('Workflow/Orders/CraftingOrders/' .. file .. '.lua')
 end
 CO.IsEnabled = function() return true end

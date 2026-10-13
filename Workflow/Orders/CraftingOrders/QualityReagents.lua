@@ -1036,6 +1036,15 @@ function CO:GetRowAction(orderID, fallbackOrder)
         return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
     end
 
+    if self.GetOrderEquipmentPlan and order and not order.isFulfillable then
+        local equipment, reason = self:GetOrderEquipmentPlan(order, pageFrame)
+        if equipment == "swap" then return "equip", T("COA_EQUIPMENT_ACTION", "Equip set"), order, true end
+        if equipment ~= "ready" then return "blocked", reason, order, false end
+        if self.NeedsEquipmentQueueRecheck and self:NeedsEquipmentQueueRecheck(order) then
+            return "equip", T("COA_EQUIPMENT_RECHECK", "Check quality"), order, true
+        end
+    end
+
     if IsOrderCreated(order) and self.IsOrderReadyForQualityRejection
         and self:IsOrderReadyForQualityRejection(order) then
         return "reject", T("COA_ACTION_REJECT", "Decline"), order, true
@@ -1584,7 +1593,9 @@ function CO:UpdateConcentrationRequiredBorder(row, order)
 end
 
 function GetCompactActionText(action, actionText, order)
-    if action == "reject" then
+    if action == "equip" then
+        return T("COA_EQUIPMENT_ACTION_SHORT", "Set")
+    elseif action == "reject" then
         return T("COA_ACTION_REJECT_SHORT", "Decline")
     elseif action == "rejecting" then
         return T("COA_ACTION_REJECTING_SHORT", "...")
@@ -3145,6 +3156,7 @@ end
 -- Presentation only: never arm a rejection or prepare/mutate the live order
 -- while painting a row. The action still rechecks the authoritative order.
 function CO:GetOrderProblemReason(order, pageFrame, action)
+    if action == "equip" then return nil end
     if not order or not order.orderID or action == "fulfill" or action == "fulfilling" then return nil end
     if self.GetEffectiveOrder then order = self:GetEffectiveOrder(order.orderID, order) or order end
     if not self:IsPersonalCraftingOrder(order, pageFrame) then return nil end
@@ -3248,6 +3260,7 @@ function CO:GetOrderReadinessState(order, pageFrame, action, needsConcentration,
 end
 
 function CO:ComputeOrderReadinessState(order, pageFrame, action, needsConcentration, problemReason)
+    if action == "equip" then return "pending", T("COA_EQUIPMENT_CHANGED", "Equipment changed. Press Next step again after the quality updates.") end
     if action == "fulfill" or action == "fulfilling" then return nil end
 
     if problemReason == nil then

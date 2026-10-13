@@ -1,3 +1,4 @@
+unpack = unpack or table.unpack
 local model = dofile('scripts/UIFrameModel.lua')
 local frames, methods, frame, bounds, noop = model.frames, model.methods, model.frame, model.bounds, model.noop
 methods.Disable = noop
@@ -38,6 +39,14 @@ dofile('Workflow/Orders/CraftingOrders/Rows.lua')
 dofile('Workflow/Orders/CraftingOrders/ClassicTheme.lua')
 dofile('Workflow/Orders/CraftingOrders/Panel.lua')
 dofile('Workflow/Orders/CraftingOrders/CustomList.lua')
+-- Exercise edit-box commits through the production parser without importing
+-- queue execution into this presentation-only fixture.
+local uiMethods={}
+for key,value in pairs(CO) do uiMethods[key]=value end
+dofile('Workflow/Orders/CraftingOrders/QueueShopping.lua')
+local parseProfitInput=CO.ParseQueueMinProfitInput
+for key in pairs(CO) do CO[key]=uiMethods[key] end
+CO.ParseQueueMinProfitInput=parseProfitInput
 local CL = CO.CustomList
 local RealGetOrders = CL.GetOrders
 CO.IsEnabled = function() return true end
@@ -55,6 +64,7 @@ CO.GetRejectConfirmTipCopper = function() return rejectConfirmCopper end
 CO.SetRejectConfirmTipCopper = function(_, value) rejectConfirmCopper = value end
 CO.IsAutoQueueOnOpen = function() return true end
 CO.IsAutoShoppingOnOpen = function() return true end
+CO.IsAutoToolOn = function() return false end
 
 local page = frame('Frame')
 page:SetSize(1060, 680)
@@ -78,13 +88,55 @@ assert(panel.runActionButton.text.fontPath == PT.FONT, 'action label lost the Cy
 CO:StyleClassicButton(panel.runActionButton, true)
 assert(panel.runActionButton.text.fontPath == PT.FONT, 'native button styling reset the font')
 local craft, queue = panel.classicPages.craft, panel.classicPages.queue
-assert(craft.scroll:IsVisible() and not queue.scroll:IsVisible())
+local equipment = panel.classicPages.equipment
+assert(craft.scroll:IsVisible() and not queue.scroll:IsVisible() and not equipment.scroll:IsVisible())
 assert(panel.reagentSeg:GetParent() == craft.body)
 assert(panel.bestQualityToggle:GetParent() == craft.body, 'tool escaped the scroll page')
 assert(panel.minProfitInput:GetParent() == queue.body)
+assert(panel.equipmentSwapCheck:GetParent() == equipment.body and panel.saveEquipmentButton:GetParent() == equipment.body,
+    'set controls are not grouped in the equipment tab')
+assert(panel.chooseToolButton:GetParent() == equipment.body and panel.autoToolToggle:GetParent() == equipment.body)
+for _, key in ipairs({'midnight','tww'}) do
+    local input=panel.knowledgeExpansionInputs[key]
+    assert(input and input:GetParent()==queue.body and input.placeholder:IsShown(), 'expansion profit input missing/empty is unclear')
+    local entered
+    CO.SetKnowledgeExpansionProfitOverride=function(_,which,value) assert(which==key);entered=value end
+    CO.GetKnowledgeExpansionProfitOverride=function(_,which) return which==key and entered end
+    input:SetText('0');input.scripts.OnEditFocusLost(input)
+    assert(entered==0 and tonumber(input:GetText())==0 and not input.placeholder:IsShown(), 'zero was collapsed to inherited')
+    input:SetText('-1000');input.scripts.OnEditFocusLost(input)
+    assert(entered==-1000*10000, 'allowed loss is not in gold')
+    input:SetText('');input.scripts.OnEditFocusLost(input)
+    assert(entered==nil and input.placeholder:IsShown(), 'empty override did not return to inherited')
+    input:SetText('not-a-number');input.scripts.OnEditFocusLost(input)
+    assert(entered==nil and input:GetText()=='', 'invalid text changed the threshold')
+    input:SetText('1e999');input.scripts.OnEditFocusLost(input)
+    assert(entered==nil and input:GetText()=='', 'infinite input was saved')
+end
+CO.SetKnowledgeExpansionProfitOverride, CO.GetKnowledgeExpansionProfitOverride=nil,nil
+do
+    local dropdown=PT.Dropdown
+    local menu
+    PT.Dropdown={Show=function(_,options) menu=options.items end}
+    panel.equipmentProfileButton:Click()
+    assert(menu and #menu>=2)
+    for _,entry in ipairs(menu) do if entry.text=='TWW' then entry.onClick() end end
+    assert(panel.equipmentProfileKey=='tww', 'equipment-set choice did not change')
+    assert(CO:GetSelectedProfessionExpansionLabel()=='Midnight', 'saving a set switched the actual profession')
+    local savedKey,savedPage
+    CO.SaveProfessionEquipmentProfile=function(_,key,whichPage) savedKey,savedPage=key,whichPage;return true end
+    panel.saveEquipmentButton:Click()
+    assert(savedKey=='tww' and savedPage==page)
+    CO.SaveProfessionEquipmentProfile=nil
+    panel.equipmentProfileKey='midnight'
+    PT.Dropdown=dropdown
+end
+for _,tab in pairs(panel.classicTabs) do
+    assert(tab.text:GetStringWidth() <= tab:GetWidth()-8, 'settings tab caption does not fit')
+end
 -- The tip above which a decline asks first sits with the other gold values.
 assert(panel.rejectConfirmInput and panel.rejectConfirmInput:GetParent() == queue.body
-    and panel.rejectConfirmInput.text == '5000', 'the decline confirmation limit is not shown: '
+    and tonumber(panel.rejectConfirmInput.text) == 5000, 'the decline confirmation limit is not shown: '
     .. tostring(panel.rejectConfirmInput and panel.rejectConfirmInput.text))
 assert(panel.runActionButton:GetParent() == panel.footer)
 for _, button in ipairs({panel.selectAllButton, panel.clearSelectedButton}) do
@@ -1044,7 +1096,7 @@ if arg[1] == '--scene' then
     CL:SetCompact(false); CL:ResizeList(container)
     panel.selectedText:SetText('Выбрано: 2')
     panel.keyText:SetText('Клавиша: Tab')
-    panel.statusText:SetText('Отметьте заказы и нажмите «Действие».')
+    panel.statusText:SetText('Отметьте заказы и нажмите «Следующий шаг».')
     panel.weeklyQuestIndicator.text:SetText('Квест')
     panel.shopCostText:SetText('39g')
     container.countText:SetText('Заказов: 3')
@@ -1066,6 +1118,7 @@ if arg[1] == '--scene' then
         CL:ApplyOrderProblemStyle(demo, i==2 and 'Клиент приложил не все обязательные реагенты' or nil, false)
     end
     if arg[3] == 'queue' then panel.classicTabs.queue:Click() end
+    if arg[3] == 'equipment' then panel.classicTabs.equipment:Click() end
     if arg[3] == 'collapsed' then panel.collapseButton:Click() end
     if arg[3] == 'finishers' then CO:OpenAutoFinishingMenu(panel.finisherButton) end
     local function quote(value)
@@ -1074,11 +1127,22 @@ if arg[1] == '--scene' then
     for _, f in ipairs(frames) do
         if f:IsVisible() then
             local x,y,w,h = bounds(f)
+            local clip='null'
+            local child=f
+            while child.parent do
+                local parent=child.parent
+                if parent.kind=='ScrollFrame' and parent.child==child then
+                    local cx,cy,cw,ch=bounds(parent)
+                    clip=string.format('[%.1f,%.1f,%.1f,%.1f]',cx,cy,cw,ch)
+                    y=y-(parent:GetVerticalScroll() or 0)
+                end
+                child=parent
+            end
             if w > 0 and h > 0 then
                 local color=f.color or {0,0,0,0}
-                print('UI ' .. string.format('{"kind":%s,"x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"text":%s,"size":%d,"justify":%s,"skin":%s,"color":[%.3f,%.3f,%.3f,%.3f]}',
+                print('UI ' .. string.format('{"kind":%s,"x":%.1f,"y":%.1f,"w":%.1f,"h":%.1f,"text":%s,"size":%d,"justify":%s,"skin":%s,"color":[%.3f,%.3f,%.3f,%.3f],"clip":%s}',
                     quote(f.kind),x,y,w,h,quote(f.text),f.fontSize or 12,quote(f.justify),quote(f.backdrop and 'inset' or (f.hironClassic and 'button' or '')),
-                    color[1],color[2],color[3],color[4]))
+                    color[1],color[2],color[3],color[4],clip))
             end
         end
     end

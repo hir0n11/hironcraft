@@ -66,6 +66,24 @@ for (const file of manualFiles) {
 }
 
 const ownCalls = calls.filter(call => !call.file.startsWith('Libs/'));
+const equipmentFile='Workflow/Orders/CraftingOrders/Equipment.lua';
+assert.deepEqual(ownCalls.filter(call=>call.name.endsWith('.PrepareOrderEquipment')).map(call=>call.file),
+    ['Workflow/Orders/CraftingOrders/Actions.lua'], 'saved-set preparation escaped the explicit row action');
+const equipmentAction=functions.get(equipmentFile+':CO.PrepareOrderEquipment');
+assert(equipmentAction, 'missing equipment action');
+const actionNodes=new Set();
+function collectNodes(node) {
+    if(!node || typeof node!=='object') return;
+    actionNodes.add(node);
+    for(const value of Object.values(node)) {
+        if(Array.isArray(value)) value.forEach(collectNodes);
+        else if(value && typeof value==='object') collectNodes(value);
+    }
+}
+collectNodes(equipmentAction);
+for(const call of ownCalls.filter(call=>call.file===equipmentFile && /(^|\.)(PickupContainerItem|PickupInventoryItem|ClearCursor)$/.test(call.name))) {
+    assert(actionNodes.has(call.node), 'equipment mutation escaped the clicked preparation: '+call.name);
+}
 // Also through pcall: the central sender catches the game's refusal of a
 // message that is too long ("Chat message limits exceeded").
 const directChat = ownCalls.filter(call => /(^|\.)SendChatMessage$/.test(call.name)
