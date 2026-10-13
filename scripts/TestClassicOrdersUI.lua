@@ -92,8 +92,29 @@ CO:EnsureControlPanel(page)
 assert(page.hironVersionLabel == versionLabel, 'reopening the panel duplicated the version label')
 assert(versionLabel.fontFlags == '' and versionLabel.fontSize == 10,
     'version label is not small plain text')
-assert(versionLabel:GetParent() == page and versionLabel.anchors.TOPRIGHT[1] == page,
-    'version label depends on the sidebar or browse list')
+local versionFrame = page.hironVersionFrame
+assert(versionFrame and versionFrame:GetParent() == page and versionLabel:GetParent() == versionFrame,
+    'version text has no independent rendering frame above the native decoration')
+assert(versionFrame.anchors.TOPRIGHT[1] == page, 'version frame has the wrong fallback anchor')
+-- Retail title/border frames may draw above the order page. The old test
+-- checked only logical visibility, which does not catch text covered by them.
+local versionHost = frame('Frame')
+versionHost:SetSize(1060,680);versionHost:SetFrameLevel(10)
+versionHost.TitleContainer=frame('Frame',versionHost);versionHost.TitleContainer:SetFrameLevel(200)
+versionHost.NineSlice=frame('Frame',versionHost);versionHost.NineSlice:SetFrameLevel(240)
+ProfessionsFrame=versionHost
+CO:EnsureVersionLabel(page)
+assert(versionFrame:GetFrameLevel()>versionHost.NineSlice:GetFrameLevel(), 'native border covers the version')
+assert(versionFrame.anchors.TOPRIGHT[1]==versionHost and versionFrame.anchors.TOPRIGHT[4]<=-28,
+    'version still occupies the title-bar artwork instead of the space below it')
+versionHost.NineSlice:SetFrameLevel(260)
+page.BrowseFrame:SetFrameLevel(280)
+CO:EnsureVersionLabel(page)
+assert(page.hironVersionFrame==versionFrame and versionFrame:GetFrameLevel()>280,
+    'reopening did not update the native stacking level or duplicated the version frame')
+page.BrowseFrame:SetFrameLevel(1)
+ProfessionsFrame=nil
+CO:EnsureVersionLabel(page)
 page.BrowseFrame:Hide()
 assert(versionLabel:IsVisible(), 'native detail view hid the version label')
 page.BrowseFrame:Show()
@@ -103,6 +124,7 @@ page:Show()
 CO.IsEnabled = function() return false end
 CO:EnsureVersionLabel(page)
 assert(not versionLabel:IsShown(), 'disabled order module retained its version label')
+assert(not versionFrame:IsShown(), 'disabled order module retained the version frame')
 CO.IsEnabled = function() return true end
 PT.version = '9.8.8-test'
 CO:EnsureControlPanel(page)

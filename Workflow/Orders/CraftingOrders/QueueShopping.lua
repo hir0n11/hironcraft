@@ -2630,6 +2630,7 @@ function CO:ApplyEnabledState()
     if not self:IsEnabled() then
         local page = self.activePageFrame or self:FindOrderPageFrame()
         if page and page.hironVersionLabel then page.hironVersionLabel:Hide() end
+        if page and page.hironVersionFrame then page.hironVersionFrame:Hide() end
         self:HideAllOrderOverlays()
         if self.CustomList and self.CustomList.Deactivate then
             self.CustomList:Deactivate()

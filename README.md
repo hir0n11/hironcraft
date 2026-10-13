@@ -25,6 +25,14 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Version label visibility (0.4.150)
+
+- Moved the small gray version text below the title bar and into a dedicated,
+  mouse-transparent frame above the native title/border layers. It stays
+  visible in the list and order detail, independently of the sidebar.
+- Added stacking-level regression coverage, including native border changes,
+  repeated opening and disabled/hidden page behavior. Order mechanics unchanged.
+
 ## Native order actions and visible version (0.4.149)
 
 - A small gray HironCraft version label now appears in the upper-right corner

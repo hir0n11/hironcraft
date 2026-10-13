@@ -1359,22 +1359,43 @@ end
 function CO:EnsureVersionLabel(pageFrame)
     if not pageFrame then return end
     local label = pageFrame.hironVersionLabel
+    local holder = pageFrame.hironVersionFrame
     if not self:IsEnabled() then
         if label then label:Hide() end
+        if holder then holder:Hide() end
         return
     end
+    if not holder then
+        holder = CreateFrame("Frame", nil, pageFrame)
+        holder:SetSize(150, 14)
+        holder:EnableMouse(false)
+        holder.ahuiCraftingOrdersOwned = true
+        pageFrame.hironVersionFrame = holder
+    end
     if not label then
-        label = pageFrame:CreateFontString(nil, "OVERLAY")
+        label = holder:CreateFontString(nil, "OVERLAY")
         ApplyFont(label, 10, "")
         label:SetShadowOffset(0, 0)
-        label:SetTextColor(0.58, 0.58, 0.58)
+        label:SetTextColor(0.70, 0.70, 0.70)
         label:SetJustifyH("RIGHT")
-        -- Both the browse list and native order detail belong to this page.
-        -- Keep the label outside the collapsible sidebar and away from Close.
-        label:SetPoint("TOPRIGHT", _G.ProfessionsFrame or pageFrame, "TOPRIGHT", -36, -11)
+        label:SetAllPoints(holder)
+        label.ahuiCraftingOrdersOwned = true
         pageFrame.hironVersionLabel = label
     end
+    -- OVERLAY only orders regions within their own frame. A FontString on
+    -- OrdersPage can still be covered by a higher-level native border frame.
+    -- Use a mouse-transparent child above the decoration, below the title
+    -- bar, and re-anchor it when Blizzard rebuilds/raises the profession UI.
+    local window = _G.ProfessionsFrame or pageFrame
+    local level = pageFrame:GetFrameLevel() or 0
+    for _, native in pairs({window, window.TitleContainer, window.NineSlice, pageFrame.BrowseFrame, pageFrame.OrderView}) do
+        if native.GetFrameLevel then level = math.max(level, native:GetFrameLevel() or 0) end
+    end
+    holder:SetFrameLevel(level + 10)
+    holder:ClearAllPoints()
+    holder:SetPoint("TOPRIGHT", window, "TOPRIGHT", -38, -29)
     label:SetText("HironCraft " .. tostring(PT.version or "?"))
+    holder:Show()
     label:Show()
 end
 
