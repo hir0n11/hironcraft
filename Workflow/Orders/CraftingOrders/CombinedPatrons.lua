@@ -153,7 +153,9 @@ function CO:GetCombinedPatronOrders(page)
     if not session or not Current(session) or session.page ~= page or not session.ready then return {} end
     local orders = {}
     for _, order in ipairs(session.orders) do
-        if not (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID)) then orders[#orders + 1] = order end
+        if not (self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID)) then
+            orders[#orders + 1] = self.GetEffectiveOrder and self:GetEffectiveOrder(order.orderID, order) or order
+        end
     end
     return orders
 end
@@ -357,6 +359,8 @@ function CO:HandleCombinedPatronRequest(page, request)
     if not send or not get then return false end
     self:CancelCombinedPatronLoad()
     self.activePageFrame = page
+    page.ahuiOrderRequestSerial = (page.ahuiOrderRequestSerial or 0) + 1
+    page.ahuiOrderRequestPending = nil
     if page.requestCallback and page.requestCallback.Cancel then page.requestCallback:Cancel() end
     page.requestCallback = nil
     local session = { page = page, identity = identity, profession = self:GetActiveBaseProfessionID(page),
@@ -422,15 +426,17 @@ function CO:HandleCombinedPatronRequest(page, request)
         query.searchFavorites, query.initialNonPublicSearch = request.searchFavorites == true, false
         query.primarySort = { sortType = Enum.CraftingOrderSortType.ItemName, reversed = false }
         query.secondarySort = { sortType = Enum.CraftingOrderSortType.MaxTip, reversed = false }
-        local function Answer(result, orderType, displayBuckets, expectMoreRows)
+        local function Answer(result, orderType, displayBuckets, expectMoreRows, responseOffset)
             if not Current(session) or answered or session.serial ~= serial then return end
-            if not IsResultOk(result) or orderType ~= page.orderType or displayBuckets or Child() ~= childID then Retry(); return end
+            if not IsResultOk(result) or orderType ~= page.orderType or displayBuckets or Child() ~= childID
+                or (responseOffset ~= nil and tonumber(responseOffset) ~= offset) then Retry(); return end
             local ok, orders = pcall(get)
             if not ok or type(orders) ~= 'table' then Retry(); return end
             answered = true
             session.callback = nil
-            local added = 0
+            local added, consumed = 0, 0
             for _, source in ipairs(orders) do
+                consumed = consumed + 1
                 local key = source.orderID and tostring(source.orderID)
                 if key and not session.seen[key] and (source.orderType == nil or source.orderType == page.orderType) then
                     local order = Copy(source)
@@ -446,9 +452,12 @@ function CO:HandleCombinedPatronRequest(page, request)
                 end
             end
             -- An empty/repeated page with expectMoreRows must not spin forever.
-            if expectMoreRows and added == 0 then Publish(true); return end
+            if expectMoreRows and (added == 0 or consumed <= offset) then Publish(true); return end
             Later(0.1, function()
-                if expectMoreRows then Fetch(index, offset + added, 0)
+                -- GetCrafterOrders is cumulative: Blizzard sets numOrders to
+                -- its length and requests the next page at that offset. Do not
+                -- add the previous offset again or later pages are skipped.
+                if expectMoreRows then Fetch(index, consumed, 0)
                 else Fetch(index + 1, 0, 0) end
             end)
         end

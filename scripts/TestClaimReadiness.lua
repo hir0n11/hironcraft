@@ -118,6 +118,8 @@ assert(CO.currentQueueOrderID == order.orderID)
 local craftOrder = { orderID = 7002, orderState = 2 }
 CO.CanSupplyCrafterReagentsForQueue = function() return false end
 CO.orderIssues["7002"] = "old issue"
+liveClaim = craftOrder
+CO.GetOrderEngine = function() return {} end
 assert(CO:CraftOrderFromRow(craftOrder, page, {}) == false)
 assert(CO.orderIssues["7002"] == nil, "missing reagents permanently blocked the row")
 assert(CO.lastStatus == "Cannot craft: missing reagents.")

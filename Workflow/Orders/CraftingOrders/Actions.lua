@@ -11,6 +11,43 @@ local CLAIM_READY_POLL = 0.08
 local CLAIM_READY_TIMEOUT = 8.0
 local CRAFT_START_ACK_TIMEOUT = 4.0
 local CRAFT_FINAL_TIMEOUT = 30.0
+local ORDER_RESPONSE_TIMEOUT = 10.0
+
+-- Timers reconcile state only. A retry always requires a new hardware click.
+function CO:ScheduleTerminalOrderRecovery(terminal)
+    if not C_Timer or not C_Timer.After then return end
+    C_Timer.After(ORDER_RESPONSE_TIMEOUT, function()
+        if CO.terminalAction ~= terminal then return end
+        local claimed = CO:GetClaimedOrder()
+        CO.terminalAction = nil
+        if terminal.kind == "release" then
+            CO.pendingReleaseOrderID, CO.pendingReleaseForReject = nil, nil
+        else
+            CO.pendingFulfillOrderID = nil
+        end
+        if not claimed or not SameOrderID(claimed.orderID, terminal.orderID) then
+            local key = OrderKey(terminal.orderID)
+            CO.selectedOrders[key] = nil
+            if CO.rowStates[terminal.orderID] then CO.rowStates[terminal.orderID].order = nil end
+            if CO.ForgetCompletedOrderSelection then CO:ForgetCompletedOrderSelection(terminal.orderID) end
+            if SameOrderID(CO.currentQueueOrderID, terminal.orderID) then CO.currentQueueOrderID = nil end
+            if SameOrderID(CO.craftedOrderID, terminal.orderID) then CO.craftedOrderID = nil end
+        end
+        CO:SetStatus(T("COA_STATUS_RESPONSE_TIMEOUT", "Server response is delayed. State rechecked; press Action to continue."))
+        CO:InvalidateOrderCaches(terminal.orderID)
+        CO:RefreshVisibleRowsSoon()
+        if CO.RestoreListActionViewSoon then CO:RestoreListActionViewSoon() end
+        if CO.UpdateControlPanel then CO:UpdateControlPanel() end
+        if not claimed and CO.RefreshPageSoon then CO:RefreshPageSoon(0.05, true) end
+    end)
+end
+
+function CO:MatchesPendingCraftEvent(spellID, castGUID)
+    if not self.pendingCraftOrderID then return false end
+    if spellID and self.pendingCraftSpellID and tonumber(spellID) ~= tonumber(self.pendingCraftSpellID) then return false end
+    if castGUID and self.pendingCraftCastGUID and castGUID ~= self.pendingCraftCastGUID then return false end
+    return true
+end
 
 function CO:SyncRowActionButtonLayers(row, btn)
     btn = btn or (row and row.ahuiOrderActionButton)
@@ -212,6 +249,19 @@ function CO:IsOrderSubmissionPending()
         or self.progressActive == true or self.terminalAction ~= nil
 end
 
+function CO:IsOrderListReadyForAction(pageFrame)
+    if self.queueSelectionRunning or self.combinedPatronQueue then return false end
+    pageFrame = pageFrame or self.activePageFrame
+    if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(pageFrame) then return false end
+    local container = pageFrame and pageFrame.ahuiCustomList
+    if pageFrame and pageFrame.ahuiOrderRequestPending then return false end
+    if container and container._freshSearchPending then return false end
+    local automatic = self._autoQueuePending
+    if automatic and automatic.page == pageFrame and automatic.stamp == self._autoQueueStamp
+        and automatic.context == self._orderSelectionContext then return false end
+    return true
+end
+
 function CO:BeginListAction(pageFrame)
     if not self.IsOrderListOpen or not self:IsOrderListOpen(pageFrame) then return false end
     self.listActionContext = {
@@ -320,6 +370,7 @@ function CO:GetOrderEngine(pageFrame, order)
         and SameOrderID(self.preparedFinisherOrderID, order.orderID)
         and orderView.order
         and SameOrderID(orderView.order.orderID, order.orderID)
+        and orderView.order.orderState == order.orderState
 
     if self.preparedFinisherOrderID
         and not SameOrderID(self.preparedFinisherOrderID, order.orderID)
@@ -385,6 +436,8 @@ function CO:ReleaseOrder(order, pageFrame, forRejection)
     end
 
     self.pendingReleaseOrderID = order.orderID
+    local terminal = {kind="release", orderID=order.orderID, removalSeen=false, responseSeen=false}
+    self.terminalAction = terminal
     self.pendingReleaseForReject = forRejection == true
     self.pendingClaimOrderID = nil
     self.pendingCraftOrderID = nil
@@ -406,7 +459,10 @@ function CO:ReleaseOrder(order, pageFrame, forRejection)
     if not ok then
         self.pendingReleaseOrderID = nil
         self.pendingReleaseForReject = nil
+        if self.terminalAction == terminal then self.terminalAction = nil end
         self:RefreshVisibleRowsSoon()
+    else
+        self:ScheduleTerminalOrderRecovery(terminal)
     end
 
     return ok
@@ -763,8 +819,8 @@ function CO:ScheduleClaimedOrderReadiness(orderID)
             -- it as craft-ready: protected crafting cannot succeed until the
             -- authoritative claimed order exists.
             CO.pendingClaimOrderID = nil
-            local state = CO.rowStates and CO.rowStates[orderID]
-            if state and state.order then SetCachedOrderStateClaimed(state.order) end
+            -- A successful request is not an authoritative claimed snapshot.
+            -- Do not fabricate a Claimed row/transaction after a lost response.
             CO:SetStatus(T(
                 "COA_STATUS_CLAIM_NOT_READY",
                 "Order is still being claimed — press craft again in a moment."
@@ -783,6 +839,7 @@ end
 function CO:ClaimOrder(order, pageFrame)
     if not order or not order.orderID then return false end
     if self:IsOrderSubmissionPending() then return false end
+    if not self:IsOrderListReadyForAction(pageFrame) then return false end
     local claimed = self:GetClaimedOrder()
     if claimed then return false end
     if self.IsOrderFulfilled and self:IsOrderFulfilled(order.orderID) then return false end
@@ -893,6 +950,7 @@ function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
 
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
+    self.pendingCraftCastGUID = nil
     self.pendingCraftButton = nil
     self.craftSubmissionAcknowledgedOrderID = nil
     if not keepPreparedFinisher then
@@ -993,17 +1051,6 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
         return false
     end
 
-    if self.CanSupplyCrafterReagentsForQueue and not self:CanSupplyCrafterReagentsForQueue(order, true) then
-        local key = OrderKey(order.orderID)
-        -- Bag contents can change immediately after Shopping. Do not turn this
-        -- transient condition into a sticky disabled row: the next hardware
-        -- press must be able to recheck and craft once the reagents are owned.
-        self.orderIssues[key] = nil
-        self:SetStatus(T("COA_STATUS_NO_REAGENTS", "Cannot craft: missing reagents."))
-        self:RefreshVisibleRowsSoon()
-        return false
-    end
-
     -- The craft only binds while C_CraftingOrders.GetClaimedOrder() actually returns this order.
     -- Right after claiming (fresh login / fast key presses) the claim is not yet registered
     -- server-side, GetClaimedOrder() is nil, and CraftOrder()/CraftRecipe() silently no-op —
@@ -1022,6 +1069,16 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     local engine, err = self:GetOrderEngine(pageFrame, order)
     if not engine then
         self:SetStatus(err)
+        return false
+    end
+
+    -- Bind the authoritative claim before checking quantities. The list may
+    -- have been built using another recipe rank/child or an old allocation.
+    self:InvalidateOrderCaches(order.orderID)
+    if self.CanSupplyCrafterReagentsForQueue and not self:CanSupplyCrafterReagentsForQueue(order, true) then
+        self.orderIssues[OrderKey(order.orderID)] = nil
+        self:SetStatus(T("COA_STATUS_NO_REAGENTS", "Cannot craft: missing reagents."))
+        self:RefreshVisibleRowsSoon()
         return false
     end
 
@@ -1126,6 +1183,31 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     end
 
     local transaction, form = self:GetTransactionFromEngine(engine)
+    if transaction and transaction.HasMetAllRequirements then
+        local ok, ready = pcall(transaction.HasMetAllRequirements, transaction)
+        if not ok or not ready then
+            self:SetStatus(T("COA_STATUS_NO_REAGENTS", "Cannot craft: missing reagents."))
+            self:RefreshVisibleRowsSoon()
+            return false
+        end
+    end
+    local target = self.GetOrderRequestedQuality and self:GetOrderRequestedQuality(order) or tonumber(order.minQuality) or 0
+    if target > 0 and form and form.GetRecipeOperationInfo then
+        local ok, info = pcall(form.GetRecipeOperationInfo, form)
+        if not ok or type(info) ~= "table"
+            or (tonumber(info.craftingQuality or info.quality or info.projectedQuality or info.outputQuality) or 0) < target then
+            self:SetStatus(T("COA_STATUS_CRAFT_QUALITY_WAIT", "The live recipe has not confirmed the requested quality. Check reagents and concentration."))
+            self:RefreshVisibleRowsSoon()
+            return false
+        end
+        if transaction and transaction.IsApplyingConcentration then
+            local applied = transaction:IsApplyingConcentration() == true
+            if applied ~= useConcentration then
+                self:SetStatus(T("COA_STATUS_CRAFT_QUALITY_WAIT", "The live recipe has not confirmed the requested quality. Check reagents and concentration."))
+                return false
+            end
+        end
+    end
     local reagentTbl = self:BuildOrderSubmissionReagents(engine, order, transaction)
     local recipeLevel = form and form.GetCurrentRecipeLevel and form:GetCurrentRecipeLevel()
     if order.isRecraft and Professions and Professions.PrepareRecipeRecraft
@@ -1144,6 +1226,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
 
     self.pendingCraftOrderID = order.orderID
     self.pendingCraftSpellID = order.spellID
+    self.pendingCraftCastGUID = nil
     self.craftSubmissionAcknowledgedOrderID = nil
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.activeOrderID = order.orderID
@@ -1174,8 +1257,11 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
                         return
                     end
 
-                    local casting = UnitCastingInfo("player") or UnitChannelInfo("player")
-                    if casting then
+                    local casting, _, _, _, _, _, _, _, castingSpellID = UnitCastingInfo("player")
+                    if not casting then
+                        casting, _, _, _, _, _, _, castingSpellID = UnitChannelInfo("player")
+                    end
+                    if casting and co:MatchesPendingCraftEvent(castingSpellID) then
                         co:MarkCraftSubmissionAcknowledged(watchID)
                         return
                     end
@@ -1297,6 +1383,11 @@ function CO:FulfillOrder(order, pageFrame)
     end
     local claimed = self:GetClaimedOrder()
     if not claimed or not SameOrderID(claimed.orderID, order.orderID) then return false end
+    if claimed.isFulfillable ~= true then
+        self:SetStatus(T("COA_STATUS_CRAFT_CONFIRM_WAIT", "Waiting for the server to confirm the crafted order."))
+        self:RefreshVisibleRowsSoon()
+        return false
+    end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not self:IsAtUsableCraftingOrderTable(pageFrame) then
         self:SetStatus(T("COA_STATUS_TABLE_REQUIRED", "Crafting order table is required for this action."))
@@ -1310,7 +1401,8 @@ function CO:FulfillOrder(order, pageFrame)
     end
 
     self.pendingFulfillOrderID = order.orderID
-    self.terminalAction = {orderID=order.orderID, removalSeen=false, responseSeen=false}
+    local terminal = {kind="fulfill", orderID=order.orderID, removalSeen=false, responseSeen=false}
+    self.terminalAction = terminal
     self.currentQueueOrderID = order.orderID
     self.activeOrderID = order.orderID
     self.activePageFrame = pageFrame
@@ -1325,6 +1417,8 @@ function CO:FulfillOrder(order, pageFrame)
         self.terminalAction = nil
         self:SetStatus(T("COA_STATUS_FULFILL_FAILED", "Could not complete the order."))
         self:RefreshVisibleRowsSoon()
+    elseif ok then
+        self:ScheduleTerminalOrderRecovery(terminal)
     end
     return ok
 end
@@ -1336,6 +1430,11 @@ function CO:RunRowButtonAction(btn)
     -- No rebinding, expansion switching or diagnostic spam during any pending
     -- stage, even when another row is clicked or refreshed under the pointer.
     if self:IsOrderSubmissionPending() then return end
+    local page = btn.pageFrame or self.activePageFrame
+    if not self:IsOrderListReadyForAction(page) or btn.ahuiStaleDuringSearch then
+        self:SetStatus(T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."))
+        return
+    end
 
     self:BeginListAction(btn.pageFrame or self.activePageFrame)
     self:SetActiveRowButton(btn)
@@ -1380,6 +1479,10 @@ end
 
 function CO:RunActiveRowAction()
     if self:IsOrderSubmissionPending() then return end
+    if not self:IsOrderListReadyForAction(self.activePageFrame) then
+        self:SetStatus(T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."))
+        return
+    end
     if self.listActionContext then self:RestoreListActionView(self.listActionContext.page) end
     if not self:HasSelectedOrders() then
         if self.HandleEmptyPersonalOrdersHotkey and self:HandleEmptyPersonalOrdersHotkey() then

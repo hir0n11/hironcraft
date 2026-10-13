@@ -164,7 +164,8 @@ for _,reason in ipairs({'missing_customer_reagents','insufficient_quality'}) do
     claimed=nil
     CO:OnEvent('CRAFTINGORDERS_CLAIMED_ORDER_REMOVED')
     for _,fn in ipairs(timers) do fn() end
-    assert(rejected==previous and #timers==0, 'release event scheduled/submitted a decline')
+    assert(rejected==previous, 'release recovery timer submitted a decline')
+    timers={}
     assert(CO.selectedOrders['7001'], 'release lost the row needed for the next click')
     local action=CO:GetRowAction(7001,order)
     assert(action=='reject', 'next click is not a manual decline')

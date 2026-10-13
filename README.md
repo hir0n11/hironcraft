@@ -25,6 +25,28 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order workflow stability and loading recovery (0.4.143)
+
+- Fixed a loading regression: native callback containers are invoked through
+  `Invoke`, not called as Lua functions. Empty and nonempty Personal answers
+  now finish the fresh search; failures/timeouts clear the spinner and locks.
+  Public searches without favourites cannot leave a lock with no request.
+- Every list request owns a generation, character, tab and child-profession
+  context. Late/duplicate answers cannot replace a newer list. Owned deep
+  snapshots survive mutation of Blizzard's shared result buffer. Queue paging
+  follows the cumulative buffer length and retains all fetched action rows.
+- Early hotkey/clicks wait for list loading and automatic queue calculation.
+  Claim/craft/fulfill/release advance only on authoritative live state.
+  Cast notifications and recovery timers cannot advance a different order;
+  bounded recovery never submits a protected action in the background.
+- Crafting rebinds the live claim before checking stock, slot allocations,
+  quality and concentration. Variable reagent quantities use the chosen grade
+  and customer contribution; one bag stack is reserved once across slots.
+  An incomplete plan cannot partially overwrite the selected reagents.
+- Regression coverage includes native non-callable userdata callbacks, empty
+  Personal lists, stale requests/timeouts, multiple cumulative pages, missing
+  terminal events, delayed craft confirmation and shared/variable quantities.
+
 ## Actual patron reagent quality (0.4.142)
 
 - Operation-info requests keep regular and modified reagent slots separate.

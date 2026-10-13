@@ -707,6 +707,11 @@ function CL:ShowBlizzardList(pageFrame)
     end
 end
 
+function CL:StopLoadingSpinner(pageFrame)
+    local list = pageFrame and pageFrame.BrowseFrame and pageFrame.BrowseFrame.OrderList
+    if list and list.LoadingSpinner then list.LoadingSpinner:Hide() end
+end
+
 function CL:Deactivate(pageFrame)
     pageFrame = pageFrame or CO.activePageFrame or (_G.ProfessionsFrame and ProfessionsFrame.OrdersPage)
     self._pollStamp = (self._pollStamp or 0) + 1
@@ -1221,7 +1226,8 @@ function CL:PopulateRow(row, order)
                     b._itemID = id
                     b._itemLink = nil
 
-                    local need = tonumber(selected and selected.quantity) or tonumber(reagent.quantity) or 0
+                    local need = CO.GetRequiredReagentQuantity and CO:GetRequiredReagentQuantity(order, reagent, id)
+                        or tonumber(reagent.quantity) or 0
                     local available, missing, mixedCount = false, 0, 0
 
                     if selected and type(selected.mix) == "table" and #selected.mix > 0 then
@@ -1669,14 +1675,95 @@ end
 
 function CL:ScopeKey(pageFrame) return ListScopeKey(pageFrame) end
 
+local function OrderSnapshot(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local copy = {}
+    seen[value] = copy
+    for key, entry in pairs(value) do copy[key] = OrderSnapshot(entry, seen) end
+    return copy
+end
+
+function CL:GuardOrderRequest(page, request)
+    if not CO.IsEnabled or not CO:IsEnabled() then return end
+    if not page or not request or not request.callback or page.requestCallback ~= request.callback then return end
+    local scope, owner = ListScopeKey(page), UnitGUID and UnitGUID('player')
+    local serial = (page.ahuiOrderRequestSerial or 0) + 1
+    page.ahuiOrderRequestSerial, page.ahuiOrderRequestPending = serial, true
+    local callback, answered = request.callback, false
+    local orderType, offset = request.orderType, tonumber(request.offset) or 0
+    local child = C_TradeSkillUI and C_TradeSkillUI.GetProfessionChildSkillLineID
+        and C_TradeSkillUI.GetProfessionChildSkillLineID()
+    local function Current()
+        return page.ahuiOrderRequestSerial == serial and ListScopeKey(page) == scope
+            and owner == (UnitGUID and UnitGUID('player'))
+            and (not page.IsShown or page:IsShown())
+            and (not child or not C_TradeSkillUI.GetProfessionChildSkillLineID
+                or child == C_TradeSkillUI.GetProfessionChildSkillLineID())
+    end
+    local function Answer(result, responseType, displayBuckets, expectMoreRows, responseOffset, ...)
+        if answered or not Current() then return end
+        local okResult = Enum and Enum.CraftingOrderResult and Enum.CraftingOrderResult.Ok or 0
+        if result == okResult and ((responseType ~= nil and orderType ~= nil and responseType ~= orderType)
+            or (responseOffset ~= nil and tonumber(responseOffset) ~= offset)) then return end
+        answered = true
+        page.ahuiOrderRequestPending = nil
+        if CO.IsEnabled and CO:IsEnabled() and result ~= okResult then
+            if type(callback) ~= "function" and callback.Cancel then callback:Cancel() end
+            page.requestCallback = nil
+            local container = page.ahuiCustomList
+            if container then container._freshSearchPending = nil; container._allowEmptyOnce = true end
+            page.ahuiScopedOrders = {scope=scope, orders={}}
+            self:StopLoadingSpinner(page)
+            CO:SetStatus(L("COA_STATUS_LIST_LOAD_FAILED", "Could not load orders. Refresh the list to retry."))
+            QueueRefresh()
+            return
+        end
+        -- CreateCallback returns a native FunctionContainer, not a callable
+        -- Lua function. Calling it directly aborts ShowOrders/ShowGeneric and
+        -- leaves both the custom list and Blizzard's spinner stuck forever.
+        local ok, err
+        if type(callback) == "function" then
+            ok, err = pcall(callback, result, responseType, displayBuckets, expectMoreRows, responseOffset, ...)
+        else
+            ok, err = pcall(callback.Invoke, callback, result, responseType, displayBuckets, expectMoreRows, responseOffset, ...)
+        end
+        if not ok then
+            self:ClearScope(page)
+            QueueRefresh()
+            CO:SetStatus(L("COA_STATUS_LIST_LOAD_FAILED", "Could not load orders. Refresh the list to retry."))
+            if geterrorhandler then geterrorhandler()(err) else error(err, 0) end
+        end
+    end
+    local guarded = C_FunctionContainers and C_FunctionContainers.CreateCallback
+        and C_FunctionContainers.CreateCallback(Answer) or Answer
+    request.callback, page.requestCallback = guarded, guarded
+    if C_Timer and C_Timer.After then
+        C_Timer.After(10, function()
+            if answered or page.ahuiOrderRequestSerial ~= serial then return end
+            if not Current() then
+                self:ClearScope(page)
+                QueueRefresh()
+                return
+            end
+            Answer(-1)
+        end)
+    end
+end
+
 local UnregisterRow
 function CL:ClearScope(pageFrame)
     if CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
     pageFrame.ahuiScopedOrders = { scope = ListScopeKey(pageFrame), orders = {} }
-    if pageFrame.requestCallback then
+    pageFrame.ahuiOrderRequestSerial = (pageFrame.ahuiOrderRequestSerial or 0) + 1
+    pageFrame.ahuiOrderRequestPending = nil
+    if pageFrame.requestCallback and type(pageFrame.requestCallback) ~= "function" and pageFrame.requestCallback.Cancel then
         pageFrame.requestCallback:Cancel()
-        pageFrame.requestCallback = nil
     end
+    pageFrame.requestCallback = nil
+    pageFrame.ahuiRequestedScope = nil
+    self:StopLoadingSpinner(pageFrame)
     local container = pageFrame.ahuiCustomList
     if not container then return end
     container._lastGoodOrders, container._lastGoodType, container._lastGoodScope = nil, nil, nil
@@ -1698,16 +1785,16 @@ function CL:AcceptScopeAnswer(pageFrame, orders, offset)
         pageFrame.ahuiScopedOrders = state
     end
     local seen = {}
-    for _, order in ipairs(state.orders) do seen[order.orderID] = true end
+    for index, order in ipairs(state.orders) do seen[tostring(order.orderID)] = index end
     for _, order in ipairs(orders or {}) do
         -- Public bucket summaries are NOT orders. Keep them in Blizzard's
         -- recipe list; never fall back to GetCrafterOrders from another tab.
-        if order.orderID and not seen[order.orderID]
+        if order.orderID
             and (order.orderType == nil or order.orderType == pageFrame.orderType) then
-            local copy = {}
-            for key, value in pairs(order) do copy[key] = value end
-            state.orders[#state.orders + 1] = copy
-            seen[order.orderID] = true
+            local key = tostring(order.orderID)
+            local index = seen[key] or (#state.orders + 1)
+            state.orders[index] = OrderSnapshot(order)
+            seen[key] = index
         end
     end
 end
@@ -1963,6 +2050,11 @@ function CL:Refresh(pageFrame)
     container._lastOrderCount = #orders
     if CO.RestoreOrderSelection then CO:RestoreOrderSelection(pageFrame, orders) end
     container.countText:SetText(string.format(L("COA_CLASSIC_ORDER_COUNT", "Orders: %d"), #orders))
+    local loading = pageFrame.ahuiOrderRequestPending or container._freshSearchPending
+        or (CO.combinedPatrons and CO.combinedPatrons.page == pageFrame and CO.combinedPatrons.loading)
+    container.emptyText:SetText(loading
+        and L("COA_CLASSIC_LOADING", "Loading orders...")
+        or L("COA_CLASSIC_EMPTY", "No orders. Refresh the list or choose another tab."))
     container.emptyText:SetShown(#orders == 0)
 
     local sortCol = CL._sortColumn
@@ -2098,6 +2190,7 @@ function CL:Refresh(pageFrame)
         if row._order and row._order.orderID ~= order.orderID then UnregisterRow(row) end
         if row._staleDuringSearch then
             row._staleDuringSearch = nil
+            if row.action then row.action.ahuiStaleDuringSearch = nil end
             if row.action and row.action.EnableMouse then row.action:EnableMouse(true) end
         end
         if row._listY ~= y then

@@ -859,7 +859,7 @@ function CO:PrepareOrderForQueueAnalysis(order, pageFrame)
     return prepared == true
 end
 
-function CO:FindAvailableCrafterReagent(order, reagentEntry)
+function CO:FindAvailableCrafterReagent(order, reagentEntry, inventory)
     if not order or not reagentEntry then return nil end
     if IsCustomerProvidedReagent(reagentEntry) or not IsCrafterProvidedReagent(reagentEntry) then
         return { provided = true }
@@ -870,7 +870,14 @@ function CO:FindAvailableCrafterReagent(order, reagentEntry)
 
     local slotIndex = reagentEntry.slotIndex or reagentEntry.dataSlotIndex
     local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
-    if selected and selected.itemID and self:GetItemCountForShopping(selected.itemID) >= quantity then
+    local function Have(itemID)
+        if inventory and inventory[itemID] ~= nil then return inventory[itemID] end
+        return self:GetItemCountForShopping(itemID) or 0
+    end
+    local function Need(itemID)
+        return self.GetRequiredReagentQuantity and self:GetRequiredReagentQuantity(order, reagentEntry, itemID) or quantity
+    end
+    if selected and selected.itemID and Have(selected.itemID) >= Need(selected.itemID) then
         return selected
     end
 
@@ -887,7 +894,7 @@ function CO:FindAvailableCrafterReagent(order, reagentEntry)
         return tier ~= nil and tier >= wanted
     end
 
-    if reagentEntry.itemID and self:GetItemCountForShopping(reagentEntry.itemID) >= quantity
+    if reagentEntry.itemID and Have(reagentEntry.itemID) >= Need(reagentEntry.itemID)
         and goodEnough(reagentEntry.qualityTier or ReadProfessionQualityFromItem(reagentEntry.itemID))
     then
         return {
@@ -903,7 +910,7 @@ function CO:FindAvailableCrafterReagent(order, reagentEntry)
 
     local best
     for _, candidate in ipairs(self:GetReagentCandidates(order, reagentEntry)) do
-        if candidate and candidate.itemID and self:GetItemCountForShopping(candidate.itemID) >= quantity
+        if candidate and candidate.itemID and Have(candidate.itemID) >= Need(candidate.itemID)
             and goodEnough(self:GetQueueReagentCandidateTier(candidate))
         then
             if not best then
@@ -1071,6 +1078,8 @@ end
 
 function CO:ApplyQueueReagentModeToOrder(order)
     if not order or not order.orderID then return false end
+    if (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
+        or (self.GetClaimedOrder and self:GetClaimedOrder()) then return true end
 
     local mode = self:GetQueueReagentMode()
     if mode == "manual" then return true end
@@ -1096,7 +1105,7 @@ function CO:ApplyQueueReagentModeToOrder(order)
                     if alternateKey then self.selectedReagents[alternateKey] = nil end
                     changed = true
                 elseif candidate and candidate.itemID then
-                    local quantity = reagentEntry.quantity or candidate.quantity or 0
+                    local quantity = self:GetRequiredReagentQuantity(order, reagentEntry, candidate.itemID)
                     local dataSlotIndex = reagentEntry.dataSlotIndex or candidate.dataSlotIndex
                     local slotIndex = reagentEntry.slotIndex or candidate.slotIndex or dataSlotIndex
                     local qualityTier = self:GetQueueReagentCandidateTier(candidate)
@@ -1267,6 +1276,21 @@ function CO:BuildOwnedMixForEntry(order, reagentEntry, vInv)
 
     local mix = {}
     local remaining = quantity
+    -- Blizzard does not permit mixing alternatives when their required
+    -- quantities differ. Pick one complete allocation, not a sum of ranks.
+    if reagentEntry.slotSchematic and #(reagentEntry.slotSchematic.variableQuantities or {}) > 0 then
+        for _, candidate in ipairs(candidates) do
+            local id = candidate.itemID
+            local need = self:GetRequiredReagentQuantity(order, reagentEntry, id)
+            local left = vInv[id]
+            if left == nil then left = self:GetItemCountForShopping(id) or 0 end
+            if left >= need then
+                vInv[id] = left - need
+                return {{itemID=id, quantity=need, qualityTier=self:GetQueueReagentCandidateTier(candidate)}}, 0
+            end
+        end
+        return {}, quantity
+    end
     for _, cand in ipairs(candidates) do
         if remaining <= 0 then break end
         local id = cand.itemID
@@ -1295,79 +1319,67 @@ function CO:CanSupplyCrafterReagentsForQueue(order, saveSelections)
 
     local mode = self.GetQueueReagentMode and self:GetQueueReagentMode() or "auto"
     local slots = self:BuildDisplayReagents(order)
-
-    if mode == "auto" then
-        local vInv = {}
-        for _, reagentEntry in ipairs(slots) do
-            if IsCrafterProvidedReagent(reagentEntry) and not IsCustomerProvidedReagent(reagentEntry) then
-                local mix, remaining = self:BuildOwnedMixForEntry(order, reagentEntry, vInv)
-                if remaining > 0 then
-                    return false
-                end
-                if saveSelections and #mix > 0 then
-                    local key = MakeReagentSelectionKeyForEntry(order.orderID, reagentEntry)
-                    if key then
-                        self.selectedReagents[key] = {
-                            slotIndex = reagentEntry.slotIndex or reagentEntry.dataSlotIndex,
-                            dataSlotIndex = reagentEntry.dataSlotIndex,
-                            quantity = tonumber(reagentEntry.quantity) or 0,
-                            itemID = mix[1].itemID,
-                            qualityTier = mix[1].qualityTier,
-                            mix = mix,
-                        }
-                    end
-                end
-            end
-        end
+    if slots.ahuiSchematicReady == false then return false end
+    local inventory, staged = {}, {}
+    local function Reserve(itemID, quantity)
+        if not itemID or quantity <= 0 then return false end
+        local left = inventory[itemID]
+        if left == nil then left = self:GetItemCountForShopping(itemID) or 0 end
+        if left < quantity then return false end
+        inventory[itemID] = left - quantity
         return true
     end
-
     for _, reagentEntry in ipairs(slots) do
         if IsCrafterProvidedReagent(reagentEntry) and not IsCustomerProvidedReagent(reagentEntry) then
             local selKey = MakeReagentSelectionKeyForEntry(order.orderID, reagentEntry)
-            local sel = selKey and self.selectedReagents[selKey]
-            if sel and type(sel.mix) == "table" and #sel.mix > 0 then
-                local sum = 0
+            local sel = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
+            local mix, quantity, itemID, tier
+            if mode == "auto" then
+                local remaining
+                mix, remaining = self:BuildOwnedMixForEntry(order, reagentEntry, inventory)
+                if remaining > 0 or #mix == 0 then return false end
+                quantity = 0
+                for _, part in ipairs(mix) do quantity = quantity + part.quantity end
+                itemID, tier = mix[1].itemID, mix[1].qualityTier
+            elseif sel and type(sel.mix) == "table" and #sel.mix > 0 then
+                quantity = self:GetRequiredReagentQuantity(order, reagentEntry, sel.mix[1].itemID)
+                local remaining = quantity
+                mix = {}
+                if reagentEntry.slotSchematic and #(reagentEntry.slotSchematic.variableQuantities or {}) > 0 and #sel.mix > 1 then return false end
                 for _, part in ipairs(sel.mix) do
-                    if not part.itemID or (self:GetItemCountForShopping(part.itemID) or 0) < (tonumber(part.quantity) or 0) then
-                        return false
+                    if remaining <= 0 then break end
+                    local take = math.min(remaining, math.max(0, tonumber(part.quantity) or 0))
+                    if take > 0 then
+                        if not Reserve(part.itemID, take) then return false end
+                        mix[#mix+1] = {itemID=part.itemID, quantity=take, qualityTier=part.qualityTier}
+                        remaining = remaining - take
                     end
-                    sum = sum + (tonumber(part.quantity) or 0)
                 end
-                if sum < (tonumber(reagentEntry.quantity) or 0) then
-                    return false
-                end
+                if remaining > 0 then return false end
+                itemID, tier = mix[1].itemID, mix[1].qualityTier
             else
-                local available = self:FindAvailableCrafterReagent(order, reagentEntry)
-                if not available or not available.itemID then
-                    return false
-                end
-
-                if saveSelections then
-                    -- What was found in the bags is what the craft is made of:
-                    -- the chosen grade, or a better one standing in for it. Left
-                    -- on a grade that is not owned, the craft would be sent
-                    -- with a reagent the bags do not hold.
-                    local slotIndex = reagentEntry.slotIndex or reagentEntry.dataSlotIndex
-                    local current = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
-                    local currentID = current and current.itemID or reagentEntry.itemID
-                    if slotIndex and available.itemID ~= currentID then
-                        self:SetSelectedReagentForEntry(order.orderID, reagentEntry, {
-                            itemID = available.itemID,
-                            quantity = tonumber(reagentEntry.quantity) or tonumber(available.quantity) or 0,
-                            slotIndex = slotIndex,
-                            dataSlotIndex = reagentEntry.dataSlotIndex or available.dataSlotIndex,
-                            qualityTier = available.qualityTier,
-                            maxQualityTier = available.maxQualityTier,
-                            expansionID = available.expansionID,
-                            qualityKind = available.qualityKind,
-                        })
-                    end
-                end
+                local available = self:FindAvailableCrafterReagent(order, reagentEntry, inventory)
+                if not available or not available.itemID then return false end
+                itemID, tier = available.itemID, available.qualityTier
+                quantity = self:GetRequiredReagentQuantity(order, reagentEntry, itemID)
+                if not Reserve(itemID, quantity) then return false end
+                sel = available
+            end
+            if selKey then
+                local pick = {}
+                for key, value in pairs(sel or {}) do pick[key] = value end
+                pick.itemID, pick.quantity, pick.qualityTier, pick.mix = itemID, quantity, tier, mix
+                pick.slotIndex, pick.dataSlotIndex = reagentEntry.schematicIndex or reagentEntry.slotIndex, reagentEntry.dataSlotIndex
+                staged[selKey] = pick
             end
         end
     end
-
+    -- Publish only after every slot passed: failure in a later slot must not
+    -- partially change the reagent plan used to price/check the order.
+    if saveSelections then
+        for key, pick in pairs(staged) do self.selectedReagents[key] = pick end
+        self:InvalidateOrderCaches(order.orderID)
+    end
     return true
 end
 
@@ -1639,6 +1651,12 @@ end
 function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
+    local container = pageFrame and pageFrame.ahuiCustomList
+    if (pageFrame and pageFrame.ahuiOrderRequestPending) or (container and container._freshSearchPending)
+        or (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending()) then
+        self:SetStatus(T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."))
+        return
+    end
     local session = { selected = 0, seen = {} }
 
     if not knowledgeOnly and not (mode and mode.automatic) then
@@ -1670,6 +1688,15 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
     self:FinishQueueWorkOrdersSelection(session)
 end
 
+local function QueueOrderSnapshot(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local copy = {}; seen[value] = copy
+    for key, entry in pairs(value) do copy[key] = QueueOrderSnapshot(entry, seen) end
+    return copy
+end
+
 function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
     if self.queueSelectionRunning then return end
     knowledgeOnly = knowledgeOnly == true
@@ -1680,6 +1707,13 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
 
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
+    local container = pageFrame and pageFrame.ahuiCustomList
+    if (pageFrame and pageFrame.ahuiOrderRequestPending) or (container and container._freshSearchPending)
+        or (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
+        or (self.GetClaimedOrder and self:GetClaimedOrder()) then
+        self:SetStatus(T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."))
+        return
+    end
     if self.GetPatronExpansionScope and self:GetPatronExpansionScope(pageFrame) then
         if self:IsCombinedPatronListReady(pageFrame) then self:QueueCombinedPatronSelection(knowledgeOnly, mode, pageFrame) end
         return
@@ -1718,11 +1752,17 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
         selected = 0,
         publicCandidates = {},
         seen = {},
+        received = {}, orders = {}, requestSerial = 0,
     }
     self._queueSelectionToken = (self._queueSelectionToken or 0) + 1
     local token, context, initialType = self._queueSelectionToken, self._orderSelectionContext, pageFrame and pageFrame.orderType
     local function current()
         if session.finished or self._queueSelectionToken ~= token then return false end
+        if (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
+            or (self.GetClaimedOrder and self:GetClaimedOrder()) then
+            self:CancelQueueSelection()
+            return false
+        end
         if self._orderSelectionContext ~= context or (pageFrame and pageFrame.orderType ~= initialType)
             or (self.GetOrderSelectionContext and self:GetOrderSelectionContext(pageFrame) ~= context)
             or GetProfessionFromPage(pageFrame) ~= profession
@@ -1768,6 +1808,12 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
 
     local function finish()
         if not current() then return end
+        if pageFrame and session.allResponsesSeen and not session.failed and self.CustomList and self.CustomList.AcceptScopeAnswer then
+            -- The custom scroll box does not drive Blizzard's page loader.
+            -- Retain every row fetched by this same-scope queue, including
+            -- rows beyond the first page, so selected orders remain actionable.
+            self.CustomList:AcceptScopeAnswer(pageFrame, session.orders, 0)
+        end
         session.finished = true
         flushPublicCandidates()
 
@@ -1791,8 +1837,9 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
                 local order = orders[i]
                 i = i + 1
                 if order and order.orderID and order.spellID and not self.selectedOrders[OrderKey(order.orderID)] then
-                    local analysis = self:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
-                    if analysis and analysis.queued then
+                    local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, orderType, opts, pageFrame)
+                    if not ok then self:SetQueueSkipReason(order, "quality_unknown") end
+                    if ok and analysis and analysis.queued then
                         if isPublic then
                             session.publicCandidates[#session.publicCandidates + 1] = {
                                 order = order,
@@ -1820,10 +1867,11 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
         step()
     end
 
-    local function requestType(index)
+    local function requestType(index, offset)
         if not current() then return end
         local orderType = orderTypes[index]
         if not orderType then
+            session.allResponsesSeen = true
             finish()
             return
         end
@@ -1832,26 +1880,44 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
             self.controlPanel.selectAllButton.text:SetText(tostring(index) .. "/" .. tostring(#orderTypes))
         end
 
-        local callback = function(result)
-            if not current() then return end
+        offset = tonumber(offset) or 0
+        session.requestSerial = session.requestSerial + 1
+        local serial, answered = session.requestSerial, false
+        local callback = function(result, responseType, displayBuckets, expectMoreRows, responseOffset)
+            if not current() or answered or session.requestSerial ~= serial then return end
+            if (responseType ~= nil and responseType ~= orderType)
+                or (responseOffset ~= nil and tonumber(responseOffset) ~= offset) then return end
+            answered = true
             if not IsResultOk(result) then
+                session.failed = true
                 requestType(index + 1)
                 return
             end
 
             local orders = {}
-            local ok, resultOrders = pcall(C_CraftingOrders.GetCrafterOrders)
-            if ok and type(resultOrders) == "table" then
-                orders = resultOrders
-            end
-
-            local claimed = self:GetClaimedOrder()
-            if claimed and (not claimed.orderType or claimed.orderType == orderType) then
-                orders[#orders + 1] = claimed
+            local consumed = 0
+            local get = self.originalGetCrafterOrders or C_CraftingOrders.GetCrafterOrders
+            local ok, resultOrders = pcall(get)
+            if not ok or displayBuckets or type(resultOrders) ~= "table" then session.failed = true end
+            if ok and not displayBuckets and type(resultOrders) == "table" then
+                consumed = #resultOrders
+                for _, source in ipairs(resultOrders) do
+                    local key = source.orderID and OrderKey(source.orderID)
+                    if key and not session.received[key] and (not source.orderType or source.orderType == orderType) then
+                        session.received[key] = true
+                        local order = QueueOrderSnapshot(source)
+                        orders[#orders + 1] = order
+                        session.orders[#session.orders + 1] = order
+                    end
+                end
             end
 
             processOrders(orderType, orders, function()
-                requestType(index + 1)
+                if expectMoreRows and consumed > offset and #orders > 0 and consumed < 10000 then
+                    requestType(index, consumed)
+                else
+                    requestType(index + 1)
+                end
             end)
         end
 
@@ -1868,20 +1934,21 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
                 reversed = false,
             },
             forCrafter = true,
-            offset = 0,
+            offset = offset,
             profession = profession,
             callback = (C_FunctionContainers and C_FunctionContainers.CreateCallback) and C_FunctionContainers.CreateCallback(callback) or callback,
         }
 
         local ok = pcall(C_CraftingOrders.RequestCrafterOrders, request)
         if not ok then
+            session.failed = true
             requestType(index + 1)
         end
     end
 
     self:SetStatus(T("COA_STATUS_QUEUE_BUILDING", "Building work order queue..."))
     if C_Timer and C_Timer.After then
-        C_Timer.After(5, function()
+        C_Timer.After(30, function()
             if CO.queueSelectionRunning and not session.finished then
                 finish()
             end
@@ -2069,7 +2136,8 @@ function CO:BuildShoppingMaterialsForSelectedOrders()
                                 end
                             else
                             local itemID = selected and selected.itemID or reagentEntry.itemID
-                            local quantity = reagentEntry.quantity or 0
+                            local quantity = self.GetRequiredReagentQuantity
+                                and self:GetRequiredReagentQuantity(order, reagentEntry, itemID) or reagentEntry.quantity or 0
                             local qualityTier = (selected and selected.qualityTier) or reagentEntry.qualityTier
                             local label = selected and selected.label or reagentEntry.name
 

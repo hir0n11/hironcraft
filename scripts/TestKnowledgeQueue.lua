@@ -206,4 +206,37 @@ assertSelection('1,7')
 staleRequest.callback(0)
 assertSelection('1,7') -- late knowledge response cannot affect a newer queue
 
-print('Knowledge queue tests passed.')
+-- WoW exposes a cumulative buffer, not just the last page. Exercise more than
+-- two pages, duplicate callbacks, and mutation of the native-owned payload.
+local source1={orderID=21,spellID=121,orderType=4,profit=500,reagents={{quantity=20}}}
+local source2={orderID=22,spellID=122,orderType=4,profit=500}
+local source3={orderID=23,spellID=123,orderType=4,profit=500}
+CO.selectedOrders={}
+orders={source1}
+local published
+CO.CustomList={AcceptScopeAnswer=function(_,candidate,rows,offset)
+    assert(candidate==page and offset==0)
+    published=rows
+end}
+CO:QueueWorkOrdersSelection()
+local first=table.remove(requests,1)
+assert(first.offset==0)
+first.callback(0,4,false,true,0)
+local second=table.remove(requests,1)
+assert(second.offset==1 and CO.queueSelectionRunning)
+first.callback(0,4,false,true,0)
+assert(#requests==0, 'duplicate answer sent another page request')
+source1.reagents[1].quantity=999
+assert(CO.rowStates[21].order.reagents[1].quantity==20, 'native buffer mutation changed the queued snapshot')
+orders={source1,source2}
+second.callback(0,4,false,true,1)
+local third=table.remove(requests,1)
+assert(third.offset==2, 'cumulative offset skipped a page')
+orders={source1,source2,source3}
+third.callback(0,4,false,false,2)
+assertSelection('21,22,23')
+assert(not CO.queueSelectionRunning and #requests==0)
+assert(#published==3 and published[1].reagents[1].quantity==20,
+    'complete queue rows were not retained for display/actions')
+
+print('Knowledge queue tests passed (including cumulative pagination and stale callbacks).')

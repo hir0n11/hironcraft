@@ -881,7 +881,7 @@ function CO:SetStatus(text)
 end
 
 function CO:GetClaimedOrder()
-    if C_CraftingOrders.GetClaimedOrder then
+    if C_CraftingOrders and C_CraftingOrders.GetClaimedOrder then
         return C_CraftingOrders.GetClaimedOrder()
     end
     return nil
@@ -901,11 +901,17 @@ function CO:GetEffectiveOrder(orderID, fallback)
     local claimed = self:GetClaimedOrder()
     if claimed and SameOrderID(claimed.orderID, orderID) then
         if self.RememberOrderIdentity then self:RememberOrderIdentity(claimed) end
+        if fallback and fallback.hironPatronChildID and not claimed.hironPatronChildID then
+            local copy = {}
+            for key, value in pairs(claimed) do copy[key] = value end
+            for _, key in ipairs({"hironPatronChildID", "hironPatronExpansionID", "hironPatronExpansionKey"}) do copy[key] = fallback[key] end
+            return copy
+        end
         return claimed
     end
 
     local state = self.rowStates and self.rowStates[orderID]
-    if state and state.order then
+    if state and state.order and SameOrderID(state.order.orderID, orderID) then
         if self.RememberOrderIdentity and SameOrderID(state.order.orderID, orderID) then
             self:RememberOrderIdentity(state.order)
         end
@@ -934,6 +940,9 @@ function CO:IsSafeToPrepareOrderViewForAnalysis(pageFrame)
 end
 
 function CO:GetRowAction(orderID, fallbackOrder)
+    if self.IsOrderListReadyForAction and not self:IsOrderListReadyForAction(self.activePageFrame) then
+        return "pending", T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."), fallbackOrder, false
+    end
     if self.combinedPatronQueue then
         return "pending", T("COA_STATUS_QUEUE_BUILDING", "Building work order queue..."), fallbackOrder, false
     end
@@ -954,7 +963,9 @@ function CO:GetRowAction(orderID, fallbackOrder)
         end
         self.rowStates[orderID] = self.rowStates[orderID] or {}
         self.rowStates[orderID].order = claimed
-        order = claimed
+        -- Keep the union's expansion identity attached to the authoritative
+        -- claim, rather than replacing it with the old Created row later.
+        order = self:GetEffectiveOrder(orderID, fallbackOrder)
     end
 
     local issueKey = OrderKey(orderID)
@@ -2594,6 +2605,15 @@ function CollectOrderReagentsForSlot(order, slotIndex, dataSlotIndex, itemID)
 end
 
 function GetSlotRequiredQuantity(slotSchematic, firstPayload, orderReagent)
+    local itemID = GetOrderReagentItemID(orderReagent) or GetOrderReagentItemID(firstPayload)
+    if itemID then
+        for _, variable in ipairs((slotSchematic and slotSchematic.variableQuantities) or {}) do
+            if tonumber(GetOrderReagentItemID(variable.reagent)) == tonumber(itemID) then
+                local quantity = tonumber(variable.quantity)
+                if quantity and quantity > 0 then return quantity end
+            end
+        end
+    end
     local quantity = tonumber(slotSchematic and (slotSchematic.quantityRequired or slotSchematic.quantity or slotSchematic.requiredQuantity))
         or tonumber(firstPayload and (firstPayload.quantityRequired or firstPayload.quantity or firstPayload.requiredQuantity))
 
@@ -2856,6 +2876,18 @@ function ConsumeProvidedEntry(entry, need)
     return used
 end
 
+function GetProvidedItemForSchematicSlot(slot, provided, slotIndex, dataSlotIndex)
+    if not slot or #(slot.variableQuantities or {}) == 0 then return nil end
+    local choiceIDs = BuildSchematicChoiceItemSet(slot)
+    local slotKey = MakeProvidedReagentSlotKey(slotIndex, dataSlotIndex)
+    for _, entry in ipairs(provided.entries or {}) do
+        if (tonumber(entry.remaining) or 0) > 0
+            and DoesProvidedEntryMatchSchematicSlot(entry, choiceIDs, slotIndex, dataSlotIndex, slotKey, true) then
+            return entry.itemID
+        end
+    end
+end
+
 function GetProvidedQuantityForSchematicSlot(slotSchematic, provided, requiredQuantity, slotIndex, dataSlotIndex)
     if type(provided) ~= "table" or type(provided.entries) ~= "table" then return 0 end
 
@@ -2936,14 +2968,11 @@ function CO:BuildDisplayReagents(order, forceAnalyze)
     end
 
     local schematic
-    if C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic then
-        local ok, result = pcall(C_TradeSkillUI.GetRecipeSchematic, order.spellID, order.isRecraft)
-        if ok then schematic = result end
-    end
+    schematic = self:GetOperationRecipeSchematic(order)
 
     local seen = {}
 
-    local function addEntry(itemID, quantity, slotIndex, dataSlotIndex, source, orderReagent, slotSchematic, candidates, qualityPayload, schematicIndex)
+    local function addEntry(itemID, quantity, slotIndex, dataSlotIndex, source, orderReagent, slotSchematic, candidates, qualityPayload, schematicIndex, providedQuantity)
         itemID = tonumber(itemID)
         quantity = tonumber(quantity) or 0
         if not itemID or itemID <= 0 or quantity <= 0 then return false end
@@ -2961,6 +2990,7 @@ function CO:BuildDisplayReagents(order, forceAnalyze)
             slotSchematic = slotSchematic,
             candidates = candidates or {},
             crafterRequired = true,
+            providedQuantity = tonumber(providedQuantity) or 0,
         }
 
         CopyReagentQualityFields(entry, qualityPayload or GetOrderReagentPayload(orderReagent) or slotSchematic, itemID)
@@ -2984,15 +3014,36 @@ function CO:BuildDisplayReagents(order, forceAnalyze)
                 local dataSlotIndex = slotSchematic.dataSlotIndex or slotSchematic.slotDataIndex or index
                 local slotIndex = slotSchematic.slotIndex or dataSlotIndex or index
                 local requiredQuantity = GetSlotRequiredQuantity(slotSchematic, firstPayload, nil)
+                local providedItemID = GetProvidedItemForSchematicSlot(slotSchematic, providedByItemID, slotIndex, dataSlotIndex)
+                if providedItemID then
+                    requiredQuantity = GetSlotRequiredQuantity(slotSchematic, {itemID=providedItemID}, nil)
+                    local lockedChoices = {}
+                    for _, choice in ipairs(choices or {}) do
+                        if GetSchematicChoiceItemID(choice) == providedItemID then lockedChoices[#lockedChoices+1] = choice end
+                    end
+                    choices = lockedChoices
+                end
+                local selectionKey = MakeReagentSelectionKeyForEntry(order.orderID, {
+                    schematicIndex=index, selectionToken="schematic:" .. tostring(index),
+                    dataSlotIndex=dataSlotIndex, slotIndex=slotIndex })
+                local selected = selectionKey and self.selectedReagents and self.selectedReagents[selectionKey]
+                if not providedItemID and selected and selected.itemID then
+                    for _, choice in ipairs(choices or {}) do
+                        if tonumber(GetSchematicChoiceItemID(choice)) == tonumber(selected.itemID) then
+                            requiredQuantity = GetSlotRequiredQuantity(slotSchematic, {itemID=selected.itemID}, nil)
+                            break
+                        end
+                    end
+                end
 
                 if firstItemID and requiredQuantity and requiredQuantity > 0 then
                     local providedQuantity = GetProvidedQuantityForSchematicSlot(slotSchematic, providedByItemID, requiredQuantity, slotIndex, dataSlotIndex)
                     local quantity = math.max(0, requiredQuantity - (tonumber(providedQuantity) or 0))
 
                     if quantity > 0 then
-                        local itemID = firstItemID
+                        local itemID = providedItemID or firstItemID
                         local source = Enum and Enum.CraftingOrderReagentSource and Enum.CraftingOrderReagentSource.Crafter or 2
-                        addEntry(itemID, quantity, slotIndex, dataSlotIndex, source, nil, slotSchematic, choices or {}, firstPayload or slotSchematic, index)
+                        addEntry(itemID, quantity, slotIndex, dataSlotIndex, source, nil, slotSchematic, choices or {}, firstPayload or slotSchematic, index, providedQuantity)
                     end
                 end
             end
@@ -3275,21 +3326,24 @@ function CO:ApplySelectedReagentsToEngine(engine, order)
     if not orderKey then return true end
 
     local applied = false
-    for key, selected in pairs(self.selectedReagents or {}) do
-        if type(key) == "string" and key:match("^" .. orderKey .. ":") and selected then
-            local slotIndex = selected.slotIndex or selected.dataSlotIndex
+    -- Apply only live crafter slots. Old picks may refer to a different rank,
+    -- an obsolete quantity or a slot now supplied by the customer.
+    for _, entry in ipairs(self:BuildDisplayReagents(order)) do
+        local selected = self:GetSelectedReagentForEntry(order.orderID, entry)
+        if selected then
+            local slotIndex = entry.schematicIndex or entry.slotIndex or selected.slotIndex or selected.dataSlotIndex
+            local quantity = self:GetRequiredReagentQuantity(order, entry, selected.itemID)
             if slotIndex and type(selected.mix) == "table" and #selected.mix > 0 then
                 if self:AllocateMixToTransaction(transaction, slotIndex, selected.mix) then
                     applied = true
                 elseif selected.itemID and (tonumber(selected.quantity) or 0) > 0 then
                     local reagent = { itemID = selected.itemID }
                     local ok = SafeCall("OverwriteAllocation", function()
-                        transaction:OverwriteAllocation(slotIndex, reagent, tonumber(selected.quantity))
+                        transaction:OverwriteAllocation(slotIndex, reagent, quantity)
                     end)
                     if ok then applied = true end
                 end
             elseif slotIndex and selected.itemID and (tonumber(selected.quantity) or 0) > 0 then
-                local quantity = tonumber(selected.quantity)
                 local reagent = { itemID = selected.itemID }
                 local ok = SafeCall("OverwriteAllocation", function()
                     transaction:OverwriteAllocation(slotIndex, reagent, quantity)
@@ -3381,8 +3435,46 @@ end
 
 function CO:GetOperationRecipeSchematic(order)
     if not order or not order.spellID or not C_TradeSkillUI or not C_TradeSkillUI.GetRecipeSchematic then return nil end
-    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, order.spellID, order.isRecraft == true)
+    local recipeID = order.spellID
+    if C_TradeSkillUI.GetRecipeInfo and Professions and Professions.GetHighestLearnedRecipe then
+        local found, info = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+        if found and info then
+            local ok, highest = pcall(Professions.GetHighestLearnedRecipe, info)
+            if ok and highest and highest.recipeID then recipeID = highest.recipeID end
+        end
+    end
+    local page = self.activePageFrame
+    local view = page and page.OrderView
+    local form = view and view.OrderDetails and view.OrderDetails.SchematicForm
+    local transaction = form and form.transaction
+    if form and form.GetTransaction then
+        local ok, current = pcall(form.GetTransaction, form)
+        if ok then transaction = current end
+    end
+    if view and view.order and SameOrderID(view.order.orderID, order.orderID)
+        and transaction and transaction.GetRecipeSchematic then
+        local ok, schematic = pcall(transaction.GetRecipeSchematic, transaction)
+        if ok and schematic and (tonumber(schematic.recipeID) == tonumber(recipeID)
+            or tonumber(schematic.recipeID) == tonumber(order.spellID)) then return schematic end
+    end
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, order.isRecraft == true)
     return ok and type(schematic) == "table" and schematic or nil
+end
+
+function CO:GetRequiredReagentQuantity(order, entry, itemID)
+    local slot = entry and entry.slotSchematic
+    if not slot and order then
+        local schematic = self:GetOperationRecipeSchematic(order)
+        local index = entry and (entry.schematicIndex or entry.slotIndex)
+        slot = schematic and schematic.reagentSlotSchematics and schematic.reagentSlotSchematics[index]
+    end
+    if slot then
+        local required = GetSlotRequiredQuantity(slot, {itemID=itemID or entry.itemID}, nil)
+        -- Display entries already subtract the customer's contribution.
+        local supplied = tonumber(entry.providedQuantity) or 0
+        return math.max(0, required - supplied)
+    end
+    return tonumber(entry and entry.quantity) or 0
 end
 
 function GetOperationInfoDataSlot(schematic, reagentInfo)
@@ -3428,6 +3520,21 @@ function CO:IsCompleteOperationReagentInfoTbl(order, reagents, schematic)
             and IsRequiredCraftingOrderReagentSlot(slot) then
             local ds = tonumber(slot.dataSlotIndex or slot.slotIndex)
             local required = tonumber(slot.quantityRequired) or 0
+            if type(slot.variableQuantities) == "table" and #slot.variableQuantities > 0 then
+                local allocated, itemID, total = false, nil, 0
+                local choices = BuildSchematicChoiceItemSet(slot)
+                for _, entry in ipairs(reagents or {}) do
+                    if tonumber(entry.dataSlotIndex) == ds then
+                        local id = tonumber(GetOrderReagentItemID(entry))
+                        if not id or not choices[id] or (itemID and itemID ~= id) then return false end
+                        itemID, allocated = id, true
+                        total = total + (tonumber(entry.quantity) or 0)
+                    end
+                end
+                local need = GetSlotRequiredQuantity(slot, {itemID=itemID}, nil)
+                if not allocated or need <= 0 or total < need then return false end
+                required = 0
+            end
             if required > 0 and (not ds or (quantities[ds] or 0) < required) then return false end
         end
     end
@@ -3498,7 +3605,7 @@ function CO:BuildCraftingReagentInfoTbl(order)
         if not IsCustomerProvidedReagent(reagentEntry) then
             local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
             local itemID = selected and selected.itemID or reagentEntry.itemID
-            local quantity = (selected and selected.quantity) or reagentEntry.quantity or 0
+            local quantity = self:GetRequiredReagentQuantity(order, reagentEntry, itemID)
             local dataSlotIndex = (selected and selected.dataSlotIndex) or reagentEntry.dataSlotIndex or reagentEntry.slotIndex
 
             local function AddPart(id, qty)
@@ -3633,8 +3740,8 @@ function CO:BuildSchematicCraftingReagentInfoTbl(order)
         return list
     end
 
-    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, order.spellID, order.isRecraft)
-    if not ok or type(schematic) ~= "table" or type(schematic.reagentSlotSchematics) ~= "table" then
+    local schematic = self:GetOperationRecipeSchematic(order)
+    if type(schematic) ~= "table" or type(schematic.reagentSlotSchematics) ~= "table" then
         return list
     end
 
@@ -3661,6 +3768,7 @@ function CO:BuildSchematicCraftingReagentInfoTbl(order)
                 end
             end
             itemID = itemID or firstItemID
+            quantity = GetSlotRequiredQuantity(slotSchematic, {itemID=itemID}, nil)
 
             if itemID and dataSlotIndex and quantity > 0 and not seenSlot[dataSlotIndex] then
                 seenSlot[dataSlotIndex] = true
@@ -4642,7 +4750,8 @@ function CO:GetOrderProfitInfo(order)
                     -- costs, not its first grade times the whole quantity.
                     for _, part in ipairs(selected.mix) do addCost(part.itemID, part.quantity) end
                 else
-                    addCost(selected and selected.itemID or reagentEntry.itemID, reagentEntry.quantity)
+                    local itemID = selected and selected.itemID or reagentEntry.itemID
+                    addCost(itemID, self:GetRequiredReagentQuantity(order, reagentEntry, itemID))
                 end
             end
         end
@@ -5052,6 +5161,9 @@ function CO:InstallProfitSortHooks()
                     CO.ahuiSortCrafterOrdersByAction = false
                 end
 
+                if CO.CustomList and CO.CustomList.GuardOrderRequest then
+                    CO.CustomList:GuardOrderRequest(CO.activePageFrame, request)
+                end
                 return originalRequest(request, ...)
             end
         end)

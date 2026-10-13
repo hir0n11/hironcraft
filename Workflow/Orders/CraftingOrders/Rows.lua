@@ -730,7 +730,7 @@ function CO:UpdateReagentsFrame(frame, order)
             local selected = self:GetSelectedReagentForEntry(order.orderID, reagentEntry)
             local displayItemID = selected and selected.itemID or itemID
             local texture = GetItemTexture(displayItemID) or "Interface\\Icons\\INV_Misc_QuestionMark"
-            local quantity = (selected and selected.quantity) or reagentEntry.quantity or 0
+            local quantity = self:GetRequiredReagentQuantity(order, reagentEntry, displayItemID)
             local providedByCustomer = IsCustomerProvidedReagent(reagentEntry)
             local selectable = IsCrafterProvidedReagent(reagentEntry)
 

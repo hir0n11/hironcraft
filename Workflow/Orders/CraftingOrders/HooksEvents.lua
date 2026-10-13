@@ -174,12 +174,15 @@ function CO:HookBlizzardProfessions()
             local stamp = (CO._autoQueueStamp or 0) + 1
             CO._autoQueueStamp = stamp
             local context = CO._orderSelectionContext
+            local automatic = {page=pageFrame, stamp=stamp, context=context}
+            CO._autoQueuePending = automatic
             local function current()
                 return CO._autoQueueStamp == stamp and CO._orderSelectionContext == context
                     and onClientsTab(pageFrame) and pageFrame:IsShown()
                     and not pageFrame.ahuiCraftingOrdersOrderOpen
             end
             C_Timer.After(0.6, function()
+                if CO._autoQueuePending == automatic then CO._autoQueuePending = nil end
                 if not current() then return end
                 if CO._autoRanForOpen then return end
                 if not autoSelectionEnabled() then return end
@@ -203,7 +206,7 @@ function CO:HookBlizzardProfessions()
                     local function whenReady()
                         if not current() or not CO:IsAutoShoppingOnOpen() then return end
                         if CO.queueSelectionRunning then
-                            local limit = CO.combinedPatronQueue and 60 or 6
+                            local limit = CO.combinedPatronQueue and 60 or 30
                             if (GetTime() - startedAt) < limit then C_Timer.After(0.2, whenReady) end
                             return
                         end
@@ -291,17 +294,18 @@ function CO:HookBlizzardProfessions()
 end
 
 function CO:MarkOrderCraftedReady(orderID)
-    if not orderID then return end
+    if not orderID or (self.IsOrderFulfilled and self:IsOrderFulfilled(orderID)) then return false end
+    if self.pendingFulfillOrderID or self.terminalAction then return false end
+    if self.pendingCraftOrderID and not SameOrderID(self.pendingCraftOrderID, orderID) then return false end
 
     local claimed = self:GetClaimedOrder()
     local order = claimed and SameOrderID(claimed.orderID, orderID) and claimed or nil
-    local state = self.rowStates and self.rowStates[orderID]
-    if not order and state then
-        order = state.order
-    end
+    -- A spell/result notification can belong to a normal reagent craft or
+    -- arrive after the next order has started. Only the live server snapshot
+    -- may advance an order to fulfillment; never fabricate isFulfillable.
+    if not order or order.isFulfillable ~= true then return false end
 
     if order then
-        order.isFulfillable = true
         self.rowStates[orderID] = self.rowStates[orderID] or {}
         self.rowStates[orderID].order = order
         self.rowStates[orderID].pageFrame = self.rowStates[orderID].pageFrame or self.activePageFrame
@@ -310,6 +314,7 @@ function CO:MarkOrderCraftedReady(orderID)
     self.craftedOrderID = orderID
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
+    self.pendingCraftCastGUID = nil
     self.pendingCraftButton = nil
     self.craftSubmissionAcknowledgedOrderID = nil
     if self.preparedFinisherOrderID
@@ -324,6 +329,20 @@ function CO:MarkOrderCraftedReady(orderID)
     self:InvalidateOrderCaches(orderID)
     self:SetStatus(T("COA_STATUS_CRAFTED_READY", "Order crafted. Complete it."))
     self:RefreshVisibleRowsSoon(0.05)
+    return true
+end
+
+function CO:ScheduleCraftCompletionCheck(orderID)
+    local token = self._craftWatchToken
+    local function check()
+        if CO._craftWatchToken ~= token or not CO.pendingCraftOrderID
+            or not SameOrderID(CO.pendingCraftOrderID, orderID) then return end
+        CO:MarkOrderCraftedReady(orderID)
+    end
+    check()
+    if C_Timer and C_Timer.After then
+        for _, delay in ipairs({0.05, 0.20, 0.50, 1.0}) do C_Timer.After(delay, check) end
+    end
 end
 
 function CO:OnEvent(event, ...)
@@ -407,7 +426,6 @@ function CO:OnEvent(event, ...)
                 if claimed and SameOrderID(claimed.orderID, pendingID) then
                     self:MarkClaimedOrderReady(pendingID, claimed)
                 elseif self.rowStates[pendingID] and self.rowStates[pendingID].order then
-                    SetCachedOrderStateClaimed(self.rowStates[pendingID].order)
                     self.currentQueueOrderID = pendingID
                     self:InvalidateOrderCaches(pendingID)
                     self:SetStatus(T("COA_STATUS_CLAIMING", "Claiming order..."))
@@ -424,6 +442,7 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_ADDED" then
+        if self.queueSelectionRunning and self.CancelQueueSelection then self:CancelQueueSelection() end
         local order = self:GetClaimedOrder()
         if order then
             self:MarkClaimedOrderReady(order.orderID, order)
@@ -471,6 +490,9 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "CRAFTINGORDERS_CLAIMED_ORDER_REMOVED" then
+        -- This event has no order ID. A duplicate from an earlier job is not
+        -- evidence that the currently claimed job has disappeared.
+        if self:GetClaimedOrder() then return end
         local terminal = self.terminalAction
         local orderID = (terminal and terminal.orderID) or self.pendingReleaseOrderID or self.pendingFulfillOrderID
         -- A duplicate/unowned removal must not stop a later craft's progress.
@@ -478,7 +500,7 @@ function CO:OnEvent(event, ...)
             or self:GetClaimedOrder()) then return end
         if terminal then
             terminal.removalSeen = true
-            if terminal.responseSeen then self.terminalAction = nil end
+            if terminal.responseSeen or terminal.kind == "release" then self.terminalAction = nil end
         end
         local manualRejection = self.pendingReleaseForReject and self.pendingReleaseOrderID
             and orderID and SameOrderID(self.pendingReleaseOrderID, orderID)
@@ -542,7 +564,13 @@ function CO:OnEvent(event, ...)
     if event == "CRAFTINGORDERS_FULFILL_ORDER_RESPONSE" then
         local result, orderID = ...
         local terminal = self.terminalAction
+        if terminal and terminal.kind == "release" then return end
         if not orderID and terminal then orderID = terminal.orderID end
+        local ownsResponse = (terminal and SameOrderID(terminal.orderID, orderID))
+            or (self.pendingFulfillOrderID and SameOrderID(self.pendingFulfillOrderID, orderID))
+        -- A late/duplicate completion for an old order cannot finish a newer
+        -- transition, replace its status, or trigger a list refresh mid-craft.
+        if not ownsResponse then return end
         if self.pendingFulfillOrderID and (not orderID or SameOrderID(orderID, self.pendingFulfillOrderID)) then
             self.pendingFulfillOrderID = nil
         end
@@ -584,6 +612,8 @@ function CO:OnEvent(event, ...)
         if self.pendingReleaseOrderID and (not orderID or SameOrderID(orderID, self.pendingReleaseOrderID))
             and not IsResultOk(result) then
             self.pendingReleaseOrderID, self.pendingReleaseForReject = nil, nil
+            if self.terminalAction and self.terminalAction.kind == "release"
+                and (not orderID or SameOrderID(orderID, self.terminalAction.orderID)) then self.terminalAction = nil end
             self:SetStatus(T("COA_STATUS_RELEASE_FAILED", "Could not release the order."))
             self:RefreshVisibleRowsSoon()
         end
@@ -591,12 +621,9 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "UNIT_SPELLCAST_START" then
-        local unit, _, spellID = ...
-        local expectedSpellID = tonumber(self.pendingCraftSpellID)
-        if unit == "player"
-            and self.pendingCraftOrderID
-            and (not expectedSpellID or not spellID or tonumber(spellID) == expectedSpellID)
-        then
+        local unit, castGUID, spellID = ...
+        if unit == "player" and self:MatchesPendingCraftEvent(spellID, castGUID) then
+            self.pendingCraftCastGUID = castGUID
             self:MarkCraftSubmissionAcknowledged(self.pendingCraftOrderID)
             local btn = self.pendingCraftButton or self.progressButton
             local orderID = self.pendingCraftOrderID or self.progressOrderID or (btn and btn.orderID)
@@ -613,6 +640,8 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "TRADE_SKILL_CRAFT_BEGIN" then
+        local spellID = ...
+        if not self:MatchesPendingCraftEvent(spellID) then return end
         local orderID = self.pendingCraftOrderID
         if orderID then
             self:MarkCraftSubmissionAcknowledged(orderID)
@@ -623,41 +652,37 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
+        local data = ...
+        if type(data) == "table" and not self:MatchesPendingCraftEvent(data.recipeID or data.recipeSpellID) then return end
         local orderID = self.pendingCraftOrderID or self.progressOrderID
         if orderID then
-            self:MarkOrderCraftedReady(orderID)
+            self:ScheduleCraftCompletionCheck(orderID)
         end
         return
     end
 
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
-        local unit, _, spellID = ...
+        local unit, castGUID, spellID = ...
         if unit ~= "player" then return end
-        if not self.pendingCraftOrderID then return end
-        local expectedSpellID = tonumber(self.pendingCraftSpellID)
-        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
+        if not self:MatchesPendingCraftEvent(spellID, castGUID) then return end
         local orderID = self.pendingCraftOrderID
         if orderID then
-            C_Timer.After(0.20, function()
-                CO:MarkOrderCraftedReady(orderID)
-            end)
+            self:ScheduleCraftCompletionCheck(orderID)
         end
         return
     end
 
     if event == "UNIT_SPELLCAST_INTERRUPTED"
     or event == "UNIT_SPELLCAST_FAILED" then
-        local unit, _, spellID = ...
+        local unit, castGUID, spellID = ...
         if unit ~= "player" then return end
-        local expectedSpellID = tonumber(self.pendingCraftSpellID)
-        if not self.pendingCraftOrderID then return end
-        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
+        if not self:MatchesPendingCraftEvent(spellID, castGUID) then return end
+        local orderID, token = self.pendingCraftOrderID, self._craftWatchToken
         C_Timer.After(0.25, function()
-            CO:StopRowProgress()
-            CO.pendingCraftButton = nil
-            CO.pendingCraftOrderID = nil
-            CO.pendingCraftSpellID = nil
-            CO.craftSubmissionAcknowledgedOrderID = nil
+            if CO._craftWatchToken ~= token or not CO.pendingCraftOrderID
+                or not SameOrderID(CO.pendingCraftOrderID, orderID) then return end
+            if CO:MarkOrderCraftedReady(orderID) then return end
+            CO:ClearPendingCraftAttempt(orderID, true)
             if CO.preparedFinisherOrderID then
                 CO.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
             end
@@ -667,11 +692,9 @@ function CO:OnEvent(event, ...)
     end
 
     if event == "UNIT_SPELLCAST_STOP" then
-        local unit, _, spellID = ...
+        local unit, castGUID, spellID = ...
         if unit ~= "player" then return end
-        if not self.pendingCraftOrderID then return end
-        local expectedSpellID = tonumber(self.pendingCraftSpellID)
-        if expectedSpellID and spellID and tonumber(spellID) ~= expectedSpellID then return end
+        if not self:MatchesPendingCraftEvent(spellID, castGUID) then return end
         local pendingID = self.pendingCraftOrderID or self.progressOrderID
         local token = self._craftWatchToken
         C_Timer.After(0.25, function()
@@ -681,10 +704,8 @@ function CO:OnEvent(event, ...)
                 C_Timer.After(5.0, function()
                     if CO._craftWatchToken == token and CO.pendingCraftOrderID
                         and SameOrderID(CO.pendingCraftOrderID, pendingID) then
-                        CO.pendingCraftButton = nil
-                        CO.pendingCraftOrderID = nil
-                        CO.pendingCraftSpellID = nil
-                        CO.craftSubmissionAcknowledgedOrderID = nil
+                        if CO:MarkOrderCraftedReady(pendingID) then return end
+                        CO:ClearPendingCraftAttempt(pendingID, true)
                         CO:RefreshVisibleRowsSoon()
                     end
                 end)

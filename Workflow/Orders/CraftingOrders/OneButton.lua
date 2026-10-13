@@ -122,6 +122,7 @@ function CO:PrepareFreshOrderSearch(pageFrame)
     for _, row in ipairs(container.rows or {}) do
         local action = row and row.action
         if action then
+            action.ahuiStaleDuringSearch = true
             if self.visibleRowButtons then self.visibleRowButtons[action] = nil end
             local key = action.orderID and tostring(action.orderID)
             if key and self.rowButtonsByOrderID and self.rowButtonsByOrderID[key] == action then
@@ -156,7 +157,19 @@ function CO:InstallFreshOrderSearchHooks()
                 CO:PrepareFreshOrderSearch(pageFrame)
                 TryCall(pageFrame, "ClearCachedRequests")
             end
-            return target.ahuiOriginalStartDefaultSearch(pageFrame, ...)
+            local results = { target.ahuiOriginalStartDefaultSearch(pageFrame, ...) }
+            -- Public without favourites does not issue a server request and
+            -- consequently never calls ShowGeneric. Do not leave a fresh-search
+            -- lock behind when Blizzard has already finished this local path.
+            local container = pageFrame.ahuiCustomList
+            local combined = CO.combinedPatrons
+            if CO:IsEnabled() and container and container._freshSearchPending
+                and not pageFrame.requestCallback and not pageFrame.ahuiOrderRequestPending
+                and not (combined and combined.page == pageFrame and combined.loading) then
+                CO:MarkFreshOrderSearchComplete(pageFrame)
+                if CO.CustomList and CO.CustomList.QueueRefresh then CO.CustomList:QueueRefresh() end
+            end
+            return unpack(results)
         end
     end
 
@@ -522,6 +535,8 @@ function CO:StartEmptyPersonalOrdersRefresh(pageFrame)
     local requested = TryCall(pageFrame, "StartDefaultSearch")
     if not requested then
         self._oneButtonEmptyRefreshRunning = false
+        if self.CustomList and self.CustomList.ClearScope then self.CustomList:ClearScope(pageFrame) end
+        if pageFrame.ahuiCustomList then pageFrame.ahuiCustomList._freshSearchPending = nil end
         self:SetStatus(T("COA_ONE_BUTTON_TIMEOUT", "Could not refresh personal orders automatically."))
         return true
     end
