@@ -25,6 +25,18 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Order-list opening hotfix and lighter sidebar (0.4.147)
+
+- Fixed the sidebar styling error that interrupted the first list refresh:
+  plain checkbox buttons do not have Retail backdrop methods. Checkbox skins
+  stay intact; inset styling checks native capabilities before applying a skin.
+- Repeated refreshes now complete panel creation instead of leaving overlapping
+  partial panels. Removed sidebar text outlines/shadows and reduced footer space.
+- Regression checks reproduce the original failure with strict backdrop
+  capabilities, then cover first opening, repeated opening, all order types,
+  settings-tab isolation and compact footer bounds in Russian and English.
+- Equipment swaps, queue selection and profit rules are unchanged.
+
 ## Clear order settings and expansion equipment (0.4.146)
 
 - The wider sidebar separates Crafting, Selection and Equipment. Tool/reagent

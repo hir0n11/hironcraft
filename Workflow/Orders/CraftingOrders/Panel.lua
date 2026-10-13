@@ -987,7 +987,11 @@ end
 function CO:StyleWidget(frame, selected)
     if not frame then return end
     if frame.hironClassicClose then return end
-    if frame.GetObjectType and frame:GetObjectType() == "Button" and frame.text then
+    if frame.hironCheckToggle then
+        -- Preserve the checkbox textures and left-aligned label. This plain
+        -- Button intentionally has no backdrop mixin or panel-button skin.
+        self:StyleClassicLabel(frame.label, 11)
+    elseif frame.GetObjectType and frame:GetObjectType() == "Button" and frame.text then
         self:StyleClassicButton(frame, selected)
     else
         self:ApplyClassicInset(frame)
@@ -1076,6 +1080,7 @@ end
 
 function CO:CreateCheckToggle(parent, label, getValue, setValue, width)
     local b = CreateFrame("Button", nil, parent)
+    b.hironCheckToggle = true
     b:SetSize(width or 82, 20)
     b.getValue = getValue
     b.setValue = setValue
@@ -1091,7 +1096,7 @@ function CO:CreateCheckToggle(parent, label, getValue, setValue, width)
     b.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
 
     b.label = b:CreateFontString(nil, "OVERLAY")
-    ApplyFont(b.label, 12, "")
+    self:StyleClassicLabel(b.label, 11)
     b.label:SetPoint("LEFT", b.box, "RIGHT", 3, 0)
     b.label:SetPoint("RIGHT", 0, 0)
     b.label:SetJustifyH("LEFT")
@@ -1358,7 +1363,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Title (next to the help icon)
     panel.titleFS = panel:CreateFontString(nil, "OVERLAY")
-    ApplyFont(panel.titleFS, 13, "OUTLINE")
+    self:StyleClassicLabel(panel.titleFS, 13)
     panel.titleFS:SetPoint("LEFT", panel.helpButton, "RIGHT", 6, 0)
     panel.titleFS:SetPoint("RIGHT", panel, "RIGHT", -6, 0)
     panel.titleFS:SetJustifyH("LEFT")
@@ -1369,18 +1374,19 @@ function CO:EnsureControlPanel(pageFrame)
     local y = -8
     local function AddHeader(text)
         local fs = body:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        self:StyleClassicLabel(fs, 12)
         fs:SetPoint("TOPLEFT", PADX, y)
         fs:SetWidth(INNER)
         fs:SetJustifyH("LEFT")
         fs:SetText(text)
-        y = y - 22
+        y = y - 20
         return fs
     end
     local function AddNote(text, height)
         local note = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         note:SetPoint("TOPLEFT", PADX, y)
         note:SetSize(INNER, height or 30)
-        ApplyFont(note, 11, "")
+        self:StyleClassicLabel(note, 11)
         note:SetJustifyH("LEFT"); note:SetJustifyV("TOP")
         note:SetTextColor(0.75, 0.72, 0.65); note:SetText(text)
         y = y - (height or 30) - 6
@@ -1433,7 +1439,7 @@ function CO:EnsureControlPanel(pageFrame)
     -- Automatic finishing reagents. The menu separates the master switch from
     -- the maximum skill bonus the queue may consume before declining an order.
     local finisherHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(finisherHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(finisherHeader, 11)
     finisherHeader:SetPoint("TOPLEFT", PADX, y - 4)
     finisherHeader:SetTextColor(1, 0.82, 0.35, 1)
     finisherHeader:SetText(T("COA_FINISHER_HEADER", "Финишеры"))
@@ -1534,7 +1540,7 @@ function CO:EnsureControlPanel(pageFrame)
     AddHeader(T("COA_CLASSIC_FILTERS", "Order filters"))
     -- Min profit
     local mpHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(mpHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(mpHeader, 11)
     mpHeader:SetPoint("TOPLEFT", PADX, y - 4)
     mpHeader:SetTextColor(1, 0.82, 0.35, 1)
     mpHeader:SetText(T("COA_QUEUE_MINPROFIT_HEADER", "Мин. профит"))
@@ -1546,7 +1552,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Min profit for knowledge orders
     local kmpHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(kmpHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(kmpHeader, 11)
     kmpHeader:SetPoint("TOPLEFT", PADX, y - 4)
     kmpHeader:SetTextColor(1, 0.82, 0.35, 1)
     kmpHeader:SetText(T("COA_QUEUE_KNOWLEDGE_MINPROFIT_HEADER", "Знания: мин. профит"))
@@ -1601,7 +1607,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Bag reward value
     local bagHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(bagHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(bagHeader, 11)
     bagHeader:SetPoint("TOPLEFT", PADX, y - 4)
     bagHeader:SetTextColor(1, 0.82, 0.35, 1)
     bagHeader:SetText(T("COA_QUEUE_BAGVALUE_HEADER", "Цена сумки"))
@@ -1613,7 +1619,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Knowledge point value
     local kpHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(kpHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(kpHeader, 11)
     kpHeader:SetPoint("TOPLEFT", PADX, y - 4)
     kpHeader:SetTextColor(1, 0.82, 0.35, 1)
     kpHeader:SetText(T("COA_QUEUE_KPVALUE_HEADER", "Цена ОЗ"))
@@ -1625,7 +1631,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Ask before declining an order with a tip above this
     local rejectHeader = body:CreateFontString(nil, "OVERLAY")
-    ApplyFont(rejectHeader, 11, "OUTLINE")
+    self:StyleClassicLabel(rejectHeader, 11)
     rejectHeader:SetPoint("TOPLEFT", PADX, y - 4)
     rejectHeader:SetTextColor(1, 0.82, 0.35, 1)
     rejectHeader:SetText(T("COA_REJECT_CONFIRM_HEADER", "Decline: ask above"))
@@ -1874,7 +1880,7 @@ function CO:EnsureControlPanel(pageFrame)
 
     -- Hotkey: label on its own line, then Bind / clear
     panel.keyText = footer:CreateFontString(nil, "OVERLAY")
-    ApplyFont(panel.keyText, 12, "")
+    self:StyleClassicLabel(panel.keyText, 11)
     panel.keyText:SetPoint("TOPLEFT", PADX, y - 3)
     panel.keyText:SetWidth(INNER)
     panel.keyText:SetJustifyH("CENTER")
@@ -1903,8 +1909,8 @@ function CO:EnsureControlPanel(pageFrame)
 
 
     panel.runActionButton:ClearAllPoints()
-    panel.runActionButton:SetPoint("TOPLEFT", footer, "TOPLEFT", 10, -64)
-    panel.runActionButton:SetSize(VPANEL_W - 30, 28)
+    panel.runActionButton:SetPoint("TOPLEFT", footer, "TOPLEFT", 10, -56)
+    panel.runActionButton:SetSize(VPANEL_W - 30, 24)
     panel.runActionButton.text:SetWidth(VPANEL_W - 40)
     panel.keyText:ClearAllPoints()
     panel.keyText:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", 10, 13)
@@ -1917,12 +1923,14 @@ function CO:EnsureControlPanel(pageFrame)
     panel.clearButton:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -5, 5)
 
     panel.selectedText = footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self:StyleClassicLabel(panel.selectedText, 12)
     panel.selectedText:SetPoint("TOPLEFT", 10, -8)
     panel.selectedText:SetWidth(VPANEL_W - 30)
     panel.selectedText:SetJustifyH("LEFT")
     panel.statusText = footer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self:StyleClassicLabel(panel.statusText, 11)
     panel.statusText:SetPoint("TOPLEFT", 10, -26)
-    panel.statusText:SetSize(VPANEL_W - 30, 32)
+    panel.statusText:SetSize(VPANEL_W - 30, 26)
     panel.statusText:SetJustifyH("LEFT")
     panel.statusText:SetJustifyV("TOP")
     panel.statusText:SetMaxLines(2)

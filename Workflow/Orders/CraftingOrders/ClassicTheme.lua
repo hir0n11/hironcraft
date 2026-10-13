@@ -33,6 +33,11 @@ function CO:CreateClassicToggleBorder(button)
 end
 
 function CO:ApplyClassicInset(frame, raised)
+    -- Native/icon/checkbox buttons need not inherit BackdropTemplate. Styling
+    -- one must not abort construction of the panel and the order list.
+    if not frame or type(frame.SetBackdrop) ~= "function"
+        or type(frame.SetBackdropColor) ~= "function"
+        or type(frame.SetBackdropBorderColor) ~= "function" then return false end
     frame:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -41,6 +46,12 @@ function CO:ApplyClassicInset(frame, raised)
     })
     frame:SetBackdropColor(raised and 0.65 or 0.35, raised and 0.58 or 0.32, raised and 0.48 or 0.28, 0.96)
     frame:SetBackdropBorderColor(0.65, 0.57, 0.43, 1)
+    return true
+end
+
+function CO:StyleClassicLabel(label, size)
+    ApplyFont(label, size or 11, "")
+    label:SetShadowOffset(0, 0)
 end
 
 function CO:StyleClassicButton(button, selected, unavailable)
@@ -60,7 +71,7 @@ function CO:StyleClassicButton(button, selected, unavailable)
     local label = button.text or button.label
     if label then
         label:SetFontObject(GameFontNormalSmall)
-        ApplyFont(label, 11, "")
+        self:StyleClassicLabel(label, 11)
         label:ClearAllPoints()
         label:SetPoint("CENTER", button, "CENTER", 0, 0)
         label:SetSize(math.max(1, button:GetWidth() - 8), button:GetHeight())
@@ -75,7 +86,7 @@ function CO:CreateClassicPanelShell(panel)
     panel.footer = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     panel.footer:SetPoint("BOTTOMLEFT", 5, 5)
     panel.footer:SetPoint("BOTTOMRIGHT", -5, 5)
-    panel.footer:SetHeight(140)
+    panel.footer:SetHeight(116)
     self:ApplyClassicInset(panel.footer)
 
     -- Common actions stay outside both settings scroll pages.

@@ -15,9 +15,19 @@ if not setfenv then
     end
 end
 local frames, methods = {}, {}
+local model = { frames=frames, methods=methods }
+local backdropMethods = { SetBackdrop=true, SetBackdropColor=true, SetBackdropBorderColor=true }
 local function noop() end
 local function frame(kind, parent, template)
-    local f = setmetatable({ kind = kind, parent = parent, template = template, anchors = {}, scripts = {}, visible = true }, { __index = methods })
+    local f = setmetatable({ kind = kind, parent = parent, template = template, anchors = {}, scripts = {}, visible = true }, {
+        __index = function(_, key)
+            -- Retail frames only acquire backdrop methods through the mixin.
+            -- A universal stub used to hide a real panel-construction failure.
+            if model.strictBackdrop and backdropMethods[key]
+                and not (template and template:find('BackdropTemplate', 1, true)) then return nil end
+            return methods[key]
+        end,
+    })
     frames[#frames + 1] = f
     if template == 'UIPanelScrollFrameTemplate' then f.ScrollBar = frame('Slider', f) end
     return f
@@ -88,8 +98,8 @@ function methods:SetAtlas(texture) self.texture = texture end
 function methods:SetBackdrop(value) self.backdrop = value end
 function methods:SetBackdropColor(r,g,b,a) self.fill = {r,g,b,a} end
 function methods:SetBackdropBorderColor(r,g,b,a) self.border = {r,g,b,a} end
-function methods:SetFont(path, size) self.fontPath, self.fontSize = path, size end
-function methods:SetFontObject() self.fontPath, self.fontSize = STANDARD_TEXT_FONT, 12 end
+function methods:SetFont(path, size, flags) self.fontPath, self.fontSize, self.fontFlags = path, size, flags or '' end
+function methods:SetFontObject() self.fontPath, self.fontSize, self.fontFlags = STANDARD_TEXT_FONT, 12, '' end
 function methods:SetJustifyH(value) self.justify = value end
 function methods:SetJustifyV(value) self.justifyV = value end
 function methods:GetStringWidth() return utf8.len(self.text or '') * 6 end
@@ -119,7 +129,8 @@ function methods:Click() if self.scripts.OnClick then self.scripts.OnClick(self,
 function methods:Show() self.visible = true;self.showCalls=(self.showCalls or 0)+1 end
 function methods:Hide() self.visible = false;self.hideCalls=(self.hideCalls or 0)+1 end
 function methods:SetShown(value) self.visible = not not value end
-methods.SetShadowColor,methods.SetShadowOffset=noop,noop
+function methods:SetShadowColor(r,g,b,a) self.shadowColor = {r,g,b,a} end
+function methods:SetShadowOffset(x,y) self.shadowOffset = {x,y} end
 function methods:IsShown() return self.visible end
 function methods:IsVisible() return self.visible and (not self.parent or self.parent:IsVisible()) end
 function methods:IsEnabled() return true end
@@ -145,7 +156,7 @@ function methods:GetRegions()
 end
 function methods:IsObjectType(kind) return self.kind == kind end
 function methods:GetAtlas() return self.texture end
-function methods:GetFont() return self.fontPath, self.fontSize, '' end
+function methods:GetFont() return self.fontPath, self.fontSize, self.fontFlags or '' end
 function methods:GetStringHeight() return self.fontSize or 14 end
 function methods:GetLeft() local x = bounds(self); return x end
 function methods:GetTop() local _,y = bounds(self); return -y end
@@ -158,4 +169,5 @@ end
 function methods:SetVertexColor(r,g,b,a) self.vertex = {r,g,b,a or 1} end
 for _, name in ipairs({'RegisterForClicks','RegisterForDrag','SetTexCoord','SetRotation','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','UnregisterAllEvents','SetDesaturated','Enable','SetBlendMode','SetToplevel','SetMouseMotionEnabled','SetResizable','SetResizeBounds','SetUserPlaced','SetMovable','StartMoving','StopMovingOrSizing','Raise','SetMultiLine','SetFocus','ClearFocus','SetClipsChildren','SetHitRectInsets','SetMotionScriptsWhileDisabled','SetNormalFontObject','SetHighlightFontObject','SetDisabledFontObject','SetDrawLayer'}) do methods[name] = methods[name] or noop end
 table.unpack = table.unpack or unpack
-return { frames=frames, methods=methods, frame=frame, bounds=bounds, noop=noop }
+model.frame, model.bounds, model.noop = frame, bounds, noop
+return model

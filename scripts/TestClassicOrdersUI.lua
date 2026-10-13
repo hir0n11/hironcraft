@@ -1,5 +1,6 @@
 unpack = unpack or table.unpack
 local model = dofile('scripts/UIFrameModel.lua')
+model.strictBackdrop = true
 local frames, methods, frame, bounds, noop = model.frames, model.methods, model.frame, model.bounds, model.noop
 methods.Disable = noop
 for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
@@ -87,6 +88,21 @@ assert(panel.keyText.fontPath == PT.FONT, 'binding label lost the Cyrillic-capab
 assert(panel.runActionButton.text.fontPath == PT.FONT, 'action label lost the Cyrillic-capable font')
 CO:StyleClassicButton(panel.runActionButton, true)
 assert(panel.runActionButton.text.fontPath == PT.FONT, 'native button styling reset the font')
+for _, label in ipairs({panel.titleFS, panel.keyText, panel.selectedText, panel.statusText,
+    panel.runActionButton.text, panel.bestQualityToggle.label, panel.autoToolToggle.label,
+    panel.equipmentSwapCheck.label}) do
+    assert(label.fontFlags == '' and label.shadowOffset[1] == 0 and label.shadowOffset[2] == 0,
+        'sidebar text retained a heavy outline/shadow')
+end
+for _, check in ipairs({panel.bestQualityToggle, panel.autoToolToggle, panel.equipmentSwapCheck}) do
+    assert(check.SetBackdrop == nil and check.backdrop == nil and not check.hironClassic,
+        'a checkbox acquired a backdrop or panel-button skin')
+    assert(check.label.anchors.LEFT[1] == check.box and check.label.justify == 'LEFT',
+        'styling moved the checkbox label over its icon')
+end
+local bareButton = frame('Button')
+assert(CO:ApplyClassicInset(bareButton) == false, 'native button backdrop capability was ignored')
+bareButton:Hide()
 local craft, queue = panel.classicPages.craft, panel.classicPages.queue
 local equipment = panel.classicPages.equipment
 assert(craft.scroll:IsVisible() and not queue.scroll:IsVisible() and not equipment.scroll:IsVisible())
@@ -310,6 +326,13 @@ for _, height in ipairs({390,490,590}) do
     local _, fy = bounds(panel.footer)
     local _, ay, _, ah = bounds(panel.queueActions)
     assert(sh > 0 and sy + sh < ay and ay + ah < fy, 'settings overlap the common actions or footer')
+    local _, statusY, _, statusH = bounds(panel.statusText)
+    local _, actionY, _, actionH = bounds(panel.runActionButton)
+    local _, bindY = bounds(panel.bindButton)
+    local _, clearY = bounds(panel.clearButton)
+    assert(panel.footer:GetHeight() <= 116 and statusY + statusH < actionY
+        and actionY + actionH < bindY and actionY + actionH < clearY,
+        'compact footer has overlapping status/action/binding controls')
     for _, scrollPage in pairs(panel.classicPages) do
         CO:UpdateClassicSettingsScroll(scrollPage.scroll, scrollPage.body)
         assert(scrollPage.scroll.ScrollBar:IsShown() == (scrollPage.body:GetHeight() > scrollPage.scroll:GetHeight() + 1),
@@ -688,6 +711,46 @@ CO.GetOrderActionAvailabilitySortRank = function() return 1 end
 page.orderType = Enum.CraftingOrderType.Personal
 container._orderType = page.orderType
 CL._sortColumn = nil
+-- A fresh list refresh must build the real sidebar and then render orders in
+-- the same call. Retail lacks backdrop methods on the plain checkbox buttons;
+-- the old universal mock missed a failure before any rows were populated.
+do
+    local oldActivePage = CO.activePageFrame
+    for _, orderType in ipairs({1, 2, 3, 4}) do
+        local freshPage = frame('Frame')
+        freshPage:SetSize(1060, 680)
+        freshPage.orderType = orderType
+        freshPage.BrowseFrame = frame('Frame', freshPage)
+        freshPage.BrowseFrame:SetAllPoints()
+        local freshAnchor = frame('Frame', freshPage.BrowseFrame)
+        freshAnchor:SetPoint('TOPLEFT', 260, -70)
+        freshAnchor:SetPoint('BOTTOMRIGHT', -8, 8)
+        freshPage.BrowseFrame.OrderList = freshAnchor
+        CO.activePageFrame = freshPage
+        CL:Refresh(freshPage)
+        local freshPanel, freshList = freshPage.ahuiCraftingOrdersPanel, freshPage.ahuiCustomList
+        assert(freshPanel and freshList and #freshList.rows == 3 and freshList.rows[1]:IsShown(),
+            'first opening aborted before nonempty rows were rendered')
+        for _, key in ipairs({'queue','equipment','craft','equipment','craft'}) do
+            freshPage:Hide(); freshPage:Show()
+            freshPanel.classicTabs[key]:Click()
+            CL:Refresh(freshPage)
+            assert(freshPage.ahuiCraftingOrdersPanel == freshPanel and #freshList.rows == 3,
+                'reopening lost the cached panel or rows')
+            for pageKey, scrollPage in pairs(freshPanel.classicPages) do
+                assert(scrollPage.scroll:IsVisible() == (pageKey == key), 'settings tabs overlap after reopening')
+            end
+        end
+        local panelCount = 0
+        for _, candidate in ipairs(frames) do
+            if candidate.parent == freshPage and candidate.classicPages then panelCount = panelCount + 1 end
+        end
+        assert(panelCount == 1, 'repeated opening left duplicate/partial panels')
+        CL:Deactivate(freshPage)
+        freshPage:Hide()
+    end
+    CO.activePageFrame, CO.controlPanel = oldActivePage, panel
+end
 CL:Refresh(page)
 assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
     and container.rows[3].action.orderID == 103, 'checking an order moved it to the top')
