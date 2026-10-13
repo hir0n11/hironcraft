@@ -1595,6 +1595,7 @@ function CL:PopulateRow(row, order)
     row.name:SetTextColor(nr, ng, nb)
 
     row.checkbox:SetChecked(CO.IsOrderSelected and CO:IsOrderSelected(order.orderID) or false)
+    if CO.queueSelectionRunning or CO._autoQueuePending then row.checkbox:Disable() else row.checkbox:Enable() end
 
     row.checkbox:SetScript("OnClick", function(self)
         if CO.SetOrderSelected and order.orderID then
@@ -1932,6 +1933,15 @@ local function RestoreScrollAnchor(container, positions, oldScroll, candidates, 
     container.scroll:SetVerticalScroll(math.max(0, math.min(target, maxScroll)))
 end
 
+function CL:UpdateOrderCountText(pageFrame)
+    local container = pageFrame and pageFrame.ahuiCustomList
+    if not container or not container.countText then return end
+    local text = string.format(L("COA_CLASSIC_ORDER_COUNT", "Orders: %d"), container._displayedOrderCount or container._lastOrderCount or 0)
+    local preparing = CO.GetQueuePreparationText and CO:GetQueuePreparationText()
+    if preparing then text = text .. "    " .. preparing end
+    container.countText:SetText(text)
+end
+
 function CL:Refresh(pageFrame)
     pageFrame = pageFrame or CO.activePageFrame
     if not pageFrame then return end
@@ -2056,7 +2066,8 @@ function CL:Refresh(pageFrame)
     container._allowEmptyOnce = false
     container._lastOrderCount = #orders
     if CO.RestoreOrderSelection then CO:RestoreOrderSelection(pageFrame, orders) end
-    container.countText:SetText(string.format(L("COA_CLASSIC_ORDER_COUNT", "Orders: %d"), #orders))
+    container._displayedOrderCount = #orders
+    self:UpdateOrderCountText(pageFrame)
     local loading = pageFrame.ahuiOrderRequestPending or container._freshSearchPending
         or (CO.combinedPatrons and CO.combinedPatrons.page == pageFrame and CO.combinedPatrons.loading)
     container.emptyText:SetText(loading

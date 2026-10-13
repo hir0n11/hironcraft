@@ -228,9 +228,8 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
         profession = self:GetActiveBaseProfessionID(page), originalChild = Child(),
         token = self._queueSelectionToken, context = self._orderSelectionContext, selected = 0, unknown = 0 }
     self.combinedPatronQueue = selection
-    self.queueSelectionRunning = true
+    self:BeginQueueSelectionPublication(selection, page, not knowledgeOnly and not (mode and mode.automatic))
     self.qualityWarmSerial = (self.qualityWarmSerial or 0) + 1
-    if not knowledgeOnly and not (mode and mode.automatic) then self:ResetQueueCheckboxes() end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
@@ -272,11 +271,11 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
     local Step
     Step = function(index, retry)
         if not Alive() then return end
+        self:UpdateQueueSelectionProgress(selection, index - 1, #orders)
         local order = orders[index]
         if not order then Finish(); return end
-        local key = OrderKey(order.orderID)
-        if self.selectedOrders[key] or (opts.automatic and self:IsOrderManuallyExcluded(order.orderID)) then
-            if not self.selectedOrders[key] then self:SetQueueSkipReason(order, "manual") end
+        if self:IsOrderSelectedForQueueAnalysis(order.orderID) or (opts.automatic and self:IsOrderManuallyExcluded(order.orderID)) then
+            if not self:IsOrderSelectedForQueueAnalysis(order.orderID) then self:SetQueueSkipReason(order, "manual") end
             Later(0.02, function() Step(index + 1, 0) end)
             return
         end
@@ -305,6 +304,7 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
             if not Alive() then return end
             if self:IsInactivePatronOrder(order) then Step(index, retry); return end
             local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, order.orderType, opts, page)
+            if not Alive() then return end
             if not ok then
                 selection.unknown = selection.unknown + 1
                 self:SetQueueSkipReason(order, "quality_unknown")

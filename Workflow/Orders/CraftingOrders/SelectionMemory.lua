@@ -101,6 +101,7 @@ end
 -- Returns how many checks were dropped. A dropped order is not remembered as
 -- unchecked by hand, so a later automatic pass may take it again.
 function CO:DropQueuedSelectionsBelowProfit(orders, strict)
+    if self.queueSelectionRunning then return 0 end
     local bucket = self._orderSelectionBucket
     if not bucket or not self.OrderPassesQueueProfitRule then return 0 end
     if self.IsOrderActionInProgress and self:IsOrderActionInProgress() then return 0 end
@@ -138,6 +139,9 @@ end
 function CO:RestoreOrderSelection(pageFrame, orders)
     local bucket = self:EnsureOrderSelectionContext(pageFrame)
     if not bucket or type(orders) ~= 'table' then return end
+    -- Background recipe/list refreshes must not change the visible checks
+    -- while a staged queue pass is still preparing its final result.
+    if self.queueSelectionRunning then return end
     local present = {}
     -- A Personal order that arrives while the list is already open used to
     -- stay unchecked (the automatic selection ran only when opening), so the

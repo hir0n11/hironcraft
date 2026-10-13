@@ -187,6 +187,7 @@ function CO:IsKnowledgeProfitIgnored()
 end
 
 function CO:SetKnowledgeProfitIgnored(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     self:GetQueueOptions().knowledgeIgnoreProfit = value == true
     self:RecheckQueuedSelections(nil, true)
 end
@@ -218,6 +219,7 @@ function CO:GetKnowledgeMinProfitText()
 end
 
 function CO:SetKnowledgeMinProfitCopper(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local opts = self:GetQueueOptions()
     value = tonumber(value)
     opts.knowledgeMinProfitCopper = value
@@ -255,6 +257,7 @@ function CO:ParseQueueMinProfitInput(text)
 end
 
 function CO:SetQueueMinProfitCopper(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local opts = self:GetQueueOptions()
     value = tonumber(value)
     if value then
@@ -369,6 +372,7 @@ function CO:GetBagRewardValueText()
 end
 
 function CO:SetBagRewardValueCopper(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local opts = self:GetQueueOptions()
     value = tonumber(value)
     opts.bagRewardCopper = (value and value > 0) and value or nil
@@ -395,6 +399,7 @@ function CO:GetKnowledgePointValueText()
 end
 
 function CO:SetKnowledgePointValueCopper(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local opts = self:GetQueueOptions()
     value = tonumber(value)
     opts.knowledgePointCopper = (value and value > 0) and value or nil
@@ -461,6 +466,7 @@ function CO:ApplyQueueReagentModeToCheckedOrders()
 end
 
 function CO:SetQueueReagentMode(mode)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local opts = self:GetQueueOptions()
     if self:IsNpcTab() then
         if mode ~= "t1" and mode ~= "t2" and mode ~= "profit" and mode ~= "manual" then mode = "auto" end
@@ -490,6 +496,7 @@ function CO:GetQueueConcMode()
 end
 
 function CO:SetQueueConcMode(value)
+    if self.queueSelectionRunning then self:CancelQueueSelection() end
     local q = self:GetQueueOptions()
     q.allowConcentration = (value == "allow" or value == "force")
     q.forceConcentration = (value == "force")
@@ -1194,6 +1201,7 @@ end
 -- Only a list of ours that is still open is rebuilt, and only while the rows
 -- are there to build it from.
 function CO:RebuildShoppingListAfterDrop()
+    if self.queueSelectionRunning or self._autoQueuePending then return false end
     local shopping = PT and PT.ShoppingList
     local session = shopping and shopping.session
     if not (session and session.active and session.temporary and session.sourceKind == "crafting_orders") then
@@ -1522,8 +1530,20 @@ function CO:MarkOrderQueuedForCheckbox(order, analysis, pageFrame)
     self.rowStates[order.orderID].order = order
     self.rowStates[order.orderID].pageFrame = pageFrame or self.activePageFrame
 
+    local publication = self._queueSelectionPublication
     if not self:ApplyQueueReagentModeToOrder(order) then
         return false
+    end
+
+    if publication then
+        if self._queueSelectionPublication ~= publication then return false end
+        if publication.pendingChecks[key] then return false end
+        -- Recipe/quality preparation still needs several frames (and child
+        -- profession switches). Do not expose its intermediate checks or
+        -- write them to selection memory until the whole pass completes.
+        publication.pendingChecks[key] = { order = order, analysis = analysis }
+        publication.pendingOrder[#publication.pendingOrder + 1] = key
+        return true
     end
 
     self.selectedOrders[key] = true
@@ -1644,7 +1664,71 @@ function CO:GetAvailabilityQueueAnalysis(order, orderType, opts, pageFrame)
     }
 end
 
+function CO:BeginQueueSelectionPublication(session, pageFrame, replaceCheckboxes)
+    session.pendingChecks, session.pendingOrder = {}, {}
+    session.replaceCheckboxes = replaceCheckboxes == true
+    session.publicationToken = self._queueSelectionToken
+    session.publicationContext = self._orderSelectionContext
+    session.publicationPage = pageFrame
+    self._queueSelectionPublication = session
+    self.queueSelectionRunning = true
+    self:UpdateQueueSelectionProgress(session, 0)
+    if self.RefreshVisibleRows then self:RefreshVisibleRows() end
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+end
+
+function CO:IsOrderSelectedForQueueAnalysis(orderID)
+    local key = OrderKey(orderID)
+    local session = self._queueSelectionPublication
+    if session and session.pendingChecks[key] then return true end
+    if session and session.replaceCheckboxes then return false end
+    return key and self.selectedOrders[key] == true
+end
+
+function CO:GetQueuePreparationText()
+    if not self.queueSelectionRunning and not self._autoQueuePending then return nil end
+    local session = self._queueSelectionPublication
+    if session and session.total then
+        return string.format(T("COA_QUEUE_PREPARING_PROGRESS", "Preparing queue: %d/%d"), session.processed or 0, session.total)
+    elseif session and (session.processed or 0) > 0 then
+        return string.format(T("COA_QUEUE_PREPARING_COUNT", "Checking orders: %d..."), session.processed)
+    end
+    return T("COA_QUEUE_PREPARING", "Preparing queue...")
+end
+
+function CO:UpdateQueueSelectionProgress(session, processed, total)
+    if self._queueSelectionPublication ~= session then return end
+    session.processed, session.total = processed, total
+    local panel = self.controlPanel
+    if panel and panel.selectAllButton then
+        panel.selectAllButton:Disable()
+        panel.selectAllButton.text:SetText(total and (tostring(processed) .. "/" .. tostring(total)) or "...")
+    end
+    if panel and panel.selectedText then panel.selectedText:SetText(self:GetQueuePreparationText()) end
+    if self.CustomList and self.CustomList.UpdateOrderCountText then
+        self.CustomList:UpdateOrderCountText(session.publicationPage)
+    end
+end
+
 function CO:FinishQueueWorkOrdersSelection(session)
+    if session and session.pendingChecks then
+        -- A cancelled or old pass must never publish into a newer tab/queue.
+        if self._queueSelectionPublication ~= session
+            or session.publicationToken ~= self._queueSelectionToken
+            or session.publicationContext ~= self._orderSelectionContext then return false end
+        if session.replaceCheckboxes then self:ResetQueueCheckboxes() end
+        for _, key in ipairs(session.pendingOrder) do
+            local pending = session.pendingChecks[key]
+            local order, analysis = pending.order, pending.analysis
+            self.selectedOrders[key] = true
+            self.useConcentration[key] = analysis and analysis.useConcentration == true or nil
+            if self.RememberOrderSelection then
+                self:RememberOrderSelection(order.orderID, true, order, analysis and analysis.profitRule, analysis and analysis.profit)
+            end
+            self.currentQueueOrderID = self.currentQueueOrderID or order.orderID
+        end
+        self._queueSelectionPublication = nil
+    end
     local selected = 0
     for _, checked in pairs(self.selectedOrders or {}) do
         if checked then selected = selected + 1 end
@@ -1658,6 +1742,9 @@ function CO:FinishQueueWorkOrdersSelection(session)
 
     self:RefreshVisibleRows()
     self:UpdateControlPanel()
+    if session and self.CustomList and self.CustomList.UpdateOrderCountText then
+        self.CustomList:UpdateOrderCountText(session.publicationPage)
+    end
     self:SetStatus(string.format(T("COA_STATUS_QUEUED_ORDERS", "Queued orders: %d."), selected))
 end
 
@@ -1683,15 +1770,30 @@ function CO:ResetQueueCheckboxes()
 end
 
 function CO:CancelQueueSelection()
+    local publication = self._queueSelectionPublication
     self._queueSelectionToken = (self._queueSelectionToken or 0) + 1
+    self._queueSelectionPublication = nil
     self.queueSelectionRunning = false
     if self.controlPanel and self.controlPanel.selectAllButton then
         self.controlPanel.selectAllButton:Enable()
         self.controlPanel.selectAllButton.text:SetText(T("COA_QUEUE_BUTTON", "Queue"))
     end
+    -- Cancellation is also called while switching selection contexts. Leave
+    -- that synchronous transition alone; refresh only an actual cancelled
+    -- preparation pass, after the new page/context has settled.
+    if publication and C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            if CO.RefreshVisibleRows then CO:RefreshVisibleRows() end
+            if CO.UpdateControlPanel then CO:UpdateControlPanel() end
+            if CO.CustomList and CO.CustomList.UpdateOrderCountText then
+                CO.CustomList:UpdateOrderCountText(publication.publicationPage)
+            end
+        end)
+    end
 end
 
 function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
+    if self.queueSelectionRunning then return end
     local pageFrame = self:FindOrderPageFrame() or self.activePageFrame
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     local container = pageFrame and pageFrame.ahuiCustomList
@@ -1702,9 +1804,7 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
     end
     local session = { selected = 0, seen = {} }
 
-    if not knowledgeOnly and not (mode and mode.automatic) then
-        self:ResetQueueCheckboxes()
-    end
+    self:BeginQueueSelectionPublication(session, pageFrame, not knowledgeOnly and not (mode and mode.automatic))
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
@@ -1713,16 +1813,22 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
 
     local opts = self:GetQueueSelectionOptions(knowledgeOnly, mode)
     for _, btn in ipairs(buttons) do
+        if self._queueSelectionPublication ~= session then return end
         local order = btn.order
         local key = OrderKey(order and order.orderID)
         local tabOk = not (pageFrame and pageFrame.orderType ~= nil and order and order.orderType ~= nil
             and order.orderType ~= pageFrame.orderType)
         if key and tabOk and not session.seen[key] then
             session.seen[key] = true
-            if not self.selectedOrders[key] then
-                local analysis = self:GetAvailabilityQueueAnalysis(order, order.orderType, opts, pageFrame)
-                if analysis and analysis.queued and self:MarkOrderQueuedForCheckbox(order, analysis, pageFrame) then
-                    session.selected = session.selected + 1
+            if not self:IsOrderSelectedForQueueAnalysis(order.orderID) then
+                local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, order.orderType, opts, pageFrame)
+                if self._queueSelectionPublication ~= session then return end
+                if ok and analysis and analysis.queued then
+                    local marked, result = pcall(self.MarkOrderQueuedForCheckbox, self, order, analysis, pageFrame)
+                    if marked and result then session.selected = session.selected + 1
+                    elseif not marked then self:SetQueueSkipReason(order, "quality_unknown") end
+                elseif not ok then
+                    self:SetQueueSkipReason(order, "quality_unknown")
                 end
             end
         end
@@ -1776,10 +1882,6 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
         return
     end
 
-    self.queueSelectionRunning = true
-    if not knowledgeOnly and not (mode and mode.automatic) then
-        self:ResetQueueCheckboxes()
-    end
     self.queueReagentPriceCache = {}
     wipe(self.queuePreparedOrders or {})
     self.queuePreparedOrders = self.queuePreparedOrders or {}
@@ -1799,6 +1901,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
     }
     self._queueSelectionToken = (self._queueSelectionToken or 0) + 1
     local token, context, initialType = self._queueSelectionToken, self._orderSelectionContext, pageFrame and pageFrame.orderType
+    self:BeginQueueSelectionPublication(session, pageFrame, not knowledgeOnly and not (mode and mode.automatic))
     local function current()
         if session.finished or self._queueSelectionToken ~= token then return false end
         if (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
@@ -1817,15 +1920,19 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
     end
 
     local function selectOrder(order, analysis)
+        if self._queueSelectionPublication ~= session then return end
         local key = OrderKey(order and order.orderID)
-        if not key or session.seen[key] or self.selectedOrders[key] then return end
+        if not key or session.seen[key] or self:IsOrderSelectedForQueueAnalysis(order.orderID) then return end
         if pageFrame and pageFrame.orderType ~= nil and order and order.orderType ~= nil
             and order.orderType ~= pageFrame.orderType then
             return
         end
         session.seen[key] = true
-        if self:MarkOrderQueuedForCheckbox(order, analysis, pageFrame) then
+        local ok, marked = pcall(self.MarkOrderQueuedForCheckbox, self, order, analysis, pageFrame)
+        if ok and marked then
             session.selected = session.selected + 1
+        elseif not ok then
+            self:SetQueueSkipReason(order, "quality_unknown")
         end
     end
 
@@ -1859,9 +1966,10 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
         end
         session.finished = true
         flushPublicCandidates()
-
+        if self._queueSelectionPublication ~= session then return end
 
         if session.selected == 0 then
+            self._queueSelectionPublication = nil
             self.queueSelectionRunning = false
             self:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
             return
@@ -1877,10 +1985,12 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
             if not current() then return end
             local limit = math.min(#orders, i + 3)
             while i <= limit do
+                if not current() then return end
                 local order = orders[i]
                 i = i + 1
-                if order and order.orderID and order.spellID and not self.selectedOrders[OrderKey(order.orderID)] then
+                if order and order.orderID and order.spellID and not self:IsOrderSelectedForQueueAnalysis(order.orderID) then
                     local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, orderType, opts, pageFrame)
+                    if not current() then return end
                     if not ok then self:SetQueueSkipReason(order, "quality_unknown") end
                     if ok and analysis and analysis.queued then
                         if isPublic then
@@ -1894,6 +2004,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
                         end
                     end
                 end
+                self:UpdateQueueSelectionProgress(session, (session.processed or 0) + 1)
             end
 
             if i <= #orders then
@@ -2370,6 +2481,7 @@ function CO:GetShoppingMaterialsCostInfo(materials)
 end
 
 function CO:GetSelectedShoppingCostInfo()
+    if self.queueSelectionRunning or self._autoQueuePending then return { text = "...", preparing = true } end
     local materials, orderCount = self:BuildShoppingMaterialsForSelectedOrders()
     local info = self:GetShoppingMaterialsCostInfo(materials)
     info.orderCount = orderCount or 0
@@ -2396,6 +2508,10 @@ function CO:UpdateShoppingCostText()
 end
 
 function CO:CreateShoppingListForSelectedOrders()
+    if self.queueSelectionRunning or self._autoQueuePending then
+        self:SetStatus(T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."))
+        return false
+    end
     if self.combinedPatronQueue then return end
     if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then return end
     if not self:HasSelectedOrders() then

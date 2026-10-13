@@ -1,5 +1,6 @@
 local model = dofile('scripts/UIFrameModel.lua')
 local frames, methods, frame, bounds, noop = model.frames, model.methods, model.frame, model.bounds, model.noop
+methods.Disable = noop
 for _, name in ipairs({'RegisterForClicks','SetTexCoord','SetRotation','SetAutoFocus','SetMaxLetters','SetCursorPosition','SetTextInsets','EnableMouse','EnableMouseWheel','LockHighlight','UnlockHighlight','SetStatusBarTexture','SetStatusBarColor','SetMinMaxValues','SetValue','RegisterEvent','SetDesaturated','SetVertexColor','Enable','SetBlendMode'}) do methods[name] = noop end
 
 local CO, PT = {}, { L = {} }
@@ -638,6 +639,27 @@ CL._sortColumn = nil
 CL:Refresh(page)
 assert(container.rows[1].action.orderID == 101 and container.rows[2].action.orderID == 102
     and container.rows[3].action.orderID == 103, 'checking an order moved it to the top')
+-- A preparation footer must never abort row rendering. Exercise both the
+-- optional method's absence and its presence after a complete addon load,
+-- then repeat on an empty tab and after returning to a nonempty tab.
+local oldPreparationText = CO.GetQueuePreparationText
+CO.GetQueuePreparationText = function() return 'Preparing queue: 1/3' end
+CO.queueSelectionRunning = true
+CL:Refresh(page)
+assert(#container.rows == 3 and container.rows[1]:IsShown(), 'preparation hid nonempty rows')
+assert(container.countText.text:find('Preparing queue: 1/3', 1, true), 'missing preparation footer')
+CO.queueSelectionRunning = false
+CO.GetQueuePreparationText = function() return nil end
+CL:Refresh(page)
+assert(#container.rows == 3 and not container.countText.text:find('Preparing queue', 1, true), 'footer did not finish')
+CL.GetOrders = function() return {} end
+container._allowEmptyOnce = true
+CL:Refresh(page)
+assert(#container.rows == 0 and container.emptyText:IsShown(), 'empty tab failed to render')
+CL.GetOrders = function() return { sortOrders[1], sortOrders[2], sortOrders[3] } end
+CL:Refresh(page)
+assert(#container.rows == 3 and container.rows[1]:IsShown(), 'returning to a nonempty tab lost rows')
+CO.GetQueuePreparationText = oldPreparationText
 local stableRowsByID={}
 for _,currentRow in ipairs(container.rows) do
     stableRowsByID[tostring(currentRow.action.orderID)]=currentRow

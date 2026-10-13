@@ -1672,6 +1672,9 @@ function CO:UpdateRowButton(btn)
 
     if btn.check then
         btn.check:SetChecked(selected)
+        if self.queueSelectionRunning or self._autoQueuePending then
+            if btn.check.Disable then btn.check:Disable() end
+        elseif btn.check.Enable then btn.check:Enable() end
         btn.check:Show()
     end
 
@@ -1962,7 +1965,8 @@ function CO:UpdateControlPanel()
     if panel.selectedText then
         local count = 0
         for _ in pairs(self.selectedOrders or {}) do count = count + 1 end
-        panel.selectedText:SetText(T("COA_SELECTED_LABEL", "Selected:") .. " " .. count)
+        local preparing = self.GetQueuePreparationText and self:GetQueuePreparationText()
+        panel.selectedText:SetText(preparing or (T("COA_SELECTED_LABEL", "Selected:") .. " " .. count))
     end
 
     if panel.expansionButton and panel.expansionButton.text then

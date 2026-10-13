@@ -165,6 +165,10 @@ function CO:IsOrderSelected(orderID)
 end
 
 function CO:SetOrderSelected(orderID, selected)
+    if self.queueSelectionRunning or self._autoQueuePending then
+        if self.RefreshVisibleRowsSoon then self:RefreshVisibleRowsSoon() end
+        return
+    end
     local key = OrderKey(orderID)
     if not key then return end
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext() end
@@ -185,6 +189,11 @@ function CO:SetOrderSelected(orderID, selected)
 end
 
 function CO:ClearSelectedOrders(preserveMemory)
+    if self.queueSelectionRunning and self.CancelQueueSelection then self:CancelQueueSelection() end
+    if self._autoQueuePending then
+        self._autoQueuePending = nil
+        self._autoQueueStamp = (self._autoQueueStamp or 0) + 1
+    end
     if not preserveMemory then
         for key in pairs(self.selectedOrders) do
             if self.RememberOrderSelection then self:RememberOrderSelection(key, false) end
@@ -204,6 +213,7 @@ function CO:HasSelectedOrders()
 end
 
 function CO:SelectAllVisibleOrders(pageFrame, automatic)
+    if self.queueSelectionRunning or (not automatic and self._autoQueuePending) then return end
     pageFrame = pageFrame or self.activePageFrame or (_G.ProfessionsFrame and ProfessionsFrame.OrdersPage)
     if self.EnsureOrderSelectionContext then self:EnsureOrderSelectionContext(pageFrame) end
     local currentType = pageFrame and pageFrame.orderType

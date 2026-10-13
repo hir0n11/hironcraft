@@ -25,6 +25,20 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Atomic queue preparation and row rendering (0.4.145)
+
+- Queue checks and their saved choices are published together after analysis,
+  including both expansions in a combined Patron list. Existing checks remain
+  unchanged during preparation; a cancelled or stale pass cannot publish.
+- The list stays visible with preparation progress. Shopping shows a pending
+  amount, not an incomplete price; partial shopping imports and checkbox edits
+  are blocked until the result is ready.
+- Changing reagent/concentration/profit settings cancels obsolete analysis.
+  Failed row analysis cannot leave the visible-row fallback locked.
+- Fixed a rendering interruption in the preparation footer. Regression checks
+  exercise nonempty/empty tab transitions, staged memory and concentration,
+  multi-expansion preparation, cancellation, late callbacks and stale scopes.
+
 ## Claimed-order navigation and mixed stock (0.4.144)
 
 - Opening a claimed order from the combined list uses the authoritative server

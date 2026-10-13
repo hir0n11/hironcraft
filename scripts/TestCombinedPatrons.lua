@@ -204,6 +204,16 @@ CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
 eq(CO.queueSelectionRunning, true, 'asynchronous whole-list analysis')
 eq(CO:PrepareCombinedPatronAction(published[3], page), false, 'no row action during analysis')
 CO:CreateShoppingListForSelectedOrders() -- No partial import before analysis ends.
+for _ = 1, 100 do
+    if CO._queueSelectionPublication.pendingChecks['2'] then break end
+    tick()
+end
+eq(CO._queueSelectionPublication.pendingChecks['2'] ~= nil, true, 'first child analysed')
+eq(CO.selectedOrders['2'], nil, 'first child check remains staged')
+eq(CO.selectedOrders['3'], nil, 'second child not yet checked')
+eq(CO._orderSelectionBucket.choices['2'], nil, 'selection memory remains unchanged')
+eq(CO:GetSelectedShoppingCostInfo().preparing, true, 'no partial shopping cost')
+eq(CO:GetQueuePreparationText():find('/4', 1, true) ~= nil, true, 'one progress total covers both expansions')
 settleQueue()
 eq(CO.selectedOrders['1'], nil, 'manual exclusion retained')
 eq(CO.selectedOrders['2'], true)
