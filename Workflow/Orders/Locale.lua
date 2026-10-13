@@ -473,6 +473,7 @@ local friendly = {
     COA_AUTO_SHOP_SHORT = { "Build shopping list", "Создавать список закупки" },
     COA_AUTO_KNOWLEDGE_SHORT = { "Add knowledge orders", "Добавлять заказы со знаниями" },
     COA_PATRON_EXPANSIONS = { "Patrons to display", "Каких патронов показывать" },
+    COA_PATRON_CHOOSE_MENU = { "Select expansions", "Выбрать дополнения" },
     COA_QUEUE_BAGVALUE_HEADER = { "Bag reward", "Сумка в награде" },
     COA_QUEUE_KPVALUE_HEADER = { "1 knowledge point", "1 очко знаний" },
     COA_REWARD_VALUES_HEADER = { "Estimated reward values", "Оценка наград, золото" },

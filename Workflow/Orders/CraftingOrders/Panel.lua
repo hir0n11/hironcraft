@@ -1131,6 +1131,53 @@ function CO:RefreshVisibleRowsSafe()
     if self.UpdateControlPanel then self:UpdateControlPanel() end
 end
 
+local PATRON_MENU_KEYS = { "tww", "midnight" }
+
+function CO:OpenPatronExpansionMenu(owner)
+    if not PT.Dropdown or not owner or not owner:IsVisible() then return end
+    local items = {}
+    for _, key in ipairs(PATRON_MENU_KEYS) do
+        local expansionKey = key
+        items[#items + 1] = {
+            text = key == "tww" and "TWW" or "Midnight",
+            checked = self.IsPatronExpansionSelected and self:IsPatronExpansionSelected(key) or false,
+            onClick = function()
+                if CO.SetPatronExpansionSelected and CO.IsPatronExpansionSelected then
+                    -- Read the current setting, not a captured checkmark: a
+                    -- blocked scope change or the last choice may be rejected.
+                    CO:SetPatronExpansionSelected(expansionKey, not CO:IsPatronExpansionSelected(expansionKey))
+                end
+                CO:UpdateQueueSettingWidgets()
+                CO:OpenPatronExpansionMenu(owner)
+            end,
+        }
+    end
+    PT.Dropdown:Show({ owner=owner, items=items, keepOpen=true,
+        anchorPoint="TOPRIGHT", anchorRelativePoint="BOTTOMRIGHT" })
+end
+
+function CO:UpdateKnowledgeExpansionVisibility(panel)
+    if not panel or not panel.knowledgeExpansionBlock or not panel.queueFollowingSettings then return end
+    local page = panel.classicPages.queue
+    local block = panel.knowledgeExpansionBlock
+    local show = self.IsPatronExpansionSelected and self:IsPatronExpansionSelected("midnight")
+        and self:IsPatronExpansionSelected("tww") or false
+    local oldHeight = block:GetHeight()
+    local height = show and panel.knowledgeExpansionBlockHeight or 0
+    -- SetHeight may synchronously run the body's OnSizeChanged hook and
+    -- clamp scrolling; take the original offset before that can happen.
+    local offset = page.scroll:GetVerticalScroll()
+    block:SetShown(show)
+    block:SetHeight(height)
+    page.body:SetHeight(panel.knowledgeExpansionStart + height + panel.queueFollowingSettings:GetHeight())
+    -- Keep the controls below the block in place while changing the menu at
+    -- the bottom of a scrolled page. Never leave a hole for hidden fields.
+    if offset > panel.knowledgeExpansionStart and oldHeight ~= height then
+        page.scroll:SetVerticalScroll(math.max(0, offset + height - oldHeight))
+    end
+    self:UpdateClassicSettingsScroll(page.scroll, page.body)
+end
+
 function CO:UpdateQueueSettingWidgets()
     local panel = self.controlPanel
     if not panel then return end
@@ -1142,8 +1189,17 @@ function CO:UpdateQueueSettingWidgets()
     self:UpdateCheckToggle(panel.autoKnowledgeCheck)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
-    self:UpdateCheckToggle(panel.patronMidnightCheck)
-    self:UpdateCheckToggle(panel.patronTwwCheck)
+    if panel.patronExpansionDropdown then
+        local selected = {}
+        for _, key in ipairs(PATRON_MENU_KEYS) do
+            if self.IsPatronExpansionSelected and self:IsPatronExpansionSelected(key) then
+                selected[#selected + 1] = key == "tww" and "TWW" or "Midnight"
+            end
+        end
+        panel.patronExpansionDropdown.text:SetText(#selected > 0 and table.concat(selected, " + ")
+            or T("COA_PATRON_CHOOSE_MENU", "Select expansions"))
+    end
+    self:UpdateKnowledgeExpansionVisibility(panel)
     self:UpdateCheckToggle(panel.equipmentSwapCheck)
     self:UpdateCheckToggle(panel.bestQualityToggle)
     self:UpdateCheckToggle(panel.autoToolToggle)
@@ -1571,6 +1627,13 @@ function CO:EnsureControlPanel(pageFrame)
     end)
     panel.knowledgeMinProfitInput:HookScript("OnLeave", HideStyledTooltip)
     y = y - 26
+    local queueBody = body
+    panel.knowledgeExpansionStart = -y
+    panel.knowledgeExpansionBlock = CreateFrame("Frame", nil, queueBody)
+    panel.knowledgeExpansionBlock:SetPoint("TOPLEFT", 0, y)
+    panel.knowledgeExpansionBlock:SetPoint("TOPRIGHT", 0, y)
+    body = panel.knowledgeExpansionBlock
+    y = 0
     AddHeader(T("COA_KNOWLEDGE_EXPANSION_HEADER", "Knowledge: this profession"))
     AddNote(T("COA_KNOWLEDGE_EXPANSION_NOTE", "Empty = general rule. 0 = no loss. Negative = allowed loss, in gold."), 54)
     panel.knowledgeExpansionInputs = {}
@@ -1603,6 +1666,13 @@ function CO:EnsureControlPanel(pageFrame)
         y = y - 26
     end
     y = y - 8
+    panel.knowledgeExpansionBlockHeight = -y
+    body:SetHeight(-y)
+    panel.queueFollowingSettings = CreateFrame("Frame", nil, queueBody)
+    panel.queueFollowingSettings:SetPoint("TOPLEFT", body, "BOTTOMLEFT", 0, 0)
+    panel.queueFollowingSettings:SetPoint("TOPRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    body = panel.queueFollowingSettings
+    y = 0
     AddHeader(T("COA_REWARD_VALUES_HEADER", "Reward values"))
 
     -- Bag reward value
@@ -1701,27 +1771,26 @@ function CO:EnsureControlPanel(pageFrame)
     y = y - 24
 
     AddHeader(T("COA_PATRON_EXPANSIONS", "Патроны дополнений"))
-    panel.patronMidnightCheck = self:CreateCheckToggle(body, "Midnight",
-        function() return CO.IsPatronExpansionSelected and CO:IsPatronExpansionSelected('midnight') end,
-        function(v) if CO.SetPatronExpansionSelected then CO:SetPatronExpansionSelected('midnight', v) end end, INNER / 2)
-    panel.patronMidnightCheck:SetPoint("TOPLEFT", PADX, y)
-    panel.patronTwwCheck = self:CreateCheckToggle(body, "TWW",
-        function() return CO.IsPatronExpansionSelected and CO:IsPatronExpansionSelected('tww') end,
-        function(v) if CO.SetPatronExpansionSelected then CO:SetPatronExpansionSelected('tww', v) end end, INNER / 2)
-    panel.patronTwwCheck:SetPoint("TOPLEFT", PADX + INNER / 2, y)
-    for _, check in ipairs({ panel.patronMidnightCheck, panel.patronTwwCheck }) do
-        check:HookScript("OnEnter", function(owner)
-            if not Tooltip then return end
-            Tooltip:Clear()
-            Tooltip:AddLine(T("COA_PATRON_EXPANSIONS", "Патроны дополнений"), 13, 1, 0.82, 0.35)
-            Tooltip:AddLine(T("COA_PATRON_EXPANSIONS_TIP", "Selected expansions share one patron list, queue and shopping list. Only trained expansions are loaded."), 11, 0.85, 0.85, 0.85)
-            ShowStyledTooltip(owner)
-        end)
-        check:HookScript("OnLeave", HideStyledTooltip)
-    end
-    y = y - 24
+    panel.patronExpansionDropdown = self:CreateTextButton(body, nil, INNER, 24,
+        T("COA_PATRON_CHOOSE_MENU", "Select expansions"))
+    panel.patronExpansionDropdown:SetPoint("TOPLEFT", PADX, y)
+    panel.patronExpansionDropdown.arrow = panel.patronExpansionDropdown:CreateTexture(nil, "OVERLAY")
+    panel.patronExpansionDropdown.arrow:SetSize(16, 16)
+    panel.patronExpansionDropdown.arrow:SetPoint("RIGHT", -6, 0)
+    panel.patronExpansionDropdown.arrow:SetTexture("Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up")
+    panel.patronExpansionDropdown:SetScript("OnClick", function(owner) CO:OpenPatronExpansionMenu(owner) end)
+    panel.patronExpansionDropdown:HookScript("OnEnter", function(owner)
+        if not Tooltip then return end
+        Tooltip:Clear()
+        Tooltip:AddLine(T("COA_PATRON_EXPANSIONS", "Патроны дополнений"), 13, 1, 0.82, 0.35)
+        Tooltip:AddLine(T("COA_PATRON_EXPANSIONS_TIP", "Selected expansions share one patron list, queue and shopping list. Only trained expansions are loaded."), 11, 0.85, 0.85, 0.85)
+        ShowStyledTooltip(owner)
+    end)
+    panel.patronExpansionDropdown:HookScript("OnLeave", HideStyledTooltip)
+    y = y - 28
 
     body:SetHeight(-y + 8)
+    self:UpdateKnowledgeExpansionVisibility(panel)
     body = panel.queueActions
     y = -6
     local ACTION_INNER = VPANEL_W - 26
@@ -1971,8 +2040,6 @@ function CO:EnsureControlPanel(pageFrame)
     self:UpdateCheckToggle(panel.autoKnowledgeCheck)
     self:UpdateCheckToggle(panel.knowledgeProfitCheck)
     self:UpdateCheckToggle(panel.autoShopCheck)
-    self:UpdateCheckToggle(panel.patronMidnightCheck)
-    self:UpdateCheckToggle(panel.patronTwwCheck)
     for _, w in ipairs({ panel.minProfitInput, panel.knowledgeMinProfitInput,
         panel.bagValueInput, panel.kpValueInput, panel.rejectConfirmInput }) do
         if w then self:StyleWidget(w) end
@@ -1991,6 +2058,7 @@ function CO:EnsureControlPanel(pageFrame)
     end
     pageFrame.ahuiCraftingOrdersPanel = panel
     self.controlPanel = panel
+    self:UpdateQueueSettingWidgets()
     self:EnsureConflictBar(pageFrame)
     self:UpdateControlPanel()
     self:UpdateControlPanelVisibility(pageFrame)

@@ -25,6 +25,17 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Patron multiselect and conditional expansion thresholds (0.4.148)
+
+- Selection settings now use one dropdown with independent TWW/Midnight
+  checkmarks. It keeps the existing validation for pending actions and the last
+  selected expansion; a rejected change cannot leave a misleading checkmark.
+- Per-expansion knowledge-profit fields, their heading and help text appear
+  only when both expansions are selected. Hiding them removes their empty space
+  and clamps scrolling, without resetting saved thresholds or changing rules.
+- Regression checks cover single/multiple choices, repeated transitions, live
+  menu checkmarks, retained zero/negative values, tab isolation and RU/EN layout.
+
 ## Order-list opening hotfix and lighter sidebar (0.4.147)
 
 - Fixed the sidebar styling error that interrupted the first list refresh:

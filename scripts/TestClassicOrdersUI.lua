@@ -66,6 +66,13 @@ CO.SetRejectConfirmTipCopper = function(_, value) rejectConfirmCopper = value en
 CO.IsAutoQueueOnOpen = function() return true end
 CO.IsAutoShoppingOnOpen = function() return true end
 CO.IsAutoToolOn = function() return false end
+local patronChoices = { midnight=true }
+CO.IsPatronExpansionSelected = function(_, key) return patronChoices[key] == true end
+CO.SetPatronExpansionSelected = function(_, key, value)
+    local other = key == 'tww' and 'midnight' or 'tww'
+    if not value and not patronChoices[other] then return end
+    patronChoices[key] = value == true
+end
 
 local page = frame('Frame')
 page:SetSize(1060, 680)
@@ -114,7 +121,7 @@ assert(panel.equipmentSwapCheck:GetParent() == equipment.body and panel.saveEqui
 assert(panel.chooseToolButton:GetParent() == equipment.body and panel.autoToolToggle:GetParent() == equipment.body)
 for _, key in ipairs({'midnight','tww'}) do
     local input=panel.knowledgeExpansionInputs[key]
-    assert(input and input:GetParent()==queue.body and input.placeholder:IsShown(), 'expansion profit input missing/empty is unclear')
+    assert(input and input:GetParent()==panel.knowledgeExpansionBlock and input.placeholder:IsShown(), 'expansion profit input missing/empty is unclear')
     local entered
     CO.SetKnowledgeExpansionProfitOverride=function(_,which,value) assert(which==key);entered=value end
     CO.GetKnowledgeExpansionProfitOverride=function(_,which) return which==key and entered end
@@ -151,7 +158,7 @@ for _,tab in pairs(panel.classicTabs) do
     assert(tab.text:GetStringWidth() <= tab:GetWidth()-8, 'settings tab caption does not fit')
 end
 -- The tip above which a decline asks first sits with the other gold values.
-assert(panel.rejectConfirmInput and panel.rejectConfirmInput:GetParent() == queue.body
+assert(panel.rejectConfirmInput and panel.rejectConfirmInput:GetParent() == panel.queueFollowingSettings
     and tonumber(panel.rejectConfirmInput.text) == 5000, 'the decline confirmation limit is not shown: '
     .. tostring(panel.rejectConfirmInput and panel.rejectConfirmInput.text))
 assert(panel.runActionButton:GetParent() == panel.footer)
@@ -675,23 +682,83 @@ panel.knowledgeProfitCheck:Click()
 assert(CO:IsKnowledgeProfitIgnored()~=beforeKnowledgeProfit)
 panel.autoKnowledgeCheck:Click();panel.knowledgeProfitCheck:Click()
 for _,check in ipairs({panel.autoKnowledgeCheck,panel.knowledgeProfitCheck}) do
-    assert(check:GetParent()==queue.body, 'knowledge setting escaped the scrollable queue page')
+    assert(check:GetParent()==panel.queueFollowingSettings and panel.queueFollowingSettings:GetParent()==queue.body,
+        'knowledge setting escaped the scrollable queue page')
     assert(check.label:GetStringWidth()<=check.label:GetWidth(), 'knowledge setting label is clipped')
 end
 
--- The expansion picker belongs to the same scrollable settings page and
--- routes each checkbox independently. It must fit at the narrow sidebar width.
-local patronChoices = { midnight = true }
-CO.IsPatronExpansionSelected = function(_, key) return patronChoices[key] == true end
-CO.SetPatronExpansionSelected = function(_, key, value) patronChoices[key] = value == true end
+-- The multiselect dropdown uses the existing validated scope setter. Only a
+-- multiple-expansion choice exposes separate thresholds, without erasing their
+-- values, leaving an empty hole, growing repeatedly or leaking between tabs.
+patronChoices = { midnight=true }
+panel.classicTabs.queue:Click()
+queue.scroll:SetVerticalScroll(0)
 CO:UpdateQueueSettingWidgets()
-panel.patronTwwCheck:Click()
-assert(patronChoices.tww and patronChoices.midnight, 'TWW toggle changed Midnight')
-panel.patronMidnightCheck:Click()
-assert(patronChoices.tww and not patronChoices.midnight, 'Midnight toggle changed TWW')
-for _, check in ipairs({ panel.patronMidnightCheck, panel.patronTwwCheck }) do
-    assert(check:GetParent() == queue.body, 'patron expansion escaped queue settings')
-    assert(check.label:GetStringWidth() <= check.label:GetWidth(), 'patron expansion label is clipped')
+local compactHeight = queue.body:GetHeight()
+assert(not panel.knowledgeExpansionBlock:IsShown() and panel.knowledgeExpansionBlock:GetHeight()==0,
+    'single-expansion mode displays per-expansion thresholds')
+local _, queueTop = bounds(queue.body)
+local _, followingTop = bounds(panel.queueFollowingSettings)
+assert(followingTop==queueTop+panel.knowledgeExpansionStart, 'hidden thresholds left an empty hole')
+assert(panel.patronExpansionDropdown:GetParent()==panel.queueFollowingSettings
+    and panel.patronExpansionDropdown.text:GetText()=='Midnight')
+do
+    local dropdown, menu = PT.Dropdown, nil
+    PT.Dropdown={Show=function(_,opts) assert(opts.keepOpen);menu=opts.items end}
+    local overrides={midnight=-1000*10000,tww=0}
+    CO.GetKnowledgeExpansionProfitOverride=function(_,key) return overrides[key] end
+    CO.SetKnowledgeExpansionProfitOverride=function() error('visibility must not modify saved profit') end
+    panel.patronExpansionDropdown:Click()
+    assert(#menu==2 and menu[1].text=='TWW' and menu[2].text=='Midnight'
+        and not menu[1].checked and menu[2].checked, 'wrong dropdown choices/checkmarks')
+    menu[1].onClick()
+    assert(patronChoices.tww and patronChoices.midnight and menu[1].checked and menu[2].checked,
+        'multi-menu changed the other expansion or retained stale checkmarks')
+    assert(panel.patronExpansionDropdown.text:GetText()=='TWW + Midnight')
+    assert(panel.knowledgeExpansionBlock:IsVisible()
+        and panel.knowledgeExpansionInputs.midnight:IsVisible() and panel.knowledgeExpansionInputs.tww:IsVisible(),
+        'multiple expansions did not show the threshold block immediately')
+    local expandedHeight=queue.body:GetHeight()
+    assert(expandedHeight==compactHeight+panel.knowledgeExpansionBlockHeight,
+        'multi-expansion block height was not included exactly once')
+    for _=1,3 do CO:UpdateQueueSettingWidgets() end
+    assert(queue.body:GetHeight()==expandedHeight, 'repeated updates enlarged the page')
+    local oldOffset=math.max(0,expandedHeight-queue.scroll:GetHeight())
+    queue.scroll:SetVerticalScroll(oldOffset)
+    -- Native resizing may clamp the old offset synchronously, before the
+    -- visibility helper can adjust it to keep the lower settings in view.
+    local setHeight=queue.body.SetHeight
+    queue.body.SetHeight=function(self,height)
+        setHeight(self,height)
+        CO:UpdateClassicSettingsScroll(queue.scroll,self)
+    end
+    menu[2].onClick()
+    queue.body.SetHeight=setHeight
+    assert(patronChoices.tww and not patronChoices.midnight and not menu[2].checked)
+    assert(not panel.knowledgeExpansionBlock:IsVisible() and queue.body:GetHeight()==compactHeight,
+        'switching to TWW only left the block or a blank area')
+    assert(queue.scroll:GetVerticalScroll()<=math.max(0,compactHeight-queue.scroll:GetHeight()),
+        'shrinking the page left an invalid scroll offset')
+    local expectedOffset=oldOffset>panel.knowledgeExpansionStart
+        and math.max(0,oldOffset-panel.knowledgeExpansionBlockHeight) or oldOffset
+    expectedOffset=math.min(expectedOffset,math.max(0,compactHeight-queue.scroll:GetHeight()))
+    assert(queue.scroll:GetVerticalScroll()==expectedOffset, 'native resize clamped the scroll offset twice')
+    assert(overrides.midnight==-1000*10000 and overrides.tww==0, 'hiding erased the saved thresholds')
+    menu[1].onClick()
+    assert(patronChoices.tww and menu[1].checked, 'rejected last choice lost its checkmark')
+    menu[2].onClick()
+    assert(panel.knowledgeExpansionBlock:IsVisible() and queue.body:GetHeight()==expandedHeight,
+        'restoring both expansions did not restore the block')
+    assert(tonumber(panel.knowledgeExpansionInputs.midnight:GetText())==-1000
+        and tonumber(panel.knowledgeExpansionInputs.tww:GetText())==0, 'saved zero/negative values were lost')
+    panel.classicTabs.craft:Click()
+    assert(not panel.knowledgeExpansionBlock:IsVisible(), 'threshold block leaked into another settings tab')
+    panel.classicTabs.queue:Click()
+    menu[1].onClick()
+    assert(patronChoices.midnight and not patronChoices.tww and queue.body:GetHeight()==compactHeight,
+        'Midnight-only mode did not collapse the block')
+    PT.Dropdown=dropdown
+    CO.GetKnowledgeExpansionProfitOverride,CO.SetKnowledgeExpansionProfitOverride=nil,nil
 end
 
 -- Selecting a lower row may repaint it, but must not promote it above the
@@ -1180,6 +1247,7 @@ if arg[1] == '--scene' then
         demo.action.text:SetText(i == 1 and 'Крафт' or 'Взять')
         CL:ApplyOrderProblemStyle(demo, i==2 and 'Клиент приложил не все обязательные реагенты' or nil, false)
     end
+    for _, scrollPage in pairs(panel.classicPages) do scrollPage.scroll:SetVerticalScroll(0) end
     if arg[3] == 'queue' then panel.classicTabs.queue:Click() end
     if arg[3] == 'equipment' then panel.classicTabs.equipment:Click() end
     if arg[3] == 'collapsed' then panel.collapseButton:Click() end
