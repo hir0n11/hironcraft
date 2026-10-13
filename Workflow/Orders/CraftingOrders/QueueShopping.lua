@@ -1174,6 +1174,12 @@ function CO:ApplyQueueReagentModeToOrder(order)
     return ok
 end
 
+-- A reagent without a known price counts as free here, and that is meant.
+-- The order is checked, its reagents go to the shopping list, the shopping
+-- scan brings their price, and RecheckQueuedSelections takes the check away
+-- again if the profit does not hold. Refused here, the order would stay off
+-- that list, the scan would never look its price up, and it would never be
+-- queued. The row's tooltip says when a price is missing.
 function CO:OrderPassesQueueProfitFilter(order, minProfitOverride)
     local minProfit = minProfitOverride or self:GetQueueMinProfitCopper()
     if not minProfit then return true end
@@ -1866,12 +1872,18 @@ function CO:QueueVisibleWorkOrdersSelection(knowledgeOnly, mode)
     self:FinishQueueWorkOrdersSelection(session)
 end
 
-local function QueueOrderSnapshot(value, seen)
+-- An owned deep copy of game data (an order, a request, recipe info): the game
+-- reuses and rewrites the tables it hands out. skip names a key that is left
+-- out at every level. CombinedPatrons.lua, loaded after this file, uses it as
+-- well; CustomList.lua lives outside this environment and keeps its own.
+function CopyOrderData(value, skip, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
     if seen[value] then return seen[value] end
     local copy = {}; seen[value] = copy
-    for key, entry in pairs(value) do copy[key] = QueueOrderSnapshot(entry, seen) end
+    for key, entry in pairs(value) do
+        if key ~= skip then copy[key] = CopyOrderData(entry, skip, seen) end
+    end
     return copy
 end
 
@@ -2088,7 +2100,7 @@ function CO:QueueWorkOrdersSelection(knowledgeOnly, mode)
                     local key = source.orderID and OrderKey(source.orderID)
                     if key and not session.received[key] and (not source.orderType or source.orderType == orderType) then
                         session.received[key] = true
-                        local order = QueueOrderSnapshot(source)
+                        local order = CopyOrderData(source)
                         orders[#orders + 1] = order
                         session.orders[#session.orders + 1] = order
                     end

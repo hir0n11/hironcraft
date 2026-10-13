@@ -255,10 +255,13 @@ function CO:IsOrderVisualStateHoldActive()
     return (tonumber(self.orderVisualStateHoldUntil) or 0) > CacheNow()
 end
 
-function CO:InvalidateOrderCaches(orderID)
+-- keepQueueReasons is for a list update the addon caused itself: the reasons
+-- why the queue skipped orders are then still those of the pass in progress.
+function CO:InvalidateOrderCaches(orderID, keepQueueReasons)
     local key = OrderKey(orderID)
     if self.queueSkipReasons then
-        if key then self.queueSkipReasons[key] = nil else wipe(self.queueSkipReasons) end
+        if key then self.queueSkipReasons[key] = nil
+        elseif not keepQueueReasons then wipe(self.queueSkipReasons) end
     end
     if not key then
         self:HoldOrderVisualState(ORDER_VISUAL_STALE_HOLD_TTL)

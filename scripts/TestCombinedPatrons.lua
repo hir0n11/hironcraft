@@ -317,6 +317,129 @@ eq(begin(), true)
 eq(#requests, 0, 'delayed Init does not start another load')
 CO._patronPageInitializing = nil
 
+-- A step that fails gives the queue lock back. The steps run from timers:
+-- nothing else would finish a queue left "being built", with the Queue
+-- button off and every action refused.
+local reported
+E.geterrorhandler = function() return function(err) reported = err end end
+local realExcluded = CO.IsOrderManuallyExcluded
+CO.IsOrderManuallyExcluded = function() error('broken step') end
+local childBefore = child
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
+eq(CO.queueSelectionRunning, true)
+for _ = 1, 100 do if not CO.combinedPatronQueue then break end; tick() end
+eq(CO.combinedPatronQueue, nil, 'failed step left the combined queue locked')
+eq(CO.queueSelectionRunning, false, 'failed step left the queue running')
+eq(CO.status, 'The queue could not be built. Press Queue again.')
+eq(tostring(reported):find('broken step', 1, true) ~= nil, true, 'the error is still reported')
+eq(child, childBefore, 'failed step restores the expansion')
+eq(CO:IsOrderListReadyForAction(page), true, 'actions work again after a failed step')
+CO.IsOrderManuallyExcluded = realExcluded
+-- The same for the last step, which publishes the checks: it has let go of
+-- the combined queue by then, but not of the pass.
+local realRemember = CO.RememberOrderSelection
+CO.selectedOrders['3'], CO._orderSelectionBucket.choices['3'] = nil, nil
+CO.RememberOrderSelection = function() error('broken publication') end
+reported = nil
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
+for _ = 1, 500 do if not CO._queueSelectionPublication then break end; tick() end
+CO.RememberOrderSelection = realRemember
+eq(tostring(reported):find('broken publication', 1, true) ~= nil, true, 'publication did not fail as arranged')
+eq(CO._queueSelectionPublication, nil, 'failed publication left the pass open')
+eq(CO.queueSelectionRunning, false, 'failed publication left the queue running')
+eq(CO.status, 'The queue could not be built. Press Queue again.')
+eq(child, childBefore, 'failed publication left another expansion selected')
+eq(CO:IsOrderListReadyForAction(page), true, 'actions work again after a failed publication')
+CO:QueueWorkOrdersSelection(false, { automatic = true, includeProfit = true })
+settleQueue()
+eq(CO.selectedOrders['3'], true, 'the next pass runs normally')
+
+-- A complete list outlives a look at another tab and a closed window while
+-- an order is claimed. It is not loaded again until that order is done
+-- (loading switches expansions), so dropping it left the claimed order
+-- without a row to craft, complete or release it from.
+local function row(id)
+    for _, value in ipairs(E.C_CraftingOrders.GetCrafterOrders()) do
+        if value.orderID == id then return value end
+    end
+end
+local kept = CO.combinedPatrons
+eq(kept.ready, true)
+CO.GetClaimedOrder = function() return { orderID = 3, spellID = 103, orderType = 4 } end
+page.orderType = 3
+eq(begin(), false, 'another tab is not ours to answer')
+eq(CO.combinedPatrons, kept, 'claimed order: list dropped by another tab')
+eq(E.C_CraftingOrders.GetCrafterOrders(), buffer, 'another tab reads the game buffer')
+page.orderType = 4
+page.shown = false
+page:OnHide()
+eq(CO.combinedPatrons, kept, 'claimed order: list dropped by closing the window')
+eq(#E.C_CraftingOrders.GetCrafterOrders(), 0, 'a hidden page shows nothing')
+page.shown = true
+eq(CO:SuspendCombinedPatronLoad(), false, 'claimed order: the list is not let go')
+switchCount = #switches
+published = {}
+eq(begin(), true)
+eq(#requests, 0, 'claimed order: nothing is requested on return')
+eq(#switches, switchCount, 'claimed order: nothing is switched on return')
+eq(CO:IsCombinedPatronListReady(page), true, 'claimed order: the list is ready on return')
+eq(#published > 0 and row(3) ~= nil, true, 'claimed order has its row on return')
+eq(row(3).hironPatronChildID, 2872, 'claimed order keeps its expansion')
+-- The request is kept as an owned copy, without the callback of its sender.
+local sent = { orderType = 4, profession = profession, offset = 0, callback = {},
+    primarySort = { sortType = 1, callback = {} } }
+eq(CO:HandleCombinedPatronRequest(page, sent), true)
+eq(page.lastRequest ~= sent and page.lastRequest.primarySort ~= sent.primarySort
+    and page.lastRequest.primarySort.sortType == 1, true, 'the kept request is not an owned copy')
+eq(page.lastRequest.callback, nil, "the sender's callback was kept with the request")
+eq(page.lastRequest.primarySort.callback, nil, 'a callback deeper in the request was kept')
+
+-- The claimed order may be given its own expansion; nothing else is
+-- switched under it, and a refusal says why.
+child = 2907
+CO.status = nil
+eq(CO:PrepareCombinedPatronAction(row(3), page), false, 'the switch click acts on nothing')
+eq(child, 2872, 'claimed order could not be given its own expansion')
+eq(CO.status, 'Order expansion selected. Press Action again to continue.')
+eq(CO._patronSwitchSettlesAt, clock + 0.5, 'the switch is not marked as our own for the list update that answers it')
+clock = clock + 0.3
+eq(CO:PrepareCombinedPatronAction(row(3), page), true, 'second press goes on')
+CO.status, switchCount = nil, #switches
+eq(CO:PrepareCombinedPatronAction(row(2), page), false)
+eq(#switches, switchCount, 'another order switched the expansion under a claimed one')
+eq(CO.status, 'Finish the current order before changing expansions.', 'the refusal is silent')
+child = 2907
+CO.pendingCraftOrderID, CO.status, switchCount = 3, nil, #switches
+eq(CO:PrepareCombinedPatronAction(row(3), page), false)
+eq(#switches, switchCount, 'switched in the middle of a step')
+eq(CO.status, 'Finish the current order before changing expansions.')
+CO.pendingCraftOrderID = nil
+child = childBefore
+
+-- A list that is still loading is cancelled as before, and so is a complete
+-- one that nothing holds any more.
+CO.GetClaimedOrder = function() return nil end
+eq(CO:SuspendCombinedPatronLoad(), true)
+eq(CO.combinedPatrons, nil, 'a list nothing holds is let go')
+begin()
+nextRequest()
+CO.GetClaimedOrder = function() return { orderID = 3, spellID = 103, orderType = 4 } end
+eq(CO:SuspendCombinedPatronLoad(), true)
+eq(CO.combinedPatrons, nil, 'a load in progress is cancelled even with a claimed order')
+-- No list at all and an order claimed (a reload): still nothing is loaded,
+-- and the status says where that order is to be finished.
+timers, requests, CO.status, switchCount = {}, {}, nil, #switches
+eq(begin(), true)
+eq(CO.combinedPatrons, nil); eq(#requests, 0); eq(#timers, 0); eq(#switches, switchCount, 'loaded under a claimed order')
+eq(CO.status, 'The patron list loads once the claimed order is done. Finish it in the order window.')
+CO.pendingCraftOrderID = 3
+eq(begin(), true)
+eq(CO.status, 'Finish the current order before changing expansions.')
+CO.pendingCraftOrderID = nil
+CO.GetClaimedOrder = function() return nil end
+timers, requests = {}, {}
+child = childBefore
+
 -- Closed/changed scopes ignore even callbacks delivered after cancellation.
 begin()
 local stale = nextRequest()

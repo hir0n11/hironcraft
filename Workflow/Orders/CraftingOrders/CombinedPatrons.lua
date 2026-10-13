@@ -6,17 +6,10 @@ if not PT or not CO then return end
 -- The game owns a single crafter-order result buffer. Read each trained child
 -- profession in sequence and publish only our complete, character-scoped copy.
 -- This module never claims, crafts, releases or fulfils an order.
-local function Copy(value, seen)
-    if type(value) ~= 'table' then return value end
-    seen = seen or {}
-    if seen[value] then return seen[value] end
-    local result = {}
-    seen[value] = result
-    for key, entry in pairs(value) do
-        if key ~= 'callback' then result[key] = Copy(entry, seen) end
-    end
-    return result
-end
+
+-- CopyOrderData is in QueueShopping.lua. A request carries the callback of
+-- whoever sent it, which is not ours to keep.
+local function Copy(value) return CopyOrderData(value, 'callback') end
 
 local function Child()
     if C_TradeSkillUI and C_TradeSkillUI.GetProfessionChildSkillLineID then
@@ -129,6 +122,9 @@ function CO:SwitchCombinedPatronChild(childID)
     -- Suppress the ordinary expansion synchronizer: it must not change the
     -- aggregate selection scope, saved setting or queue on a transient switch.
     self.suppressExpansionSyncUntil = CacheNow() + 0.5
+    -- Nor may the game's answer to it erase the notes of the queue pass
+    -- (see TRADE_SKILL_LIST_UPDATE).
+    self._patronSwitchSettlesAt = CacheNow() + 0.5
     return ok and Child() == childID
 end
 
@@ -144,6 +140,22 @@ function CO:CancelCombinedPatronLoad()
         and not self:IsCombinedPatronActionBusy() then
         self:SwitchCombinedPatronChild(session.originalChild)
     end
+end
+
+-- Leaving the list (the window closed, a look at another tab) cancels its
+-- load. A list that is complete stays while an order is claimed or a step is
+-- in flight: it is not loaded again until then - loading switches expansions,
+-- and the game answers every switch by opening the claimed order - so
+-- dropping it would leave the claimed order without a row to be crafted from.
+-- Returns whether the list was let go.
+function CO:SuspendCombinedPatronLoad()
+    local session = self.combinedPatrons
+    if session and session.ready == true and not session.loading and self:IsCombinedPatronActionBusy() then
+        self:CancelCombinedPatronSelection()
+        return false
+    end
+    self:CancelCombinedPatronLoad()
+    return true
 end
 
 function CO:GetCombinedPatronOrders(page)
@@ -185,7 +197,19 @@ function CO:PrepareCombinedPatronAction(order, page)
     if not self:IsInactivePatronOrder(order) then
         return not self._patronActionReadyAt or CacheNow() >= self._patronActionReadyAt
     end
-    if self:IsCombinedPatronActionBusy() then return false end
+    if self:IsCombinedPatronActionBusy() then
+        -- Busy with another order, or in the middle of a step: nothing is
+        -- switched under it. Busy only because this very order is the one
+        -- claimed: its own expansion is what it needs to go on.
+        local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
+        local stepInFlight = (self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
+            or self.pendingClaimOrderID or self.pendingCraftOrderID or self.pendingFulfillOrderID
+            or self.pendingReleaseOrderID or self.progressOrderID
+        if stepInFlight or not (claimed and SameOrderID(claimed.orderID, order.orderID)) then
+            self:SetStatus(T('COA_PATRON_WAIT_ACTION', 'Finish the current order before changing expansions.'))
+            return false
+        end
+    end
     if not self:SwitchCombinedPatronChild(order.hironPatronChildID) then
         self:SetStatus(T('COA_PATRON_SWITCH_FAILED', 'Could not switch the order profession. Try again.'))
         return false
@@ -268,6 +292,22 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
             self:SetStatus(string.format(T('COA_PATRON_QUEUE_UNKNOWN', '%d orders still lack quality data. Press Queue again to retry.'), selection.unknown))
         end
     end
+    -- The steps run from timers, one after another. One that fails would end
+    -- the chain with the queue still "being built": nothing else finishes
+    -- it, the Queue button stays off and every action is refused. Give the
+    -- lock back, say so, and let the error be seen. The last step has already
+    -- handed the pass over for publication when it fails, hence both checks.
+    local function Next(delay, step)
+        Later(delay, function()
+            local ok, err = pcall(step)
+            if ok then return end
+            if self.combinedPatronQueue == selection or self._queueSelectionPublication == selection then
+                self:CancelQueueSelection()
+                self:SetStatus(T('COA_PATRON_QUEUE_FAILED', 'The queue could not be built. Press Queue again.'))
+            end
+            if geterrorhandler then geterrorhandler()(err) end
+        end)
+    end
     local Step
     Step = function(index, retry)
         if not Alive() then return end
@@ -276,15 +316,15 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
         if not order then Finish(); return end
         if self:IsOrderSelectedForQueueAnalysis(order.orderID) or (opts.automatic and self:IsOrderManuallyExcluded(order.orderID)) then
             if not self:IsOrderSelectedForQueueAnalysis(order.orderID) then self:SetQueueSkipReason(order, "manual") end
-            Later(0.02, function() Step(index + 1, 0) end)
+            Next(0.02, function() Step(index + 1, 0) end)
             return
         end
         if self:IsInactivePatronOrder(order) then
             if not self:SwitchCombinedPatronChild(order.hironPatronChildID) then
                 selection.unknown = selection.unknown + 1
-                Later(0.02, function() Step(index + 1, 0) end)
+                Next(0.02, function() Step(index + 1, 0) end)
             else
-                Later(0.15, function() Step(index, retry) end)
+                Next(0.15, function() Step(index, retry) end)
             end
             return
         end
@@ -300,7 +340,7 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
         -- Its operation data may arrive on the next frame even though the
         -- child-profession setter has already returned the correct child ID.
         pcall(self.PrepareOrderForQueueAnalysis, self, order, page)
-        Later(0.05, function()
+        Next(0.05, function()
             if not Alive() then return end
             if self:IsInactivePatronOrder(order) then Step(index, retry); return end
             local ok, analysis = pcall(self.GetAvailabilityQueueAnalysis, self, order, order.orderType, opts, page)
@@ -314,13 +354,13 @@ function CO:QueueCombinedPatronSelection(knowledgeOnly, mode, page)
                 elseif not marked then selection.unknown = selection.unknown + 1 end
             elseif self:GetRecipeKnownState(order) ~= false
                 and self:OrderRequiresConcentrationForQueue(order, page) == nil then
-                if (retry or 0) < 3 then Later(0.15, function() Step(index, (retry or 0) + 1) end); return end
+                if (retry or 0) < 3 then Next(0.15, function() Step(index, (retry or 0) + 1) end); return end
                 selection.unknown = selection.unknown + 1
             end
-            Later(0.02, function() Step(index + 1, 0) end)
+            Next(0.02, function() Step(index + 1, 0) end)
         end)
     end
-    Later(0.15, function() Step(1, 0) end)
+    Next(0.15, function() Step(1, 0) end)
 end
 
 function CO:HandleCombinedPatronRequest(page, request)
@@ -328,7 +368,7 @@ function CO:HandleCombinedPatronRequest(page, request)
     if self._patronSwitching then return true end
     local scope, options = self:GetPatronExpansionScope(page)
     if not scope or not request or request.orderType ~= page.orderType then
-        self:CancelCombinedPatronLoad()
+        self:SuspendCombinedPatronLoad()
         return false
     end
     local identity = Identity(page)
@@ -337,7 +377,7 @@ function CO:HandleCombinedPatronRequest(page, request)
     if page.HookScript and not page.hironCombinedPatronHideHooked then
         page.hironCombinedPatronHideHooked = true
         page:HookScript('OnHide', function()
-            if CO.combinedPatrons and CO.combinedPatrons.page == page then CO:CancelCombinedPatronLoad() end
+            if CO.combinedPatrons and CO.combinedPatrons.page == page then CO:SuspendCombinedPatronLoad() end
         end)
     end
     local previous = self.combinedPatrons
@@ -351,7 +391,15 @@ function CO:HandleCombinedPatronRequest(page, request)
         end
     end
     if self:IsCombinedPatronActionBusy() then
-        self:SetStatus(T('COA_PATRON_WAIT_ACTION', 'Finish the current order before changing expansions.'))
+        -- Nothing may be loaded now, and after a reload there is no complete
+        -- list to fall back on either (see SuspendCombinedPatronLoad): the
+        -- claimed order has no row here until it is done. The game shows it
+        -- in its own order window when the page opens; say where to look.
+        local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
+        local stepInFlight = self.IsOrderSubmissionPending and self:IsOrderSubmissionPending()
+        self:SetStatus(claimed and not stepInFlight
+            and T('COA_PATRON_CLAIMED_FIRST', 'The patron list loads once the claimed order is done. Finish it in the order window.')
+            or T('COA_PATRON_WAIT_ACTION', 'Finish the current order before changing expansions.'))
         return true
     end
     local send = self.originalRequestCrafterOrders or (C_CraftingOrders and C_CraftingOrders.RequestCrafterOrders)

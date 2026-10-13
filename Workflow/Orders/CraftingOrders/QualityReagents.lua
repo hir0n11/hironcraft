@@ -972,14 +972,16 @@ function CO:IsSafeToPrepareOrderViewForAnalysis(pageFrame)
 end
 
 function CO:GetRowAction(orderID, fallbackOrder)
-    if self.IsOrderListReadyForAction and not self:IsOrderListReadyForAction(self.activePageFrame) then
-        return "pending", T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."), fallbackOrder, false
-    end
+    -- The exact reasons first: the general check below covers both of them.
     if self.combinedPatronQueue then
         return "pending", T("COA_STATUS_QUEUE_BUILDING", "Building work order queue..."), fallbackOrder, false
     end
-    if self.IsCombinedPatronListReady and not self:IsCombinedPatronListReady(self.activePageFrame) then
+    local patrons = self.combinedPatrons
+    if patrons and patrons.loading and patrons.page == self.activePageFrame then
         return "pending", T("COA_PATRON_LOADING", "Loading patron orders from selected expansions..."), fallbackOrder, false
+    end
+    if self.IsOrderListReadyForAction and not self:IsOrderListReadyForAction(self.activePageFrame) then
+        return "pending", T("COA_STATUS_LIST_NOT_READY", "Wait for the order list and queue calculation to finish."), fallbackOrder, false
     end
     -- The server or a preserved row can still expose a claimed/fulfillable
     -- snapshot after success. Completion is terminal regardless of that data.
@@ -2051,7 +2053,24 @@ end
 function CO:RefreshPageSoon(delay, forceSearch)
     C_Timer.After(delay or 0.2, function()
         local pageFrame = CO.activePageFrame
-        if forceSearch == true and pageFrame and pageFrame:IsShown() and pageFrame.StartDefaultSearch then
+        -- The search was asked for a moment ago, and a press may have started
+        -- the next step since. A search under a claim or a craft marks the
+        -- rows stale and clears the game's request cache beneath it (see
+        -- StartEmptyPersonalOrdersRefresh), so the rows are only redrawn then.
+        -- A completion or release whose removal has been seen is over as far
+        -- as the list goes: the refresh it asked for must still search.
+        local stepInFlight = CO.pendingClaimOrderID ~= nil or CO.pendingCraftOrderID ~= nil
+            or CO.progressActive == true
+        if not stepInFlight then
+            local terminal = CO.terminalAction
+            if terminal then
+                stepInFlight = terminal.removalSeen ~= true
+            else
+                stepInFlight = CO.pendingFulfillOrderID ~= nil or CO.pendingReleaseOrderID ~= nil
+            end
+        end
+        if forceSearch == true and not stepInFlight
+            and pageFrame and pageFrame:IsShown() and pageFrame.StartDefaultSearch then
             SafeCall("StartDefaultSearch", function()
                 pageFrame:StartDefaultSearch()
             end)

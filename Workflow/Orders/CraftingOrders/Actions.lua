@@ -334,7 +334,9 @@ end
 
 function CO:GetOrderEngine(pageFrame, order)
     if order and self.GetEffectiveOrder then order = self:GetEffectiveOrder(order.orderID, order) or order end
-    if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then return nil end
+    if self.IsInactivePatronOrder and self:IsInactivePatronOrder(order) then
+        return nil, T("COA_PATRON_SWITCH_NEEDED", "The order's expansion is not selected. Press Action again.")
+    end
     if not order then
         return nil, T("COA_STATUS_NO_ENGINE", "Crafting order view is not available.")
     end
@@ -344,7 +346,9 @@ function CO:GetOrderEngine(pageFrame, order)
         or self.pendingFulfillOrderID or self.pendingReleaseOrderID
     local claimed = self.GetClaimedOrder and self:GetClaimedOrder()
     ownedID = ownedID or (claimed and claimed.orderID)
-    if ownedID and not SameOrderID(ownedID, order.orderID) then return nil end
+    if ownedID and not SameOrderID(ownedID, order.orderID) then
+        return nil, T("COA_STATUS_STEP_BUSY", "Another order is being worked on. Finish it first.")
+    end
 
     pageFrame = self:FindOrderPageFrame(pageFrame)
     if pageFrame then
@@ -477,22 +481,25 @@ local REJECTION_IDENTITY_FIELDS = {
     "parentProfessionID", "orderType", "npcCustomerName", "tipAmount",
     "consortiumCut", "isRecraft", "outputItemHyperlink",
 }
-local function CopyRejectionIdentity(source, previous)
-    local snapshot = {}
+-- Writes what source knows into target and returns target. A field that the
+-- source lacks, hides (a secret value) or has blank keeps what target had.
+local function MergeRejectionIdentity(target, source)
     for _, field in ipairs(REJECTION_IDENTITY_FIELDS) do
         local value = source and source[field]
-        if (issecretvalue and issecretvalue(value))
-            or (type(value) == "string" and not value:find("%S")) then value = nil end
-        if value == nil and previous then value = previous[field] end
-        snapshot[field] = value
+        if value ~= nil and not (issecretvalue and issecretvalue(value))
+            and not (type(value) == "string" and not value:find("%S")) then
+            target[field] = value
+        end
     end
-    return snapshot
+    return target
 end
 
 -- GetEffectiveOrder can prefer a sparse claimed/rowState table over the full
 -- visible row. Keep an owned copy as soon as either supplies identity, not
 -- only when Decline is pressed; the game may retire those tables in between.
-function CO:RememberOrderIdentity(order)
+-- This is asked for every row at every list refresh, so the saved identity is
+-- brought up to date in place; wantCopy is for the caller that keeps it.
+function CO:RememberOrderIdentity(order, wantCopy)
     if type(order) ~= "table" or (issecretvalue and issecretvalue(order.orderID)) then return end
     local key = OrderKey(order.orderID)
     if not key then return end
@@ -505,11 +512,13 @@ function CO:RememberOrderIdentity(order)
         self.identitySweepAt = now
     end
     local saved = self.rejectionReagentSnapshots[key]
-    if not saved or now - saved.time > 300 then saved = {} end
-    saved.order = CopyRejectionIdentity(order, saved.order)
+    if not saved or now - saved.time > 300 then
+        saved = {}
+        self.rejectionReagentSnapshots[key] = saved
+    end
+    saved.order = MergeRejectionIdentity(saved.order or {}, order)
     saved.time = now
-    self.rejectionReagentSnapshots[key] = saved
-    return CopyRejectionIdentity(saved.order)
+    if wantCopy then return MergeRejectionIdentity({}, saved.order) end
 end
 
 local function HasRejectionIdentity(order)
@@ -520,13 +529,13 @@ end
 
 function CO:ResolveRejectionIdentity(order, claimed)
     local orderID = order.orderID
-    local resolved = self:RememberOrderIdentity(order)
+    local resolved = self:RememberOrderIdentity(order, true)
     local function collect(candidate)
         -- Never infer a customer from a recipe, a nearby row, or the last
         -- claimed order. Multiple customers can request the same bracers.
         if type(candidate) == "table" and not (issecretvalue and issecretvalue(candidate.orderID))
             and SameOrderID(candidate.orderID, orderID) then
-            resolved = self:RememberOrderIdentity(candidate)
+            resolved = self:RememberOrderIdentity(candidate, true)
         end
     end
     local state = self.rowStates and self.rowStates[orderID]
@@ -617,6 +626,16 @@ end
 
 function CO:RejectOrder(order, pageFrame, releasedForReject, rejectionReason)
     if order and self.IsOrderUnavailable and self:IsOrderUnavailable(order.orderID) then return false end
+    -- The question about a large tip is answered long after the click that
+    -- raised it: by then another order may be on its way through a claim, a
+    -- craft or a completion. A decline, and the list search that follows it,
+    -- must not land in the middle of that step. Every other way into this
+    -- function has already passed the same check.
+    if self:IsOrderSubmissionPending() then
+        self:SetStatus(T("COA_STATUS_REJECT_BUSY",
+            "Another order step is still in progress. Nothing was declined; press Action again when it finishes."))
+        return false
+    end
     pageFrame = self:FindOrderPageFrame(pageFrame) or self.activePageFrame or pageFrame
     if not order or not order.orderID then
         self:SetStatus(T("COA_STATUS_NO_ORDER", "Select an order first."))
@@ -944,6 +963,45 @@ function CO:IsCraftSubmissionAcknowledged(orderID)
         and SameOrderID(self.craftSubmissionAcknowledgedOrderID, orderID)
 end
 
+-- A removal that arrives while an order is being crafted carries no order ID
+-- and cannot be told from a late duplicate of the previous job, so nothing is
+-- done about it then (see CRAFTINGORDERS_CLAIMED_ORDER_REMOVED). It is settled
+-- here, once that craft attempt has been given up: if no order is claimed any
+-- more, this one was cancelled or has expired under its craft. Its claimed
+-- snapshot would otherwise keep the row at "Craft", with every press answered
+-- by "the order is still being claimed", and the list would not be asked again.
+function CO:ResolveOrderLostDuringCraft(orderID)
+    local removal = self._removalDuringCraft
+    if not removal or not orderID or not SameOrderID(removal.orderID, orderID) then return false end
+    self._removalDuringCraft = nil
+    if removal.token ~= self._craftWatchToken or self:GetClaimedOrder() then return false end
+
+    local key = OrderKey(orderID)
+    self.selectedOrders[key] = nil
+    for _, id in ipairs({ orderID, key, tonumber(orderID) }) do
+        if self.rowStates[id] then self.rowStates[id].order = nil end
+    end
+    if self.ForgetCompletedOrderSelection then self:ForgetCompletedOrderSelection(orderID) end
+    self.orderIssues[key] = nil
+    if self.currentQueueOrderID and SameOrderID(self.currentQueueOrderID, orderID) then self.currentQueueOrderID = nil end
+    if self.craftedOrderID and SameOrderID(self.craftedOrderID, orderID) then self.craftedOrderID = nil end
+    if self.preparedFinisherOrderID and SameOrderID(self.preparedFinisherOrderID, orderID) then
+        self.preparedFinisherOrderID = nil
+        self.preparedFinisherReagent = nil
+        self.preparedFinisherReadyAt = nil
+        self.preparedFinisherUseEngineOrderID = nil
+    end
+    self:InvalidateOrderCaches(orderID)
+    self:SetStatus(T("COA_STATUS_ORDER_LOST", "The order is no longer claimed: it was cancelled or has expired. Refreshing the list."))
+    self:RefreshVisibleRowsSoon()
+    if self.RestoreListActionViewSoon then self:RestoreListActionViewSoon() end
+    if self.UpdateControlPanel then self:UpdateControlPanel() end
+    if self.RefreshPageSoon then self:RefreshPageSoon(0.35, true) end
+    return true
+end
+
+-- Returns whether the attempt was cleared and, second, whether its order
+-- turned out to be lost (see above): the caller then leaves the status alone.
 function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
     if orderID and self.pendingCraftOrderID
         and not SameOrderID(self.pendingCraftOrderID, orderID)
@@ -951,6 +1009,7 @@ function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
         return false
     end
 
+    local attemptID = self.pendingCraftOrderID or orderID
     self.pendingCraftOrderID = nil
     self.pendingCraftSpellID = nil
     self.pendingCraftCastGUID = nil
@@ -963,7 +1022,7 @@ function CO:ClearPendingCraftAttempt(orderID, keepPreparedFinisher)
         self.preparedFinisherUseEngineOrderID = nil
     end
     self:StopRowProgress()
-    return true
+    return true, self:ResolveOrderLostDuringCraft(attemptID)
 end
 
 -- Blizzard's transaction contains both the reagents supplied by the customer
@@ -999,6 +1058,7 @@ function CO:HandleCraftOrderResponse(result, orderID)
     if not matchesPending then return false end
 
     if not IsResultOk(result) then
+        local failedID = self.pendingCraftOrderID
         self:SetStatus(T("COA_STATUS_CRAFT_FAILED", "Could not craft the order."))
         self.pendingCraftOrderID = nil
         self.pendingCraftSpellID = nil
@@ -1008,6 +1068,8 @@ function CO:HandleCraftOrderResponse(result, orderID)
         if self.preparedFinisherOrderID then
             self.preparedFinisherReadyAt = (GetTime and GetTime() or 0) + 0.25
         end
+        -- The server may refuse because the order is gone: say that instead.
+        self:ResolveOrderLostDuringCraft(failedID)
         return true
     end
 
@@ -1232,6 +1294,7 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
     self.pendingCraftSpellID = order.spellID
     self.pendingCraftCastGUID = nil
     self.craftSubmissionAcknowledgedOrderID = nil
+    self._removalDuringCraft = nil
     self.orderIssues[OrderKey(order.orderID)] = nil
     self.activeOrderID = order.orderID
     self.activePageFrame = pageFrame
@@ -1273,7 +1336,8 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
                     if co:IsCraftSubmissionAcknowledged(watchID) then return end
 
                     co:DActionPrint("craft start was not acknowledged for order", watchID)
-                    co:ClearPendingCraftAttempt(watchID, prepared)
+                    local _, lost = co:ClearPendingCraftAttempt(watchID, prepared)
+                    if lost then return end
                     if prepared then
                         if co.preparedFinisherUseEngineOrderID
                             and SameOrderID(co.preparedFinisherUseEngineOrderID, watchID)
@@ -1304,7 +1368,8 @@ function CO:CraftOrderFromRow(order, pageFrame, btn)
                         return
                     end
                     co:DActionPrint("craft final watchdog released order", watchID)
-                    co:ClearPendingCraftAttempt(watchID, prepared)
+                    local _, lost = co:ClearPendingCraftAttempt(watchID, prepared)
+                    if lost then return end
                     co:SetStatus(T(
                         "COA_STATUS_CRAFT_RETRY",
                         "Craft did not start. Press Action again."

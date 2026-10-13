@@ -48,6 +48,14 @@ current:Invoke(0);current:Invoke(0)
 assert(accepted==1 and not page.ahuiOrderRequestPending, 'duplicate callback republished a list')
 old=request();CL:ClearScope(page);old:Invoke(0)
 assert(accepted==1, 'cancelled request was accepted')
+-- A change of tab or profession ends here too: the patron list is asked to
+-- step aside, not dropped outright (it stays while an order is claimed).
+local suspended,cancelled=0,0
+CO.SuspendCombinedPatronLoad=function() suspended=suspended+1 end
+CO.CancelCombinedPatronLoad=function() cancelled=cancelled+1 end
+CL:ClearScope(page)
+assert(suspended==1 and cancelled==0, 'clearing a scope dropped the patron list of a claimed order')
+CO.SuspendCombinedPatronLoad,CO.CancelCombinedPatronLoad=nil,nil
 old=request();owner='Player-B';old:Invoke(0)
 assert(accepted==1, 'old character request was accepted')
 owner='Player-A';old=request();child=1002;old:Invoke(0)

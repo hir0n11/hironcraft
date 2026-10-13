@@ -1684,6 +1684,9 @@ end
 
 function CL:ScopeKey(pageFrame) return ListScopeKey(pageFrame) end
 
+-- The same copy as CopyOrderData in QueueShopping.lua. This file runs outside
+-- the orders environment and is loaded on its own by its tests, so it has it
+-- here.
 local function OrderSnapshot(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -1763,7 +1766,10 @@ end
 
 local UnregisterRow
 function CL:ClearScope(pageFrame)
-    if CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
+    -- A change of tab or profession arrives here as well: a complete patron
+    -- list stays while an order is claimed (see SuspendCombinedPatronLoad).
+    if CO.SuspendCombinedPatronLoad then CO:SuspendCombinedPatronLoad()
+    elseif CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
     pageFrame.ahuiScopedOrders = { scope = ListScopeKey(pageFrame), orders = {} }
     pageFrame.ahuiOrderRequestSerial = (pageFrame.ahuiOrderRequestSerial or 0) + 1
     pageFrame.ahuiOrderRequestPending = nil
@@ -2393,7 +2399,10 @@ local function AttachHooks()
     if ProfessionsFrame and ProfessionsFrame.HookScript and not ProfessionsFrame.ahuiCustomListHidehooked then
         ProfessionsFrame.ahuiCustomListHidehooked = true
         ProfessionsFrame:HookScript("OnHide", function()
-            if CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
+            -- A complete patron list stays while an order is claimed (see
+            -- SuspendCombinedPatronLoad): it could not be loaded again.
+            if CO.SuspendCombinedPatronLoad then CO:SuspendCombinedPatronLoad()
+            elseif CO.CancelCombinedPatronLoad then CO:CancelCombinedPatronLoad() end
             if CO.visibleRowButtons then
                 wipe(CO.visibleRowButtons)
             end

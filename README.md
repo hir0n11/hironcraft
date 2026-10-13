@@ -25,6 +25,68 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A claimed order keeps its row; late answers wait for the step in progress (0.4.151)
+
+A review of the order workflow of 0.4.137-0.4.150. What changes in play:
+
+- **Combined patron list with an order claimed.** Closing the profession
+  window, or a look at another tab, dropped the loaded list; with an order
+  claimed it could not be loaded again (loading switches expansions), so the
+  Patron tab came back empty and the claimed order could not be crafted,
+  completed or released from the addon. A complete list now stays while an
+  order is claimed or a step is in flight, and is loaded afresh by the first
+  request after that. After a reload there is no list to keep: the status
+  then says that the list loads once the claimed order is done, and that the
+  game shows that order in its own order window.
+- **The claimed order and its expansion.** With a TWW order claimed and
+  Midnight active, Action on that order did nothing and said nothing. It now
+  selects the order's expansion and asks for a second press. Another order
+  still does not switch expansions under a claimed one, and says so.
+- **A failed step of the combined queue.** An error in one of its timed steps
+  left the queue "being built" for good: Queue button off, every action
+  refused. The pass is now cancelled, the status says to press Queue again,
+  and the error is still reported.
+- **Decline answered from its dialog.** The question about a large tip can be
+  answered long after it was raised. Answered during another order's claim,
+  craft or completion, it sent the decline and a list search into the middle
+  of that step. It is now refused with a status; the answer stands for the
+  next press.
+- **A list search asked for a moment ago** no longer starts under a claim or
+  a craft that began in the meantime; the rows are redrawn instead.
+- **Automatic queue of an opening.** With an order already claimed when the
+  table was opened, the automatic pass was refused but counted as made, and
+  the queue had to be built by hand after that order. The pass (and the
+  automatic shopping list that follows it) now stays owed and is made at the
+  next list refresh once no order is in hand.
+- **An order that disappears under its own craft** (cancelled, expired). The
+  removal carries no order ID and is still not acted on while the craft is
+  pending. When that attempt is given up and nothing is claimed any more, the
+  order's stale "claimed" row is dropped, its check is removed, the status
+  says so and the list is asked again. Before, the row stayed at "Craft" and
+  answered every press with "still being claimed".
+- **Reasons.** A craft refused because of the order's expansion or of another
+  order in work says why instead of clearing the status line. A waiting row
+  says "Building work order queue..." or "Loading patron orders..." when that
+  is the reason. The reasons why the queue skipped orders survive the
+  expansion switches of the combined queue pass.
+- **Less work per row.** Remembering an order's identity for a possible
+  decline made two tables per row at every list refresh; the saved one is now
+  updated in place. The queue and the combined list share one deep copy.
+
+Left as it is, on purpose:
+
+- A reagent without a known price still counts as free for the queue's profit
+  rule. The order goes to the shopping list, the shopping scan brings the
+  price, and the check is examined again. Refused outright, the order would
+  stay off that list, its price would never be looked up, and it would never
+  be queued.
+- The selection of patron expansions stays account-wide, and an expansion a
+  character has not trained is not replaced by another one.
+
+Tests: `scripts/TestOrderStepGuards.lua` (new), additions to
+`TestCombinedPatrons.lua` and `TestOrderRequestSnapshots.lua`. Offline
+regression checks, not an in-game verification.
+
 ## Version label visibility (0.4.150)
 
 - Moved the small gray version text below the title bar and into a dedicated,

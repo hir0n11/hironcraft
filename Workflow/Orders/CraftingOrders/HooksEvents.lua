@@ -168,8 +168,16 @@ function CO:HookBlizzardProfessions()
             return (CO.IsAutoQueueOnOpen and CO:IsAutoQueueOnOpen())
                 or (CO.IsAutoKnowledgeOnOpen and CO:IsAutoKnowledgeOnOpen())
         end
+        -- With an order already claimed, or a step in flight, the pass is
+        -- refused, and arming it would only hold up every press for 0.6 s after
+        -- each list refresh. It stays owed to this opening instead: the list is
+        -- shown again once that order is done, and the pass is made then.
+        local function orderInHand()
+            return (CO.IsOrderSubmissionPending and CO:IsOrderSubmissionPending())
+                or (CO.GetClaimedOrder and CO:GetClaimedOrder() ~= nil) or false
+        end
         if onClientsTab(pageFrame) and autoSelectionEnabled() and CO.QueueWorkOrdersSelection
-            and not CO._autoRanForOpen
+            and not CO._autoRanForOpen and not orderInHand()
         then
             local stamp = (CO._autoQueueStamp or 0) + 1
             CO._autoQueueStamp = stamp
@@ -193,6 +201,13 @@ function CO:HookBlizzardProfessions()
                     haveOrders = ok and type(list) == "table" and #list > 0
                 end
                 if not haveOrders then return end
+
+                -- Not now, for a reason that passes: the list is being asked
+                -- again, or an order was claimed in the meantime. The pass
+                -- would be refused; it is not counted as made.
+                local container = pageFrame.ahuiCustomList
+                if pageFrame.ahuiOrderRequestPending or (container and container._freshSearchPending)
+                    or orderInHand() then return end
 
                 CO._autoRanForOpen = true
                 pcall(function() CO:QueueWorkOrdersSelection(false, {
@@ -317,6 +332,7 @@ function CO:MarkOrderCraftedReady(orderID)
     self.pendingCraftCastGUID = nil
     self.pendingCraftButton = nil
     self.craftSubmissionAcknowledgedOrderID = nil
+    self._removalDuringCraft = nil
     if self.preparedFinisherOrderID
         and SameOrderID(self.preparedFinisherOrderID, orderID)
     then
@@ -497,7 +513,13 @@ function CO:OnEvent(event, ...)
         local orderID = (terminal and terminal.orderID) or self.pendingReleaseOrderID or self.pendingFulfillOrderID
         -- A duplicate/unowned removal must not stop a later craft's progress.
         if not orderID and ((self.IsOrderSubmissionPending and self:IsOrderSubmissionPending())
-            or self:GetClaimedOrder()) then return end
+            or self:GetClaimedOrder()) then
+            -- It may also be the order under that craft which is gone. That is
+            -- looked at when the craft is given up (ResolveOrderLostDuringCraft).
+            self._removalDuringCraft = self.pendingCraftOrderID
+                and { orderID = self.pendingCraftOrderID, token = self._craftWatchToken } or nil
+            return
+        end
         if terminal then
             terminal.removalSeen = true
             if terminal.responseSeen or terminal.kind == "release" then self.terminalAction = nil end
@@ -791,7 +813,12 @@ function CO:OnEvent(event, ...)
 
     if event == "TRADE_SKILL_LIST_UPDATE" then
         wipe(self.orderIssues)
-        self:InvalidateOrderCaches()
+        -- The combined patron list switches expansions itself, and the game
+        -- answers every switch with this event. What the queue pass has just
+        -- noted about the orders it skipped must outlive its own switches.
+        local ownSwitch = self.combinedPatronQueue ~= nil
+            or (self._patronSwitchSettlesAt ~= nil and CacheNow() < self._patronSwitchSettlesAt)
+        self:InvalidateOrderCaches(nil, ownSwitch)
         self:UpdateControlPanel()
         self:RefreshVisibleRowsSoon()
         return
