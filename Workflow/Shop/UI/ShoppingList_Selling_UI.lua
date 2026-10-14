@@ -461,6 +461,7 @@ function S:EnsureSellPanel()
     form.qtyBox:SetScript("OnTextChanged", function(box, userInput)
         if not userInput then return end
         S.sell.quantity = tonumber(box:GetText()) or 0
+        S.sell.quantityIsAuto = false
         S:UpdateSellTotals()
     end)
     form.qtyBox:SetScript("OnEnterPressed", function(box) box:ClearFocus() end)
@@ -472,6 +473,7 @@ function S:EnsureSellPanel()
     form.maxBtn:SetText(T("PG_SELL_MAX", "Max"))
     if S.StyleClassicTextButton then S.StyleClassicTextButton(form.maxBtn) end
     form.maxBtn:SetScript("OnClick", function()
+        S.sell.quantityIsAuto = true
         S.sell.quantity = S:GetSellPostLimit()
         S:RefreshSellUI()
     end)

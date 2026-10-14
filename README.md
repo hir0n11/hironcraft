@@ -25,6 +25,23 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Selling reagent stack recovery (0.4.153)
+
+- Posting resolves the selected material's live bag location again after a
+  sort/split, and can use another unlocked matching stack. Commodity ranks
+  remain distinct by item ID; noncommodity variants still require the exact
+  link. No different material is posted from an old bag position.
+- Temporary inventory locks no longer leave an automatic Max quantity at
+  zero after unlocking. Explicit quantities are retained through a temporary
+  lock and remain subject to the current auction-house posting limit.
+- Item-lock events refresh the selling list, without submitting or replaying
+  a sale. A blocked hardware press reports its reason: occupied stack, loading
+  inventory/prices, auction throttling, unavailable stock or invalid input.
+- Auction regression tests cover relocation, unlocked alternate stacks,
+  quantity recovery, explicit quantities, variant isolation and confirmation
+  ordering. Video alone did not reveal which silent guard blocked the ore;
+  the new feedback makes any remaining refusal visible.
+
 ## Item links are recognised again in 12.1.5 (0.4.152)
 
 Patch 12.1.5 took away the old global item functions (`GetItemInfo`,

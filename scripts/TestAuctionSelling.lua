@@ -78,7 +78,7 @@ E.C_AuctionHouse = {
         local info, total = bags[loc.slot], 0
         if not info then return 0 end
         for _, stack in pairs(bags) do
-            if stack.itemID == info.itemID and not stack.isBound then total = total + stack.stackCount end
+            if stack.itemID == info.itemID and not stack.isBound and not stack.isLocked then total = total + stack.stackCount end
         end
         return total
     end,
@@ -147,6 +147,7 @@ check(#messages == 1 and S.sell.selected.itemID == 1002, 'bag-first confirmation
 
 reset()
 S.sell.quantity = 5
+S.sell.quantityIsAuto = false -- entered explicitly through the quantity box
 S:PostSellItem(); bags[1].stackCount = 8
 emit('AUCTION_HOUSE_AUCTION_CREATED', 13); emit('BAG_UPDATE_DELAYED'); advance(1)
 check(S.sell.selected.itemID == 1001 and S.sell.selected.count == 8 and S.sell.quantity == 5,
@@ -197,6 +198,37 @@ reset(); bags[1] = stack(9999, 20)
 check(not S:PostSellItem() and #posts == 0, 'posted different item from stale bag slot')
 reset(); bags[1].isLocked = true
 check(not S:PostSellItem() and #posts == 0, 'posted locked stack')
+check(#warnings>0, 'a locked stack refused the hotkey without an explanation')
+
+-- A bag refresh can lag behind a split/sort. The selected identity and price
+-- stay the same, but posting must use its current unlocked location.
+reset(); bags[4],bags[1]=bags[1],stack(9999,20)
+check(S:PostSellItem() and posts[1][1].slot==4, 'moved material did not post from its live location')
+check(S.sell.awaitingPost.entry.itemID==1001, 'relocation changed the selected material')
+
+-- The aggregate's first stack may be locked while another matching stack is
+-- usable. Do not stick to that first location forever or change item quality.
+reset(); bags[3]=stack(1001,7);bags[1].isLocked=true
+check(S:PostSellItem() and posts[1][1].slot==3, 'an unlocked matching stack was ignored')
+
+-- An automatic maximum temporarily becomes zero while inventory is locked.
+-- Unlocking must restore it without replaying the failed hardware press.
+reset();bags[1].isLocked=true;S:SelectSellItem(S.sell.items[1])
+check(S.sell.quantity==0, 'locked inventory remained immediately postable')
+bags[1].isLocked=false;emit('ITEM_LOCK_CHANGED',0,1);advance(.2)
+check(S.sell.quantity==13 and #posts==0, 'unlock kept the automatic quantity at zero or submitted a background post')
+S.sell.quantity=3;S.sell.quantityIsAuto=false;emit('ITEM_LOCK_CHANGED',0,1);advance(.2)
+check(S.sell.quantity==3, 'unlock replaced an explicitly entered quantity')
+bags[1].isLocked=true;emit('ITEM_LOCK_CHANGED',0,1);advance(.2)
+bags[1].isLocked=false;emit('ITEM_LOCK_CHANGED',0,1);advance(.2)
+check(S.sell.quantity==3, 'temporary lock erased an explicitly entered quantity')
+reset();bags[1].hasNoValue=true
+check(S:PostSellItem(), 'a vendor-price flag overrode the auction house sellability check')
+reset({equipment=true});bags[3]=stack(1001,13,{equipment=true,hyperlink='item:1001:other-variant'})
+bags[1]=nil
+check(not S:PostSellItem() and #posts==0, 'relocation posted a different variant of the same item ID')
+reset({equipment=true});bags[1].hyperlink=nil;S.sell.selected.itemLink=nil
+check(not S:PostSellItem() and #posts==0, 'unknown noncommodity variant identity reached posting')
 reset(); S.sell.price = 0
 check(not S:PostSellItem(), 'zero price normalized into a cheap auction')
 reset(); ready = false

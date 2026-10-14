@@ -194,6 +194,58 @@ local function IterateSellBags(callback)
     end
 end
 
+local function MatchesSellEntry(info, entry)
+    return info and info.itemID == entry.itemID
+        and (entry.isCommodity or (entry.itemLink ~= nil and info.hyperlink == entry.itemLink))
+end
+
+-- Inventory positions are not item identities. A sort, split or previous
+-- auction can move the selected stack before BAG_UPDATE_DELAYED is delivered.
+function S:ResolveSellLocation(entry)
+    if not entry or not C_Container or not C_Container.GetContainerItemInfo or not ItemLocation then
+        return nil, "PG_SELL_BAGS_LOADING"
+    end
+    local locked, loading = false, false
+    local function check(bag, slot)
+        local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+        if not ok then loading = true; return end
+        if not info then
+            if C_Container.GetContainerItemID then
+                local okID, itemID = pcall(C_Container.GetContainerItemID, bag, slot)
+                if not okID or itemID == entry.itemID then loading = true end
+            end
+            return
+        end
+        if info.itemID == entry.itemID and not entry.isCommodity
+            and (not entry.itemLink or not info.hyperlink) then loading = true; return end
+        if not MatchesSellEntry(info, entry) then return end
+        if info.isLocked then locked = true; return end
+        local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+        if not loc or (loc.IsValid and not loc:IsValid()) then return end
+        if C_Item and C_Item.DoesItemExist and not C_Item.DoesItemExist(loc) then return end
+        if C_AuctionHouse and C_AuctionHouse.IsSellItemValid then
+            local validOK, valid = pcall(C_AuctionHouse.IsSellItemValid, loc, false)
+            if not validOK then loading = true; return end
+            if valid == false then return end
+        elseif info.isBound or info.hasNoValue then
+            return
+        end
+        return loc
+    end
+    local loc = entry.bag ~= nil and entry.slot and check(entry.bag, entry.slot)
+    if loc then return loc end
+    IterateSellBags(function(bag, slot)
+        if loc then return end
+        local candidate = check(bag, slot)
+        if candidate then
+            loc = candidate
+            entry.bag, entry.slot = bag, slot
+        end
+    end)
+    return loc, not loc and (locked and "PG_SELL_STACK_BUSY"
+        or loading and "PG_SELL_BAGS_LOADING" or "PG_SELL_ITEM_UNAVAILABLE") or nil
+end
+
 function S:ScanSellBags()
     local agg = {}
     local order = {}
@@ -318,7 +370,12 @@ function S:RefreshSellList()
 
         if stillThere then
             self.sell.selected = stillThere
-            self.sell.quantity = math.min(self.sell.quantity or 0, self:GetSellPostLimit())
+            local limit = self:GetSellPostLimit()
+            if self.sell.quantityIsAuto then
+                self.sell.quantity = limit
+            elseif limit > 0 then
+                self.sell.quantity = math.min(self.sell.quantity or 0, limit)
+            end
         elseif prevIndex and #order > 0 then
             local target = order[prevIndex] or order[#order]
             if target then
@@ -403,9 +460,10 @@ end
 function S:GetSellPostLimit()
     local entry = self.sell.selected
     if not entry then return 0 end
+    local loc = self:ResolveSellLocation(entry)
+    if not loc then return 0 end
     local limit = entry.count or 0
     if ItemLocation and C_AuctionHouse and C_AuctionHouse.GetAvailablePostCount then
-        local loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
         if loc and C_Item and C_Item.DoesItemExist and C_Item.DoesItemExist(loc) then
             local okCount, count = pcall(C_AuctionHouse.GetAvailablePostCount, loc)
             if okCount and count then
@@ -442,6 +500,7 @@ function S:SelectSellItem(entry)
     if self.sell.awaitingPost then return end
     if not entry then return end
     self.sell.selected = entry
+    self.sell.quantityIsAuto = true
     self.sell.quantity = self:GetSellPostLimit()
     self.sell.price = 0
     self.sell.scan = nil
@@ -688,11 +747,6 @@ end
 
 local SELL_CONFIRM_DIALOG = "HIRONCRAFT_SELL_CONFIRM"
 
-local function MatchesSellEntry(info, entry)
-    return info and info.itemID == entry.itemID
-        and (entry.isCommodity or info.hyperlink == entry.itemLink)
-end
-
 local function SellLocationMatches(entry)
     if not C_Container or not C_Container.GetContainerItemInfo then return false end
     local info = C_Container.GetContainerItemInfo(entry.bag, entry.slot)
@@ -811,15 +865,40 @@ function S:ShowSellPostConfirmation(pending)
     end
 end
 
+local SELL_BLOCK_MESSAGES = {
+    PG_SELL_STACK_BUSY = "The material is busy. Wait for the bag slot to unlock.",
+    PG_SELL_BAGS_LOADING = "Bag contents are still loading. Try again in a moment.",
+    PG_SELL_ITEM_UNAVAILABLE = "The selected material is no longer available for sale.",
+    PG_SELL_WAIT_THROTTLE = "The auction house is busy. Press Post again in a moment.",
+    PG_SELL_WAIT_PRICES = "Wait for this material's auction prices to load.",
+    PG_SELL_ENTER_PRICE = "Enter a positive unit price.",
+    PG_SELL_ENTER_QUANTITY = "Enter a positive quantity.",
+    PG_SELL_QUANTITY_CHANGED = "The available quantity changed. Check the bags and try again.",
+}
+
+function S:ExplainSellPostBlock(reason)
+    local entry = self.sell.selected
+    local now = GetTime and GetTime() or 0
+    local key = tostring(entry and entry.key) .. ":" .. tostring(reason)
+    if self._lastSellBlockKey ~= key or now - (self._lastSellBlockTime or 0) >= 3 then
+        self._lastSellBlockKey, self._lastSellBlockTime = key, now
+        local name = entry and (entry.itemLink or entry.itemName or ("item:" .. tostring(entry.itemID))) or ""
+        print("|cffffd200HironCraft:|r " .. name .. ": " .. T(reason, SELL_BLOCK_MESSAGES[reason]))
+    end
+    return false
+end
+
 function S:PostSellItem()
     local entry = self.sell.selected
     if not entry then return false end
     if self.sell.awaitingPost or self.sell.pendingBuy then return false end
     if not self.isAuctionHouseOpen then return false end
     if not C_AuctionHouse then return false end
-    if not self:IsSellAHThrottleReady() then return false end
-    if not self:IsSellScanReady() then return false end
-    if not SellLocationMatches(entry) then
+    if not self:IsSellAHThrottleReady() then return self:ExplainSellPostBlock("PG_SELL_WAIT_THROTTLE") end
+    if not self:IsSellScanReady() then return self:ExplainSellPostBlock("PG_SELL_WAIT_PRICES") end
+    local loc, locationReason = self:ResolveSellLocation(entry)
+    if not loc then
+        self:ExplainSellPostBlock(locationReason)
         self:RefreshSellList()
         return false
     end
@@ -831,15 +910,15 @@ function S:PostSellItem()
 
     local qty = math.floor(tonumber(self.sell.quantity) or 0)
     local rawPrice = tonumber(self.sell.price) or 0
-    if rawPrice <= 0 then return false end
+    if rawPrice <= 0 then return self:ExplainSellPostBlock("PG_SELL_ENTER_PRICE") end
     local price = NormalizeSellPrice(rawPrice)
     local dur = self:GetSellDurationCode()
 
-    if qty <= 0 or price <= 0 then return false end
+    if qty <= 0 or price <= 0 then return self:ExplainSellPostBlock("PG_SELL_ENTER_QUANTITY") end
 
     local limit = self:GetSellPostLimit()
     if qty > limit then qty = limit end
-    if qty <= 0 then return false end
+    if qty <= 0 then return self:ExplainSellPostBlock("PG_SELL_ITEM_UNAVAILABLE") end
 
     local deposit = self:GetSellDeposit()
     if self._sellDepositTrusted and deposit > 0 and (GetMoney and GetMoney() or 0) < deposit then
@@ -853,8 +932,12 @@ function S:PostSellItem()
         return false
     end
 
-    local loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
+    loc, locationReason = self:ResolveSellLocation(entry)
+    if not loc then
+        return self:ExplainSellPostBlock(locationReason)
+    end
     if not (C_Item and C_Item.DoesItemExist and C_Item.DoesItemExist(loc)) then
+        self:ExplainSellPostBlock("PG_SELL_ITEM_UNAVAILABLE")
         self:RefreshSellList()
         return false
     end
@@ -876,7 +959,8 @@ function S:PostSellItem()
     entry.isCommodity = isCommodity
 
     local beforeCount = CountSellInventory(entry)
-    if not beforeCount or beforeCount < qty then return false end
+    if not beforeCount then return self:ExplainSellPostBlock("PG_SELL_BAGS_LOADING") end
+    if beforeCount < qty then return self:ExplainSellPostBlock("PG_SELL_QUANTITY_CHANGED") end
     local snapshot = {}
     for key, value in pairs(entry) do snapshot[key] = value end
     local pending = { entry = snapshot, quantity = qty, price = price, duration = dur,
@@ -995,7 +1079,6 @@ function S:RunSellHotkeyAction()
     if not self.sell.selected then return end
     -- Posting must remain in the real click/key handler. Never replay a busy
     -- press from THROTTLED_SYSTEM_READY (which has no hardware action context).
-    if not self:IsSellAHThrottleReady() then return end
     local now = GetTime and GetTime() or 0
     if self._lastSellPostTime and (now - self._lastSellPostTime) < 0.35 then return end
     if self:PostSellItem() then
@@ -1124,6 +1207,7 @@ local sellEventFrame = CreateFrame("Frame")
 sellEventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
 sellEventFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
 sellEventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+sellEventFrame:RegisterEvent("ITEM_LOCK_CHANGED")
 sellEventFrame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 sellEventFrame:RegisterEvent("COMMODITY_PRICE_UPDATED")
 sellEventFrame:RegisterEvent("COMMODITY_PRICE_UNAVAILABLE")
@@ -1179,7 +1263,7 @@ sellEventFrame:SetScript("OnEvent", function(_, event, ...)
         return
     end
 
-    if event == "BAG_UPDATE_DELAYED" then
+    if event == "BAG_UPDATE_DELAYED" or event == "ITEM_LOCK_CHANGED" then
         S:TryFinishSellPost()
         if S.frame and S.shopTab == "sell" and S.frame:IsShown() then
             S:RefreshSellListSoon()
