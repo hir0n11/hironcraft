@@ -25,6 +25,32 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## A decline's card comes as fast as its mark (0.4.154)
+
+The card that offers "I checked your order. Looks like you're..." on the
+other linked account waits for the decline's material list: it names what
+the customer has to fix. The mark of the order went at once; the list did
+not.
+
+- It went 1.5 s after the decline, on the bulk prefix behind profession data
+  and other lists, one batch at a time with up to ten seconds for its ACK. A
+  relog in between started it over, so with frequent relogs the card came
+  late or only after a long wait.
+- The list of a fresh decline (up to ten minutes old) now goes with every
+  flush of pending marks, right behind them, alone, as an urgent message on
+  the shared prefix. Every version reads it there, so an older linked
+  account gets it too.
+- It stays pending until its ACK. Unanswered, it goes again with a later
+  flush (a ping reply, at least every ten seconds), and at once to a new
+  character of the linked account after a relog. After three tries the bulk
+  pump takes it as before.
+- The card on the other account appears the moment the list arrives, as it
+  did; only the wait for the list is gone. Lists of delivered orders and
+  older declines still travel on the bulk prefix.
+- Tests: `TestOrderSyncPayload.lua` covers the urgent list (with the mark,
+  no pump copy, the card announced on arrival, ACK, resends then the pump, a
+  new character, old declines and deliveries left to the pump).
+
 ## Selling reagent stack recovery (0.4.153)
 
 - Posting resolves the selected material's live bag location again after a

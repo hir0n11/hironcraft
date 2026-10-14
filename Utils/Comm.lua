@@ -133,6 +133,7 @@ local SendOrderStatusRepairs
 local ReceiveOrderStatuses
 local ScheduleOrderStatusFlush
 local ScheduleMaterialPump
+local SendUrgentMaterials
 local lastRecentOrderReplayAt = nil
 local FRESH_TARGET_SECONDS = 15
 local HEARTBEAT_SECONDS = 10
@@ -1458,6 +1459,7 @@ local function SendPendingOrderStatuses(accountID, target)
         end
     end
 
+    SendUrgentMaterials(accountID, target)
     ScheduleMaterialPump(accountID)
 end
 
@@ -1651,6 +1653,78 @@ local function MaterialPayloadEntry(entry)
     return copy
 end
 
+-- The list of a decline is what the card on the other account waits for: it
+-- names the materials the customer has to fix ("I checked your order. Looks
+-- like you're..."). On the pump below it started 1.5 s after the decline, went
+-- on the bulk prefix behind profession data, one batch at a time with up to
+-- ten seconds for its ACK - and a relog in between started it all over. So the
+-- list of a fresh decline goes the way its mark goes: with every flush of
+-- pending marks (SendPendingOrderStatuses), right behind them, alone, as an
+-- urgent message on the shared prefix, where every version reads it. It stays
+-- pending until its ACK: unanswered, it goes again with a later flush (a ping
+-- reply brings one every ten seconds, a new character of the linked account
+-- at once), and after a few tries the pump takes it as before.
+local URGENT_MATERIAL_ENTRIES = 2 -- a decline's status and its completion notice
+local URGENT_MATERIAL_MAX_AGE = 10 * 60
+local URGENT_MATERIAL_RESEND_SECONDS = 10
+local URGENT_MATERIAL_ATTEMPTS = 3
+local urgentMaterialSends = setmetatable({}, { __mode = 'k' })
+
+local function UrgentMaterialSend(entry, accountID)
+    return urgentMaterialSends[entry] and urgentMaterialSends[entry][accountID]
+end
+
+-- Still on its way the urgent way to this character: the pump leaves it alone.
+local function SentUrgently(entry, accountID, target)
+    local send = UrgentMaterialSend(entry, accountID)
+    return send ~= nil and send.target == target
+        and (send.attempts < URGENT_MATERIAL_ATTEMPTS or Now() - send.at < URGENT_MATERIAL_RESEND_SECONDS)
+end
+
+SendUrgentMaterials = function(accountID, target)
+    local fulfillment = HironCraftScan.OrderFulfillment
+    target = target or FreshTargetForAccount(accountID)
+    if not fulfillment or not target then
+        return -- The ping reply flushes to the live character, and this with it.
+    end
+    local now = time()
+    local function Urgent(entry)
+        if not MaterialsPendingFor(entry, accountID) or entry.status ~= 'rejected'
+            or now - (tonumber(entry.updatedAt) or 0) > URGENT_MATERIAL_MAX_AGE then
+            return false
+        end
+        local send = UrgentMaterialSend(entry, accountID)
+        if not send or send.target ~= target then return true end
+        return send.attempts < URGENT_MATERIAL_ATTEMPTS and Now() - send.at >= URGENT_MATERIAL_RESEND_SECONDS
+    end
+    local candidates = {}
+    for _, notice in ipairs(NewestOrderEntries(fulfillment:GetCompletionNotices(), nil, Urgent)) do
+        table.insert(candidates, { kind = 'recent', entry = notice })
+    end
+    for _, entry in ipairs(NewestOrderEntries(fulfillment:GetStatuses(), nil, Urgent)) do
+        table.insert(candidates, { kind = 'statuses', entry = entry })
+    end
+    if #candidates == 0 then
+        return
+    end
+    table.sort(candidates, function(lhs, rhs)
+        return (tonumber(lhs.entry.updatedAt) or 0) > (tonumber(rhs.entry.updatedAt) or 0)
+    end)
+
+    materialBatchSequence = materialBatchSequence + 1
+    local payload = { batch = materialBatchSequence, statuses = {}, recent = {} }
+    for index = 1, math.min(#candidates, URGENT_MATERIAL_ENTRIES) do
+        local candidate = candidates[index]
+        table.insert(payload[candidate.kind], MaterialPayloadEntry(candidate.entry))
+        local byAccount = urgentMaterialSends[candidate.entry] or {}
+        urgentMaterialSends[candidate.entry] = byAccount
+        local previous = byAccount[accountID]
+        byAccount[accountID] = { target = target, at = Now(),
+            attempts = (previous and previous.target == target and previous.attempts or 0) + 1 }
+    end
+    HironCraftScanComm:Transmit(payload, HironCraftScanComm.Operations.ShareOrderMaterials, target, nil, true)
+end
+
 local function PumpOrderMaterials(accountID)
     local fulfillment = HironCraftScan.OrderFulfillment
     local pump = MaterialPump(accountID)
@@ -1663,7 +1737,7 @@ local function PumpOrderMaterials(accountID)
     end
 
     local function Pending(entry)
-        return MaterialsPendingFor(entry, accountID)
+        return MaterialsPendingFor(entry, accountID) and not SentUrgently(entry, accountID, target)
     end
     local candidates = {}
     for _, notice in ipairs(NewestOrderEntries(fulfillment:GetCompletionNotices(), nil, Pending)) do
@@ -2588,7 +2662,9 @@ local function AddonVersion()
     return addonVersion or nil
 end
 
-function HironCraftScanComm:Transmit(data, operation, target, onSent)
+-- urgent sends an operation that usually waits (a decline's material list)
+-- the way marks go: at once, on the shared prefix every version reads.
+function HironCraftScanComm:Transmit(data, operation, target, onSent, urgent)
     if STATUS_ORDER_OPERATIONS[operation] then
         data = CompactOrderPayload(data)
     end
@@ -2605,8 +2681,8 @@ function HironCraftScanComm:Transmit(data, operation, target, onSent)
 
     HironCraftScan.Utils.printTable('Sending msg', msg)
 
-    local priority = PriorityForOperation(operation)
-    local prefix = PrefixForOperation(operation)
+    local priority = urgent and 'ALERT' or PriorityForOperation(operation)
+    local prefix = urgent and HIRONCRAFT_SCAN_COMM_PREFIX or PrefixForOperation(operation)
     if priority == 'ALERT' then
         -- Critical order updates are small. Serialize them immediately so the
         -- addon queues the whisper in the same frame as the fulfillment event;

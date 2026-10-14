@@ -440,14 +440,22 @@ local notice
 for _,value in pairs(fulfillment:GetCompletionNotices()) do if value.orderID==888 then notice=value end end
 assert(notice and notice.deliveryPending['lap-horde'] and notice.deliveryPending['lap-alliance'])
 runTimers(0.3)
-local markPackets={}
-for _,packet in ipairs(sent) do if packet.data.operation==op.ShareOrderCompletion then markPackets[packet.target]=packet end end
+local markPackets,materialPackets={},{}
+for _,packet in ipairs(sent) do
+    if packet.data.operation==op.ShareOrderCompletion then markPackets[packet.target]=packet end
+    if packet.data.operation==op.ShareOrderMaterials then materialPackets[packet.target]=packet end
+end
 assert(markPackets['lap-horde-Realm'] and markPackets['lap-alliance-Realm'],'one of two collectors received no decline packet')
+-- The list of a decline goes with its mark, as an urgent message: the card on
+-- the collector waits for it to name the materials.
+for _,target in ipairs({'lap-horde-Realm','lap-alliance-Realm'}) do
+    local packet=materialPackets[target]
+    assert(packet and packet.prefix=='HIRONCRAFT_SCAN' and packet.priority=='ALERT',
+        'a collector got no decline list with the mark: '..target)
+end
 for _,packet in pairs(markPackets) do markSent(packet) end
 sent={};runTimers(1.5);flushFrames()
-local materialPackets={}
-for _,packet in ipairs(sent) do if packet.data.operation==op.ShareOrderMaterials then materialPackets[packet.target]=packet end end
-assert(materialPackets['lap-horde-Realm'] and materialPackets['lap-alliance-Realm'],'one collector received no material packet')
+assert(not find(op.ShareOrderMaterials),'the pump sent a decline list again behind its urgent copy')
 
 -- Deliver Alliance's ACK first, while Horde has received nothing yet.
 local ack={orderID=888,customerName=notice.customerName,spellID=notice.spellID,itemID=notice.itemID,
@@ -569,3 +577,129 @@ do
 end
 print('Profession link transport passed (parent-only bulk push, offline revisions, stale packets, reconnect, permissions, deletion).')
 
+
+-- A decline's material list goes with its mark (0.4.154). The card on the
+-- other account ("I checked your order. Looks like you're...") waits for it,
+-- and on the bulk pump it came 1.5 s late at best, behind profession data,
+-- one batch at a time with ten seconds for an ACK, and a relog started it over.
+do
+    local clock=1000
+    function GetTime() return clock end
+    local emitted={}
+    local realEmit=Scan.Events.Emit
+    Scan.Events.Emit=function(_,name,_,value) emitted[#emitted+1]={name=name,entry=value} end
+    local function link(me,peer,character)
+        Scan.DB={settings={my_uuid=me},realm={linked_accounts={[peer]={permissions={1}}}},customers={},listed_orders={}}
+        if character then
+            receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID=peer,data={state=2}}},character)
+        end
+        return Scan.DB
+    end
+    local function decline(id,at,status)
+        local value={customerName='Buyer-Realm',responseID=id,craftingOrderID=id+5000,status=status or 'rejected',
+            rev=1,origin='crafter',updatedAt=at or time(),automatic=true,
+            reagentAudit={version=1,orderID=id+5000,capturedAt=time(),complete=true,
+                rows={{itemID=11,name='Ink',required=20,known=true,supplied={{itemID=11,quantity=15,quality=1}}}}}}
+        comm:PrepareOrderStatusDelivery(value)
+        fulfillment:GetStatuses()[Scan.OrderToOrderID(value)]=value
+        return value
+    end
+    local function lists()
+        local found={}
+        for _,packet in ipairs(sent) do
+            if packet.data.operation==op.ShareOrderMaterials then found[#found+1]=packet end
+        end
+        return found
+    end
+    local function share(value) sent={};comm:ShareOrderStatus(value);runTimers(0.05) end
+
+    -- At once, alone, urgent; the pump does not send it again behind it.
+    -- Account ids of their own: the pumps of the sections above may still have a
+    -- batch in flight.
+    local crafterDB=link('crafter','collector','Receiver-Realm')
+    timers,frames={},{}
+    local fresh=decline(700)
+    share(fresh)
+    local urgent=lists()
+    assert(#urgent==1 and urgent[1].prefix=='HIRONCRAFT_SCAN' and urgent[1].priority=='ALERT'
+        and urgent[1].target=='Receiver-Realm','the list of a decline did not go with its mark')
+    local wire=urgent[1].data.data.statuses[1]
+    assert(wire.responseID==700 and wire.reagentAudit.rows[1].supplied[1].quantity==15 and not wire.materialsPending,
+        'the urgent list does not carry the decline as it was')
+    assert(find(op.ShareOrderCompletion),'the mark did not go')
+    sent={};runTimers(1.5);flushFrames()
+    assert(#lists()==0,'the pump sent the list again behind its urgent copy')
+
+    -- The collector: the list landing after the mark is announced at once,
+    -- which is what raises the card.
+    link('collector','crafter','Crafter-Realm')
+    local mark=copy(fresh);mark.reagentAudit=nil;mark.deliveryPending={collector=true};mark.materialsPending=nil
+    assert(fulfillment:ApplyRemoteStatus(mark))
+    emitted={}
+    receive(urgent[1],'Crafter-Realm')
+    local stored=fulfillment:GetStatuses()[Scan.OrderToOrderID(fresh)]
+    assert(stored and stored.reagentAudit and stored.reagentAudit.rows[1].supplied[1].quantity==15,'the collector lost the list')
+    assert(#emitted==1 and emitted[1].name=='ORDER_FULFILLMENT_UPDATED' and emitted[1].entry.reagentAudit,
+        'the list arrived without telling the card')
+    local ack=only(op.OrderMaterialsAck)
+    assert(ack.prefix=='HIRONCRAFT_SCAN' and ack.priority=='ALERT')
+
+    -- Its ACK ends it: nothing goes again, urgent or not.
+    Scan.DB=crafterDB
+    receive(ack,'Receiver-Realm')
+    assert(not fresh.materialsPending,'the ACK of the urgent list did not clear it')
+    clock=clock+30
+    share(fresh);runTimers(1.5);flushFrames()
+    assert(#lists()==0,'a delivered list was sent again')
+
+    -- Unanswered: again with the next flush of pending results (a ping reply,
+    -- a relog) ten seconds on, three times; then the pump has it, as before.
+    local function flush() sent={};comm:ReplayRecentOrderHistory();runTimers(0.05) end
+    local slow=decline(710)
+    share(slow)
+    assert(#lists()==1,'the second decline did not go at once')
+    clock=clock+5;flush()
+    assert(#lists()==0,'the urgent list was sent again before its resend time')
+    clock=clock+6;flush()
+    assert(#lists()==1 and lists()[1].priority=='ALERT','an unanswered list was not sent again by the next flush')
+    clock=clock+11;flush()
+    assert(#lists()==1,'the third urgent attempt did not go')
+    clock=clock+11;flush()
+    assert(#lists()==0,'the urgent attempts did not stop')
+    runTimers(1.5);flushFrames()
+    local pumped=lists()
+    assert(#pumped==1 and pumped[1].prefix=='HIRONCRAFT_BULK' and pumped[1].data.data.statuses[1].responseID==710,
+        'the pump did not take over an unanswered decline list')
+
+    -- The linked account changed character (a relog): to the new one at once.
+    crafterDB=link('crafter','other','Old-Realm')
+    timers,frames={},{}
+    local moved=decline(720)
+    share(moved)
+    assert(#lists()==1 and lists()[1].target=='Old-Realm')
+    receive({prefix='HIRONCRAFT_SCAN',data={operation=op.Ping,version=1,senderID='other',data={state=2}}},'New-Realm')
+    Scan.DB=crafterDB
+    share(moved)
+    assert(#lists()==1 and lists()[1].target=='New-Realm' and lists()[1].priority=='ALERT',
+        'the list was not sent at once to the new character')
+
+    -- An old decline, and a delivery, wait for the pump as before.
+    crafterDB=link('crafter','third','Third-Realm')
+    timers,frames={},{}
+    local old=decline(730,time()-11*60)
+    share(old)
+    assert(#lists()==0,'a decline from long ago went the urgent way')
+    runTimers(1.5);flushFrames()
+    assert(#lists()==1 and lists()[1].prefix=='HIRONCRAFT_BULK','an old decline list was not pumped')
+    crafterDB=link('crafter','fourth','Fourth-Realm')
+    timers,frames={},{}
+    local done=decline(740,nil,'fulfilled')
+    share(done)
+    assert(#lists()==0,'the list of a delivery went the urgent way')
+    runTimers(1.5);flushFrames()
+    assert(#lists()==1 and lists()[1].prefix=='HIRONCRAFT_BULK','a delivery list was not pumped')
+
+    Scan.Events.Emit=realEmit
+    function GetTime() return 10 end
+end
+print('Decline lists passed (with the mark, no pump copy, card announced, ACK, resend then pump, new character, old declines and deliveries pumped).')
