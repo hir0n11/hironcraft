@@ -1,5 +1,9 @@
 local PT = HironCraftProfit
 if not PT then return end
+-- 12.1.5 took the old global item functions away (Blizzard_DeprecatedItemScript
+-- is gone): C_Item has the same ones. Inside each stand-in the name is still
+-- the global one, tried last for a client or a test that has only that.
+local GetItemIcon = function(...) return (C_Item and C_Item.GetItemIconByID or GetItemIcon)(...) end
 local AddonScan = select(2, ...)
 PT.CraftingOrders = PT.CraftingOrders or {}
 local CO = PT.CraftingOrders

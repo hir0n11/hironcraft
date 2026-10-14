@@ -8,6 +8,13 @@ setfenv(1, E)
 
 PT = HironCraftProfit
 if not PT then return end
+-- 12.1.5 took the old global item functions away (Blizzard_DeprecatedItemScript
+-- is gone): C_Item has the same ones, C_CurrencyInfo the coin text. Inside each
+-- stand-in the name is still the global one, tried last for a client or a
+-- test that has only that.
+local GetItemInfo = function(...) return (C_Item and C_Item.GetItemInfo or GetItemInfo)(...) end
+local GetItemInfoInstant = function(...) return (C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant)(...) end
+local GetCoinTextureString = function(...) return (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString or GetCoinTextureString)(...) end
 
 PT.ShoppingList = PT.ShoppingList or {}
 S = PT.ShoppingList

@@ -25,6 +25,32 @@ local conversation establishes the owner; the crafting character is not guessed.
 
 The original CraftScan and AhUI folders are not required after migration and can no longer overwrite this copy when they update.
 
+## Item links are recognised again in 12.1.5 (0.4.152)
+
+Patch 12.1.5 took away the old global item functions (`GetItemInfo`,
+`GetItemInfoInstant`, `GetItemCount`, `GetItemIcon` and the rest of
+`Blizzard_DeprecatedItemScript`) and `GetCoinTextureString`. The `C_Item`
+and `C_CurrencyInfo` functions are the same ones under their new names.
+
+- **Greeting banners for linked items.** A request with an item link
+  (`LF [Farstrider's Trophy Belt]`) made no banner and no row: building the
+  greeting asked `GetItemInfo` for the item's link and stopped there.
+  Requests without a link (`LF JC JW`, "can u do leather belts and wrists")
+  never asked for it, which is why only linked items went quiet.
+- The same calls sat in the shopping list, the order shopping list, the
+  account overview, quick replies that name an item, the craft engine, the
+  orders panel and its rows, quest and recipe shopping. Some of them
+  failed with an error, others quietly showed no name or icon.
+- Each of those files now has local stand-ins that take the function from
+  `C_Item` (`C_CurrencyInfo` for the coin text); the calls themselves are
+  unchanged.
+- `## Interface` lists 12.1.5 (120105) beside 12.1.0.
+- Tests: `scripts/TestRemovedGlobals.cjs` (new) reads every Lua file and
+  fails on any use of a global that 12.1.5 removed, except the fallback in
+  `C_X and C_X.Y or Name`. The other tests stand in for the game and define
+  those globals themselves, so they could not see this. A linked item without
+  the global `GetItemInfo` is added to `TestItemLinkRequests.lua`.
+
 ## A claimed order keeps its row; late answers wait for the step in progress (0.4.151)
 
 A review of the order workflow of 0.4.137-0.4.150. What changes in play:

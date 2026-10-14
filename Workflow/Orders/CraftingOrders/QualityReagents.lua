@@ -6,6 +6,11 @@ if not E then
 end
 setfenv(1, E)
 if not PT or not CO then return end
+-- 12.1.5 took the old global item functions away (Blizzard_DeprecatedItemScript
+-- is gone): C_Item has the same ones. Inside each stand-in the name is still
+-- the global one, tried last for a client or a test that has only that.
+local GetItemIcon = function(...) return (C_Item and C_Item.GetItemIconByID or GetItemIcon)(...) end
+local GetItemInfoInstant = function(...) return (C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant)(...) end
 
 function ReadConcentrationCostFromInfo(info)
     if type(info) ~= "table" then return nil end

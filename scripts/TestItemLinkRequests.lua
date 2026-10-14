@@ -2382,3 +2382,22 @@ do
     reset()
 end
 print('Decline question routing passed (own whispers only).')
+
+-- 12.1.5 took the global item functions away (Blizzard_DeprecatedItemScript):
+-- GetItemInfo is nil and only C_Item has it. A linked item must still become
+-- its row and greeting; requests without a link never needed it, which is why
+-- only linked items went quiet.
+do
+    reset()
+    local savedGlobal, savedItem = GetItemInfo, C_Item
+    GetItemInfo = nil
+    C_Item = setmetatable({ GetItemInfo = function(id) return 'Item ' .. id, link(id) end }, { __index = savedItem })
+    scan('LF ' .. a)
+    flushTimers()
+    assert(response(101), 'a linked item made no row without the global GetItemInfo')
+    local text = table.concat(response(101).message, ' ')
+    assert(text:find(link(1001), 1, true), 'the greeting lost the linked item without the global GetItemInfo')
+    GetItemInfo, C_Item = savedGlobal, savedItem
+    reset()
+end
+print('Item links without the old global item functions passed.')

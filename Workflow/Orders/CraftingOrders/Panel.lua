@@ -6,6 +6,12 @@ if not E then
 end
 setfenv(1, E)
 if not PT or not CO then return end
+-- 12.1.5 took the old global item functions away (Blizzard_DeprecatedItemScript
+-- is gone): C_Item has the same ones. Inside each stand-in the name is still
+-- the global one, tried last for a client or a test that has only that.
+local GetItemInfoInstant = function(...) return (C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant)(...) end
+local GetItemInfo = function(...) return (C_Item and C_Item.GetItemInfo or GetItemInfo)(...) end
+local EquipItemByName = function(...) return (C_Item and C_Item.EquipItemByName or EquipItemByName)(...) end
 
 local PROFESSION_TOOL_SLOT_SIZE = 34
 
