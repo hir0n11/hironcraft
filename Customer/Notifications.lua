@@ -50,7 +50,7 @@ local function Restore()
     end
 end
 function N.Volume(kind)
-    local default=kind=='reminder' and 70 or 100
+    local default=kind=='reminder' and 50 or 100
     local value=tonumber(Setting(kind .. '_volume',default)) or default
     if value~=value then value=default end
     return math.max(0,math.min(100,math.floor(value/10+0.5)*10))

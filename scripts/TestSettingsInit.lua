@@ -43,7 +43,7 @@ local Scan={DB={settings={}}, CONST={TEXT={},DEFAULT_SETTINGS={}},
     Notifications={GetOptions=noop},PersonalOrdersIndicator={Reset=function() reset=reset+1 end}}
 assert(loadfile('Consts.lua'))('HironCraft',Scan)
 assert(Scan.CONST.DEFAULT_SETTINGS.quick_reply_sound_enabled==false)
-assert(Scan.CONST.DEFAULT_SETTINGS.reminder_volume==70)
+assert(Scan.CONST.DEFAULT_SETTINGS.reminder_volume==50)
 assert(loadfile('Settings/Settings.lua'))('HironCraft',Scan)
 assert(registered and buttons['Reset position'] and buttons.Open, 'settings initialization stopped halfway')
 buttons['Reset position'].click(); assert(reset==1)
@@ -51,7 +51,7 @@ Scan.Settings:Open()
 Scan.Settings:OpenAlerts();SlashCmdList.HIRONCRAFTSOUNDS()
 for _,kind in ipairs({'scanner','whisper','order','quick_reply','reminder'}) do
     local value=settings['HIRONCRAFT_SCAN_'..kind:upper()..'_VOLUME']
-    local expected=kind=='reminder' and 70 or 100
+    local expected=kind=='reminder' and 50 or 100
     assert(value and value.kind=='number' and value.default==expected and value.category:GetID()==43)
 end
 local quick=proxies.HIRONCRAFT_SCAN_QUICK_REPLY_SOUND_ENABLED

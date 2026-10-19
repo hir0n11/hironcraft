@@ -127,24 +127,24 @@ for level=10,100,10 do
 end
 assert(cv.Sound_MasterVolume=='0.15')
 -- Defaults apply before the settings UI opens; explicitly saved choices win.
-assert(Scan.CONST.DEFAULT_SETTINGS.reminder_volume==70 and N.Volume('reminder')==70)
+assert(Scan.CONST.DEFAULT_SETTINGS.reminder_volume==50 and N.Volume('reminder')==50)
 assert(Scan.CONST.DEFAULT_SETTINGS.quick_reply_sound_enabled==false)
 now=now+2;count=#plays
-assert(N.Alert('reminder') and #plays==count+1 and plays[#plays].volume==0.7,
+assert(N.Alert('reminder') and #plays==count+1 and plays[#plays].volume==0.5,
     'default reminder did not use the quieter kit volume')
 Scan.DB.settings.customer_reminder_sound=bundled
 now=now+2
-assert(N.Alert('reminder') and plays[#plays][1]=='Interface\\AddOns\\HironCraft\\Media\\AlertVolume\\70\\WhisperAlert.ogg',
+assert(N.Alert('reminder') and plays[#plays][1]=='Interface\\AddOns\\HironCraft\\Media\\AlertVolume\\50\\WhisperAlert.ogg',
     'default reminder did not use the quieter bundled file')
 Scan.DB.settings.customer_reminder_sound=nil
-for _,volume in ipairs({0,30,100}) do
+for _,volume in ipairs({0,30,70,100}) do
     Scan.DB.settings.reminder_volume=volume
     assert(N.Volume('reminder')==volume,'saved reminder volume was reset to the new default')
 end
-Scan.DB.settings.reminder_volume='invalid';assert(N.Volume('reminder')==70)
-Scan.DB.settings.reminder_volume=0/0;assert(N.Volume('reminder')==70)
+Scan.DB.settings.reminder_volume='invalid';assert(N.Volume('reminder')==50)
+Scan.DB.settings.reminder_volume=0/0;assert(N.Volume('reminder')==50)
 Scan.DB.settings.reminder_volume=nil
-assert(N.Volume('reminder')==70)
+assert(N.Volume('reminder')==50)
 count=#plays
 local timerCount=#timers
 assert(not N.Alert('quick_reply') and #plays==count and #timers==timerCount,
@@ -159,7 +159,7 @@ assert(not N.Alert('quick_reply') and #plays==count,'clearing a quick reply over
 assert(Scan.DB.settings.reminder_volume==nil and Scan.DB.settings.quick_reply_sound_enabled==nil,
     'reading defaults rewrote saved settings')
 Scan.DB.settings.quick_reply_sound_enabled=true
-print('Notification defaults passed (70% reminder, silent quick replies, explicit overrides, kit/file volume paths and no saved-setting reset).')
+print('Notification defaults passed (50% reminder, silent quick replies, explicit overrides, kit/file volume paths and no saved-setting reset).')
 count=#plays
 assert(not N.Play(bundled,true,0) and #plays==count,'zero volume was not silent')
 Scan.DB.settings.whisper_volume=0
