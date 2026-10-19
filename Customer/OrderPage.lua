@@ -1,4 +1,4 @@
-local HironCraftScan = select(2, ...)
+local addonName, HironCraftScan = ...
 
 HironCraftScanCrafterOrderListElementMixin = CreateFromMixins(TableBuilderRowMixin);
 
@@ -255,8 +255,50 @@ function HironCraftScanCraftingOrderPageMixin:GetDesiredPageWidth()
     return 1105;
 end
 
+function HironCraftScanCraftingOrderPageMixin:UpdateVersionLabel()
+    local holder=self.hironVersionFrame
+    if not holder then
+        holder=CreateFrame('Frame',nil,self)
+        holder:SetSize(170,14)
+        holder:EnableMouse(false)
+        self.hironVersionFrame=holder
+        local label=holder:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+        local font=label:GetFont()
+        if font then label:SetFont(font,10,'') end
+        label:SetTextColor(0.72,0.72,0.72)
+        label:SetShadowOffset(0,0)
+        label:SetJustifyH('LEFT')
+        label:SetWordWrap(false)
+        label:SetAllPoints(holder)
+        self.hironVersionLabel=label
+    end
+    -- The browse background/title decoration may draw above the page's own
+    -- font strings. Keep a mouse-transparent child above those native layers.
+    local level=self:GetFrameLevel() or 0
+    for _,key in ipairs({'BrowseFrame','NineSlice','TitleContainer'}) do
+        local native=self[key]
+        if native and native.GetFrameLevel then level=math.max(level,native:GetFrameLevel() or 0) end
+    end
+    holder:SetFrameLevel(level+10)
+    holder:ClearAllPoints()
+    holder:SetPoint('TOPLEFT',self,'TOPLEFT',84,-8)
+    local version=type(HironCraft)=='table' and HironCraft.version
+    if type(version)~='string' or version=='' then
+        local get=C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+        if get then
+            local ok,value=pcall(get,addonName or 'HironCraft','Version')
+            if ok then version=value end
+        end
+    end
+    if type(version)~='string' or version=='' then version='?' end
+    self.hironVersionLabel:SetText('HironCraft '..version)
+    holder:Show()
+    self.hironVersionLabel:Show()
+end
+
 function HironCraftScanCraftingOrderPageMixin:OnLoad()
     HironCraftScan.Utils.onLoad(function()
+        self:UpdateVersionLabel()
         self:ResetSortOrder() -- self.InitButtons()
         self:InitOrderListTable()
         self:SetupOrderListTable()
@@ -266,6 +308,7 @@ function HironCraftScanCraftingOrderPageMixin:OnLoad()
 end
 
 function HironCraftScanCraftingOrderPageMixin:OnShow()
+    self:UpdateVersionLabel()
     HironCraftScanScannerMenu:ClearPulses()
     -- Opening the page starts at the newest request. Subsequent refreshes only
     -- move the list when another order actually appears.

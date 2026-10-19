@@ -216,6 +216,11 @@ function A.Classify(message,response)
         if s:find(phrase, 1, true) then return 'waiting' end
     end
     if tostring(message or ''):find('?', 1, true) then return 'attention' end
+    -- A standalone +/++ is also used as an order-sent acknowledgement.
+    -- Inspect the raw body: Plain deliberately removes punctuation, and a
+    -- plus inside quality, price, maths or a longer reply is not confirmation.
+    local sign=tostring(message or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):gsub('%s+','')
+    if sign=='+' or sign=='++' then return 'sent' end
     if ShortConfirmation(s) then return 'sent' end
     local extra = Settings().order_sent_keywords or ''
     for _,word in ipairs(SEND_WORDS) do

@@ -257,4 +257,16 @@ now=3904;M.MarkReply(sendInfo,{body='i will send now',receivedAt=now})
 assert(sendRow.customer_answered and A.State(sendOrder,sendRow)=='sent')
 assert(A.KeepAlive(sendOrder,sendRow),'immediate send was treated as crafted/fulfilled')
 assert(A.Collect(3961)==0 and A.Collect(3962)==1,'immediate send changed the reminder delay')
+-- Screenshot: after the crafter says where to send the order, the customer
+-- replies with a standalone +. It activates the reply mark/green state, not
+-- a completed craft or an immediate reminder.
+now=4000
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local plusInfo,plusRow,plusOrder=Add('Xenious-Realm',9,'plus-scenario')
+A.Record(plusInfo,{body="Send to Favu. You choose the price. I'll do it now.",receivedAt=now},false)
+now=4001;M.MarkReply(plusInfo,{body='+',receivedAt=now})
+assert(plusRow.customer_answered and plusRow.firstAnsweredAt==4001 and A.State(plusOrder,plusRow)=='sent')
+now=4002;M.MarkReply(plusInfo,{body='++',receivedAt=now})
+assert(plusRow.firstAnsweredAt==4001 and A.KeepAlive(plusOrder,plusRow))
+assert(A.Collect(4060)==0 and A.Collect(4061)==1,'plus confirmation stopped or prematurely rang the reminder')
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

@@ -46,6 +46,16 @@ for _,message in ipairs(positives) do
         checks=checks+1
     end
 end
+for _,message in ipairs({'+','++',' + ','\t++\t','+ +','|cff00ff00+|r'}) do
+    assert(A.Classify(message)=='sent','standalone plus confirmation was missed: '..message)
+    checks=checks+1
+end
+for _,message in ipairs({'',' ','?','+?','++?','?+','not +','no +','+ not yet',
+    '+1','+30','r5+','t5+','25k+','skill +10','1+1','2 + 2','++ later','ok +',
+    'getting mats +','+ sent?','+++','--','-','Buyer: +'}) do
+    assert(A.Classify(message)~='sent','non-confirmation became a plus acknowledgement: '..message)
+    checks=checks+1
+end
 for _,prefix in ipairs({"I'll send ",'imma send ','ima send ','gonna send ',"I'm gonna send ",
     'im gonna send ','I am going to send ','going to send '}) do
     for _,tail in ipairs({'rn','it rn','the order rn','now','it right now','order rightnow'}) do
