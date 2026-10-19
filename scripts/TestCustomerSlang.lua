@@ -21,7 +21,11 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     "I'm listing it now",'im listing the order','I am listing it',
     'put the order in','put an order in','put order in','put in the order','put in an order','put order up',
     'just put the order in',"I've put in the order",'in your order list','on ur order list',
-    "it's in your crafting orders"}
+    "it's in your crafting orders",
+    'ordered','orderd','ordred','ordrd','orded','odered','ordering','orderin','orderng',
+    'I ordered it',"I've ordered the order",'ordered it rn','ordered for you','order done',
+    'made the order','made an order',"I've made an order",'created the order','created an order',
+    'order created','order is created','заказал','заказала','заказано'}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep '}) do
@@ -62,7 +66,11 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'listed the mats','listing materials','listed the recipe','listed on the AH','I listed it on auction',
     'can you list it','please list the order','I will be listing it','I am not listing it',
     'I am listing it later','listed after buying mats','listed if you can do it','put the order in?',
-    'put the order in later','did you put the order in','do not put the order in'}) do
+    'put the order in later','did you put the order in','do not put the order in',
+    'order','orders','preordered','unordered','ordered?', 'not ordered','not yet ordered',
+    'I will order it','I am not ordering it','ordered the mats','ordered reagents','ordered on the AH',
+    'ordered the recipe','ordered from Amazon','made a list','created a character',
+    'please create the order','did you make an order','created the order if I can'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end
@@ -104,6 +112,12 @@ assert(lavu.customerState=='sent' and vamo.customerState=='sent','screenshot lis
 A.Record(info,{body='omw',receivedAt=1000},false)
 assert(lavu.customerState=='sent' and vamo.customerState=='sent' and info.lastCrafterReplyAt==1000,
     'outgoing omw changed the customer state or failed to update the reminder reply clock')
+lavu.customerState='attention';vamo.customerState='attention'
+A.Record(info,{body='You choose the price',receivedAt=1000},false)
+A.Record(info,{body='ordered',receivedAt=1000,replyContext=context},true)
+assert(lavu.customerState=='sent' and vamo.customerState=='sent' and A.State({},lavu)=='sent',
+    'screenshot ordered did not confirm the order or was treated as a completed craft')
+assert(info.lastCrafterReplyAt==1000 and lavu.firstAnsweredAt==1000,'ordered changed the reminder start time')
 lavu.customerState='attention';vamo.customerState='attention'
 A.Record(info,{message='Makinguhappy: log lavu',customerState='attention',receivedAt=1001,replyContext=context},true)
 assert(lavu.customerState=='sent' and vamo.customerState=='attention','login request did not stay crafter-specific')

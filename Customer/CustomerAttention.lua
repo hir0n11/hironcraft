@@ -69,6 +69,9 @@ local SHORT_SENT = {
     ['put it up']=true, ['put the order up']=true, ['put order up']=true, ['put it in']=true,
     ['put the order in']=true, ['put an order in']=true, ['put order in']=true,
     ['put in the order']=true, ['put in an order']=true,
+    ['made the order']=true, ['made an order']=true,
+    ['created the order']=true, ['created an order']=true,
+    ['order created']=true, ['order is created']=true,
     ['should be there']=true, ['should be there now']=true,
     ['you should have it now']=true, ['u should have it now']=true,
     ['in your orders']=true, ['in ur orders']=true,
@@ -88,6 +91,7 @@ end
 local SHORT_VERBS = {}
 for _,word in ipairs({'posted','submitted','submited','placed','mailed','delivered','dispatched',
     'listed','listing','listin','listng','listd','lstd','lsted','lsited','lisetd','listted','listet',
+    'ordered','orderd','ordred','ordrd','orded','odered','ordering','orderin','orderng',
     'sentit','sendit','sntit','sndit','sendedit','donezo'}) do SHORT_VERBS[word]=true end
 local SHORT_TAILS = {}
 for _,object in ipairs({'','it','order','the order','crafting order','the crafting order','request','the request'}) do
@@ -101,7 +105,7 @@ for _,object in ipairs({'','it','order','the order','crafting order','the crafti
 end
 local RUSSIAN_SHORT = {}
 for _,word in ipairs({'кинул','кинула','закинул','закинула','скинул','скинула','ушло','улетело',
-    'отправляю','отсылаю','оформил','оформила','оформлено'}) do RUSSIAN_SHORT[word]=true end
+    'отправляю','отсылаю','оформил','оформила','оформлено','заказал','заказала','заказано'}) do RUSSIAN_SHORT[word]=true end
 local function ShortConfirmation(s)
     local text=Courtesy(s:match('^%s*(.-)%s*$'))
     if SHORT_SENT[text] then return true end
