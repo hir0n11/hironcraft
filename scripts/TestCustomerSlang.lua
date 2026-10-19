@@ -14,7 +14,14 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'кинул','закинула заказ','скинул тебе','уже оформил заказ','отправляю заказ','заказ у тебя',
     'order placed','order submitted','the order has been posted','it has been submitted',
     'order is posted','order is on the way','its otw',"it's inc",'on its way to you','on the air rn',
-    'in ur orders','check your orders'}
+    'in ur orders','check your orders',
+    'listed','listing','listin','listng','listd','lstd','lsted','lsited','lisetd','listted','listet',
+    'order listed','the order has been listed',"it's listed",'listed it rn',
+    'I listed the order','listed for you','listed the order for u',
+    "I'm listing it now",'im listing the order','I am listing it',
+    'put the order in','put an order in','put order in','put in the order','put in an order','put order up',
+    'just put the order in',"I've put in the order",'in your order list','on ur order list',
+    "it's in your crafting orders"}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep '}) do
@@ -50,7 +57,12 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'okay','yes','sure','ty','np','getting mats','buying mats','posted the price','posted on discord',
     'please post it','can you submit it','how do I place the order','incoming?',
     'almost donee','nearly doneee','log','logging off','login failed','combat log','my log is on air',
-    'imma send later','gonna send tomorrow','ima send soon','sentences','postmaster'}) do
+    'imma send later','gonna send tomorrow','ima send soon','sentences','postmaster',
+    'list','list it','my list','on the list','listings','blacklisted','unlisted',
+    'listed the mats','listing materials','listed the recipe','listed on the AH','I listed it on auction',
+    'can you list it','please list the order','I will be listing it','I am not listing it',
+    'I am listing it later','listed after buying mats','listed if you can do it','put the order in?',
+    'put the order in later','did you put the order in','do not put the order in'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end
@@ -86,6 +98,12 @@ local info={responses={[1]=lavu,[2]=vamo}}
 local context={members={{responseID=1,requestToken='lavu-job'},{responseID=2,requestToken='vamo-job'}}}
 A.Record(info,{body='on air',receivedAt=1000,replyContext=context},true)
 assert(lavu.customerState=='sent' and vamo.customerState=='sent')
+lavu.customerState='attention';vamo.customerState='attention'
+A.Record(info,{body='listed',receivedAt=1000,replyContext=context},true)
+assert(lavu.customerState=='sent' and vamo.customerState=='sent','screenshot listed did not turn the active inquiry green')
+A.Record(info,{body='omw',receivedAt=1000},false)
+assert(lavu.customerState=='sent' and vamo.customerState=='sent' and info.lastCrafterReplyAt==1000,
+    'outgoing omw changed the customer state or failed to update the reminder reply clock')
 lavu.customerState='attention';vamo.customerState='attention'
 A.Record(info,{message='Makinguhappy: log lavu',customerState='attention',receivedAt=1001,replyContext=context},true)
 assert(lavu.customerState=='sent' and vamo.customerState=='attention','login request did not stay crafter-specific')

@@ -66,10 +66,15 @@ local SHORT_SENT = {
     ['order up']=true, ['order s up']=true, ['order is up']=true,
     ['it s there']=true, ['its there']=true, ['it is there']=true,
     ['it s in']=true, ['its in']=true, ['it is in']=true, ['order is in']=true,
-    ['put it up']=true, ['put the order up']=true, ['put it in']=true,
+    ['put it up']=true, ['put the order up']=true, ['put order up']=true, ['put it in']=true,
+    ['put the order in']=true, ['put an order in']=true, ['put order in']=true,
+    ['put in the order']=true, ['put in an order']=true,
     ['should be there']=true, ['should be there now']=true,
     ['you should have it now']=true, ['u should have it now']=true,
     ['in your orders']=true, ['in ur orders']=true,
+    ['in your order list']=true, ['in ur order list']=true,
+    ['on your order list']=true, ['on ur order list']=true,
+    ['in your crafting orders']=true, ['in ur crafting orders']=true,
     ['check your orders']=true, ['check ur orders']=true,
     ['заказ у тебя']=true, ['заказ отправлен']=true, ['заказ отправлен тебе']=true,
 }
@@ -82,14 +87,16 @@ for _,phrase in ipairs({'on air','on the air','in the air','on the way','on its 
 end
 local SHORT_VERBS = {}
 for _,word in ipairs({'posted','submitted','submited','placed','mailed','delivered','dispatched',
+    'listed','listing','listin','listng','listd','lstd','lsted','lsited','lisetd','listted','listet',
     'sentit','sendit','sntit','sndit','sendedit','donezo'}) do SHORT_VERBS[word]=true end
 local SHORT_TAILS = {}
 for _,object in ipairs({'','it','order','the order','crafting order','the crafting order','request','the request'}) do
     for _,when in ipairs({'','now','rn','already','just now'}) do
         local tail=object~='' and when~='' and object..' '..when or object..when
         SHORT_TAILS[tail]=true
-        SHORT_TAILS[tail~='' and tail..' to you' or 'to you']=true
-        SHORT_TAILS[tail~='' and tail..' to u' or 'to u']=true
+        for _,recipient in ipairs({'to you','to u','for you','for u'}) do
+            SHORT_TAILS[tail~='' and tail..' '..recipient or recipient]=true
+        end
     end
 end
 local RUSSIAN_SHORT = {}
@@ -102,7 +109,7 @@ local function ShortConfirmation(s)
         local previous=text
         for _,prefix in ipairs({'the order has been ','order has been ','the order is ','order is ',
             'the order ','order s ','order ','it has been ','it s ','its ','it is ','it ',
-            'i ve ','ive ','i have ','i ','just ','already ','уже '}) do
+            'i ve ','ive ','i have ','i m ','im ','i am ','i ','just ','already ','уже '}) do
             if text:sub(1,#prefix)==prefix then text=text:sub(#prefix+1);break end
         end
         if text==previous then break end
