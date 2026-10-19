@@ -241,7 +241,7 @@ HironCraftScan.Utils.onLoad(function()
         Checkbox('alert_sound_when_muted', 'Alerts when sound is muted', 'Temporarily enable sound and background audio for alerts, then restore your settings. Master volume is not changed.', true)
         Checkbox('personal_order_sound_enabled', 'New personal order sound', 'Play a sound when the current character receives a new personal order.', true)
         Checkbox('scanner_sound_enabled','Scanner sound','Sound for a new scanner request.',true)
-        Checkbox('quick_reply_sound_enabled','Quick reply suggestion sound','Sound when a new quick reply suggestion appears, not when it is sent.',true)
+        Checkbox('quick_reply_sound_enabled','Quick reply suggestion sound','Sound when a new quick reply suggestion appears, not when it is sent.',false)
         Checkbox('customer_reminders_enabled','Remind waiting customers on this device',
             'Enable only on the collecting laptop. All unfinished rows with the second check are included, regardless of colour.',false,
             function() if HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.RemindersChanged() end end)

@@ -50,8 +50,9 @@ local function Restore()
     end
 end
 function N.Volume(kind)
-    local value=tonumber(Setting(kind .. '_volume',100)) or 100
-    if value~=value then value=100 end
+    local default=kind=='reminder' and 70 or 100
+    local value=tonumber(Setting(kind .. '_volume',default)) or default
+    if value~=value then value=default end
     return math.max(0,math.min(100,math.floor(value/10+0.5)*10))
 end
 function N.SupportsVolume(value)
@@ -117,7 +118,7 @@ function N.Alert(kind, customer)
     if kind == 'whisper' and not Setting('whisper_alert_enabled', true) then return end
     if kind == 'order' and not Setting('personal_order_sound_enabled', true) then return end
     if kind == 'scanner' and not Setting('scanner_sound_enabled',true) then return false end
-    if kind == 'quick_reply' and not Setting('quick_reply_sound_enabled',true) then return false end
+    if kind == 'quick_reply' and not Setting('quick_reply_sound_enabled',false) then return false end
     if N.Volume(kind)==0 then return false end
     -- A whisper that also creates a scanner row must not play two alerts.
     -- A quick-reply suggestion is a distinct alert. Do not swallow it merely

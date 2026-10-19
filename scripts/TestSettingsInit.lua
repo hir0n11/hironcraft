@@ -41,9 +41,9 @@ end
 local Scan={DB={settings={}}, CONST={TEXT={},DEFAULT_SETTINGS={}},
     LOCAL={GetText=function(_,text) return text end},Utils={onLoad=function(fn) fn() end},
     Notifications={GetOptions=noop},PersonalOrdersIndicator={Reset=function() reset=reset+1 end}}
-for _,kind in ipairs({'scanner','whisper','order','quick_reply','reminder'}) do Scan.CONST.DEFAULT_SETTINGS[kind..'_volume']=100 end
-Scan.CONST.DEFAULT_SETTINGS.customer_reminder_delay=60
-Scan.CONST.DEFAULT_SETTINGS.customer_reminder_interval=60
+assert(loadfile('Consts.lua'))('HironCraft',Scan)
+assert(Scan.CONST.DEFAULT_SETTINGS.quick_reply_sound_enabled==false)
+assert(Scan.CONST.DEFAULT_SETTINGS.reminder_volume==70)
 assert(loadfile('Settings/Settings.lua'))('HironCraft',Scan)
 assert(registered and buttons['Reset position'] and buttons.Open, 'settings initialization stopped halfway')
 buttons['Reset position'].click(); assert(reset==1)
@@ -51,8 +51,16 @@ Scan.Settings:Open()
 Scan.Settings:OpenAlerts();SlashCmdList.HIRONCRAFTSOUNDS()
 for _,kind in ipairs({'scanner','whisper','order','quick_reply','reminder'}) do
     local value=settings['HIRONCRAFT_SCAN_'..kind:upper()..'_VOLUME']
-    assert(value and value.kind=='number' and value.default==100 and value.category:GetID()==43)
+    local expected=kind=='reminder' and 70 or 100
+    assert(value and value.kind=='number' and value.default==expected and value.category:GetID()==43)
 end
+local quick=proxies.HIRONCRAFT_SCAN_QUICK_REPLY_SOUND_ENABLED
+assert(quick and quick.default==false and quick.get()==false,'quick reply sound enabled by default')
+assert(Scan.DB.settings.quick_reply_sound_enabled==nil,'reading defaults persisted a new sound preference')
+quick.set(true);assert(quick.get()==true,'explicit quick reply sound opt-in was ignored')
+quick.set(false);assert(quick.get()==false,'explicit quick reply sound opt-out was ignored')
+Scan.DB.settings.quick_reply_sound_enabled=nil
+assert(quick.get()==false,'clearing the override did not restore the silent default')
 local reminder=proxies.HIRONCRAFT_SCAN_CUSTOMER_REMINDERS_ENABLED
 assert(reminder and reminder.get()==false,'reminders enabled on every computer by default')
 reminder.set(true);assert(reminder.get()==true)
