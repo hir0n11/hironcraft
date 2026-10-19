@@ -13,6 +13,7 @@ assert(loadfile('ChatFilter/FilterEngine.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/RequestTracking.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
 local A,M=Scan.CustomerAttention,Scan.RequestTracking
+A.Tick() -- First enable starts the saved grace period, before any rows exist.
 for _,s in ipairs({'sent','SENT!','order sent','send','отправил','Заказ отправила','отправлено'}) do
     assert(A.Classify(s)=='sent',s)
 end
@@ -25,6 +26,25 @@ assert(A.Classify('present')~='sent')
 assert(A.Classify('where to send?')~='sent')
 for _,s in ipairs({'please send to Favu',"I'll send soon",'I haven’t sent yet','it needs to be sent','send me the name'}) do
     assert(A.Classify(s)~='sent',s)
+end
+local variants={'sent','send','sending','sendin','sended','sented','sendt','sendet',
+    'senting','sendig','sendingg','sends','sned','sedn','snt','snd'}
+for _,word in ipairs(variants) do
+    for _,message in ipairs({word,word:upper()..'!','I '..word..' the order to Favu',word..' ty'}) do
+        assert(A.Classify(message)=='sent','unrecognized confirmation: '..message)
+    end
+    for _,message in ipairs({'not yet '..word,'I will '..word,"I haven't "..word,"I won't "..word,
+        "I couldn't "..word,"it wasn't "..word,'where should I '..word,
+        'please '..word..' to Favu',word..' me the name',word..' later',word..' in 5 minutes',
+        word..' in a few seconds',word..' in 2 hours',word..'?'}) do
+        assert(A.Classify(message)~='sent','false confirmation: '..message)
+    end
+end
+assert(A.Classify('send to Favu')=='sent')
+assert(A.Classify('i send you the order')=='sent')
+assert(A.Classify('send pls')~='sent' and A.Classify('send please')~='sent')
+for _,message in ipairs({'sender','sendingly','resent','unsent','present','done','ready','okay'}) do
+    assert(A.Classify(message)~='sent','unrelated word became a confirmation: '..message)
 end
 Scan.DB.settings.order_sent_keywords='доставлено, placed'
 assert(A.Classify('placed')=='sent')
@@ -152,4 +172,39 @@ assert(bnInfo.lastCrafterReplyAt==now and #packets==packetCount,'BN timing was f
 A.Share(bnOrder,{answered=false})
 assert(#packets==packetCount,'private BN mark was forwarded')
 for _,packet in ipairs(A.Snapshot()) do assert(packet.customer~=bnOrder.customerName) end
+
+-- A greeting older than a minute must not produce an immediate first alarm
+-- when the customer finally replies and activates the second check.
+now=3000
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local graceInfo,graceRow,graceOrder=Add('Grace-Realm',6,'grace')
+now=3010;A.Record(graceInfo,{receivedAt=now},false)
+now=3120;M.MarkReply(graceInfo,{message='sending now',receivedAt=now})
+assert(graceRow.firstAnsweredAt==3120 and graceRow.customerState=='sent')
+local sounded=alerts
+A.Tick();assert(alerts==sounded,'old greeting caused an immediate first alarm')
+now=3179;A.Tick();assert(alerts==sounded,'first alarm rang before a full minute')
+now=3180;A.Tick();assert(alerts==sounded+1,'first alarm did not ring after a minute')
+now=3190;A.Outgoing('Grace-Realm')
+now=3249;assert(A.Collect(now)==0,'later actual reply did not restart the minute')
+now=3250;assert(A.Collect(now)==1)
+M.ToggleAnswered(graceRow,graceOrder)
+now=3400;M.MarkReply(graceInfo,{message='hello again',receivedAt=now})
+assert(graceRow.firstAnsweredAt==3400 and A.Collect(now)==0,'reactivated check inherited an old first-answer time')
+assert(A.Collect(3459)==0 and A.Collect(3460)==1)
+-- Old checked rows also get a minute after switching the feature on. The
+-- persisted enable timestamp survives reload instead of delaying forever.
+now=3500
+Scan.DB.settings.customer_reminders_enabled=false;A.RemindersChanged()
+now=3600
+Scan.DB.settings.customer_reminders_enabled=true;A.RemindersChanged()
+sounded=alerts;A.Tick();assert(alerts==sounded,'enabling reminders rang immediately')
+now=3659;A.Tick();assert(alerts==sounded)
+assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
+A=Scan.CustomerAttention
+now=3660;A.Tick();assert(alerts==sounded+1,'reload restarted the enable grace period')
+now=3700;Scan.DB.settings.customer_reminder_enabled_at=nil
+sounded=alerts;A.Tick();assert(alerts==sounded,'upgrade without enable timestamp rang immediately')
+now=3759;A.Tick();assert(alerts==sounded)
+now=3760;A.Tick();assert(alerts==sounded+1)
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

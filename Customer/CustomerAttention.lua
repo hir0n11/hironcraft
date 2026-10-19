@@ -34,6 +34,42 @@ local function Plain(s)
     s = tostring(s or ''):gsub('|H.-|h(.-)|h', '%1'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
     return Lower(s):gsub('’',"'"):gsub('[%p%c]', ' '):gsub('%s+', ' '):match('^%s*(.-)%s*$')
 end
+local SEND_WORDS = {'sent','send','sending','sendin','sended','sented','sendt','sendet',
+    'senting','sendig','sendingg','sends','sned','sedn','snt','snd'}
+local function SendContext(s,first,last)
+    -- Accept broken English, but not a question, request or future intention.
+    -- Inspect only the few words before the confirmation: "sent, not sure"
+    -- is still a confirmation, unlike "not yet sent".
+    local prefix=s:sub(1,first-1)
+    local recent={}
+    for word in prefix:gmatch('%S+') do
+        recent[#recent+1]=word
+        if #recent>4 then table.remove(recent,1) end
+    end
+    local before=' '..table.concat(recent,' ')..' '
+    for _,word in ipairs({'not','never','havent','haven','hasnt','hasn','didnt','didn','dont','don',
+        'isnt','isn','wasnt','wasn','werent','weren','arent','aren','wont','won',
+        'couldnt','couldn','wouldnt','wouldn','shouldnt','shouldn',
+        'cant','cannot','will','ll','gonna','can','could','should','would','shall','must','might','may'}) do
+        if before:find(' '..word..' ',1,true) then return 'waiting' end
+    end
+    if before:match(' no%s*$') or before:match(' to%s*$') then return 'waiting' end
+    for _,word in ipairs({'where','who','whom','which','what','when','how','please','pls','plz'}) do
+        if before:find(' '..word..' ',1,true) then return 'attention' end
+    end
+    local after=' '..s:sub(last+1)
+    if after:match('^%s*me%s') then return 'attention' end
+    if s:sub(first,last):match('%S+')=='send'
+        and (after:match('^%s*please%s*$') or after:match('^%s*pl[sz]%s*$')) then return 'attention' end
+    for _,word in ipairs({'soon','later','tomorrow'}) do
+        if after:find(' '..word..' ',1,true) then return 'waiting' end
+    end
+    for _,unit in ipairs({'sec','min','hour'}) do
+        if after:find(' in%s+%d+%s*'..unit) or after:find(' in%s+a%s+'..unit)
+            or after:find(' in%s+a%s+few%s+'..unit) then return 'waiting' end
+    end
+    return 'sent'
+end
 function A.Classify(message)
     local s = ' ' .. Plain(message) .. ' '
     -- Negative/future statements win over a bare "sent" or "send".
@@ -44,8 +80,11 @@ function A.Classify(message)
     end
     if tostring(message or ''):find('?', 1, true) then return 'attention' end
     local extra = Settings().order_sent_keywords or ''
-    if s==' send ' or s==' i send ' or s==' order send ' then return 'sent' end
-    local words = {'sent', 'sended', 'отправил', 'отправила', 'отправлено', 'отослал', 'послал', 'послала'}
+    for _,word in ipairs(SEND_WORDS) do
+        local first,last=s:find(' '..word..' ',1,true)
+        if first then return SendContext(s,first,last) end
+    end
+    local words = {'отправил', 'отправила', 'отправлено', 'отослал', 'послал', 'послала'}
     for word in extra:gmatch('[^,\n]+') do words[#words+1] = Plain(word) end
     for _, word in ipairs(words) do
         if word ~= '' and s:find(' ' .. word .. ' ', 1, true) then return 'sent' end
@@ -89,9 +128,10 @@ function A.Record(info, entry, incoming)
         if type(response) == 'table' and not seen[response] then
             seen[response] = true
             if response.customer_answered and (eligible[response] or response.attentionReturned) then
+                local returned=response.attentionReturned
                 response.attentionReturned = nil
                 response.lastCustomerReplyAt=math.max(tonumber(response.lastCustomerReplyAt) or 0,at)
-                response.firstAnsweredAt = tonumber(response.firstAnsweredAt) or at
+                response.firstAnsweredAt = returned and at or tonumber(response.firstAnsweredAt) or at
                 if at >= (tonumber(response.customerStateAt) or 0) then
                     -- Small talk cannot undo a confirmed send. An explicit
                     -- return to getting materials, or a new request, can.
@@ -286,12 +326,18 @@ function A.Collect(now)
             response.firstAnsweredAt = tonumber(response.firstAnsweredAt) or now
             local requestAt=tonumber(response.time) or 0
             local replyAt=tonumber(info and info.lastCrafterReplyAt)
-            local start=(replyAt and replyAt>=requestAt) and replyAt or response.firstAnsweredAt
+            -- A greeting may be minutes old when the customer first answers.
+            -- Never ring immediately on activating (or reactivating) a row.
+            local start=math.max(response.firstAnsweredAt,(replyAt and replyAt>=requestAt) and replyAt or 0)
             start = math.min(start, now)
             if now-start >= delay then due, oldest = due+1, math.max(oldest, now-start) end
         end
     end
     return due, oldest
+end
+function A.RemindersChanged()
+    local s=Settings()
+    s.customer_reminder_enabled_at=s.customer_reminders_enabled == true and time() or nil
 end
 function A.Tick()
     A.ProcessPending()
@@ -299,6 +345,11 @@ function A.Tick()
     -- Explicit local role: never infer "laptop" from a character or account.
     if s.customer_reminders_enabled ~= true then return end
     local now = time()
+    -- First enable/upgrade gets a full grace period, even with old checked rows.
+    local enabledAt=tonumber(s.customer_reminder_enabled_at)
+    if not enabledAt or enabledAt>now then enabledAt=now;s.customer_reminder_enabled_at=now end
+    local delay=math.max(10,math.min(3600,tonumber(s.customer_reminder_delay) or 60))
+    if now-enabledAt<delay then return end
     local count = A.Collect(now)
     if count == 0 then return end
     local interval = math.max(10, math.min(3600, tonumber(s.customer_reminder_interval) or 60))

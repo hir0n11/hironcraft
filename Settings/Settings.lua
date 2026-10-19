@@ -243,7 +243,8 @@ HironCraftScan.Utils.onLoad(function()
         Checkbox('scanner_sound_enabled','Scanner sound','Sound for a new scanner request.',true)
         Checkbox('quick_reply_sound_enabled','Quick reply suggestion sound','Sound when a new quick reply suggestion appears, not when it is sent.',true)
         Checkbox('customer_reminders_enabled','Remind waiting customers on this device',
-            'Enable only on the collecting laptop. All unfinished rows with the second check are included, regardless of colour.',false)
+            'Enable only on the collecting laptop. All unfinished rows with the second check are included, regardless of colour.',false,
+            function() if HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.RemindersChanged() end end)
         for _, entry in ipairs({
             { 'whisper_alert_sound', 'Whisper sound', 'whisper' },
             { 'personal_order_sound', 'Personal order sound', 'order' },
@@ -273,7 +274,7 @@ HironCraftScan.Utils.onLoad(function()
             {'customer_reminder_interval','Repeat reminder every (seconds)'}}) do
             CreateSlider(alertCategory,'HIRONCRAFT_SCAN_'..entry[1]:upper(),entry[1],L(entry[2]),
                 Settings.CreateSliderOptions(10,600,10),
-                L('From your last sent reply. With no reply yet, from the customer answer. Removing the second check stops reminders.'))
+                L('From the second check or your last sent reply, whichever is later. Other incoming messages do not reset it. Enabling reminders grants a full initial delay.'))
         end
         if CreateSettingsButtonInitializer then
             local alertLayout=SettingsPanel:GetLayout(alertCategory)
