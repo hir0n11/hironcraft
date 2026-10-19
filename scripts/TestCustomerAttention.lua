@@ -28,7 +28,7 @@ for _,s in ipairs({'please send to Favu',"I'll send soon",'I haven’t sent yet'
     assert(A.Classify(s)~='sent',s)
 end
 local variants={'sent','send','sending','sendin','sended','sented','sendt','sendet',
-    'senting','sendig','sendingg','sends','sned','sedn','snt','snd'}
+    'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done'}
 for _,word in ipairs(variants) do
     for _,message in ipairs({word,word:upper()..'!','I '..word..' the order to Favu',word..' ty'}) do
         assert(A.Classify(message)=='sent','unrecognized confirmation: '..message)
@@ -43,8 +43,15 @@ end
 assert(A.Classify('send to Favu')=='sent')
 assert(A.Classify('i send you the order')=='sent')
 assert(A.Classify('send pls')~='sent' and A.Classify('send please')~='sent')
-for _,message in ipairs({'sender','sendingly','resent','unsent','present','done','ready','okay'}) do
+for _,message in ipairs({'sender','sendingly','resent','unsent','present','undone','redone','ready','okay'}) do
     assert(A.Classify(message)~='sent','unrelated word became a confirmation: '..message)
+end
+for _,message in ipairs({"done'",'DONE!','done’','all done',"I'm done",'done, thanks'}) do
+    assert(A.Classify(message)=='sent','done confirmation was missed: '..message)
+end
+for _,message in ipairs({'not done','not done yet','almost done','nearly done','will be done',
+    'done?','done getting mats','done buying mats','done later'}) do
+    assert(A.Classify(message)~='sent','unfinished work became a done confirmation: '..message)
 end
 Scan.DB.settings.order_sent_keywords='доставлено, placed'
 assert(A.Classify('placed')=='sent')
@@ -207,4 +214,16 @@ now=3700;Scan.DB.settings.customer_reminder_enabled_at=nil
 sounded=alerts;A.Tick();assert(alerts==sounded,'upgrade without enable timestamp rang immediately')
 now=3759;A.Tick();assert(alerts==sounded)
 now=3760;A.Tick();assert(alerts==sounded+1)
+-- Screenshot: the customer asks about quality, the crafter answers, and
+-- "done'" confirms sending the order. It is not a crafted/fulfilled mark.
+now=3800
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local doneInfo,doneRow,doneOrder=Add('Screenshot-Realm',7,'done-scenario')
+M.MarkReply(doneInfo,{message='max lvl?',body='max lvl?',receivedAt=now})
+assert(A.State(doneOrder,doneRow)=='attention')
+now=3801;A.Record(doneInfo,{message='max q',receivedAt=now},false)
+now=3803;M.MarkReply(doneInfo,{message="Customer: done'",body="done'",receivedAt=now})
+assert(doneRow.customer_answered and A.State(doneOrder,doneRow)=='sent')
+assert(A.KeepAlive(doneOrder,doneRow),'customer done was treated as crafted/fulfilled')
+assert(A.Collect(3860)==0 and A.Collect(3861)==1,'done confirmation stopped or prematurely rang the reminder')
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

@@ -35,7 +35,7 @@ local function Plain(s)
     return Lower(s):gsub('’',"'"):gsub('[%p%c]', ' '):gsub('%s+', ' '):match('^%s*(.-)%s*$')
 end
 local SEND_WORDS = {'sent','send','sending','sendin','sended','sented','sendt','sendet',
-    'senting','sendig','sendingg','sends','sned','sedn','snt','snd'}
+    'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done'}
 local function SendContext(s,first,last)
     -- Accept broken English, but not a question, request or future intention.
     -- Inspect only the few words before the confirmation: "sent, not sure"
@@ -47,6 +47,8 @@ local function SendContext(s,first,last)
         if #recent>4 then table.remove(recent,1) end
     end
     local before=' '..table.concat(recent,' ')..' '
+    if s:sub(first,last):match('%S+')=='done'
+        and (before:find(' almost ',1,true) or before:find(' nearly ',1,true)) then return 'waiting' end
     for _,word in ipairs({'not','never','havent','haven','hasnt','hasn','didnt','didn','dont','don',
         'isnt','isn','wasnt','wasn','werent','weren','arent','aren','wont','won',
         'couldnt','couldn','wouldnt','wouldn','shouldnt','shouldn',
