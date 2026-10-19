@@ -37,6 +37,30 @@ end
 local lease, changing, generation, last = nil, false, 0, {}
 local restoreAt
 local lastAlert
+local previewHandle, previewGeneration = nil, 0
+function N.StopPreview()
+    previewGeneration=previewGeneration+1
+    local handle=previewHandle
+    previewHandle=nil
+    if handle and StopSound then StopSound(handle) end
+end
+function N.QueuePreview(value, volume)
+    N.StopPreview()
+    if not value or value=='none' or value=='1' or (tonumber(volume) or 100)<=0 then return end
+    local token=previewGeneration
+    local function TryPreview()
+        if token~=previewGeneration then return end
+        if SettingsPanel and SettingsPanel.IsShown and not SettingsPanel:IsShown() then return end
+        -- Settings callbacks also fire during dragging/reinitialization. Wait
+        -- for the pointer to be released and coalesce changes to one sample.
+        if IsMouseButtonDown and IsMouseButtonDown('LeftButton') then
+            C_Timer.After(0.1,TryPreview)
+            return
+        end
+        N.Play(value,true,volume)
+    end
+    C_Timer.After(0.2,TryPreview)
+end
 local function Restore()
     local previous = lease
     lease = nil
@@ -60,6 +84,9 @@ function N.SupportsVolume(value)
     return tostring(value):match('^kit:') ~= nil or volumeFiles[value] == true
 end
 function N.Play(value, preview, volume)
+    -- Only our previous preview is stopped. Never stop an actual alert handle.
+    -- Actual alerts also cancel any delayed preview so it cannot interrupt them.
+    N.StopPreview()
     value = N.ResolveSound(value)
     if not value or value == 'none' or value == '1' then return false end
     volume=tonumber(volume) or 100
@@ -94,13 +121,17 @@ function N.Play(value, preview, volume)
         end)
     end
     local kit = tostring(value):match('^kit:(.+)$')
+    local played,handle
     if kit then
-        local id = SOUNDKIT and SOUNDKIT[kit]
-        if id then return PlaySound(id, 'Master', false, false, nil, volume/100) end
         -- Older clients without a newer chime retain a short built-in alert.
-        return PlaySound(SOUNDKIT.TELL_MESSAGE, 'Master', false, false, nil, volume/100)
+        local id = SOUNDKIT[kit] or SOUNDKIT.TELL_MESSAGE
+        local PlayKit=C_Sound and C_Sound.PlaySound or PlaySound
+        played,handle=PlayKit(id, 'Master', false, false, nil, volume/100)
+    else
+        played,handle=PlaySoundFile(tonumber(value) or value, 'Master')
     end
-    return PlaySoundFile(tonumber(value) or value, 'Master')
+    if preview and played then previewHandle=handle end
+    return played,handle
 end
 function N.Alert(kind, customer)
     if customer and Scan.IsIgnored and Scan.IsIgnored(customer) then return false end
@@ -172,7 +203,7 @@ for _, event in ipairs({ 'CHAT_MSG_WHISPER', 'CHAT_MSG_BN_WHISPER', 'CVAR_UPDATE
     f:RegisterEvent(event)
 end
 f:SetScript('OnEvent', function(_, event, name, sender, ...)
-    if event == 'PLAYER_LOGOUT' then Restore()
+    if event == 'PLAYER_LOGOUT' then N.StopPreview();Restore()
     elseif event == 'CVAR_UPDATE' then
         if lease and not changing then
             -- Do not undo a user's sound changes made during the alert.

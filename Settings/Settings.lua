@@ -157,6 +157,9 @@ end
 
 local craftScanCategory, alertSettingsCategory = nil, nil
 HironCraftScan.Utils.onLoad(function()
+    if SettingsPanel and SettingsPanel.HookScript then
+        SettingsPanel:HookScript('OnHide',function() HironCraftScan.Notifications.StopPreview() end)
+    end
     local category, layout = Settings.RegisterVerticalLayoutCategory(L('HironCraftScan'))
     craftScanCategory = category
     local alertCategory = category
@@ -261,19 +264,37 @@ HironCraftScan.Utils.onLoad(function()
             {'reminder','Waiting customer volume','customer_reminder_sound'}}) do
             local kind,soundKey=entry[1],entry[3]
             local options=Settings.CreateSliderOptions(0,100,10)
+            options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right,function(value)
+                return string.format('%d%%',math.floor(value+0.5))
+            end)
+            local function Sound()
+                local value=HironCraftScan.DB.settings[soundKey]
+                if value==nil then value=HironCraftScan.CONST.DEFAULT_SETTINGS[soundKey] end
+                return value
+            end
+            local previousVolume=HironCraftScan.DB.settings[kind..'_volume']
+            if previousVolume==nil then previousVolume=HironCraftScan.CONST.DEFAULT_SETTINGS[kind..'_volume'] end
             CreateSlider(alertCategory,'HIRONCRAFT_SCAN_'..kind:upper()..'_VOLUME',kind..'_volume',L(entry[2]),options,
-                L('Independent alert volume. 0 means silent. External sounds and game file IDs without variants use their original volume.'),
-                function() HironCraftScan.Notifications.Play(HironCraftScan.DB.settings[soundKey],true,HironCraftScan.Notifications.Volume(kind)) end)
+                L('Independent alert volume. 0 means silent. A single preview plays after releasing the slider. External sounds and game file IDs without variants use their original volume.'),
+                function(_,value)
+                    if value==previousVolume then return end
+                    previousVolume=value
+                    HironCraftScan.Notifications.QueuePreview(Sound(),value)
+                end)
             if CreateSettingsButtonInitializer then
                 SettingsPanel:GetLayout(alertCategory):AddInitializer(CreateSettingsButtonInitializer(L(entry[2]),L('Listen'),function()
-                    HironCraftScan.Notifications.Play(HironCraftScan.DB.settings[soundKey],true,HironCraftScan.Notifications.Volume(kind))
+                    HironCraftScan.Notifications.Play(Sound(),true,HironCraftScan.Notifications.Volume(kind))
                 end,L('Select a sound to preview it.'),true))
             end
         end
         for _,entry in ipairs({{'customer_reminder_delay','First reminder after (seconds)'},
             {'customer_reminder_interval','Repeat reminder every (seconds)'}}) do
+            local options=Settings.CreateSliderOptions(10,600,10)
+            options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right,function(value)
+                return string.format('%d %s',math.floor(value+0.5),L('sec.'))
+            end)
             CreateSlider(alertCategory,'HIRONCRAFT_SCAN_'..entry[1]:upper(),entry[1],L(entry[2]),
-                Settings.CreateSliderOptions(10,600,10),
+                options,
                 L('From the second check or your last sent reply, whichever is later. Other incoming messages do not reset it. Enabling reminders grants a full initial delay.'))
         end
         if CreateSettingsButtonInitializer then
@@ -306,6 +327,9 @@ HironCraftScan.Utils.onLoad(function()
             'Replace the minimap hammer with counts for the current character only. Disable to restore the standard indicator.', true,
             function() HironCraftScan.PersonalOrdersIndicator.Update(true) end)
         local options = Settings.CreateSliderOptions(0.6, 2, 0.1)
+        options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right,function(value)
+            return string.format('%d%%',math.floor(value*100+0.5))
+        end)
         CreateSlider(category, 'HIRONCRAFT_SCAN_ORDER_ICON_SCALE', 'personal_order_scale',
             L('Personal order icon scale'), options, L('Shift-drag the icons to move them.'),
             function() HironCraftScan.PersonalOrdersIndicator.Position() end)

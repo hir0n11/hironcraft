@@ -17,6 +17,8 @@ local texts = {
     ['Quick reply volume']='Громкость быстрых ответов',
     ['Waiting customer volume']='Громкость напоминаний',
     ['Independent alert volume. 0 means silent. External sounds and game file IDs without variants use their original volume.']='Отдельная громкость этого оповещения. 0 — без звука. Сторонние файлы и игровые файлы без вариантов громкости воспроизводятся на исходном уровне; такие звуки отмечены в списке.',
+    ['Independent alert volume. 0 means silent. A single preview plays after releasing the slider. External sounds and game file IDs without variants use their original volume.']='Отдельная громкость этого оповещения. 0 — без звука. Один пример звучит после отпускания ползунка. Сторонние файлы и игровые файлы без вариантов громкости воспроизводятся на исходном уровне; такие звуки отмечены в списке.',
+    ['sec.']='сек.',
     ['Original volume only']='только исходная громкость',
     ['First reminder after (seconds)']='Первое напоминание через, сек.',
     ['Repeat reminder every (seconds)']='Повторять напоминание каждые, сек.',
@@ -51,6 +53,6 @@ local texts = {
     ['Additional confirmation phrases, separated by commas. Negative and future statements still take priority.']='Дополнительные подтверждения отправки через запятую. Отрицания и обещания отправить позже имеют приоритет.',
     ['Search players']='Поиск игроков',
     ['Remove restriction']='Снять ограничение',
-    ['Order state help']='Зелёная строка: клиент подтвердил отправку заказа. Жёлтая: другой ответ. Напоминания учитывают оба цвета.',
+    ['Order state help']='Зелёная строка: клиент подтвердил отправку заказа или просит зайти на указанного крафтера. Жёлтая: другой ответ. Напоминания учитывают оба цвета.',
 }
 for key,value in pairs(texts) do L[key]=value end
