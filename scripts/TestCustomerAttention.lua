@@ -43,6 +43,22 @@ end
 assert(A.Classify('send to Favu')=='sent')
 assert(A.Classify('i send you the order')=='sent')
 assert(A.Classify('send pls')~='sent' and A.Classify('send please')~='sent')
+for _,prefix in ipairs({'I will send ',"I'll send ",'I’ll send ','ill send ','will send '}) do
+    for _,tail in ipairs({'now','right now','it now','it right now','the order now','the order right now',
+        'order now','order right now','now, thanks','right now ty'}) do
+        local message=prefix..tail
+        assert(A.Classify(message)=='sent','immediate sending confirmation was missed: '..message)
+        assert(A.Classify(message:upper()..'!')=='sent','immediate confirmation lost case/punctuation: '..message)
+    end
+end
+for _,message in ipairs({'I will send','I will send soon',"I'll send later",'I will send tomorrow',
+    'I will send in a minute','I will send now?','I will send right now?',
+    'I will not send now',"I won't send now",'not I will send now',
+    'can I send now','should I send now','please send now','I will send now if I have mats',
+    'I will send now after getting mats','I will send now or later','I will send now but not yet',
+    'I will send now, getting mats','I will send now, buying mats'}) do
+    assert(A.Classify(message)~='sent','non-confirmation became immediate sending: '..message)
+end
 for _,message in ipairs({'sender','sendingly','resent','unsent','present','undone','redone','ready','okay'}) do
     assert(A.Classify(message)~='sent','unrelated word became a confirmation: '..message)
 end
@@ -226,4 +242,19 @@ now=3803;M.MarkReply(doneInfo,{message="Customer: done'",body="done'",receivedAt
 assert(doneRow.customer_answered and A.State(doneOrder,doneRow)=='sent')
 assert(A.KeepAlive(doneOrder,doneRow),'customer done was treated as crafted/fulfilled')
 assert(A.Collect(3860)==0 and A.Collect(3861)==1,'done confirmation stopped or prematurely rang the reminder')
+-- Screenshot: customer checks the character name, receives it, then says
+-- "i will send now". Green is still unfinished and keeps the normal reminder.
+now=3900
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local sendInfo,sendRow,sendOrder=Add('Mohma-Realm',8,'send-now-scenario')
+M.MarkReply(sendInfo,{body='yoo',receivedAt=now})
+now=3901;M.MarkReply(sendInfo,{body='in this name?',receivedAt=now})
+assert(A.State(sendOrder,sendRow)=='attention')
+now=3902;A.Record(sendInfo,{message='Lavu',receivedAt=now},false)
+now=3903;M.MarkReply(sendInfo,{body='okay',receivedAt=now})
+assert(A.State(sendOrder,sendRow)=='attention')
+now=3904;M.MarkReply(sendInfo,{body='i will send now',receivedAt=now})
+assert(sendRow.customer_answered and A.State(sendOrder,sendRow)=='sent')
+assert(A.KeepAlive(sendOrder,sendRow),'immediate send was treated as crafted/fulfilled')
+assert(A.Collect(3961)==0 and A.Collect(3962)==1,'immediate send changed the reminder delay')
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

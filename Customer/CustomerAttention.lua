@@ -36,6 +36,22 @@ local function Plain(s)
 end
 local SEND_WORDS = {'sent','send','sending','sendin','sended','sented','sendt','sendet',
     'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done'}
+local IMMEDIATE_SEND = {
+    ['now']=true, ['right now']=true,
+    ['it now']=true, ['it right now']=true,
+    ['the order now']=true, ['the order right now']=true,
+    ['order now']=true, ['order right now']=true,
+}
+local function ImmediateSend(s)
+    -- Customers also use "I will send now" as their sending confirmation.
+    -- Match the entire acknowledgement, never a question, condition, denial,
+    -- request or a promise to send after collecting materials.
+    local tail=s:match('^ i will send (.-) $') or s:match('^ i ll send (.-) $')
+        or s:match('^ ill send (.-) $') or s:match('^ will send (.-) $')
+    if not tail then return false end
+    tail=tail:gsub(' thanks$',''):gsub(' ty$','')
+    return IMMEDIATE_SEND[tail]==true
+end
 local function SendContext(s,first,last)
     -- Accept broken English, but not a question, request or future intention.
     -- Inspect only the few words before the confirmation: "sent, not sure"
@@ -74,6 +90,7 @@ local function SendContext(s,first,last)
 end
 function A.Classify(message)
     local s = ' ' .. Plain(message) .. ' '
+    if not tostring(message or ''):find('?',1,true) and ImmediateSend(s) then return 'sent' end
     -- Negative/future statements win over a bare "sent" or "send".
     for _, phrase in ipairs({'not sent', 'havent sent', 'haven t sent', 'didnt send', 'didn t send',
         'not send', 'will send', 'll send', 'going to send', 'can i send', 'should i send', 'be sent', 'getting mats',
