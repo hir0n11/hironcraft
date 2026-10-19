@@ -155,10 +155,16 @@ local function CreateSlider(category, variable, key, name, options, tooltip, OnV
     initializer:AddSearchTags(L(LID.HIRONCRAFT_SCAN))
 end
 
-local craftScanCategory = nil
+local craftScanCategory, alertSettingsCategory = nil, nil
 HironCraftScan.Utils.onLoad(function()
     local category, layout = Settings.RegisterVerticalLayoutCategory(L('HironCraftScan'))
     craftScanCategory = category
+    local alertCategory = category
+    if Settings.RegisterVerticalLayoutSubcategory then
+        alertCategory = Settings.RegisterVerticalLayoutSubcategory(category,L('Sounds and reminders'))
+        Settings.RegisterAddOnCategory(alertCategory)
+    end
+    alertSettingsCategory=alertCategory
 
     do
         -- The addon list is likely to be large, so we list this option first so
@@ -204,20 +210,21 @@ HironCraftScan.Utils.onLoad(function()
         end
 
         CreateDropdown(
-            category,
+            alertCategory,
             'HIRONCRAFT_SCAN_PING_SOUND',
             'ping_sound',
             L(LID.PING_SOUND_LABEL),
             GetOptions,
             L(LID.PING_SOUND_TOOLTIP),
             function(path)
-                HironCraftScan.Notifications.Play(path, true)
+                HironCraftScan.Notifications.Play(path, true, HironCraftScan.Notifications.Volume('scanner'))
             end
         )
     end
     do
         local function Checkbox(key, name, tip, default, changed)
-            local setting = Settings.RegisterProxySetting(category, 'HIRONCRAFT_SCAN_' .. key:upper(),
+            local parent = key=='personal_order_icons' and category or alertCategory
+            local setting = Settings.RegisterProxySetting(parent, 'HIRONCRAFT_SCAN_' .. key:upper(),
                 Settings.VarType.Boolean, L(name), default,
                 function()
                     local value = HironCraftScan.DB.settings[key]
@@ -228,18 +235,71 @@ HironCraftScan.Utils.onLoad(function()
                     HironCraftScan.DB.settings[key] = value
                     if changed then changed() end
                 end)
-            Settings.CreateCheckbox(category, setting, L(tip))
+            Settings.CreateCheckbox(parent, setting, L(tip))
         end
         Checkbox('whisper_alert_enabled', 'Whisper alerts', 'Sound for every incoming whisper, including Battle.net. Disable the separate WhisperAlert addon to avoid duplicate alerts.', true)
         Checkbox('alert_sound_when_muted', 'Alerts when sound is muted', 'Temporarily enable sound and background audio for alerts, then restore your settings. Master volume is not changed.', true)
         Checkbox('personal_order_sound_enabled', 'New personal order sound', 'Play a sound when the current character receives a new personal order.', true)
+        Checkbox('scanner_sound_enabled','Scanner sound','Sound for a new scanner request.',true)
+        Checkbox('quick_reply_sound_enabled','Quick reply suggestion sound','Sound when a new quick reply suggestion appears, not when it is sent.',true)
+        Checkbox('customer_reminders_enabled','Remind waiting customers on this device',
+            'Enable only on the collecting laptop. All unfinished rows with the second check are included, regardless of colour.',false)
         for _, entry in ipairs({
-            { 'whisper_alert_sound', 'Whisper sound' },
-            { 'personal_order_sound', 'Personal order sound' },
+            { 'whisper_alert_sound', 'Whisper sound', 'whisper' },
+            { 'personal_order_sound', 'Personal order sound', 'order' },
+            { 'quick_reply_sound', 'Quick reply sound', 'quick_reply' },
+            { 'customer_reminder_sound', 'Waiting customer sound', 'reminder' },
         }) do
-            CreateDropdown(category, 'HIRONCRAFT_SCAN_' .. entry[1]:upper(), entry[1], L(entry[2]),
+            local kind=entry[3]
+            CreateDropdown(alertCategory, 'HIRONCRAFT_SCAN_' .. entry[1]:upper(), entry[1], L(entry[2]),
                 HironCraftScan.Notifications.GetOptions, L('Select a sound to preview it.'),
-                function(value) HironCraftScan.Notifications.Play(value, true) end)
+                function(value) HironCraftScan.Notifications.Play(value, true, HironCraftScan.Notifications.Volume(kind)) end)
+        end
+        for _,entry in ipairs({{'scanner','Scanner volume','ping_sound'},{'whisper','Whisper volume','whisper_alert_sound'},
+            {'order','Personal order volume','personal_order_sound'},{'quick_reply','Quick reply volume','quick_reply_sound'},
+            {'reminder','Waiting customer volume','customer_reminder_sound'}}) do
+            local kind,soundKey=entry[1],entry[3]
+            local options=Settings.CreateSliderOptions(0,100,10)
+            CreateSlider(alertCategory,'HIRONCRAFT_SCAN_'..kind:upper()..'_VOLUME',kind..'_volume',L(entry[2]),options,
+                L('Independent alert volume. 0 means silent. External sounds and game file IDs without variants use their original volume.'),
+                function() HironCraftScan.Notifications.Play(HironCraftScan.DB.settings[soundKey],true,HironCraftScan.Notifications.Volume(kind)) end)
+            if CreateSettingsButtonInitializer then
+                SettingsPanel:GetLayout(alertCategory):AddInitializer(CreateSettingsButtonInitializer(L(entry[2]),L('Listen'),function()
+                    HironCraftScan.Notifications.Play(HironCraftScan.DB.settings[soundKey],true,HironCraftScan.Notifications.Volume(kind))
+                end,L('Select a sound to preview it.'),true))
+            end
+        end
+        for _,entry in ipairs({{'customer_reminder_delay','First reminder after (seconds)'},
+            {'customer_reminder_interval','Repeat reminder every (seconds)'}}) do
+            CreateSlider(alertCategory,'HIRONCRAFT_SCAN_'..entry[1]:upper(),entry[1],L(entry[2]),
+                Settings.CreateSliderOptions(10,600,10),
+                L('From your last sent reply. With no reply yet, from the customer answer. Removing the second check stops reminders.'))
+        end
+        if CreateSettingsButtonInitializer then
+            local alertLayout=SettingsPanel:GetLayout(alertCategory)
+            alertLayout:AddInitializer(CreateSettingsButtonInitializer(L('WhisperAlert compatibility'),L('Use built-in alerts'),function()
+                if C_AddOns and C_AddOns.DisableAddOn then C_AddOns.DisableAddOn('WhisperAlert') end
+                print('HironCraft: '..L('WhisperAlert disabled. Use /reload to enable per-player whisper muting.'))
+            end,L('Disable the separate WhisperAlert addon, then reload. Otherwise it plays its own unfiltered sound.'),true))
+            alertLayout:AddInitializer(CreateSettingsButtonInitializer(L('Muted players and ignore list'),L('Open'),function()
+                if HironCraftScan.ChatFilterWindow then HironCraftScan.ChatFilterWindow.Show(HironCraftScan.ChatFilterWindow.TAB_IGNORE) end
+            end,L('Full ignore duration and removal. Per-player whisper mute is also available in the chat menu.'),true))
+            alertLayout:AddInitializer(CreateSettingsButtonInitializer(L('Extra order-sent phrases'),L('Edit phrases'),function()
+                if not (StaticPopupDialogs and StaticPopup_Show) then return end
+                StaticPopupDialogs.HIRONCRAFT_SENT_PHRASES={
+                    text=L('Additional confirmation phrases, separated by commas. Negative and future statements still take priority.'),
+                    button1=SAVE or 'Save',button2=CANCEL or 'Cancel',hasEditBox=true,timeout=0,whileDead=true,hideOnEscape=true,
+                    OnShow=function(self)
+                        local edit=self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
+                        if edit then edit:SetMaxLetters(1024);edit:SetText(HironCraftScan.DB.settings.order_sent_keywords or '');edit:SetFocus() end
+                    end,
+                    OnAccept=function(self)
+                        local edit=self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
+                        if edit then HironCraftScan.DB.settings.order_sent_keywords=(edit:GetText() or ''):sub(1,1024) end
+                    end,
+                }
+                StaticPopup_Show('HIRONCRAFT_SENT_PHRASES')
+            end,L('Order state help'),true))
         end
         Checkbox('personal_order_icons', 'Personal order profession icons',
             'Replace the minimap hammer with counts for the current character only. Disable to restore the standard indicator.', true,
@@ -526,3 +586,10 @@ HironCraftScan.Settings = {}
 function HironCraftScan.Settings:Open()
     Settings.OpenToCategory(craftScanCategory:GetID())
 end
+function HironCraftScan.Settings:OpenAlerts()
+    local category=alertSettingsCategory or craftScanCategory
+    if category then Settings.OpenToCategory(category:GetID()) end
+end
+SLASH_HIRONCRAFTSOUNDS1='/hcsounds'
+SlashCmdList=SlashCmdList or {}
+SlashCmdList.HIRONCRAFTSOUNDS=function() HironCraftScan.Settings:OpenAlerts() end

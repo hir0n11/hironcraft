@@ -110,3 +110,54 @@ assert(delays[#timers]>=11, 'short alert cuts off an overlapping long clip')
 timers[longTimer](); assert(cv.Sound_EnableAllSound=='1')
 timers[#timers](); assert(cv.Sound_EnableAllSound=='0')
 print('SharedMedia sounds passed (complete catalogue, selection migration, deduplication, numeric ID, long/overlapping clip mute restoration).')
+
+-- Independent volume never moves the game's master/SFX/music sliders.
+cv.Sound_MasterVolume='0.15'
+local previousSound=PlaySound
+PlaySound=function(id,channel,duplicates,finish,priority,volume)
+    plays[#plays+1]={id,channel,volume=volume};return true
+end
+for level=10,100,10 do
+    assert(N.Play('kit:TELL_MESSAGE',true,level))
+    assert(plays[#plays].volume==level/100)
+    N.Play(bundled,true,level)
+    local expected=level==100 and bundled or ('Interface\\AddOns\\HironCraft\\Media\\AlertVolume\\'..level..'\\WhisperAlert.ogg')
+    assert(plays[#plays][1]==expected,'wrong bundled volume path')
+end
+assert(cv.Sound_MasterVolume=='0.15')
+count=#plays
+assert(not N.Play(bundled,true,0) and #plays==count,'zero volume was not silent')
+Scan.DB.settings.whisper_volume=0
+now=now+2;f.event(nil,'CHAT_MSG_WHISPER','hello','Quiet-Realm')
+assert(#plays==count,'zero-volume whisper used a different alert path')
+Scan.DB.settings.whisper_volume=50
+Scan.CustomerPreferences={IsMuted=function(name) return name=='Quiet-Realm' end}
+now=now+2;f.event(nil,'CHAT_MSG_WHISPER','hello','Quiet-Realm')
+assert(#plays==count,'per-player whisper mute was ignored')
+f.event(nil,'CHAT_MSG_WHISPER','hello','Other-Realm')
+assert(#plays==count+1)
+Scan.IsIgnored=function(name) return name=='Ignored-Realm' end
+for _,kind in ipairs({'scanner','whisper','quick_reply'}) do
+    now=now+2;local before=#plays
+    N.Alert(kind,'Ignored-Realm');assert(#plays==before,'ignored sender played '..kind)
+end
+local bnID
+Scan.BattleNet={FromID=function(id) bnID=id;return 'Quiet-Realm' end}
+now=now+2;count=#plays
+f.event(nil,'CHAT_MSG_BN_WHISPER','hello','Display name',nil,nil,nil,nil,nil,nil,nil,nil,nil,nil,77)
+assert(bnID==77 and #plays==count,'Battle.net sender identity/mute was lost')
+Scan.CustomerPreferences=nil
+now=now+2
+local option={customer='Other-Realm',templateKey='sent',message='sent',reply='Thanks',requestToken='job'}
+N.QuickReply(option);count=#plays
+now=now+2;N.QuickReply(option)
+assert(#plays==count,'rebuilding the same suggestion rang again')
+now=now+61;N.QuickReply(option)
+assert(#plays==count+1,'a later genuine suggestion stayed muted forever')
+for _,kind in ipairs({'scanner','whisper','order','quick_reply','reminder'}) do
+    Scan.DB.settings[kind..'_volume']=30
+    now=now+2;local before=#plays
+    assert(N.Alert(kind) and #plays==before+1,kind..' did not use the common alert route')
+end
+assert(cv.Sound_MasterVolume=='0.15')
+print('New notification checks passed: all five alert types, kit/file volumes, zero volume, per-player/BN mute, full ignore, quick-reply deduplication and untouched master volume.')

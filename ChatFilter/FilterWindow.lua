@@ -470,7 +470,11 @@ end
 
 local IGNORE_COLUMNS = {
     { label = 'Player', fill = true, text = function(entry) return entry.name or entry.key end },
-    { label = 'Since', width = 90, text = function(entry) return entry.at and date('%d.%m.%Y', entry.at) or '' end },
+    { label = 'Time left', width = 100, text = function(entry)
+        local left = I().SecondsLeft(entry.name)
+        return left and (SecondsToTime and SecondsToTime(left) or math.ceil(left/60)..'m') or L('Permanent')
+    end },
+    { label = 'Mode', width = 110, text = function(entry) return L(entry.muted and 'Whisper sound only' or 'Full ignore') end },
     { label = 'Note', width = 220, text = function(entry)
         if entry.note and entry.note ~= '' then return OneLine(entry.note) end
         return (tonumber(entry.game_misses) or 0) >= 2 and '|cff808080' .. L('not found by the game') .. '|r' or ''
@@ -480,46 +484,74 @@ local IGNORE_COLUMNS = {
 local function CreateIgnoreTab(parent)
     local tab = CreateFrame('Frame', nil, parent)
     tab:SetAllPoints(parent)
+    local selectedMuted=false
 
     local input = CreateFrame('EditBox', nil, tab, 'InputBoxTemplate')
     input:SetAutoFocus(false)
-    input:SetSize(220, 20)
+    input:SetSize(165, 20)
     input:SetPoint('TOPLEFT', tab, 'TOPLEFT', 16, -10)
     local hint = input:CreateFontString(nil, 'ARTWORK', 'GameFontDisableSmall')
     hint:SetPoint('RIGHT', input, 'RIGHT', -6, 0)
     hint:SetText(L('Name-Realm'))
     input:SetScript('OnTextChanged', function(self) hint:SetShown((self:GetText() or '') == '') end)
+    local duration=false
+    local durationButton
+    durationButton=Button(tab,'Permanent',95,function(self)
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+        MenuUtil.CreateContextMenu(durationButton,function(_,root)
+            for _,choice in ipairs({{'1 hour',3600},{'1 day',86400},{'1 week',604800},{'Permanent',false}}) do
+                local seconds,label=choice[2],choice[1]
+                root:CreateButton(L(label),function() duration=seconds; durationButton:SetText(L(label)) end)
+            end
+        end)
+    end)
+    durationButton:SetPoint('LEFT',input,'RIGHT',6,0)
     local function AddTyped()
         local name = (input:GetText() or ''):gsub('^%s+', ''):gsub('%s+$', '')
         if name ~= '' then
-            I().Add(name, { source = 'window' })
+            I().Add(name, { source = 'window', seconds=duration, replace=true })
             input:SetText('')
             W.Refresh()
         end
     end
     input:SetScript('OnEnterPressed', AddTyped)
     input:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
-    local add = Button(tab, 'Ignore', 100, AddTyped)
-    add:SetPoint('LEFT', input, 'RIGHT', 8, 0)
-    local remove = Button(tab, 'Unignore', 120, function()
+    local add = Button(tab, 'Ignore', 85, AddTyped)
+    add:SetPoint('LEFT', durationButton, 'RIGHT', 6, 0)
+    local remove = Button(tab, 'Remove restriction', 120, function()
         if selectedPlayer then
-            I().Remove(selectedPlayer)
+            if selectedMuted and Scan.CustomerPreferences then Scan.CustomerPreferences.SetMuted(selectedPlayer,false)
+            else I().Remove(selectedPlayer) end
             selectedPlayer = nil
             W.Refresh()
         end
     end)
+    tab.PlayerInput,tab.DurationButton,tab.AddButton,tab.RemoveButton=input,durationButton,add,remove
     remove:SetPoint('LEFT', add, 'RIGHT', 6, 0)
     tab.Count = tab:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     tab.Count:SetPoint('LEFT', remove, 'RIGHT', 14, 0)
+    tab.Search=CreateFrame('EditBox',nil,tab,'InputBoxTemplate')
+    tab.Search:SetAutoFocus(false)
+    tab.Search:SetSize(220,20)
+    tab.Search:SetPoint('TOPLEFT',tab,'TOPLEFT',16,-38)
+    local searchHint=tab.Search:CreateFontString(nil,'OVERLAY','GameFontDisableSmall')
+    searchHint:SetPoint('LEFT',tab.Search,'LEFT',6,0)
+    searchHint:SetText(L('Search players'))
+    tab.Search:SetScript('OnTextChanged',function(self)
+        searchHint:SetShown((self:GetText() or '')=='')
+        if frame.Pages then W.Refresh() end
+    end)
+    tab.Search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
 
     frame.Players = CreateTable(tab, IGNORE_COLUMNS, {
         isSelected = function(entry) return entry.name == selectedPlayer end,
         onClick = function(entry)
             selectedPlayer = entry.name
+            selectedMuted=entry.muted
             frame.Players:SetRows(frame.Players.rows)
         end,
     })
-    frame.Players.frame:SetPoint('TOPLEFT', tab, 'TOPLEFT', 0, -40)
+    frame.Players.frame:SetPoint('TOPLEFT', tab, 'TOPLEFT', 0, -66)
     frame.Players.frame:SetPoint('BOTTOMLEFT', tab, 'BOTTOMLEFT', 0, 0)
     frame.Players.frame:SetWidth(600)
 
@@ -538,7 +570,6 @@ local function CreateIgnoreTab(parent)
         tab.Checks[#tab.Checks + 1] = check
         previous = check
     end
-    Option('reply', 'Answer their whispers', 'Answer their whispers tooltip')
     Option('decline', 'Decline their invitations', 'Decline their invitations tooltip')
     Option('warn', 'Warn when one is in your group', nil)
     Option('lfg', 'Mark their groups in the group finder', nil)
@@ -621,6 +652,21 @@ function W.Refresh()
         local page = frame.Pages[TAB_IGNORE]
         for _, check in ipairs(page.Checks) do check:SetChecked(check.get()) end
         local list = I().List()
+        if Scan.CustomerPreferences then
+            for _,r in ipairs(Scan.CustomerPreferences.Snapshot()) do
+                if r.kind=='mute' and Scan.CustomerPreferences.IsMuted(r.name) and not I().IsIgnored(r.name) then
+                    list[#list+1]={name=r.name,key=r.id,at=r.at,muted=true}
+                end
+            end
+        end
+        local search=Scan.FilterEngine.Lower(page.Search and page.Search:GetText() or '')
+        if search~='' then
+            local filtered={}
+            for _,entry in ipairs(list) do
+                if Scan.FilterEngine.Lower(entry.name or ''):find(search,1,true) then filtered[#filtered+1]=entry end
+            end
+            list=filtered
+        end
         frame.Players:SetRows(list)
         local game = I().GameListCount()
         page.Count:SetText(string.format(L('%d players; on this character\'s game list: %s / 50'), #list,

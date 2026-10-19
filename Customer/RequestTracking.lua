@@ -93,7 +93,7 @@ function M.GetReplyContext(info)
     return {id=activeID, at=activeAt, members=members}
 end
 
-function M.ApplyContext(info, context, incoming)
+function M.ApplyContext(info, context, incoming, receivedAt)
     if type(context) ~= 'table' or type(context.id) ~= 'string' or #context.id > 192
         or type(context.members) ~= 'table' or type(context.at) ~= 'number' then return false end
     local matched = false
@@ -108,7 +108,9 @@ function M.ApplyContext(info, context, incoming)
                 local sentAt = math.min(tonumber(member.greetingSentAt) or context.at, context.at)
                 response.greetingSentAt = math.max(tonumber(response.greetingSentAt) or 0, sentAt)
                 response.previousGreeting = nil
-                if incoming then response.customer_answered = true end
+                if incoming and (not receivedAt or receivedAt >= (tonumber(response.answerResetAt) or 0)) then
+                    response.customer_answered = true
+                end
                 matched = true
             end
         end
@@ -123,26 +125,32 @@ function M.MarkReply(info, entry)
     -- Carry the exact request identities in synced history. Delayed replies
     -- must not check a newer row simply because it arrived before the packet.
     entry.replyContext = entry.replyContext or M.GetReplyContext(info)
-    local matched = M.ApplyContext(info, entry.replyContext, true)
+    local receivedAt = tonumber(entry.receivedAt) or time()
+    local matched = M.ApplyContext(info, entry.replyContext, true, receivedAt)
     -- A row the crafter set back to waiting is waiting for exactly this: any
     -- message from the customer, whichever request it is about.
     for _, candidate in ipairs(Responses(info)) do
         local response = candidate.response
-        if response.awaitingReturn then
+        if response.awaitingReturn and receivedAt >= (tonumber(response.answerResetAt) or 0) then
             response.awaitingReturn = nil
             response.customer_answered = true
+            response.attentionReturned = true
             matched = true
         end
     end
+    if Scan.CustomerAttention then Scan.CustomerAttention.Record(info, entry, true) end
     return matched
 end
 
 -- The second mark by hand. A customer who went quiet may or may not come
 -- back: set back to waiting, their next message checks it again.
-function M.ToggleAnswered(response)
+function M.ToggleAnswered(response, order)
     if type(response) ~= 'table' then return nil end
     response.customer_answered = not response.customer_answered
     response.awaitingReturn = not response.customer_answered or nil
+    response.answerResetAt = not response.customer_answered and time() or nil
+    if response.customer_answered then response.firstAnsweredAt = time() end
+    if order and Scan.CustomerAttention then Scan.CustomerAttention.Share(order, {answered=response.customer_answered}) end
     return response.customer_answered
 end
 

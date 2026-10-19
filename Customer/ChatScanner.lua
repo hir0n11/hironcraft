@@ -2353,7 +2353,8 @@ function HironCraftScan.ApplyRemoteCustomerChat(customer, customerGuid, entry, i
     end
     if not inserted then return false end
     if entry.greetingContext then HironCraftScan.RequestTracking.ApplyContext(customerInfo, entry.greetingContext, false) end
-    if incoming then HironCraftScan.RequestTracking.MarkReply(customerInfo, entry) end
+    if incoming then HironCraftScan.RequestTracking.MarkReply(customerInfo, entry)
+    elseif HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.Record(customerInfo, entry, false) end
     if HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
         HironCraftScanCraftingOrderPage:ShowGeneric()
     end
@@ -2363,6 +2364,8 @@ end
 -- The ignore list. A value of 1 (or true) is for good; a larger number is
 -- the time the ignore ends, after which the entry removes itself.
 function HironCraftScan.IsIgnored(customer)
+    if not HironCraftScan.DB or not HironCraftScan.DB.settings then return false end
+    if HironCraftScan.ChatIgnore and HironCraftScan.ChatIgnore.IsIgnored(customer) then return true end
     local ignored = HironCraftScan.DB.settings.ignored
     local value = type(customer) == 'string' and ignored and ignored[customer]
     if not value then return false end
@@ -2726,12 +2729,16 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     if isBattleNet and customerInfo then customerInfo.guid = customerGuid end
 
     if HironCraftScan.IsIgnored(customer) then
+        if event == 'CHAT_MSG_WHISPER' and HironCraftScan.ChatIgnore then HironCraftScan.ChatIgnore.Attempt(customer) end
         return false
     end
     overrides = overrides or {}
     overrides.remoteRequest = overrides.remoteRequest == true or HironCraftScanComm.applying_remote_state == true
     overrides.chatEntry = HironCraftScan.Utils.StampChatHistory(overrides.chatEntry
         or MakeChatHistoryEntryDefault(customer, message, event))
+    if HironCraftScan.CustomerAttention and (event=='CHAT_MSG_WHISPER' or event=='CHAT_MSG_BN_WHISPER') then
+        overrides.chatEntry.customerState=HironCraftScan.CustomerAttention.Classify(message)
+    end
     if HasGeneralRequest(customer, customerInfo) then
         -- Once we have asked what the customer needs, their clarification is
         -- allowed to be just "BS", "wrist" or an item link without another LF.
@@ -2776,6 +2783,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
             end
             entry.greetingContext = HironCraftScan.RequestTracking.GetReplyContext(customerInfo)
             HironCraftScan.Utils.AppendUniqueChatHistory(chat_history, entry)
+            if HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.Record(customerInfo,entry,false) end
             if HironCraftScanComm and HironCraftScanComm.ShareCustomerChat then
                 HironCraftScanComm:ShareCustomerChat(customer, customerInfo.guid, entry, false)
             end

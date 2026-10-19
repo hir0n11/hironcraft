@@ -1,6 +1,6 @@
 ## Interface: 120100, 120105
 ## Title: |cffffd200HironCraft|r
-## Version: 0.4.154
+## Version: 0.4.155
 ## Notes: Crafting workflow: chat scanner, crafting orders, shopping and utilities
 ## Author: Hiron
 ## Category: Professions
@@ -141,6 +141,7 @@ Locales\koKR.lua
 Locales\zhTW.lua
 Locales\zhCN.lua
 Locales\Localization.lua
+Customer\AttentionLocale.lua
 
 Utils\Debug.lua
 Utils\EventBus.lua
@@ -165,6 +166,7 @@ Customer\PersonalOrdersIndicator.lua
 Customer\AlertIcon.xml
 Customer\ChatHistory.lua
 Customer\RequestTracking.lua
+Customer\CustomerAttention.lua
 Customer\GenerousCustomers.lua
 Customer\AnalyticsLog.lua
 Customer\ReturnPrices.lua
@@ -188,6 +190,7 @@ ChatFilter\FilterEngine.lua
 ChatFilter\ChatFilter.lua
 ChatFilter\RuleSync.lua
 ChatFilter\IgnoreList.lua
+Customer\CustomerPreferences.lua
 ChatFilter\FilterWindow.lua
 
 Settings\Settings.xml

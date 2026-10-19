@@ -1557,6 +1557,7 @@ end
 
 local function SendOption(toast, option)
     if toast.option ~= option or not toast:IsVisible() then return end
+    if HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(option.customer) then DismissToast(toast); return end
     if option.action == DECLINE_REASON_ACTION then
         -- The decline as it stands now: a new order may have answered it since.
         local decline = QuickReplies:FindDecline(option.customer, option.responseID, option.declineOrderID)
@@ -1681,6 +1682,7 @@ function HironCraftScanDismissQuickReply()
 end
 
 local function SetupToast(toast, option, customerInfo, serial, optionIndex)
+    if HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(option.customer) then DismissToast(toast); return end
     toast.serial = serial
     toast.optionIndex = optionIndex
     toast.option = option
@@ -1726,6 +1728,19 @@ local function SetupToast(toast, option, customerInfo, serial, optionIndex)
         self.Glow:Hide()
     end)
     toast:Show()
+    if HironCraftScan.Notifications and HironCraftScan.Notifications.QuickReply then
+        HironCraftScan.Notifications.QuickReply(option)
+    end
+end
+
+function QuickReplies:DismissIgnored()
+    for _, toast in ipairs(toastPool) do
+        if toast.option and HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(toast.option.customer) then
+            toast.option = nil
+            toast:Hide()
+        end
+    end
+    LayoutToasts()
 end
 
 -- The reason of a decline ---------------------------------------------------------

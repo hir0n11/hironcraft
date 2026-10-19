@@ -8,7 +8,7 @@ local Scan = select(2, ...)
 -- /ignore, the friends window) changes this list too, and a player taken off
 -- here is taken off the other characters' lists when they log in.
 --
--- On top of that, as Global Ignore List did: an answer to their whispers,
+-- On top of that: one local notice (never an answer to their whispers),
 -- their group and guild invitations, duels and trades declined, a warning
 -- when one of them is in your group, and their groups marked in the group
 -- finder.
@@ -20,7 +20,6 @@ local function L(key)
 end
 
 local BLIZZARD_LIMIT = 50
-local REPLY_EVERY_SECONDS = 5 * 60
 local REMOVED_KEPT_SECONDS = 90 * 24 * 60 * 60
 local NOTICE_SECONDS = 10
 -- A player the game failed to find this often (renamed, deleted, banned) is
@@ -38,6 +37,20 @@ local function Now() return GetTime and GetTime() or 0 end
 local function Notice(text)
     local chat = rawget(_G, 'DEFAULT_CHAT_FRAME')
     if chat then chat:AddMessage('|cffffd200HironCraft:|r ' .. text) end
+end
+local changeQueued=false
+local function Changed(defer)
+    if defer and C_Timer and C_Timer.After then
+        if not changeQueued then
+            changeQueued=true
+            C_Timer.After(0.05,function() changeQueued=false;Changed(false) end)
+        end
+        return
+    end
+    if Scan.ChatFilter then Scan.ChatFilter.Changed() end
+    if Scan.QuickReplies and Scan.QuickReplies.DismissIgnored then Scan.QuickReplies:DismissIgnored() end
+    local page=HironCraftScanCraftingOrderPage
+    if Scan.DB and Scan.DB.listed_orders and Scan.State and page and page.BrowseFrame then page:ShowGeneric() end
 end
 
 local prepared = nil
@@ -74,6 +87,10 @@ end
 -- "Name-Realm", the player's realm when none is given.
 function I.FullName(name)
     if IsSecret(name) or type(name) ~= 'string' then return nil end
+    if name:sub(1,5) == 'BNET:' then
+        local owner,tag=name:match('^BNET:([^:]+):([^#%s|:]+#%d+)$')
+        return owner and #tag<=64 and name or nil
+    end
     name = name:gsub('%s', '')
     if name == '' then return nil end
     local base, realm = name:match('^([^-]+)-(.+)$')
@@ -84,6 +101,11 @@ end
 
 function I.Key(name)
     local full = I.FullName(name)
+    if full and full:sub(1,5)=='BNET:' then
+        -- Chat/request routing remains account-scoped. Blocking is explicitly
+        -- shared by BattleTag; never persist a session-local BN account ID.
+        return 'bnet:'..Scan.FilterEngine.Lower(full:match('^BNET:[^:]+:(.+)$'))
+    end
     return full and Scan.FilterEngine.Lower(full) or nil
 end
 
@@ -95,7 +117,12 @@ function I.IsIgnored(name)
     local ignore = I.Settings()
     local key = ignore and I.Key(name)
     if not key then return false end
-    if ignore.players[key] then return true end
+    local entry = ignore.players[key]
+    if entry then
+        if tonumber(entry.expires) and entry.expires > 0 and entry.expires <= time() then
+            I.Remove(name, {quiet=true,defer=true})
+        else return true end
+    end
     local realm = RealmOf(key)
     return realm ~= nil and ignore.servers[realm] ~= nil
 end
@@ -103,6 +130,7 @@ end
 function I.Entry(name)
     local ignore = I.Settings()
     local key = ignore and I.Key(name)
+    if key then I.IsIgnored(name) end
     return key and ignore.players[key] or nil
 end
 
@@ -111,7 +139,7 @@ function I.List()
     local ignore = I.Settings()
     local list = {}
     for key, entry in pairs(ignore and ignore.players or {}) do
-        if type(entry) == 'table' then
+        if type(entry) == 'table' and I.IsIgnored(entry.name or key) then
             entry.key = key
             list[#list + 1] = entry
         end
@@ -187,6 +215,7 @@ end
 
 -- On the game's list if it has room: only players of this realm when so set.
 local function FitsGameList(ignore, key)
+    if key:sub(1,5) == 'bnet:' then return false end
     if not ignore.blizzard or not snapshot.valid or snapshot.keys[key] then return false end
     if snapshot.count >= BLIZZARD_LIMIT then return false end
     local entry = ignore.players[key]
@@ -228,12 +257,12 @@ function I.Add(name, options)
     local ignore = I.Settings()
     local full = ignore and I.FullName(name)
     if not full then return false end
-    local key = Scan.FilterEngine.Lower(full)
+    local key = I.Key(full)
     ignore.removed[key] = nil
     local isNew = ignore.players[key] == nil
     if isNew then
         ignore.players[key] = { name = full, at = options.at or time(), note = options.note,
-            source = options.source }
+            source = options.source, expires = options.expires or 0 }
     else
         local entry = ignore.players[key]
         if options.note and not entry.note then entry.note = options.note end
@@ -243,9 +272,18 @@ function I.Add(name, options)
             entry.at, entry.source = options.at, 'gil'
         end
     end
+    local entry = ignore.players[key]
+    if options.replace or options.seconds ~= nil then
+        local expires = options.seconds and (time()+math.max(1,math.floor(options.seconds))) or options.expires or 0
+        if entry.expires ~= expires or (options.at and entry.at ~= options.at) then entry.notified = nil end
+        entry.expires, entry.at = expires, options.at or time()
+    end
+    if Scan.CustomerPreferences and not options.remote and (isNew or options.replace or options.seconds ~= nil) then
+        Scan.CustomerPreferences.Set('ignore',full,entry.expires or 0,false)
+    end
     if not options.fromGame and FitsGameList(ignore, key) then Game('AddIgnore', full) end
     if isNew and not options.quiet then Notice(string.format(L('%s is on your ignore list now.'), full)) end
-    if Scan.ChatFilter then Scan.ChatFilter.Changed() end
+    Changed(options.quiet)
     return isNew
 end
 
@@ -257,9 +295,12 @@ function I.Remove(name, options)
     local full = ignore.players[key].name or name
     ignore.players[key] = nil
     ignore.removed[key] = time()
+    if Scan.CustomerPreferences and not options.remote then
+        Scan.CustomerPreferences.Set('ignore',full,0,true)
+    end
     if not options.fromGame and snapshot.keys[key] then Game('DelIgnore', snapshot.keys[key]) end
     if not options.quiet then Notice(string.format(L('%s is off your ignore list.'), full)) end
-    if Scan.ChatFilter then Scan.ChatFilter.Changed() end
+    Changed(options.defer or options.quiet)
     return true
 end
 
@@ -364,17 +405,23 @@ end
 -- Once in a while per player, never back to the game's own list (the game
 -- does not pass their whispers on).
 function I.ReplyTo(author)
-    local ignore = I.Settings()
-    if not ignore or not ignore.reply then return false end
-    local key = I.Key(author)
-    if not key then return false end
-    local now = Now()
-    if replied[key] and now - replied[key].at < REPLY_EVERY_SECONDS then return false end
-    if Scan.Utils and Scan.Utils.CanSendMessages and not Scan.Utils.CanSendMessages() then return false end
-    replied[key] = { at = now }
-    local send = rawget(_G, 'SendChatMessage')
-    if not send then return false end
-    return (pcall(send, I.ReplyText(), 'WHISPER', nil, author))
+    -- No outgoing messages, even if an old GIL import has reply=true.
+    I.Attempt(author)
+    return false
+end
+
+function I.Attempt(author)
+    local entry = I.Entry(author)
+    if not entry or entry.notified then return false end
+    entry.notified = true -- SavedVariables: once per ignore, not per session.
+    local shown=Scan.BattleNet and Scan.BattleNet.DisplayName and Scan.BattleNet.DisplayName(author) or author
+    Notice(string.format(L('Ignored player %s tried to whisper you.'), shown))
+    return true
+end
+
+function I.SecondsLeft(author)
+    local e = I.Entry(author)
+    return e and tonumber(e.expires) and e.expires > 0 and math.max(0,e.expires-time()) or nil
 end
 
 -- Our own answer is not shown back in the chat.
@@ -524,6 +571,20 @@ if CreateFrame then
     end
     watcher:SetScript('OnEvent', function(_, event, arg1)
         if event == 'PLAYER_LOGIN' then
+            local ignore = I.Settings()
+            if ignore then ignore.reply = false end
+            if C_Timer and C_Timer.NewTicker then
+                C_Timer.NewTicker(15, function()
+                    local db = I.Settings()
+                    local expired = {}
+                    for _, entry in pairs(db and db.players or {}) do
+                        if tonumber(entry.expires) and entry.expires > 0 and entry.expires <= time() then
+                            expired[#expired+1] = entry.name
+                        end
+                    end
+                    for _, name in ipairs(expired) do I.Remove(name,{quiet=true,defer=true}) end
+                end)
+            end
             HookUnitMenus()
             HookGroupFinder()
         elseif event == 'ADDON_LOADED' then

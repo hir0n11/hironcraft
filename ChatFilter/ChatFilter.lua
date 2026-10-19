@@ -350,8 +350,10 @@ end
 -- 'presence', 'system') and the rule.
 function F.Decide(event, message, author, channelNumber, channelName)
     local db = F.DB()
-    if not db or db.enabled == false or type(message) ~= 'string' then return nil end
+    if not db or type(message) ~= 'string' then return nil end
     if IsSecret(message) or IsSecret(author) then return nil end
+    if Scan.ChatIgnore and type(author)=='string' and Scan.ChatIgnore.IsIgnored(author) then return 'ignored' end
+    if db.enabled == false then return nil end
 
     if event == 'CHAT_MSG_SYSTEM' then
         if Scan.ChatIgnore and Scan.ChatIgnore.HidesSystemNotice(message) then return 'system' end
@@ -454,7 +456,7 @@ local function Evaluate(event, message, author, channelNumber, channelName)
     if not reason then return false end
     local db = F.DB()
     Record(db, reason, rule, event, message, author, channelName)
-    if reason == 'ignored' and event == 'CHAT_MSG_WHISPER' and Scan.ChatIgnore then
+    if reason == 'ignored' and (event == 'CHAT_MSG_WHISPER' or event=='CHAT_MSG_BN_WHISPER') and Scan.ChatIgnore then
         Scan.ChatIgnore.ReplyTo(author)
     end
     return true
@@ -462,6 +464,9 @@ end
 
 function F.MessageFilter(_, event, message, author, ...)
     local ok, hide = pcall(function(...)
+        if event=='CHAT_MSG_BN_WHISPER' and Scan.BattleNet then
+            author=Scan.BattleNet.FromID(select(11,...)) or author
+        end
         local channelNumber, channelName, lineID = select(6, ...), select(7, ...), select(9, ...)
         if IsSecret(channelName) then channelName = nil end
         local key = LineKey(lineID)
@@ -477,7 +482,7 @@ function F.MessageFilter(_, event, message, author, ...)
     return ok and hide or false
 end
 
-local EVENTS = { 'CHAT_MSG_SYSTEM' }
+local EVENTS = { 'CHAT_MSG_SYSTEM', 'CHAT_MSG_BN_WHISPER' }
 for event in pairs(NPC_KINDS) do EVENTS[#EVENTS + 1] = event end
 for event in pairs(RULE_EVENTS) do EVENTS[#EVENTS + 1] = event end
 for event in pairs(IGNORE_ONLY_EVENTS) do EVENTS[#EVENTS + 1] = event end
@@ -503,6 +508,12 @@ if CreateFrame then
     watcher:SetScript('OnEvent', function(_, event, ...)
         if event:match('^CHAT_MSG_') then
             F.RememberLine(select(11, ...), (...))
+            local author=select(2,...)
+            if event=='CHAT_MSG_BN_WHISPER' and Scan.BattleNet then author=Scan.BattleNet.FromID(select(13,...)) end
+            if (event == 'CHAT_MSG_WHISPER' or event=='CHAT_MSG_BN_WHISPER')
+                and Scan.ChatIgnore and Scan.ChatIgnore.IsIgnored(author) then
+                Scan.ChatIgnore.Attempt(author)
+            end
             return
         end
         if event == 'PLAYER_LOGIN' then

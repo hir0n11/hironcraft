@@ -112,11 +112,11 @@ find(buttons,'Support').click()
 assert(sent[4].customer==key and sent[4].message=='Ask Favu.',
     'custom substitution tag did not expand contextual tag')
 -- Ignore is a submenu: for a while, or for good.
-assert(not find(buttons,'HironCraftScan - IGNORE').click, 'ignore is not a choice of durations')
+assert(not find(buttons,'HironCraftScan - Hide in scanner only').click, 'ignore is not a choice of durations')
 find(buttons,'Ignore permanently').click()
 assert(Scan.DB.settings.ignored[key]==1)
 buttons=menu('MENU_UNIT_BN_FRIEND',{accountInfo=friend,lineID=44})
-find(buttons,'HironCraftScan - UNIGNORE').click()
+find(buttons,'HironCraftScan - Show in scanner again').click()
 assert(not Scan.DB.settings.ignored[key])
 buttons=menu('MENU_UNIT_FRIEND',{chatTarget='Normal-Realm',lineID=44})
 find(buttons,'Price').click()

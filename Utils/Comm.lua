@@ -83,6 +83,8 @@ HironCraftScanComm.Operations = {
     ShareCustomExplanations = 'share_custom_explanations',
     ShareQuickReplies = 'share_quick_replies',
     ShareChatFilterRules = 'share_filter_rules',
+    ShareCustomerPreferences = 'customer_preferences',
+    ShareCustomerAttention = 'customer_attention',
     ShareOrderStatus = 'share_order_status',
     OrderStatusAck = 'order_status_ack',
     OrderStatusRepair = 'order_status_repair',
@@ -509,6 +511,8 @@ local function ShareCharacterData_(state, target)
         explanations_revision = ExplanationsRevision(),
         quick_replies_revision = QuickRepliesRevision(),
         filter_revisions = HironCraftScan.ChatFilterSync and HironCraftScan.ChatFilterSync.Revisions(),
+        customer_preference_revisions = HironCraftScan.CustomerPreferences and HironCraftScan.CustomerPreferences.Revisions(),
+        customer_attention = HironCraftScan.CustomerAttention and HironCraftScan.CustomerAttention.Snapshot(),
         order_statuses = orderStatuses,
         order_completions = orderCompletions,
         order_outcomes = orderOutcomes,
@@ -547,6 +551,12 @@ local function ReceiveShareQuickReplies_(quickReplies)
 end
 
 local function ReceiveShareCharacterData(sender, data, senderID)
+    if HironCraftScan.CustomerPreferences and type(data.customer_preference_revisions)=='table' then
+        HironCraftScanComm:ShareCustomerPreferences(HironCraftScan.CustomerPreferences.Delta(data.customer_preference_revisions),sender)
+    end
+    if HironCraftScan.CustomerAttention and type(data.customer_attention)=='table' and #data.customer_attention<=200 then
+        for _, entry in ipairs(data.customer_attention) do HironCraftScan.CustomerAttention.Receive(entry) end
+    end
     local renamed = 0
     if HironCraftScan.CharacterRenames then
         renamed = HironCraftScan.CharacterRenames.AcceptRemote(HironCraftScan_DB,data.character_renames,senderID) or 0
@@ -948,6 +958,7 @@ function HironCraftScanComm:ShareCustomerChat(customer, customerGuid, entry, inc
         incoming = incoming == true,
         entry = {
             message = entry.message,
+            customerState = entry.customerState,
             args = { r, g, b },
             chatType = entry.chatType,
             syncID = entry.syncID,
@@ -1105,6 +1116,20 @@ local function ReceiveShareQuickReplies(sender, data, senderID)
     ReceiveShareQuickReplies_(data)
 end
 
+function HironCraftScanComm:ShareCustomerAttention(data)
+    if LinkedAccountsConfigured() and HaveTarget() and not self.applying_remote_state then
+        TransmitToFullLinkedAccounts(data,self.Operations.ShareCustomerAttention)
+    end
+end
+function HironCraftScanComm:ShareCustomerPreferences(records,target)
+    if type(records)~='table' or #records==0 or not LinkedAccountsConfigured() or (not target and not HaveTarget()) then return end
+    for first=1,#records,40 do
+        local batch={}
+        for index=first,math.min(first+39,#records) do batch[#batch+1]=records[index] end
+        if target then self:Transmit({records=batch},self.Operations.ShareCustomerPreferences,target)
+        else TransmitToFullLinkedAccounts({records=batch},self.Operations.ShareCustomerPreferences) end
+    end
+end
 function HironCraftScanComm:ShareChatFilterRules(records, target)
     if type(records) ~= 'table' or #records == 0 or not LinkedAccountsConfigured()
         or (not target and not HaveTarget()) then return end
@@ -2399,6 +2424,7 @@ function HironCraftScanComm:EncodeMarkPacket(packet)
 end
 
 local ALERT_OPERATIONS = {
+    [HironCraftScanComm.Operations.ShareCustomerAttention] = true,
     [HironCraftScanComm.Operations.Handshake] = true,
     [HironCraftScanComm.Operations.ShareCustomerOrder] = true,
     [HironCraftScanComm.Operations.ShareCustomerChat] = true,
@@ -2415,6 +2441,7 @@ local ALERT_OPERATIONS = {
 
 local BULK_OPERATIONS = {
     [HironCraftScanComm.Operations.ShareChatFilterRules] = true,
+    [HironCraftScanComm.Operations.ShareCustomerPreferences] = true,
     [HironCraftScanComm.Operations.ShareCharacterData] = true,
     [HironCraftScanComm.Operations.ShareOrderCompletionRepair] = true,
     [HironCraftScanComm.Operations.AnalyticsOffer] = true,
@@ -2795,6 +2822,11 @@ local function ReceiveDeserialized(msg, sender)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareChatFilterRules
             and HironCraftScan.ChatFilterSync and type(msg.data) == 'table' and msg.data.version == 1 then
             HironCraftScan.ChatFilterSync.Merge(msg.data.rules)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomerPreferences
+            and HironCraftScan.CustomerPreferences and type(msg.data)=='table' then
+            HironCraftScan.CustomerPreferences.Merge(msg.data.records)
+        elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareCustomerAttention and HironCraftScan.CustomerAttention then
+            HironCraftScan.CustomerAttention.Receive(msg.data)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.ShareOrderStatus then
             ReceiveShareOrderStatus(sender, msg.data, msg.senderID)
         elseif hasFull and msg.operation == HironCraftScanComm.Operations.OrderStatusAck then

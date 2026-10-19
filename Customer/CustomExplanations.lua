@@ -805,10 +805,48 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         do
+            local prefs, ignore = HironCraftScan.CustomerPreferences, HironCraftScan.ChatIgnore
+            if prefs then
+                subMenu:CreateDivider()
+                local muted=prefs.IsMuted(target)
+                subMenu:CreateButton(prefix..L(muted and 'Enable whisper sound for this player' or 'Mute whisper sound for this player'),
+                    function() prefs.SetMuted(target,not muted) end)
+            end
+            if ignore then
+                if ignore.IsIgnored(target) then
+                    local left=ignore.SecondsLeft(target)
+                    local label=prefix..L('Remove full ignore')
+                    if left then label=label..' ('..(SecondsToTime and SecondsToTime(left) or math.ceil(left/60)..'m')..')' end
+                    subMenu:CreateButton(label,function() ignore.Remove(target) end)
+                else
+                    local menu=subMenu:CreateButton(prefix..L('Ignore everywhere'))
+                    for _,choice in ipairs({{'Ignore for 1 hour',3600},{'Ignore for 1 day',86400},
+                        {'Ignore for 1 week',604800},{'Ignore permanently',false}}) do
+                        local seconds=choice[2]
+                        menu:CreateButton(L(choice[1]),function()
+                            ignore.Add(target,{source='menu',seconds=seconds,replace=true})
+                        end)
+                    end
+                end
+            end
+            if HironCraftScan.CustomerAttention and #contexts>0 then
+                local states=subMenu:CreateButton(prefix..L('Customer order state'))
+                for _,candidate in ipairs(contexts) do
+                    local order={customerName=target,responseID=candidate.response.responseID or candidate.responseID}
+                    local menu=states
+                    if #contexts>1 then menu=states:CreateButton(Assignment(candidate) or tostring(order.responseID)) end
+                    menu:CreateButton(L('Remind in 5 minutes'),function() HironCraftScan.CustomerAttention.Snooze(order) end)
+                    for _,choice in ipairs({{'Order sent','sent'},{'Collecting materials','waiting'},{'Needs attention','attention'}}) do
+                        local state=choice[2]
+                        menu:CreateButton(L(choice[1]),function() HironCraftScan.CustomerAttention.SetState(order,state) end)
+                    end
+                end
+            end
+        end
+        do
             subMenu:CreateDivider()
             local ignoredList = HironCraftScan.DB.settings.ignored
-            local isIgnored = HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(target)
-                or (ignoredList and ignoredList[target] and true or false)
+            local isIgnored = ignoredList and ignoredList[target] and true or false
             local function SetIgnored(seconds)
                 if HironCraftScan.SetIgnored then return HironCraftScan.SetIgnored(target, seconds) end
                 local list = HironCraftScan.Utils.saved(HironCraftScan.DB.settings, 'ignored', {})
@@ -816,7 +854,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
             if isIgnored then
                 local left = HironCraftScan.IgnoreSecondsLeft and HironCraftScan.IgnoreSecondsLeft(target)
-                local title = subMenu:CreateButton(prefix .. L(LID.UNIGNORE), function()
+                local title = subMenu:CreateButton(prefix .. L('Show in scanner again'), function()
                     SetIgnored(false)
                 end)
                 title:SetTooltip(function(tooltip)
@@ -829,7 +867,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             else
                 -- A time-waster, or a customer whose LF spam should rest for
                 -- a while: ignore for a set time, or for good.
-                local ignoreMenu = subMenu:CreateButton(prefix .. L(LID.IGNORE))
+                local ignoreMenu = subMenu:CreateButton(prefix .. L('Hide in scanner only'))
                 ignoreMenu:SetTooltip(function(tooltip)
                     GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.IGNORE_TOOLTIP)))
                 end)

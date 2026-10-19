@@ -186,10 +186,10 @@ assert(F.DB().log[#F.DB().log].r == F.Rules()[5].id, 'the journal does not name 
 -- The ignore list: hidden everywhere, whispers answered once in a while ------
 assert(not Shown('CHAT_MSG_SAY', 'hello', 'Spammer-Kazzak'), 'an ignored player was shown')
 assert(not Shown('CHAT_MSG_WHISPER', 'buy gold', 'Spammer'), 'an ignored whisper was shown')
-assert(#sent == 1 and sent[1].target == 'Spammer' and sent[1].text == 'You are being ignored.', 'no answer')
-assert(not Shown('CHAT_MSG_WHISPER_INFORM', 'You are being ignored.', 'Spammer'), 'our own answer was shown')
+assert(#sent == 0, 'ignored player received an automatic answer')
+assert(I.Entry('Spammer').notified, 'first whisper did not set the persisted notice flag')
 assert(not Shown('CHAT_MSG_WHISPER', 'buy gold!!', 'Spammer'))
-assert(#sent == 1, 'answered twice within five minutes')
+assert(#sent == 0, 'repeated ignored whisper caused an answer')
 assert(Shown('CHAT_MSG_WHISPER', 'WTS m+ boost', 'Friend-Kazzak'), 'rules looked at whispers')
 
 -- NPC speech: hidden by kind, not in dungeons and raids -----------------------
@@ -267,7 +267,7 @@ function issecretvalue(value) return value == 'SECRET' end
 assert(Shown('CHAT_MSG_CHANNEL', 'SECRET', 'Seller-Kazzak', trade, tradeName), 'a secret line was touched')
 issecretvalue = nil
 F.DB().enabled = false
-assert(Shown('CHAT_MSG_SAY', 'hello', 'Spammer-Kazzak'), 'the filter worked while switched off')
+assert(not Shown('CHAT_MSG_SAY', 'hello', 'Spammer-Kazzak'), 'full ignore depended on the advertising-filter toggle')
 F.DB().enabled = true
 -- At login: Global Ignore List on and nothing taken over yet - taken over
 -- by itself, once; already off with no rules - the chat says how.

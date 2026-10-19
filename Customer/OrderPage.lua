@@ -119,7 +119,7 @@ end
 function HironCraftScan.PeelOrderMark(order)
     local response = HironCraftScan.OrderToResponse(order)
     if type(response) == 'table' and response.customer_answered and HironCraftScan.RequestTracking then
-        HironCraftScan.RequestTracking.ToggleAnswered(response)
+        HironCraftScan.RequestTracking.ToggleAnswered(response, order)
         HironCraftScanCraftingOrderPage:ShowGeneric()
         return 'answer'
     end
@@ -149,6 +149,8 @@ end
 function HironCraftScan.IsOrderInProgress(order)
     local response = order and HironCraftScan.OrderToResponse(order)
     if type(response) ~= 'table' or not response.customer_answered then return false end
+    if HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(order.customerName) then return false end
+    if HironCraftScan.CustomerAttention then return HironCraftScan.CustomerAttention.State(order,response) ~= 'done' end
     local fulfillment = HironCraftScan.OrderFulfillment
     local ok, entry = true, nil
     if fulfillment and fulfillment.GetStatus then ok, entry = pcall(fulfillment.GetStatus, fulfillment, order) end
@@ -157,6 +159,7 @@ function HironCraftScan.IsOrderInProgress(order)
 end
 
 local PROGRESS_COLOR = { 1.00, 0.82, 0.20, 0.10 }
+local SENT_COLOR = { 0.15, 1.00, 0.30, 0.14 }
 
 function HironCraftScanCrafterOrderListElementMixin:UpdateProgressHighlight()
     local inProgress = HironCraftScan.IsOrderInProgress(self.order)
@@ -167,6 +170,10 @@ function HironCraftScanCrafterOrderListElementMixin:UpdateProgressHighlight()
         self.ProgressTexture:SetAllPoints()
         self.ProgressTexture:SetColorTexture(unpack(PROGRESS_COLOR))
     end
+    local response = self.order and HironCraftScan.OrderToResponse(self.order)
+    local sent = inProgress and HironCraftScan.CustomerAttention
+        and HironCraftScan.CustomerAttention.State(self.order,response) == 'sent'
+    self.ProgressTexture:SetColorTexture(unpack(sent and SENT_COLOR or PROGRESS_COLOR))
     self.ProgressTexture:SetShown(inProgress)
 end
 
@@ -317,7 +324,8 @@ local function PurgeOldOrders()
     local timeout = HironCraftScan.Utils.GetSetting('customer_timeout') * 60;
     for orderID, order in pairs(orders) do
         local response = HironCraftScan.OrderToResponse(order)
-        if not response or type(response.time) ~= 'number' or now - response.time > timeout then
+        if not response or type(response.time) ~= 'number' or (now - response.time > timeout
+            and not (HironCraftScan.CustomerAttention and HironCraftScan.CustomerAttention.KeepAlive(order,response))) then
             table.insert(old, { id = orderID, order = order })
         end
     end
@@ -445,7 +453,8 @@ function HironCraftScanCraftingOrderPageMixin:ShowGeneric()
 
     local orders = {}
     for _, order in pairs(HironCraftScan.DB.listed_orders) do
-        if not HironCraftScan.IsHiddenOtherSideOrder(order) then
+        if not HironCraftScan.IsHiddenOtherSideOrder(order)
+            and not (HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(order.customerName)) then
             table.insert(orders, order)
         end
     end

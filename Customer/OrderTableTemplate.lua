@@ -489,7 +489,7 @@ function HironCraftScanCustomerAnswerButtonMixin:OnClick(button)
     end
     local response = HironCraftScan.OrderToResponse(self.order)
     if type(response) ~= 'table' then return end
-    HironCraftScan.RequestTracking.ToggleAnswered(response)
+    HironCraftScan.RequestTracking.ToggleAnswered(response, self.order)
     local cell = self:GetParent()
     if cell and cell.Populate then cell:Populate({ order = self.order }) end
     self:OnEnter()
@@ -505,6 +505,7 @@ function HironCraftScanCustomerAnswerButtonMixin:OnEnter()
         or L("Customer reply waiting"), 1, 1, 1, true)
     GameTooltip:AddLine(response.customer_answered and L("Customer reply reset help")
         or L("Customer reply mark help"), 1, 0.82, 0, true)
+    GameTooltip:AddLine(L('Order state help'),0.7,0.7,0.7,true)
     GameTooltip:Show()
 end
 

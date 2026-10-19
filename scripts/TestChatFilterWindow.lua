@@ -194,3 +194,32 @@ assert(C_AddOns.disabled == 'GlobalIgnoreList', 'Global Ignore List was not turn
 W.Toggle()
 assert(not W.IsShown(), 'the window did not close')
 print('Chat filter window passed (open, take over, edit, history, journal, keys, ignore list, switches).')
+
+-- Timed full ignores and independent whisper mutes share a searchable window.
+Scan.DB={settings={my_uuid='laptop'}}
+load('Customer/CustomerPreferences.lua')
+W.Show(3)
+local page=frame.Pages[3]
+local choices={}
+MenuUtil={CreateContextMenu=function(_,build)
+    build(nil,{CreateButton=function(_,name,fn) choices[name]=fn end})
+end}
+page.DurationButton.scripts.OnClick(page.DurationButton)
+assert(choices['1 hour'] and choices['Permanent'],'duration menu did not open')
+choices['1 hour']()
+page.PlayerInput:SetText('TimedBuyer')
+page.AddButton.scripts.OnClick(page.AddButton)
+assert(Scan.ChatIgnore.SecondsLeft('TimedBuyer')==3600)
+Scan.CustomerPreferences.SetMuted('QuietBuyer-Kazzak',true)
+page.Search:SetText('quietbuyer');page.Search.scripts.OnTextChanged(page.Search)
+assert(#frame.Players.scrollBox.inited==1,'search/muted-player union failed')
+local muted=frame.Players.scrollBox.inited[1]
+muted.scripts.OnClick(muted,'LeftButton')
+page.RemoveButton.scripts.OnClick(page.RemoveButton)
+assert(not Scan.CustomerPreferences.IsMuted('QuietBuyer-Kazzak'))
+assert(Scan.ChatIgnore.IsIgnored('TimedBuyer'),'removing a mute affected a different full ignore')
+page.Search:SetText('');page.Search.scripts.OnTextChanged(page.Search)
+now=now+3601
+W.Refresh()
+assert(not Scan.ChatIgnore.IsIgnored('TimedBuyer'),'expired timed ignore remained in the window')
+print('Timed ignore window passed: duration menu, typed add, muted-player union, search, independent removal and expiry.')

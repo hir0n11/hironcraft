@@ -1298,7 +1298,7 @@ assert(ignoredUntil and ignoredUntil>now, 'a timed ignore stored no end time')
 scan('LF '..a,nil,'Spammer')
 assert(not Scan.DB.customers.Spammer, 'an ignored player made a request')
 buttons={};menus.MENU_UNIT_FRIEND(nil,root,{chatTarget='Spammer',lineID='44'})
-assert(menuButton(tostring(Scan.CONST.TEXT.UNIGNORE)), 'an ignored player offered no way back')
+assert(menuButton('Show in scanner again'), 'an ignored player offered no way back')
 local savedNow=now
 now=now+2*60*60
 scan('LF '..a,nil,'Spammer')
