@@ -2201,13 +2201,15 @@ do
         and not Find(own, 'Answer 1'), 'the collapsed submenu kept its long lists')
     Scan.DB.settings.collapse_chat_context = nil
     Scan.DB.settings.fit_to_screen = false
-    assert(Find(Open(700), 'Answer 1'), 'the menu folded with fitting switched off')
+    local independent=Find(Open(700),'Custom Explanations')
+    assert(independent and not independent.title and #independent.children==12,
+        'chat menu fitting incorrectly depended on the main-window scaling switch')
     Scan.DB.settings.fit_to_screen = nil
     UIParent, Scan.DB.settings.explanations = savedParent, savedExplanations
     Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName = savedCrafter, savedProfession
     Scan.Utils.ProfessionNameByID = savedProfessionName
 end
-print('Chat menu fitting passed (tall, shorter, short, switched off).')
+print('Chat menu fitting passed (tall, shorter, short, independent of main-window scaling).')
 
 -- Recrafts: a new request for what was delivered, made by hand ----------------------
 do

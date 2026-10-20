@@ -34,15 +34,81 @@ end
 
 local CustomExplanations = {}
 
--- Estimating the chat name menu's height: rows of about MENU_ROW_HEIGHT; the
--- game's own entries and our short ones take MENU_FIXED_ROWS, ours alone
--- (the collapsed HironCraftScan submenu) MENU_OWN_ROWS. A menu over
--- MENU_SCREEN_SHARE of the screen's height is unwieldy even when it fits.
+-- Menus fit independently of the optional scaling of the main windows.
+-- Keep the native font; fold long groups and scroll any remaining overflow.
 local MENU_ROW_HEIGHT = 20
-local MENU_FIXED_ROWS = 22
-local MENU_OWN_ROWS = 8
+local MENU_NATIVE_ROWS = 12
 local MENU_SCREEN_SHARE = 0.6
 HironCraftScan.CustomExplanations = CustomExplanations
+local menuTooltips=setmetatable({}, {__mode='k'})
+local function SetMenuTooltip(description,callback)
+    menuTooltips[description]=callback
+    description:SetTooltip(callback)
+end
+local function MenuBounds()
+    local function Axis(method,fallback)
+        local value=UIParent and UIParent[method] and UIParent[method](UIParent)
+        return type(value)=='number' and value==value and value>0 and value<math.huge and value or fallback
+    end
+    local height,width=Axis('GetHeight',768),Axis('GetWidth',1024)
+    return {height=math.max(1,math.floor(math.min(height*MENU_SCREEN_SHARE,height-32))),
+        width=math.max(1,math.floor(math.min(420,width*0.75,width-48)))}
+end
+local function MenuChildren(description)
+    local children={}
+    if description.EnumerateElementDescriptions then
+        for _,child in description:EnumerateElementDescriptions() do children[#children+1]=child end
+    end
+    return children
+end
+local function LimitMenu(description,bounds)
+    if description.SetScrollMode then description:SetScrollMode(bounds.height) end
+end
+local function FitMenuEntry(description,bounds,seen)
+    if seen[description] then return end
+    seen[description]=true
+    LimitMenu(description,bounds)
+    if description.SetMaximumWidth then description:SetMaximumWidth(bounds.width) end
+    local text=MenuUtil and MenuUtil.GetElementText and MenuUtil.GetElementText(description) or description.text
+    local clipped=false
+    if description.AddInitializer then
+        description:AddInitializer(function(button)
+            local font=button.fontString
+            if not font then return end
+            local measure=font.GetUnboundedStringWidth or font.GetStringWidth
+            local extent=measure and measure(font)
+            local width=math.max(1,bounds.width-48) -- Native frame/scrollbar padding.
+            clipped=type(extent)=='number' and extent+36>width or false
+            if clipped then
+                -- Only change this entry's font region, not the global font or
+                -- the callback's original label/message/item link.
+                font:SetWidth(math.max(1,width-36))
+                font:SetWordWrap(false)
+                font:SetMaxLines(1)
+                return width,MENU_ROW_HEIGHT
+            end
+        end)
+    end
+    if type(text)=='string' and description.SetTooltip then
+        local original=menuTooltips[description]
+        description:SetTooltip(function(tooltip,elementDescription)
+            if original then original(tooltip,elementDescription) end
+            if not original or clipped then
+                GameTooltip_AddNormalLine(tooltip,HironCraftScan.MakeTextWhite(text))
+            end
+        end)
+    end
+    for _,child in ipairs(MenuChildren(description)) do FitMenuEntry(child,bounds,seen) end
+end
+local function FitMenu(root,bounds,existing)
+    LimitMenu(root,bounds)
+    local seen={}
+    -- Unit menus also belong to Blizzard/other addons. Only initialise the
+    -- descriptions we appended; leave their labels, tooltips and handlers alone.
+    for _,child in ipairs(MenuChildren(root)) do
+        if not existing[child] then FitMenuEntry(child,bounds,seen) end
+    end
+end
 
 -- A customer can have several unfinished requests at once. Keep a manual
 -- context choice in memory only: it must not outlive a reload or silently bind
@@ -427,6 +493,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
     -- The drop down button used to configure explanations
     self:SetupMenu(function(owner, rootDescription)
+        local bounds=MenuBounds()
         local explanations = CreateUIExplanations();
         for _, entry in ipairs(explanations) do
             local label = entry.label;
@@ -434,7 +501,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             local bindings = HironCraftScan.ExplanationBindings
             local key = bindings and bindings.Key(label)
             local subMenu = rootDescription:CreateButton(label .. (key and ('  [' .. key .. ']') or ''));
-            subMenu:SetTooltip(function(tooltip, elementDescription)
+            SetMenuTooltip(subMenu,function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(text));
             end);
             subMenu:CreateButton(L("Modify"), function() OnModify(label, text) end);
@@ -446,6 +513,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         rootDescription:CreateButton(L("Create"), OnCreate);
+        FitMenu(rootDescription,bounds,{})
     end)
 
     -- Inject our buttons on the right click of a name in chat.
@@ -456,35 +524,59 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             if not target then return end
         end
         if (issecretvalue and issecretvalue(target)) or type(target) ~= 'string' then return end
+        local bounds=MenuBounds()
+        local native=MenuChildren(rootDescription)
+        local existing={}
+        for _,entry in ipairs(native) do existing[entry]=true end
+        local nativeRows=rootDescription.EnumerateElementDescriptions and #native or MENU_NATIVE_ROWS
+        local crafterRows={}
+        for _,crafterInfo in ipairs(HironCraftScan.GetSortedCrafters()) do
+            local char=HironCraftScan.DB.characters[crafterInfo.name]
+            local pp=char and char.parent_professions and char.parent_professions[crafterInfo.parentProfessionID]
+            if pp and pp.scanning_enabled and not pp.character_disabled then crafterRows[#crafterRows+1]=crafterInfo end
+        end
+        local uiExplanations=CreateUIExplanations()
+        local scanner=HironCraftScan.Scanner
+        local deliveries=scanner and scanner.RecentDeliveries and scanner.RecentDeliveries(target) or {}
+        local replies=HironCraftScan.QuickReplies
+        local declines={}
+        for _,decline in ipairs(replies and replies.DeclinesForMenu and replies:DeclinesForMenu(target) or {}) do
+            local reason=replies:BuildDeclineReason(decline)
+            if reason then declines[#declines+1]={decline=decline,reason=reason} end
+        end
+        local pending=CustomExplanations:GetPendingResponses(target)
+        local contexts=CustomExplanations:GetPendingResponses(target,true)
+        local captureLineID=contextData.lineID
+        if issecretvalue and issecretvalue(captureLineID) then captureLineID=nil end
+        if type(captureLineID)=='string' then captureLineID=captureLineID:match('^%d+$') and tonumber(captureLineID) or nil end
+        local capture=type(captureLineID)=='number' and captureLineID>0 and HironCraftScan.ChatTextCapture
+        local fixedRows=4 -- Manual matching heading/divider and scanner-only ignore.
+            +(capture and 2 or 0)
+            +(#contexts>0 and (1+(#pending>0 and 1 or 0)+(#contexts>1 and 1 or 0)) or 0)
+            +(#uiExplanations>0 and 2 or 0)
+            +(HironCraftScan.Generous and not isBattleNet and 3 or 0)
+            +(HironCraftScan.CustomerPreferences and 2 or 0)+(HironCraftScan.ChatIgnore and 1 or 0)
+            +(HironCraftScan.CustomerAttention and #contexts>0 and 1 or 0)
+        local matchingRows=1+#crafterRows+#deliveries+#declines
+        local function Layout(collapsed)
+            local rows=(collapsed and 1 or nativeRows)+fixedRows+matchingRows+#uiExplanations
+            local foldExplanations=rows*MENU_ROW_HEIGHT>bounds.height and #uiExplanations>0
+            if foldExplanations then rows=rows-#uiExplanations end
+            local foldMatching=rows*MENU_ROW_HEIGHT>bounds.height
+            if foldMatching then rows=rows-matchingRows end
+            return foldMatching,foldExplanations,rows
+        end
         local collapsed = HironCraftScan.DB.settings.collapse_chat_context
+        local foldMatching,foldExplanations,rows=Layout(collapsed)
+        if not collapsed and rows*MENU_ROW_HEIGHT>bounds.height then
+            collapsed=true
+            foldMatching,foldExplanations=Layout(true)
+        end
         local prefix = collapsed and "" or L("HironCraftScan") .. " - "
         local subMenu = collapsed and rootDescription:CreateButton(L("HironCraftScan")) or rootDescription
 
         if collapsed then
             subMenu:CreateTitle(L("HironCraftScan"))
-        end
-
-        -- On a short game window (a laptop with two clients side by side) the
-        -- menu grows past most of the screen: fold its long lists into
-        -- submenus, the explanations first, then the manual matching - also
-        -- inside the collapsed HironCraftScan submenu. Only with "Fit windows
-        -- to the screen" on.
-        local crafterRows = HironCraftScan.GetSortedCrafters();
-        local foldMatching, foldExplanations = false, false
-        if HironCraftScan.Utils.FitsScreen and HironCraftScan.Utils.FitsScreen() then
-            local matches, explanations = 0, 0
-            for _, crafterInfo in ipairs(crafterRows) do
-                local ppConfig = HironCraftScan.DB.characters[crafterInfo.name].parent_professions[crafterInfo.parentProfessionID]
-                if ppConfig.scanning_enabled and not ppConfig.character_disabled then matches = matches + 1 end
-            end
-            for _ in pairs(HironCraftScan.DB.settings.explanations or {}) do explanations = explanations + 1 end
-            local available = (UIParent and UIParent.GetHeight and UIParent:GetHeight() or 768) * MENU_SCREEN_SHARE
-            local rows = (collapsed and MENU_OWN_ROWS or MENU_FIXED_ROWS) + 2 + matches + 1 + explanations
-            if rows * MENU_ROW_HEIGHT > available and explanations > 0 then
-                foldExplanations = true
-                rows = rows - explanations
-            end
-            if rows * MENU_ROW_HEIGHT > available then foldMatching = true end
         end
 
         -- Shift+click on an entry adds the row quietly: no banner, sound or
@@ -518,7 +610,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             else
                 title = subMenu:CreateTitle(prefix .. L(LID.MANUAL_MATCHING_TITLE));
             end
-            title:SetTooltip(function(tooltip, elementDescription)
+            SetMenuTooltip(title,function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.MANUAL_MATCHING_DESC)));
             end);
         end
@@ -569,7 +661,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                         HironCraftScanCraftingOrderPage:ShowGeneric()
                     end
                 end)
-            generalGreeting:SetTooltip(function(tooltip, elementDescription)
+            SetMenuTooltip(generalGreeting,function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip,
                     HironCraftScan.MakeTextWhite(L(LID.MANUAL_GENERAL_GREETING_DESC)))
                 QuietTooltip(tooltip)
@@ -625,7 +717,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                             HironCraftScanCraftingOrderPage:ShowGeneric()
                         end
                     end);
-                if matchButton and matchButton.SetTooltip then matchButton:SetTooltip(QuietTooltip) end
+                if matchButton and matchButton.SetTooltip then SetMenuTooltip(matchButton,QuietTooltip) end
             end
         end
 
@@ -633,8 +725,6 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         -- with the wrong stats comes back for a recraft after the row of the
         -- order has left the list.
         do
-            local scanner = HironCraftScan.Scanner
-            local deliveries = scanner and scanner.RecentDeliveries and scanner.RecentDeliveries(target) or {}
             for _, delivery in ipairs(deliveries) do
                 local recraftButton = matchMenu:CreateButton(
                     (foldMatching and '' or prefix) .. string.format(L('Recraft: %s'), scanner.DeliveryLabel(delivery)),
@@ -646,7 +736,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                         end)
                     end)
                 if recraftButton and recraftButton.SetTooltip then
-                    recraftButton:SetTooltip(function(tooltip)
+                    SetMenuTooltip(recraftButton,function(tooltip)
                         GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Recraft menu help')))
                         QuietTooltip(tooltip)
                     end)
@@ -657,17 +747,15 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         -- What was declined for them lately: its reason once more, for a
         -- customer who missed the reply. The click sends it.
         do
-            local replies = HironCraftScan.QuickReplies
-            local declines = replies and replies.DeclinesForMenu and replies:DeclinesForMenu(target) or {}
-            for _, decline in ipairs(declines) do
-                local reason = replies:BuildDeclineReason(decline)
+            for _,entry in ipairs(declines) do
+                local decline,reason=entry.decline,entry.reason
                 if reason then
                     local reasonButton = matchMenu:CreateButton(
                         (foldMatching and '' or prefix)
                             .. string.format(L('Decline reason: %s'), replies:DeclineLabel(decline)),
                         function() replies:SendDeclineReason(decline) end)
                     if reasonButton and reasonButton.SetTooltip then
-                        reasonButton:SetTooltip(function(tooltip)
+                        SetMenuTooltip(reasonButton,function(tooltip)
                             GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L('Decline reason menu help')))
                             GameTooltip_AddNormalLine(tooltip, '"' .. reason .. '"')
                         end)
@@ -677,16 +765,8 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
         end
 
         do
-            local lineID = contextData.lineID
-            if type(lineID) == 'string' then
-                lineID = lineID:match('^%d+$') and tonumber(lineID) or nil
-            end
-            if
-                type(lineID) == 'number'
-                and lineID > 0
-                and not (issecretvalue and issecretvalue(lineID))
-                and HironCraftScan.ChatTextCapture
-            then
+            local lineID = captureLineID
+            if capture then
                 subMenu:CreateDivider()
                 local filter = HironCraftScan.ChatFilter
                 local snapshot = filter and filter.LineText and filter.LineText(lineID)
@@ -696,8 +776,6 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
         end
 
-        local pending = CustomExplanations:GetPendingResponses(target)
-        local contexts = CustomExplanations:GetPendingResponses(target, true)
         -- A single unfinished order is useful here too: the customer may ask
         -- for the destination character without having requested two items.
         if #contexts >= 1 then
@@ -706,7 +784,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             local assignments = subMenu:CreateButton(prefix .. L('To who send'), function()
                 CustomExplanations:SendAssignments(target)
             end)
-            assignments:SetTooltip(function(tooltip, elementDescription)
+            SetMenuTooltip(assignments,function(tooltip, elementDescription)
                 GameTooltip_AddNormalLine(tooltip,
                     HironCraftScan.MakeTextWhite(L('Send every unfinished item or profession with its crafter.')))
             end)
@@ -714,7 +792,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
             if #contexts > 1 then
                 local activeOrder = subMenu:CreateButton(prefix .. L('Active order'))
-                activeOrder:SetTooltip(function(tooltip, elementDescription)
+                SetMenuTooltip(activeOrder,function(tooltip, elementDescription)
                     GameTooltip_AddNormalLine(tooltip,
                         HironCraftScan.MakeTextWhite(L('Choose the order for message tags, including declined orders for {reagent_issues}.')))
                 end)
@@ -741,7 +819,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             end
         end
 
-        if next(HironCraftScan.DB.settings.explanations) then
+        if #uiExplanations>0 then
             subMenu:CreateDivider();
             local explanationMenu = subMenu
             if foldExplanations then
@@ -749,15 +827,14 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             else
                 subMenu:CreateTitle(prefix .. L("Custom Explanations"));
             end
-            local explanations = CreateUIExplanations();
-            for _, entry in ipairs(explanations) do
+            for _, entry in ipairs(uiExplanations) do
                 local label = entry.label;
                 local text = entry.text;
                 local button = explanationMenu:CreateButton(label, function()
                     CustomExplanations:Send(text, target)
                 end);
 
-                button:SetTooltip(function(tooltip, elementDescription)
+                SetMenuTooltip(button,function(tooltip, elementDescription)
                     GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(text));
                 end);
             end
@@ -788,7 +865,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local marked = mark == choice.mark or (mark == 'diamond' and choice.mark == 'generous')
                 local button = subMenu:CreateButton(prefix .. L(marked and choice.clear or choice.set),
                     function() Set(marked and 'none' or choice.mark) end)
-                button:SetTooltip(Tooltip)
+                SetMenuTooltip(button,Tooltip)
             end
             -- Apart from the coin: a mark of the crafter's own, next to it.
             local problem = tips.IsProblem(target)
@@ -798,7 +875,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                     tips.SetProblem(target, not problem)
                     Redraw()
                 end)
-            problemButton:SetTooltip(function(tooltip)
+            SetMenuTooltip(problemButton,function(tooltip)
                 GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(
                     tips.ProblemIcon() .. ' ' .. L('Problem customer tooltip')))
             end)
@@ -857,7 +934,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 local title = subMenu:CreateButton(prefix .. L('Show in scanner again'), function()
                     SetIgnored(false)
                 end)
-                title:SetTooltip(function(tooltip)
+                SetMenuTooltip(title,function(tooltip)
                     GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.UNIGNORE_TOOLTIP)))
                     if left then
                         GameTooltip_AddNormalLine(tooltip, string.format(L('Ignore ends in %s'),
@@ -868,7 +945,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 -- A time-waster, or a customer whose LF spam should rest for
                 -- a while: ignore for a set time, or for good.
                 local ignoreMenu = subMenu:CreateButton(prefix .. L('Hide in scanner only'))
-                ignoreMenu:SetTooltip(function(tooltip)
+                SetMenuTooltip(ignoreMenu,function(tooltip)
                     GameTooltip_AddNormalLine(tooltip, HironCraftScan.MakeTextWhite(L(LID.IGNORE_TOOLTIP)))
                 end)
                 for _, choice in ipairs({
@@ -883,6 +960,7 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
                 end
             end
         end
+        FitMenu(rootDescription,bounds,existing)
     end
     Menu.ModifyMenu("MENU_UNIT_FRIEND", function(owner, rootDescription, contextData)
         AddChatActions(owner, rootDescription, contextData, false)
