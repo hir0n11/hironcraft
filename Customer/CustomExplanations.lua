@@ -35,7 +35,8 @@ end
 local CustomExplanations = {}
 
 -- Menus fit independently of the optional scaling of the main windows.
--- Keep the native font; fold long groups and scroll any remaining overflow.
+-- Keep the native font and one-click custom replies; scroll overflow instead
+-- of automatically moving those replies into another menu level.
 local MENU_ROW_HEIGHT = 20
 local MENU_NATIVE_ROWS = 12
 local MENU_SCREEN_SHARE = 0.6
@@ -558,20 +559,11 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
             +(HironCraftScan.CustomerPreferences and 2 or 0)+(HironCraftScan.ChatIgnore and 1 or 0)
             +(HironCraftScan.CustomerAttention and #contexts>0 and 1 or 0)
         local matchingRows=1+#crafterRows+#deliveries+#declines
-        local function Layout(collapsed)
-            local rows=(collapsed and 1 or nativeRows)+fixedRows+matchingRows+#uiExplanations
-            local foldExplanations=rows*MENU_ROW_HEIGHT>bounds.height and #uiExplanations>0
-            if foldExplanations then rows=rows-#uiExplanations end
-            local foldMatching=rows*MENU_ROW_HEIGHT>bounds.height
-            if foldMatching then rows=rows-matchingRows end
-            return foldMatching,foldExplanations,rows
-        end
         local collapsed = HironCraftScan.DB.settings.collapse_chat_context
-        local foldMatching,foldExplanations,rows=Layout(collapsed)
-        if not collapsed and rows*MENU_ROW_HEIGHT>bounds.height then
-            collapsed=true
-            foldMatching,foldExplanations=Layout(true)
-        end
+        local rows=(collapsed and 1 or nativeRows)+fixedRows+matchingRows+#uiExplanations
+        local foldMatching=rows*MENU_ROW_HEIGHT>bounds.height
+        -- Only an explicit preference groups all addon actions. In particular,
+        -- long custom-reply lists stay inline and use the native scroll limit.
         local prefix = collapsed and "" or L("HironCraftScan") .. " - "
         local subMenu = collapsed and rootDescription:CreateButton(L("HironCraftScan")) or rootDescription
 
@@ -821,16 +813,11 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
 
         if #uiExplanations>0 then
             subMenu:CreateDivider();
-            local explanationMenu = subMenu
-            if foldExplanations then
-                explanationMenu = subMenu:CreateButton(prefix .. L("Custom Explanations"))
-            else
-                subMenu:CreateTitle(prefix .. L("Custom Explanations"));
-            end
+            subMenu:CreateTitle(prefix .. L("Custom Explanations"));
             for _, entry in ipairs(uiExplanations) do
                 local label = entry.label;
                 local text = entry.text;
-                local button = explanationMenu:CreateButton(label, function()
+                local button = subMenu:CreateButton(label, function()
                     CustomExplanations:Send(text, target)
                 end);
 

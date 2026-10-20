@@ -2144,8 +2144,8 @@ assert(info.responses[101].battleNetCharacters['nextbuyer-realm']
 assert(not info.responses[101].greeting_sent and #bnetSent==beforeRestart, 'new friend request sent or consumed a greeting')
 print('Battle.net scanner tests passed (filters, unique rows, history, manual replies, transport, ID reuse, friends, secrets, opt-out, isolation).')
 
--- On a short game window the chat name menu folds its long lists into
--- submenus: the explanations first, then the manual matching.
+-- On a short game window manual matching can fold, but custom explanations
+-- stay directly accessible in the current menu and use scrolling for overflow.
 do
     local function Node(label)
         local node = { label = label, children = {} }
@@ -2184,26 +2184,26 @@ do
     local tall = Open(1500)
     assert(Find(tall, 'Answer 1') and Find(tall, 'Match'), 'a tall screen folded the menu')
     local medium = Open(1000)
-    local folded = Find(medium, 'Custom Explanations')
-    assert(folded and not folded.title and #folded.children == 12 and not Find(medium, 'Answer 1'),
-        'the explanations were not folded on a shorter screen')
-    assert(Find(medium, 'Match'), 'the manual matching was folded while the menu fit')
+    local explanations = Find(medium, 'Custom Explanations')
+    assert(explanations and explanations.title and Find(medium, 'Answer 1'),
+        'the explanations were hidden in a submenu on a shorter screen')
     local short = Open(700)
     local matching = Find(short, 'MANUAL_MATCHING_TITLE')
     assert(matching and not matching.title and Find(matching, 'Match') and not Find(short, 'Match'),
         'the manual matching was not folded on a short screen')
-    -- The collapsed HironCraftScan submenu folds its lists the same way.
+    assert(Find(short, 'Answer 1'), 'short-screen matching displaced custom replies')
+    -- Explicit grouping still keeps replies directly inside the chosen branch.
     Scan.DB.settings.collapse_chat_context = true
     local collapsedRoot = Open(700)
     local own = Find(collapsedRoot, 'HironCraftScan')
     local ownExplanations = own and Find(own, 'Custom Explanations')
-    assert(ownExplanations and not ownExplanations.title and #ownExplanations.children == 12
-        and not Find(own, 'Answer 1'), 'the collapsed submenu kept its long lists')
+    assert(ownExplanations and ownExplanations.title and Find(own, 'Answer 1'),
+        'explicit grouping added another submenu for replies')
     Scan.DB.settings.collapse_chat_context = nil
     Scan.DB.settings.fit_to_screen = false
-    local independent=Find(Open(700),'Custom Explanations')
-    assert(independent and not independent.title and #independent.children==12,
-        'chat menu fitting incorrectly depended on the main-window scaling switch')
+    local independent=Open(700)
+    assert(Find(independent,'Custom Explanations').title and Find(independent,'Answer 1'),
+        'direct replies incorrectly depended on the main-window scaling switch')
     Scan.DB.settings.fit_to_screen = nil
     UIParent, Scan.DB.settings.explanations = savedParent, savedExplanations
     Scan.ColorizeCrafterName, Scan.Utils.ColorizeProfessionName = savedCrafter, savedProfession

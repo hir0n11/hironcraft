@@ -46,6 +46,16 @@ local function Find(root,text)
     end
 end
 local function Need(root,text) return assert(Find(root,text),'Missing '..text) end
+local function Direct(root,text)
+    for _,child in ipairs(root.children) do if child.text==text then return child end end
+end
+local function AssertInlineReplies(root,explanations)
+    local heading=assert(Direct(root,'HironCraftScan - Custom Explanations') or Direct(root,'Custom Explanations'))
+    assert(heading.kind=='title' and #heading.children==0,'Replies moved into a submenu')
+    for label in pairs(explanations) do
+        if label~='rev' then assert(Direct(root,label),'Reply is not directly accessible: '..label) end
+    end
+end
 local function Record(kind,value,target) actions[#actions+1]={kind=kind,value=value,target=target} end
 
 local crafters,deliveries,declines={},{},{}
@@ -126,14 +136,16 @@ local function AssertOwnedLayout(node)
 end
 local root=Open()
 assert(#actions==0,'Opening the menu performed an action')
-assert(root.scrollHeight==360 and #root.children==13,'Small screen did not group addon actions')
-assert(not Scan.DB.settings.collapse_chat_context,'Adaptive grouping changed saved settings')
+assert(root.scrollHeight==360 and #root.children>12,'Small screen lost addon actions or scrolling')
+assert(not Find(root,'HironCraftScan'),'Small screen automatically grouped custom replies')
+AssertInlineReplies(root,Scan.DB.settings.explanations)
+assert(not Scan.DB.settings.collapse_chat_context,'Adaptive layout changed saved settings')
 for i=1,12 do
     local native=root.children[i]
     assert(native.maxWidth==nil and native.scrollHeight==nil and #native.initializers==1 and native.tooltip==noop,
         'Native description was modified')
 end
-AssertOwnedLayout(Need(root,'HironCraftScan'))
+for i=13,#root.children do AssertOwnedLayout(root.children[i]) end
 assert(not Find(root,'Match Deleted Profession 1') and not Find(root,'Match Disabled Profession 1'))
 local reply=Need(root,longLabel)
 local tooltip={}
@@ -154,15 +166,15 @@ Need(root,'Recraft: '..deliveries[1].label).click()
 assert(actions[#actions].value==deliveries[1],'Recraft payload was truncated')
 Need(root,'Decline reason: Missing mats').click()
 assert(actions[#actions].value==declines[1])
-Need(root,'Save chat text').click()
+Need(root,'HironCraftScan - Save chat text').click()
 assert(actions[#actions].value==44 and actions[#actions].target=='Original chat text')
-Need(root,'To who send').click()
+Need(root,'HironCraftScan - To who send').click()
 assert(actions[#actions].target=='Customer-Realm')
-Need(Need(root,'Active order'),'Item 2 - Crafter2').click()
+Need(Need(root,'HironCraftScan - Active order'),'Item 2 - Crafter2').click()
 assert(Scan.CustomExplanations:GetSelectedResponse('Customer-Realm')==Scan.DB.customers['Customer-Realm'].responses[2])
-Need(Need(root,'Ignore everywhere'),'Ignore for 1 day').click()
+Need(Need(root,'HironCraftScan - Ignore everywhere'),'Ignore for 1 day').click()
 assert(actions[#actions].target=='Customer-Realm' and actions[#actions].value.seconds==86400)
-Need(Need(Need(root,'Customer order state'),'Item 1 - Crafter1'),'Order sent').click()
+Need(Need(Need(root,'HironCraftScan - Customer order state'),'Item 1 - Crafter1'),'Order sent').click()
 assert(actions[#actions].value.responseID==1 and actions[#actions].value.customerName=='Customer-Realm'
     and actions[#actions].target=='sent')
 root.children[1].click()
@@ -181,13 +193,20 @@ assert(settingsTip[1]==longMessage)
 screen.width,screen.height=400,360
 local narrow=Open()
 assert(narrow.scrollHeight==216)
-AssertOwnedLayout(Need(narrow,'HironCraftScan'))
+assert(not Find(narrow,'HironCraftScan'),'Narrow screen hid custom replies behind grouping')
+AssertInlineReplies(narrow,Scan.DB.settings.explanations)
+for i=13,#narrow.children do AssertOwnedLayout(narrow.children[i]) end
 screen.width,screen.height=1600,3000
 local tall=Open()
 assert(not Find(tall,'HironCraftScan'),'Tall menu stayed automatically collapsed')
 assert(Need(tall,'HironCraftScan - Custom Explanations').kind=='title','Tall menu unnecessarily folded')
+AssertInlineReplies(tall,Scan.DB.settings.explanations)
 Scan.DB.settings.collapse_chat_context=true
-assert(Find(Open(),'HironCraftScan'),'Explicit grouping preference ignored')
+local grouped=assert(Find(Open(),'HironCraftScan'),'Explicit grouping preference ignored')
+AssertInlineReplies(grouped,Scan.DB.settings.explanations)
+screen.height=360
+AssertInlineReplies(Need(Open(),'HironCraftScan'),Scan.DB.settings.explanations)
+assert(Scan.DB.settings.collapse_chat_context==true,'Screen size changed explicit grouping preference')
 Scan.DB.settings.collapse_chat_context=false
 
 -- A long recraft history alone must participate in overflow detection.
@@ -205,9 +224,10 @@ empty=Open('MENU_UNIT_BN_FRIEND',{bnetIDAccount=999})
 assert(#empty.children==12 and not empty.scrollHeight)
 Scan.DB.settings.explanations={Price='Choose the price'}
 local bn=Open('MENU_UNIT_BN_FRIEND',{bnetIDAccount=30,chatTarget='Wrong recipient'})
+AssertInlineReplies(bn,Scan.DB.settings.explanations)
 Need(bn,'Price').click()
 assert(actions[#actions].target=='BNET:30')
 assert(not Find(bn,'HironCraftScan - Mark as generous customer'),'BN character-only action leaked')
 screen.width,screen.height=nil,0
 assert(Open().scrollHeight==460,'Invalid UI dimensions did not use safe fallback')
-print('Adaptive menus: native entries, fitting-off, resize, scrolling, clipping, tooltips and callbacks passed')
+print('Adaptive menus: inline replies, explicit-only grouping, native entries, resize, scrolling, clipping and callbacks passed')
