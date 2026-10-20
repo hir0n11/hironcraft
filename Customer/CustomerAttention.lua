@@ -81,6 +81,9 @@ local SHORT_SENT = {
     ['check your orders']=true, ['check ur orders']=true,
     ['заказ у тебя']=true, ['заказ отправлен']=true, ['заказ отправлен тебе']=true,
 }
+for _,phrase in ipairs({'check','chk','chck','check it','check order','check the order','check orders'}) do
+    for _,tail in ipairs({'',' now',' rn',' pls',' plz',' please'}) do SHORT_SENT[phrase..tail]=true end
+end
 for _,word in ipairs({'inc','incoming','incomming','incomin','otw'}) do
     for _,tail in ipairs({'',' now',' rn',' to you',' to u'}) do SHORT_SENT[word..tail]=true end
     SHORT_SENT['order '..word]=true

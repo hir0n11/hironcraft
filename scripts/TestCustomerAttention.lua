@@ -269,4 +269,19 @@ assert(plusRow.customer_answered and plusRow.firstAnsweredAt==4001 and A.State(p
 now=4002;M.MarkReply(plusInfo,{body='++',receivedAt=now})
 assert(plusRow.firstAnsweredAt==4001 and A.KeepAlive(plusOrder,plusRow))
 assert(A.Collect(4060)==0 and A.Collect(4061)==1,'plus confirmation stopped or prematurely rang the reminder')
+-- Screenshot: hi -> check from the customer, followed by omw -> hey from the
+-- crafter. Only check turns the row green; outgoing replies reset the reminder.
+now=4100
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local checkInfo,checkRow,checkOrder=Add('Oldnova-Realm',10,'check-scenario')
+A.Record(checkInfo,{body="Send to Mavu. You choose the price. I'll do it now.",receivedAt=now},false)
+now=4101;M.MarkReply(checkInfo,{body='hi',receivedAt=now})
+assert(checkRow.customer_answered and A.State(checkOrder,checkRow)=='attention')
+now=4102;M.MarkReply(checkInfo,{body='check',receivedAt=now})
+assert(A.State(checkOrder,checkRow)=='sent' and checkRow.firstAnsweredAt==4101)
+now=4103;A.Record(checkInfo,{body='omw',receivedAt=now},false)
+now=4104;A.Record(checkInfo,{body='hey',receivedAt=now},false)
+assert(A.State(checkOrder,checkRow)=='sent' and A.KeepAlive(checkOrder,checkRow))
+assert(checkInfo.lastCrafterReplyAt==4104 and A.Collect(4163)==0 and A.Collect(4164)==1,
+    'check/outgoing replies changed the green state or reminder delay')
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

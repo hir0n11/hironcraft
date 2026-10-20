@@ -25,7 +25,9 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'ordered','orderd','ordred','ordrd','orded','odered','ordering','orderin','orderng',
     'I ordered it',"I've ordered the order",'ordered it rn','ordered for you','order done',
     'made the order','made an order',"I've made an order",'created the order','created an order',
-    'order created','order is created','заказал','заказала','заказано'}
+    'order created','order is created','заказал','заказала','заказано',
+    'check','CHECK','chk','chck','check now','check rn','check pls','check plz','check please',
+    'check it','check it now','check order','check the order','check orders','check the order pls'}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep '}) do
@@ -80,7 +82,11 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'order','orders','preordered','unordered','ordered?', 'not ordered','not yet ordered',
     'I will order it','I am not ordering it','ordered the mats','ordered reagents','ordered on the AH',
     'ordered the recipe','ordered from Amazon','made a list','created a character',
-    'please create the order','did you make an order','created the order if I can'}) do
+    'please create the order','did you make an order','created the order if I can',
+    'check?','can you check','check price','price check','check quality','check skill','check r5',
+    'check +10','check mats','check the materials','check the link','check this','please check quality',
+    'check if I can send','check after getting mats','I will check','not check','check tomorrow',
+    'checking','checks','checker','checklist','unchecked'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end
