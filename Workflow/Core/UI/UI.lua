@@ -234,15 +234,7 @@ professionEventFrame:RegisterEvent("CHAT_MSG_SKILL")
 professionEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 professionEventFrame:SetScript("OnEvent", function()
-    C_Timer.After(0, function()
-        if PT.LoadActiveDB then
-            PT.LoadActiveDB()
-        end
-        if PT.RefreshData then
-            PT:RefreshData()
-        end
-        QueueRefreshUI()
-    end)
+    PT:QueueProfessionRefresh(true)
 end)
 
 
@@ -1009,6 +1001,9 @@ function UI:CreateMainFrame()
 
     self.content = content
     self.frame   = f
+    f:SetScript("OnShow", function()
+        if UI.dirty then QueueRefreshUI() end
+    end)
 
     PT:RegisterVisibilityFrame(
         f,
@@ -1035,7 +1030,10 @@ local function HasNearbyTreasure(profession)
 end
 
 local function CreateProfessionHeader(parent, profession)
-    local header = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    UI.professionHeaders = UI.professionHeaders or {}
+    local header = UI.professionHeaders[profession] or CreateFrame("Button", nil, parent, "BackdropTemplate")
+    UI.professionHeaders[profession] = header
+    header:ClearAllPoints()
     header:SetSize(310, 20)
     if UI.frame then
         MakeDraggable(header, UI.frame)
@@ -1046,7 +1044,8 @@ local function CreateProfessionHeader(parent, profession)
     header:SetBackdropColor(0.10, 0.10, 0.10, 0.85)
 
     if IsFantasy() then
-        header.bgFantasy = header:CreateTexture(nil, "BACKGROUND")
+        header.bgFantasy = header.bgFantasy or header:CreateTexture(nil, "BACKGROUND")
+        header.bgFantasy:Show()
         header.bgFantasy:SetAllPoints()
         header.bgFantasy:SetAtlas("Professions-Specializations-Background-Footer")
         if header.bgFantasy:GetAtlas() then
@@ -1054,14 +1053,14 @@ local function CreateProfessionHeader(parent, profession)
         else
             header.bgFantasy:Hide()
         end
-    end
+    elseif header.bgFantasy then header.bgFantasy:Hide() end
 
-    header.icon = header:CreateTexture(nil, "ARTWORK")
+    header.icon = header.icon or header:CreateTexture(nil, "ARTWORK")
     header.icon:SetSize(16, 16)
     header.icon:SetPoint("LEFT", 4, 0)
     header.icon:SetTexture(profession.icon)
 
-    header.text = header:CreateFontString(nil, "OVERLAY")
+    header.text = header.text or header:CreateFontString(nil, "OVERLAY")
     header.text:SetFont(FONT, 12)
     header.text:SetPoint("LEFT", header, "LEFT", 24, 0)
     header.text:SetJustifyH("LEFT")
@@ -1082,23 +1081,23 @@ local function CreateProfessionHeader(parent, profession)
         header.text:SetText(name)
     end
 
-    header.kpText = header:CreateFontString(nil, "OVERLAY")
+    header.kpText = header.kpText or header:CreateFontString(nil, "OVERLAY")
     header.kpText:SetFont(FONT, 11)
     header.kpText:SetPoint("RIGHT", header, "RIGHT", -17, 0)
     header.kpText:SetJustifyH("RIGHT")
     header.kpText:SetTextColor(0, 1, 0)
 
-    header.mapIcon = header:CreateTexture(nil, "OVERLAY")
+    header.mapIcon = header.mapIcon or header:CreateTexture(nil, "OVERLAY")
     header.mapIcon:SetSize(14, 14)
     header.mapIcon:SetAtlas("poi-islands-table")
     header.mapIcon:Hide()
 
-    header.zealIcon = header:CreateTexture(nil, "OVERLAY")
+    header.zealIcon = header.zealIcon or header:CreateTexture(nil, "OVERLAY")
     header.zealIcon:SetSize(14, 14)
     header.zealIcon:SetPoint("RIGHT", header, "RIGHT", -82, 0)
     header.zealIcon:Hide()
 
-    header.zealText = header:CreateFontString(nil, "OVERLAY")
+    header.zealText = header.zealText or header:CreateFontString(nil, "OVERLAY")
     header.zealText:SetFont(FONT, 11)
     header.zealText:SetJustifyH("LEFT")
     header.zealText:SetPoint("LEFT", header.zealIcon, "RIGHT", 1, 0)
@@ -1152,7 +1151,7 @@ local function CreateProfessionHeader(parent, profession)
         header.zealIcon:Hide()
     end
 
-    header.toggleText = header:CreateFontString(nil, "OVERLAY")
+    header.toggleText = header.toggleText or header:CreateFontString(nil, "OVERLAY")
     header.toggleText:SetFont(FONT, 14, "OUTLINE")
     header.toggleText:SetPoint("RIGHT", header, "RIGHT", -2, 0)
     header.toggleText:SetJustifyH("RIGHT")
@@ -1187,12 +1186,16 @@ local function CreateProfessionHeader(parent, profession)
 
     PT.UI.headers = PT.UI.headers or {}
     table.insert(PT.UI.headers, header)
-
+    header:Show()
     return header
 end
 
 local function CreateInfoRow(parent, textValue, r, g, b)
-    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    UI.infoRows = UI.infoRows or {}
+    UI.infoRowIndex = (UI.infoRowIndex or 0) + 1
+    local row = UI.infoRows[UI.infoRowIndex] or CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    UI.infoRows[UI.infoRowIndex] = row
+    row:ClearAllPoints()
     row:SetSize(310, 18)
 
     if UI.frame then
@@ -1204,14 +1207,14 @@ local function CreateInfoRow(parent, textValue, r, g, b)
     })
     row:SetBackdropColor(0.10, 0.10, 0.10, 0.85)
 
-    row.text = row:CreateFontString(nil, "OVERLAY")
+    row.text = row.text or row:CreateFontString(nil, "OVERLAY")
     row.text:SetFont(FONT, 11)
     row.text:SetPoint("LEFT", 20, 0)
     row.text:SetWidth(260)
     row.text:SetJustifyH("LEFT")
     row.text:SetTextColor(r or 1, g or 0.2, b or 0.2)
     row.text:SetText(textValue or "")
-
+    row:Show()
     return row
 end
 
@@ -1220,7 +1223,10 @@ local function CreateItemRow(parent, item)
         return nil
     end
 
-    local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    UI.rowsByItem = UI.rowsByItem or {}
+    local row = UI.rowsByItem[item] or CreateFrame("Button", nil, parent, "BackdropTemplate")
+    UI.rowsByItem[item] = row
+    row:ClearAllPoints()
     row:SetSize(310, 18)
     if UI.frame then
         MakeDraggable(row, UI.frame)
@@ -1233,7 +1239,8 @@ local function CreateItemRow(parent, item)
     row:SetBackdropColor(0.10, 0.10, 0.10, 0.85)
 
     if IsFantasy() then
-        row.bgFantasy = row:CreateTexture(nil, "BACKGROUND", nil, -1)
+        row.bgFantasy = row.bgFantasy or row:CreateTexture(nil, "BACKGROUND", nil, -1)
+        row.bgFantasy:Show()
         row.bgFantasy:SetPoint("TOPLEFT", 10, 0)
         row.bgFantasy:SetPoint("BOTTOMRIGHT", 0, 0)
         row.bgFantasy:SetAtlas("Professions-Specializations-Background-Dial")
@@ -1242,9 +1249,9 @@ local function CreateItemRow(parent, item)
         else
             row.bgFantasy:Hide()
         end
-    end
+    elseif row.bgFantasy then row.bgFantasy:Hide() end
 
-    row.trackBg = row:CreateTexture(nil, "BACKGROUND")
+    row.trackBg = row.trackBg or row:CreateTexture(nil, "BACKGROUND")
     row.trackBg:SetAllPoints()
     row.trackBg:SetColorTexture(1, 0.8, 0, 0.20)
     row.trackBg:SetShown(item.isTracked)
@@ -1254,12 +1261,12 @@ local function CreateItemRow(parent, item)
         C_Item.RequestLoadItemDataByID(id)
     end
 
-    row.iconBtn = CreateFrame("Button", nil, row)
+    row.iconBtn = row.iconBtn or CreateFrame("Button", nil, row)
     row.iconBtn:SetSize(16, 16)
     row.iconBtn:SetPoint("LEFT", 14, 0)
     row.iconBtn:EnableMouse(true)
 
-    row.icon = row.iconBtn:CreateTexture(nil, "ARTWORK")
+    row.icon = row.icon or row.iconBtn:CreateTexture(nil, "ARTWORK")
     row.icon:SetAllPoints()
 
     local icon = (item.GetIcon and item:GetIcon()) or (id and C_Item.GetItemIconByID(id)) or 134400
@@ -1284,16 +1291,19 @@ local function CreateItemRow(parent, item)
 
     local markup = item.GetCategoryIcon and item:GetCategoryIcon()
     if markup then
-        row.typeFS = row:CreateFontString(nil, "OVERLAY")
+        row.typeFS = row.typeFS or row:CreateFontString(nil, "OVERLAY")
         row.typeFS:SetFont(FONT, 12)
         row.typeFS:SetPoint("LEFT", row.icon, "RIGHT", 2, 0)
         row.typeFS:SetText(markup)
     end
+    if row.typeFS then row.typeFS:SetShown(markup ~= nil and markup ~= false) end
 
-    row.text = row:CreateFontString(nil, "OVERLAY")
+    row.text = row.text or row:CreateFontString(nil, "OVERLAY")
+    row.text:ClearAllPoints()
+    row.text:SetTextColor(1, 1, 1)
     row.text:SetFont(FONT, 11)
 
-    if row.typeFS then
+    if markup then
         row.text:SetPoint("LEFT", row.typeFS, "RIGHT", 4, 0)
     else
         row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
@@ -1320,7 +1330,7 @@ local function CreateItemRow(parent, item)
         row.text:SetTextColor(1, 0.2, 0.2)
     end
 
-    row.value = row:CreateFontString(nil, "OVERLAY")
+    row.value = row.value or row:CreateFontString(nil, "OVERLAY")
     row.value:SetFont(FONT, 11)
     row.value:SetPoint("RIGHT", -4, 0)
     row.value:SetWidth(40)
@@ -1340,7 +1350,7 @@ local function CreateItemRow(parent, item)
         row.value:SetText("")
     end
 
-    row.check = row:CreateTexture(nil, "ARTWORK")
+    row.check = row.check or row:CreateTexture(nil, "ARTWORK")
     row.check:SetSize(12, 12)
     row.check:SetPoint("RIGHT", row.value, "LEFT", -4, 0)
     row.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -1409,7 +1419,7 @@ local function CreateItemRow(parent, item)
 
     PT.UI.itemRows = PT.UI.itemRows or {}
     table.insert(PT.UI.itemRows, row)
-
+    row:Show()
     return row
 end
 
@@ -1463,21 +1473,7 @@ local function FindFirstAvailableProfessionDB()
     return nil, nil
 end
 
-function PT:RefreshUI()
-    if PT.UI then
-        PT.UI.headers = {}
-        PT.UI.itemRows = {}
-    end
-
-    wipe(pendingRowsByItemId)
-
-    local profs
-    if PT.adminShowAllProfessions then
-        profs = PT.GetProfessions(false) or PT.GetProfessions(true)
-    else
-        profs = PT.GetProfessions(true)
-    end
-
+function PT:RefreshUI(useCurrentData)
     local frame = UI:CreateMainFrame()
 
     if PT.UpdateVisibility then
@@ -1491,14 +1487,23 @@ function PT:RefreshUI()
     end
 
     if not frame:IsShown() then
+        UI.dirty = true
         return
+    end
+    UI.dirty = false
+    PT.UI.headers, PT.UI.itemRows = {}, {}
+    UI.infoRowIndex = 0
+    wipe(pendingRowsByItemId)
+    local profs = useCurrentData and PT.professions or nil
+    if not profs then
+        profs = PT.adminShowAllProfessions and PT.GetProfessions(false) or nil
+        profs = profs or PT.GetProfessions(true)
     end
 
     local parent = UI.content
     if not parent then return end
 
     for _, child in ipairs({ parent:GetChildren() }) do
-        child:SetParent(nil)
         child:Hide()
     end
 

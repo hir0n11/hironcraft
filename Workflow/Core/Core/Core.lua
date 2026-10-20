@@ -234,6 +234,32 @@ function PT:RefreshData()
     end
 end
 
+-- Several modules hear the same skill/quest/currency events. Merge their
+-- requests into one data pass and one display pass, including the late-data
+-- retry. Explicit UI actions may still call RefreshUI synchronously.
+local professionRefreshQueued, professionNamesDirty, professionRetryQueued = false, false, false
+function PT:QueueProfessionRefresh(names, retry)
+    professionNamesDirty = professionNamesDirty or names
+    if retry and not professionRetryQueued and C_Timer and C_Timer.After then
+        professionRetryQueued = true
+        C_Timer.After(0.5, function()
+            professionRetryQueued = false
+            PT:QueueProfessionRefresh(true)
+        end)
+    end
+    if professionRefreshQueued then return end
+    professionRefreshQueued = true
+    local function Refresh()
+        professionRefreshQueued = false
+        local updateNames = professionNamesDirty
+        professionNamesDirty = false
+        if updateNames and PT.UpdateAllProfessionNames then PT.UpdateAllProfessionNames() end
+        PT:RefreshData()
+        if PT.RefreshUI then PT:RefreshUI(true) end
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0, Refresh) else Refresh() end
+end
+
 local function InitAutoLootForNewChar()
     if HironCraftProfit_CharConfig.autoLootInitialized then
         return
@@ -293,8 +319,7 @@ if HironCraftProfit_CharConfig.showProfessionsWindow ~= nil then
 end
 
         PT.LoadActiveDB()
-        PT:RefreshData()
-        PT:RefreshUI()
+        PT:QueueProfessionRefresh()
 
         if PT.Settings and PT.Settings.Register then
             PT.Settings:Register()
@@ -320,8 +345,7 @@ end
     elseif event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
         PT.professions = nil
         PT.professionsReady = true
-        PT:RefreshData()
-        PT:RefreshUI()
+        PT:QueueProfessionRefresh()
 
     elseif event == "PLAYER_ENTERING_WORLD"
         or event == "QUEST_LOG_UPDATE"
@@ -329,8 +353,7 @@ end
         or event == "SKILL_LINES_CHANGED"
     then
         PT.professions = nil
-        PT:RefreshData()
-        PT:RefreshUI()
+        PT:QueueProfessionRefresh()
 
     elseif event == "BAG_UPDATE_DELAYED" then
         if not _bagRefreshPending then
@@ -338,8 +361,7 @@ end
             C_Timer.After(0.1, function()
                 _bagRefreshPending = false
                 PT.professions = nil
-                PT:RefreshData()
-                PT:RefreshUI()
+                PT:QueueProfessionRefresh()
             end)
         end
 

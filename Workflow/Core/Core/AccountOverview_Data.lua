@@ -2401,6 +2401,37 @@ function D:HandleResetBoundary()
     return true
 end
 
+local function SaveOverviewState(logout)
+    if IsSafeEnvironment() then D:SaveCurrentCharacterSnapshot() end
+    local chars = HironCraftProfit_DB and HironCraftProfit_DB.accountOverview
+        and HironCraftProfit_DB.accountOverview.chars
+    if chars then
+        for charKey in pairs(chars) do D:CheckFullConcentration(charKey) end
+        if PT.AccountOverview_UI and next(D.pendingFullConc) then
+            PT.AccountOverview_UI:ShowConcentrationNotification()
+        end
+    end
+    if not logout and PT.AccountOverview and PT.AccountOverview.Refresh then PT.AccountOverview:Refresh() end
+end
+
+local snapshotRequest
+local function RequestOverviewSnapshot(logout)
+    if logout then
+        snapshotRequest = nil -- The last character state must reach SavedVariables now.
+        SaveOverviewState(true)
+        return
+    end
+    if snapshotRequest then return end
+    local request = {}
+    snapshotRequest = request
+    local function Save()
+        if snapshotRequest ~= request then return end
+        snapshotRequest = nil
+        SaveOverviewState(false)
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0.1, Save) else Save() end
+end
+
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_LOGOUT")
@@ -2453,30 +2484,7 @@ ev:SetScript("OnEvent", function(_, event, unit)
             end
         end
 	end
-	if IsSafeEnvironment() then
-		D:SaveCurrentCharacterSnapshot()
-	end
-
-	local chars = HironCraftProfit_DB
-		and HironCraftProfit_DB.accountOverview
-		and HironCraftProfit_DB.accountOverview.chars
-
-	if chars then
-		for charKey in pairs(chars) do
-			D:CheckFullConcentration(charKey)
-		end
-
-        if PT.AccountOverview_UI and next(D.pendingFullConc) then
-            PT.AccountOverview_UI:ShowConcentrationNotification()
-        end
-	end
-
-    if event ~= "PLAYER_LOGOUT"
-       and PT.AccountOverview
-       and PT.AccountOverview.Refresh
-    then
-        PT.AccountOverview:Refresh()
-    end
+    RequestOverviewSnapshot(event == "PLAYER_LOGOUT")
 end)
 
 if not D._concTicker then

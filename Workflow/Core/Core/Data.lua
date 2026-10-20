@@ -159,21 +159,5 @@ SafeRegisterEvent(f, "PLAYER_ENTERING_WORLD")
 
 f:SetScript("OnEvent", function(_, event)
     PT.tradeSkillReady = true
-    PT.UpdateAllProfessionNames()
-    PT:RefreshData()
-    PT:RefreshUI()
-
-    if C_Timer then
-        C_Timer.After(0.5, function()
-            if PT.UpdateAllProfessionNames then
-                PT.UpdateAllProfessionNames()
-            end
-            if PT.RefreshData then
-                PT:RefreshData()
-            end
-            if PT.RefreshUI then
-                PT:RefreshUI()
-            end
-        end)
-    end
+    PT:QueueProfessionRefresh(true, true)
 end)

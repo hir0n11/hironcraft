@@ -19,6 +19,7 @@ local unpack = unpack or table.unpack
 local frame = nil
 local chunks, report = nil, nil
 local calendarReport, loadedFrom, loadedTo = nil, nil, nil
+local loadedOpenEvents
 local loading = false
 local backgroundLoad, refreshAfterLoad = false, false
 local cancelLoad = nil
@@ -1156,11 +1157,12 @@ function W.Reload(background)
         if token == loadToken and frame:IsShown() then
             Progress(string.format(L('Loading analytics %d / %d'), done, total))
         end
-    end, function(loaded)
+    end, function(loaded, openEvents)
         completed = true
         if token ~= loadToken or not frame:IsShown() then return end
         cancelLoad = nil
         chunks = loaded
+        loadedOpenEvents = openEvents
         loading, backgroundLoad = false, false
         local again = refreshAfterLoad
         refreshAfterLoad = false
@@ -1176,7 +1178,9 @@ end
 
 local function RefreshSelection()
     local from, to = RequiredRange()
-    if not loading and chunks and loadedFrom <= from and loadedTo >= to then
+    local root = Scan.AnalyticsLog.Root and Scan.AnalyticsLog.Root()
+    local currentOpen = not loadedOpenEvents or (root and root.open.events == loadedOpenEvents)
+    if not loading and chunks and currentOpen and loadedFrom <= from and loadedTo >= to then
         W.Rebuild()
     else
         W.Reload()
@@ -1220,7 +1224,7 @@ function W.Release()
     tidyToken = tidyToken + 1
     rebuildPending, refreshAfterLoad, backgroundLoad, nameRedrawAt = nil, false, false, nil
     chunks, report, returns, calendarReport = nil, nil, nil, nil
-    loadedFrom, loadedTo, loading = nil, nil, false
+    loadedFrom, loadedTo, loadedOpenEvents, loading = nil, nil, nil, false
     -- What was unpacked stays for the next opening, within the journal's limit.
     if Scan.AnalyticsLog then Scan.AnalyticsLog.TrimCache() end
     if frame then

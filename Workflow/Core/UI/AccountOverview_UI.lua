@@ -491,6 +491,7 @@ function UI:SetSortColumn(key)
 end
 
 local function CreateSortArrow(holder, key)
+    if holder.sortArrow then holder.sortArrow:Hide() end
     if IsManualOrder() then
         return nil
     end
@@ -501,10 +502,13 @@ local function CreateSortArrow(holder, key)
         return nil
     end
 
-    local arrow = holder:CreateTexture(nil, "OVERLAY")
+    local arrow = holder.sortArrow or holder:CreateTexture(nil, "OVERLAY")
+    holder.sortArrow = arrow
     arrow:SetSize(12, 12)
     arrow:SetAtlas("uitools-icon-chevron-down")
     arrow:SetRotation(state.dir == "asc" and math.pi or 0)
+    arrow:ClearAllPoints()
+    arrow:Show()
 
     return arrow
 end
@@ -547,7 +551,12 @@ local function LayoutConcLine(line)
 end
 
 local function CreateHeader(parent)
-    local header = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local header = parent.hironReusableHeader or CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    parent.hironReusableHeader = header
+    header:SetParent(parent)
+    header:ClearAllPoints()
+    header.holders = header.holders or {}
+    for _, holder in pairs(header.holders) do holder:Hide() end
     header:SetPoint("TOPLEFT", 12, -70)
     header:SetPoint("TOPRIGHT", -12, -70)
     header:SetHeight(HEADER_H)
@@ -562,17 +571,20 @@ local function CreateHeader(parent)
 
     local function AddInfoIcon(holder, fs, tipText)
         if not tipText then
+            if holder.infoIcon then holder.infoIcon:Hide() end
             return
         end
 
-        local info = CreateFrame("Frame", nil, holder)
+        local info = holder.infoIcon or CreateFrame("Frame", nil, holder)
+        holder.infoIcon = info
         info:SetSize(20, 20)
         info:SetFrameLevel(holder:GetFrameLevel() + 5)
 
         info:SetPoint("LEFT", fs, "RIGHT", -3, 4)
         info:EnableMouse(true)
 
-        local icon = info:CreateTexture(nil, "OVERLAY")
+        local icon = info.icon or info:CreateTexture(nil, "OVERLAY")
+        info.icon = icon
         icon:SetAllPoints()
         icon:SetTexture("Interface\\COMMON\\help-i")
 
@@ -583,14 +595,17 @@ local function CreateHeader(parent)
         info:SetScript("OnLeave", function()
             UI:HideHeaderTooltip()
         end)
-
+        info:Show()
         return info
     end
 
     for _, c in ipairs(visibleCols) do
         local colKey = c.key
 
-        local holder = CreateFrame("Button", nil, header)
+        local holder = header.holders[colKey] or CreateFrame("Button", nil, header)
+        header.holders[colKey] = holder
+        holder:ClearAllPoints()
+        holder:Show()
         holder:SetPoint("LEFT", header, "LEFT", x, 0)
         holder:SetSize(c.w, HEADER_H)
         holder:RegisterForClicks("LeftButtonUp")
@@ -612,7 +627,9 @@ local function CreateHeader(parent)
                 arrow:SetPoint("LEFT", holder, "LEFT", 0, 0)
             end
 
-            local fs = holder:CreateFontString(nil, "OVERLAY")
+            local fs = holder.text or holder:CreateFontString(nil, "OVERLAY")
+            holder.text = fs
+            fs:ClearAllPoints()
             fs:SetFont(FONT, 12, "")
             fs:SetPoint("LEFT", holder, "LEFT", arrow and 14 or 0, 0)
             fs:SetJustifyH("LEFT")
@@ -621,7 +638,9 @@ local function CreateHeader(parent)
 
             AddInfoIcon(holder, fs, tipText)
         else
-            local fs = holder:CreateFontString(nil, "OVERLAY")
+            local fs = holder.text or holder:CreateFontString(nil, "OVERLAY")
+            holder.text = fs
+            fs:ClearAllPoints()
             fs:SetFont(FONT, 12, "")
             fs:SetPoint("CENTER", holder, "CENTER", 0, 0)
             fs:SetJustifyH("CENTER")
@@ -640,6 +659,7 @@ local function CreateHeader(parent)
         x = x + c.w
     end
 
+    header:Show()
     return header
 end
 
@@ -1359,7 +1379,6 @@ function UI:RebuildHeader()
 
     if f.header then
         f.header:Hide()
-        f.header:SetParent(nil)
         f.header = nil
     end
 
@@ -1660,8 +1679,9 @@ function UI:Create()
 
     f.header = CreateHeader(f)
 
-	CreateRow = function(parent)
-		local row = CreateFrame("Frame", nil, parent)
+	CreateRow = function(parent, row)
+        if not row then
+		row = CreateFrame("Frame", nil, parent)
 		row:SetHeight(ROW_H)
 		row:SetWidth(math.max(1, parent:GetWidth()))
 		row:EnableMouse(true)
@@ -1694,13 +1714,19 @@ function UI:Create()
 		row.highlight:SetAlpha(0)
 
 		row.isCurrent = false
-		row.cells = {}
+		row.allCells = {}
+        end
+
+        row:SetWidth(math.max(1, parent:GetWidth()))
+        row.cells = {}
+        for _, cell in pairs(row.allCells) do cell:Hide() end
 
 		local filters = PT.AccountOverview_Data:GetColumnFilters()
 		local visibleCols = GetVisibleColumns(f:GetWidth(), filters)
 		local x = 8
 
 		for _, c in ipairs(visibleCols) do
+            if not row.allCells[c.key] then
 			if c.key == "profgear" then
 				local cell = CreateFrame("Frame", nil, row)
 				cell:SetPoint("LEFT", row, "LEFT", x, 0)
@@ -1790,7 +1816,7 @@ function UI:Create()
 					cell.icons[i] = iconFrame
 				end
 
-				row.cells[c.key] = cell
+				row.allCells[c.key] = cell
 
 			elseif c.key == "zeal" then
 				local cell = CreateFrame("Frame", nil, row)
@@ -1819,7 +1845,7 @@ function UI:Create()
 					cell.lines[i] = line
 				end
 
-				row.cells[c.key] = cell
+				row.allCells[c.key] = cell
 
 			elseif c.key == "c_df" or c.key == "c_tww" or c.key == "c_mid" then
 				local cell = CreateFrame("Frame", nil, row)
@@ -1868,7 +1894,7 @@ function UI:Create()
 					cell.lines[i] = line
 				end
 
-				row.cells[c.key] = cell
+				row.allCells[c.key] = cell
 
 			elseif c.key == "kp_df" or c.key == "kp_tww" or c.key == "kp_mid" then
 				local cell = CreateFrame("Frame", nil, row)
@@ -1944,7 +1970,7 @@ function UI:Create()
 					cell.lines[i] = line
 				end
 
-				row.cells[c.key] = cell
+				row.allCells[c.key] = cell
 
 			elseif c.key == "dmf" then
 				local cell = CreateFrame("Frame", nil, row)
@@ -1989,7 +2015,7 @@ function UI:Create()
 					cell.lines[i] = line
 				end
 
-				row.cells[c.key] = cell
+				row.allCells[c.key] = cell
 
 			elseif c.key == "tw" then
 				local cell = CreateFrame("Frame", nil, row)
@@ -2014,7 +2040,7 @@ function UI:Create()
 				cell.mark:SetDrawLayer("OVERLAY", 7)
 				cell.mark:Hide()
 
-				row.cells.tw = cell
+				row.allCells.tw = cell
 
 			else
 				local fs = row:CreateFontString(nil, "OVERLAY")
@@ -2059,9 +2085,15 @@ function UI:Create()
 				end
 
 				fs:SetText("—")
-				row.cells[c.key] = fs
+				row.allCells[c.key] = fs
 			end
-
+            end
+            local cell = row.allCells[c.key]
+            row.cells[c.key] = cell
+            cell:ClearAllPoints()
+            cell:SetWidth(c.w)
+            cell:SetPoint("LEFT", row, "LEFT", x, c.key == "skin" and -2 or 0)
+            cell:Show()
 			x = x + c.w
 		end
 
@@ -3011,6 +3043,7 @@ function UI:Refresh()
         f.scroll.hoveredRow = nil
     end
     f.content.rows = {}
+    f.content.rowPool = f.content.rowPool or {}
 
     for _, c in ipairs({ f.content:GetChildren() }) do
         c:Hide()
@@ -3020,7 +3053,8 @@ function UI:Refresh()
     local y = -2
 
     for i, charKey in ipairs(chars) do
-        local row = CreateRow(f.content)
+        local row = CreateRow(f.content, f.content.rowPool[i])
+        f.content.rowPool[i] = row
         row.charKey = charKey
         table.insert(f.content.rows, row)
 
@@ -3039,8 +3073,10 @@ function UI:Refresh()
             row.highlight:SetAlpha(0)
         end
 
+        row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, y)
         row:SetPoint("RIGHT", f.content, "RIGHT", 0, 0)
+        row:Show()
 
         if row.cells.char then
             local isCurrent = (charKey == GetCharacterKey())

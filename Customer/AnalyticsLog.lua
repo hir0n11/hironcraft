@@ -14,6 +14,9 @@ local Scan = select(2, ...)
 -- by the game's own encoder (CBOR, deflate, base64), which is many times
 -- faster than the Lua libraries; without f it is LibSerialize + LibDeflate,
 -- as everything was before 0.4.94 and still is where the encoder is missing.
+-- Full raw chunks wait in root.pending (also saved on reload), then become
+-- packed stores one at a time. Queries read both forms, without losing the
+-- recent mutable tail used to retract throttled greetings.
 --
 -- Event fields (short, they are stored by the thousand):
 --   k  kind: r request to us, g greeting sent,
@@ -35,7 +38,10 @@ local Scan = select(2, ...)
 local M = {}
 Scan.AnalyticsLog = M
 
-M.STORE_LIMIT = 2000
+M.STORE_LIMIT = 500
+-- Keep the complete retraction window mutable (a throttled greeting can be
+-- withdrawn after Record returns). Older chunks are packed off the chat path.
+M.RECENT_EVENTS = 201
 M.QUIET_SECONDS = 3 * 60
 -- Unpacked events kept in memory at most (about 0.6 KB each).
 M.CACHE_EVENTS = 40000
@@ -65,6 +71,7 @@ function M.Root()
     local analytics = Scan.DB and Scan.DB.analytics
     if type(analytics) ~= 'table' then return nil end
     if type(analytics.stores) ~= 'table' then analytics.stores = {} end
+    if type(analytics.pending) ~= 'table' then analytics.pending = {} end
     if type(analytics.open) ~= 'table' or type(analytics.open.events) ~= 'table' then
         analytics.open = { events = {} }
     end
@@ -204,6 +211,7 @@ end
 
 -- A store's events, or nil when its data cannot be read.
 local function Unpack(store)
+    if type(store.events) == 'table' then return store.events end
     if store.f == 'n' then return NativeDecode(store.data) end
     return Decode(store.data)
 end
@@ -228,20 +236,71 @@ local function WithoutMentions(events)
     return kept
 end
 
--- Close the open store into a compressed one.
+local function Describe(events)
+    local store = { events=events, n=#events, maxQ=0 }
+    for _, event in ipairs(events) do
+        local stamp = tonumber(event.t) or time()
+        local ends = event.k == 'p' and tonumber(event.e) or stamp
+        store.from = math.min(store.from or stamp, stamp)
+        store.to = math.max(store.to or stamp, stamp, ends or stamp)
+        if event.q and not event.m then
+            store.minQ = math.min(store.minQ or event.q, event.q)
+            store.maxQ = math.max(store.maxQ or event.q, event.q)
+        end
+    end
+    return store
+end
+
+local function Rotate(root, keep)
+    local events = root.open.events
+    local count = math.max(0, #events - (keep or 0))
+    if count == 0 then return false end
+    for first=1,count,M.STORE_LIMIT do
+        local chunk = {}
+        for index=first,math.min(first+M.STORE_LIMIT-1,count) do chunk[#chunk+1]=events[index] end
+        root.pending[#root.pending+1] = Describe(chunk)
+    end
+    local tail = {}
+    for index=count+1,#events do tail[#tail+1]=events[index] end
+    root.open = Describe(tail)
+    return true
+end
+
+local maintenanceQueued = setmetatable({}, {__mode='k'})
+local function ScheduleMaintenance(root, delay)
+    if maintenanceQueued[root] or not (C_Timer and C_Timer.After) then return end
+    maintenanceQueued[root] = true
+    C_Timer.After(delay or 0.1, function()
+        maintenanceQueued[root] = nil
+        if M.Root() ~= root then return end
+        if InCombatLockdown and InCombatLockdown() then ScheduleMaintenance(root, 2); return end
+        local ok, err = pcall(M.Maintain)
+        if not ok then
+            -- Pending raw chunks are SavedVariables too. A failed encoder or
+            -- reload cannot silently discard them, and reads still see them.
+            if Scan.ReportError then Scan.ReportError('Analytics maintenance', err) end
+            ScheduleMaintenance(root, 10)
+        end
+    end)
+end
+
+-- Explicit close: at most one bounded chunk per call. Commit only after Pack
+-- succeeds; both the open tail and queued chunks remain readable until then.
 function M.CloseOpenStore()
     local root = M.Root()
-    local open = root and root.open
-    if not open or #open.events == 0 then return false end
-    local events = WithoutMentions(open.events) or open.events
+    if not root then return false end
+    if #root.pending == 0 then Rotate(root, 0) end
+    local store = root.pending[1]
+    if not store then return false end
+    local events = WithoutMentions(store.events) or store.events
     if #events > 0 then
         local data, format = Pack(events)
-        root.stores[#root.stores + 1] = {
-            from = open.from, to = open.to, n = #events, maxQ = open.maxQ,
-            data = data, f = format,
-        }
+        local packed = Describe(events)
+        packed.events, packed.data, packed.f = nil, data, format
+        root.stores[#root.stores+1] = packed
     end
-    root.open = { events = {} }
+    table.remove(root.pending, 1)
+    if #root.pending > 0 then ScheduleMaintenance(root) end
     return true
 end
 
@@ -261,14 +320,17 @@ local function PruneEmpty(root)
     if kept then root.stores = kept end
 end
 
--- Closing costs a moment of compression: done behind the loading screen, when
--- a month is over or the store is full.
+-- One bounded compression per callback, independently of the three-minute
+-- analytics-exchange quiet period. Never compress the recent retraction tail.
 function M.Maintain()
     local root = M.Root()
     if root then PruneEmpty(root) end
     local open = root and root.open
-    if not open or #open.events == 0 then return end
+    if not open then return end
     if #open.events >= M.STORE_LIMIT or (open.from and Month(open.from) ~= Month(time())) then
+        Rotate(root, M.RECENT_EVENTS)
+    end
+    if #root.pending > 0 then
         M.CloseOpenStore()
     end
 end
@@ -295,8 +357,15 @@ local function Append(event, source)
     open.from = math.min(open.from or event.t, event.t)
     local ends = event.k == 'p' and tonumber(event.e) or event.t
     open.to = math.max(open.to or event.t, event.t, ends or event.t)
-    if event.q then open.maxQ = event.q end
+    if event.q then
+        open.minQ = math.min(open.minQ or event.q, event.q)
+        open.maxQ = event.q
+    end
     if Scan.ReturnPrices then Scan.ReturnPrices.Observe(event) end
+    if #open.events >= M.STORE_LIMIT then
+        Rotate(root, M.RECENT_EVENTS)
+        ScheduleMaintenance(root)
+    end
     Changed()
     return event
 end
@@ -595,6 +664,7 @@ local usedAt, useClock = setmetatable({}, { __mode = 'k' }), 0
 local unpackedCount, unpackedMs = 0, 0
 
 local function Events(store)
+    if type(store.events) == 'table' then return store.events end
     local events = unpacked[store]
     if not events then
         local started = debugprofilestop and debugprofilestop()
@@ -660,9 +730,15 @@ function M.LoadRange(from, to, progress, done)
     local root = M.Root()
     if not root then done({}) return end
     M.MigrateLegacy()
+    -- A rotation while this load yields must not move its original open
+    -- events into a store outside 'wanted' and make them disappear from it.
+    local openSnapshot = root.open.events
     local wanted = {}
     for _, store in ipairs(root.stores) do
         if Overlaps(store, from or 0, to or math.huge) then wanted[#wanted + 1] = store end
+    end
+    for _, store in ipairs(root.pending) do
+        if Overlaps(store, from or 0, to or math.huge) then wanted[#wanted+1] = store end
     end
     local chunks, step = {}, 0
     unpackedCount, unpackedMs = 0, 0
@@ -676,13 +752,13 @@ function M.LoadRange(from, to, progress, done)
         current.perf = current.perf or {}
         current.perf.at, current.perf.stores, current.perf.native = time(), #wanted, native
         current.perf.unpacked, current.perf.unpackMs = unpackedCount, math.floor(unpackedMs + 0.5)
-        chunks[#chunks + 1] = current.open.events
+        chunks[#chunks + 1] = openSnapshot
         local pending = current.presencePending
         if pending and pending.e > pending.t then
             -- A snapshot, not the mutable saved table or a sync-able record.
             chunks[#chunks + 1] = { { k = 'p', t = pending.t, e = pending.e, f = pending.f, w = pending.w } }
         end
-        done(chunks)
+        done(chunks, openSnapshot)
     end
     local function Next()
         step = step + 1
@@ -751,19 +827,61 @@ function M.OwnSince(from, limit, skip)
     local root = M.Root()
     if not root then return {}, from, false end
     from = tonumber(from) or 0
+    local capacity = limit and math.max(1, math.floor(limit)) + 1 or math.huge
+    local candidates = {}
+    local function Candidate(store, open)
+        if open or (tonumber(store.maxQ) or 0) > from then
+            candidates[#candidates+1] = {store=store, lower=tonumber(store.minQ) or from+1}
+        end
+    end
+    for _, store in ipairs(root.stores) do Candidate(store) end
+    for _, store in ipairs(root.pending) do Candidate(store) end
+    Candidate(root.open, true)
+    table.sort(candidates, function(a,b) return a.lower < b.lower end)
+
+    -- Keep only the earliest batch plus one lookahead, even for old/out-of-
+    -- order stores. Unknown legacy bounds are learned on the first read;
+    -- subsequent batches skip later stores without unpacking their history.
     local found = {}
-    local function Collect(events)
-        for _, event in ipairs(events) do
-            if event.q and event.q > from and not event.m and not (skip and skip[event.k]) then
-                found[#found + 1] = event
+    local function Keep(event)
+        if #found < capacity then
+            found[#found+1] = event
+            local index = #found
+            while index > 1 do
+                local parent = math.floor(index/2)
+                if found[parent].q >= found[index].q then break end
+                found[parent],found[index] = found[index],found[parent]
+                index = parent
+            end
+        elseif event.q < found[1].q then
+            found[1] = event
+            local index = 1
+            while index*2 <= #found do
+                local child = index*2
+                if child < #found and found[child+1].q > found[child].q then child=child+1 end
+                if found[index].q >= found[child].q then break end
+                found[index],found[child] = found[child],found[index]
+                index = child
             end
         end
     end
-    for _, store in ipairs(root.stores) do
-        if (tonumber(store.maxQ) or 0) > from then Collect(Events(store)) end
+    local function Collect(store)
+        local events = Events(store)
+        local minQ
+        for _, event in ipairs(events) do
+            if event.q and not event.m then minQ=math.min(minQ or event.q,event.q) end
+            if event.q and event.q > from and not event.m and not (skip and skip[event.k]) then
+                Keep(event)
+            end
+        end
+        -- Preserve unreadable legacy stores and their metadata untouched.
+        if minQ then store.minQ=minQ end
+    end
+    for _, candidate in ipairs(candidates) do
+        if #found >= capacity and candidate.lower > found[1].q then break end
+        Collect(candidate.store)
     end
     M.TrimCache()
-    Collect(root.open.events)
     table.sort(found, function(lhs, rhs) return lhs.q < rhs.q end)
     local batch = {}
     for index = 1, math.min(limit or #found, #found) do
@@ -790,11 +908,15 @@ function M.UntippedCustomers()
         end
     end
     local root = M.Root()
-    for _, event in ipairs(root and root.open.events or {}) do
-        if event.k == 'd' and event.st == 'f' and event.tip == nil and type(event.c) == 'string' then
-            names[#names + 1] = event.c
+    local function Collect(events)
+        for _, event in ipairs(events) do
+            if event.k == 'd' and event.st == 'f' and event.tip == nil and type(event.c) == 'string' then
+                names[#names + 1] = event.c
+            end
         end
     end
+    Collect(root and root.open.events or {})
+    for _, store in ipairs(root and root.pending or {}) do Collect(store.events) end
     return names
 end
 
@@ -812,7 +934,10 @@ function M.Startup()
             analytics.untipped_silver = 1
             pcall(Scan.Generous.MarkUntipped, M.UntippedCustomers())
         end
-        pcall(M.Maintain)
+        -- Old oversized open stores are split cheaply now; their individual
+        -- chunks are compressed after login, not all during the loading frame.
+        if #M.Root().open.events >= M.STORE_LIMIT then Rotate(M.Root(), M.RECENT_EVENTS) end
+        if #M.Root().pending > 0 then ScheduleMaintenance(M.Root()) end
     end
 end
 
@@ -821,15 +946,17 @@ end
 function M.VisitReturnEvents(visit, done)
     local root = M.Root()
     if not root then done(); return end
+    local openSnapshot = root.open.events
     local stores, index = {}, 0
     for _, store in ipairs(root.stores) do stores[#stores + 1] = store end
+    for _, store in ipairs(root.pending) do stores[#stores + 1] = store end
     local function Visit(events)
         for _, event in ipairs(events or {}) do if event.k == 'c' then visit(event) end end
     end
     local function Step()
         index = index + 1
         local store = stores[index]
-        if not store then Visit(root.open.events); done(); return end
+        if not store then Visit(openSnapshot); done(); return end
         Visit(unpacked[store] or Unpack(store))
         if C_Timer and C_Timer.After then C_Timer.After(0, Step) else Step() end
     end
