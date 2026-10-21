@@ -28,7 +28,8 @@ for _,s in ipairs({'please send to Favu',"I'll send soon",'I haven’t sent yet'
     assert(A.Classify(s)~='sent',s)
 end
 local variants={'sent','send','sending','sendin','sended','sented','sendt','sendet',
-    'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done'}
+    'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done',
+    'senidng','sendign','sedning','sendnig'}
 for _,word in ipairs(variants) do
     for _,message in ipairs({word,word:upper()..'!','I '..word..' the order to Favu',word..' ty'}) do
         assert(A.Classify(message)=='sent','unrecognized confirmation: '..message)
@@ -304,4 +305,18 @@ assert(listedCount==3 and Scan.OrderToResponse(olderOrder)==olderRow
     and Scan.OrderToResponse(unrelatedOrder)==unrelatedRow,'order quantity changed scanner rows')
 assert(A.KeepAlive(countedOrder,countedRow),'numeric confirmation was treated as a completed craft')
 assert(A.Collect(4260)==0 and A.Collect(4261)==1,'numeric confirmation changed the minute reminder delay')
+-- Screenshot: a misspelled "senidng" followed by the crafter's outgoing
+-- "omw" keeps the row green and restarts only the normal reminder clock.
+now=4300
+Scan.DB.customers={};Scan.DB.listed_orders={}
+local typoInfo,typoRow,typoOrder=Add('Eminooni-Realm',14,'sending-typo')
+A.Record(typoInfo,{body="Send to Lavu. You choose the price. I'll do it now.",receivedAt=now},false)
+now=4301;M.MarkReply(typoInfo,{body='senidng',receivedAt=now})
+assert(typoRow.customer_answered and A.State(typoOrder,typoRow)=='sent',
+    'screenshot sending typo did not turn the active row green')
+now=4302;A.Record(typoInfo,{body='omw',receivedAt=now},false)
+assert(A.State(typoOrder,typoRow)=='sent' and A.KeepAlive(typoOrder,typoRow),
+    'outgoing omw cleared the sending confirmation or completed the craft')
+assert(typoInfo.lastCrafterReplyAt==4302 and A.Collect(4361)==0 and A.Collect(4362)==1,
+    'sending typo or outgoing omw changed the one-minute reminder delay')
 print('Customer attention passed: classification, two colours, last actual reply, cadence, aliases, snooze, stop conditions, reload, late packets and request replacement.')

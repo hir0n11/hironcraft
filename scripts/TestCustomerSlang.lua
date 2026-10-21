@@ -11,6 +11,7 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'placed the order now','I posted it','I have just submitted the order',"I've placed it already",
     'mailed it','delivered the order','dispatched it','sentit','sendit','sntit','sndit','sendedit','donezo',
     'snet','sennt','sentt','senttt','sendd','senddd','snding','sendng','donee','doneee',
+    'senidng','sendign','sedning','sendnig',
     'кинул','закинула заказ','скинул тебе','уже оформил заказ','отправляю заказ','заказ у тебя',
     'order placed','order submitted','the order has been posted','it has been submitted',
     'order is posted','order is on the way','its otw',"it's inc",'on its way to you','on the air rn',
@@ -96,7 +97,8 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'placed 2 orders later','placed 2 orders if I can','2 orders placed after buying mats',
     '0 orders placed','zero orders placed','no orders placed','placed 0 orders',
     '2 mats placed','placed two mats','2 orders listed on the AH','placed 2 orders on auction',
-    'placed 2 orders it','2 orders','two orders','the orders'}) do
+    'placed 2 orders it','2 orders','two orders','the orders',
+    'senidngly','resenidng','unsenidng','sendigner'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end

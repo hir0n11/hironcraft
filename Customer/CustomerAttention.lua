@@ -36,7 +36,8 @@ local function Plain(s)
 end
 local SEND_WORDS = {'sent','send','sending','sendin','sended','sented','sendt','sendet',
     'senting','sendig','sendingg','sends','sned','sedn','snt','snd','done',
-    'snet','sennt','sentt','senttt','sendd','senddd','snding','sendng','donee','doneee'}
+    'snet','sennt','sentt','senttt','sendd','senddd','snding','sendng','donee','doneee',
+    'senidng','sendign','sedning','sendnig'}
 local IMMEDIATE_SEND = {}
 for _,object in ipairs({'','it ','the order ','order '}) do
     for _,when in ipairs({'now','right now','rn','r n','rightnow'}) do IMMEDIATE_SEND[object..when]=true end
