@@ -1397,6 +1397,7 @@ function HironCraftScan.Utils.ChatHistoryTooltip:new()
 end
 
 function HironCraftScan.Utils.ChatHistoryTooltip:Hide()
+    self.shiftSuppressed = false
     if self.reagentTooltip then self.reagentTooltip:Hide() end
     if self.tooltip then
         self.tooltip:Hide()
@@ -1419,8 +1420,19 @@ local function WantsKeyHints(anchor)
     return type(anchor) == 'table' and anchor.hironExplanationRow == true
         and IsShiftKeyDown ~= nil and IsShiftKeyDown() and true or false
 end
+local function ChatTooltipView(anchor)
+    if not WantsKeyHints(anchor) then return 'history' end
+    local settings=HironCraftScan.DB and HironCraftScan.DB.settings
+    return settings and settings.hide_explanation_shift_tooltip==true and 'hidden' or 'keys'
+end
+local function ChatTooltipOwnerValid(anchor,order)
+    if anchor.order and anchor.order~=order then return false end
+    if anchor.hironExplanationRow and anchor.order~=order then return false end
+    return not anchor.IsVisible or anchor:IsVisible()
+end
 
 function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, header, includeBinds)
+    if not ChatTooltipOwnerValid(anchor,order) then self:Hide();return end
     if not self.tooltip then
         self.tooltip = CreateFrame('GameTooltip', name, UIParent, 'GameTooltipTemplate')
         self.tooltip.TextLeft2:SetFontObject(ChatFrame1:GetFontObject())
@@ -1434,15 +1446,23 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
     local customerInfo = HironCraftScan.OrderToCustomerInfo(order)
     local response = HironCraftScan.OrderToResponse(order)
     if not response or not customerInfo then self:Hide(); return end
-    local reagentAudit = HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.GetForOrder(order)
+    local view = ChatTooltipView(anchor)
+    local reagentAudit = view~='hidden' and HironCraftScan.ReagentAudit and HironCraftScan.ReagentAudit.GetForOrder(order)
     local historyCount = #(customerInfo.chat_history or {})
     local greetingSent, requestToken = response.greeting_sent, response.requestToken
-    local keyHints = WantsKeyHints(anchor)
+    local keyHints = view=='keys'
     -- Shift pressed or let go: the other view at once, not at the next poll.
     if tooltip.RegisterEvent then
         tooltip:RegisterEvent('MODIFIER_STATE_CHANGED')
         tooltip:SetScript('OnEvent', function()
-            if tooltip:IsShown() and anchor.order == order and WantsKeyHints(anchor) ~= keyHints then
+            -- Hidden tooltips do not receive OnUpdate. Keep only this explicit
+            -- suppression alive until Shift release; :Hide() on row leave
+            -- cancels it, so a modifier can never resurrect an abandoned row.
+            if not tooltip:IsShown() and not self.shiftSuppressed then return end
+            if not ChatTooltipOwnerValid(anchor,order) then
+                self:Hide();return
+            end
+            if ChatTooltipView(anchor) ~= view then
                 self:Show(name, anchor, order, header, includeBinds)
             end
         end)
@@ -1452,8 +1472,8 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
         elapsed = elapsed + delta
         if elapsed < 0.25 then return end
         elapsed = 0
-        if anchor.order and anchor.order ~= order then self:Hide(); return end
-        if WantsKeyHints(anchor) ~= keyHints then
+        if not ChatTooltipOwnerValid(anchor,order) then self:Hide(); return end
+        if ChatTooltipView(anchor) ~= view then
             self:Show(name, anchor, order, header, includeBinds)
             return
         end
@@ -1466,6 +1486,12 @@ function HironCraftScan.Utils.ChatHistoryTooltip:Show(name, anchor, order, heade
             self:Show(name, anchor, order, header, includeBinds)
         end
     end)
+    self.shiftSuppressed = view=='hidden'
+    if self.shiftSuppressed then
+        if self.reagentTooltip then self.reagentTooltip:Hide() end
+        tooltip:Hide()
+        return
+    end
     tooltip:ClearLines()
 
     tooltip:SetOwner(anchor, 'ANCHOR_TOPLEFT')

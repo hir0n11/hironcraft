@@ -495,6 +495,16 @@ function HironCraftScan_CustomExplanationsButtonMixin:Init()
     -- The drop down button used to configure explanations
     self:SetupMenu(function(owner, rootDescription)
         local bounds=MenuBounds()
+        local hideTooltip=rootDescription:CreateCheckbox(L('Hide tooltip while holding Shift'),function()
+            return HironCraftScan.DB.settings.hide_explanation_shift_tooltip==true
+        end,function()
+            local settings=HironCraftScan.DB.settings
+            settings.hide_explanation_shift_tooltip=not (settings.hide_explanation_shift_tooltip==true)
+        end)
+        SetMenuTooltip(hideTooltip,function(tooltip)
+            GameTooltip_AddNormalLine(tooltip,L('Hide Shift tooltip help'))
+        end)
+        rootDescription:CreateDivider()
         local explanations = CreateUIExplanations();
         for _, entry in ipairs(explanations) do
             local label = entry.label;

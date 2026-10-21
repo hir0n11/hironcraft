@@ -36,7 +36,10 @@ frames[1].scripts.OnUpdate(nil, 0.2)
 assert(overrides['SHIFT-1'] and #sent == 0, 'hover must only bind, never send')
 assert(B.Send('Yes') and sent[1][2] == 'Buyer' and sent[1][3] == order)
 assert(not B.Send('Yes') and #sent == 1, 'repeat key bypassed cooldown')
-now = 17; typing = true
+now = 17
+Scan.DB.settings.hide_explanation_shift_tooltip=true
+assert(B.Send('Yes') and #sent==2 and sent[2][3]==order,'hiding the Shift hint disabled the actual hotkey action')
+typing = true
 assert(not B.Send('Yes'), 'typing in an editbox sent a whisper')
 typing = false; combat = true
 assert(not B.Send('Yes'), 'sent in combat')

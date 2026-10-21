@@ -147,6 +147,56 @@ do
     history:Show('TestHistoryTooltip', anchor, order, 'History')
     assert(text():find('the history line', 1, true) and not text():find('Quick phrase keys', 1, true),
         'a tooltip that is not a row of the list shows key hints')
+    -- Optional suppression hides the whole row tooltip, not a history popup
+    -- replacing the key popup. Hidden frames do not get OnUpdate: Shift release
+    -- must restore the history through MODIFIER_STATE_CHANGED alone.
+    Scan.DB.settings.hide_explanation_shift_tooltip=true
+    shift=false
+    history:Show('TestHistoryTooltip',row,order,'History')
+    assert(tip.visible and history.reagentTooltip.visible,'the option hid normal chat history')
+    shift=true;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible and not history.reagentTooltip.visible,'Shift suppression left a popup visible')
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(tip.visible and text():find('the history line',1,true) and history.reagentTooltip.visible,
+        'Shift release did not restore the history without a poll/mouse move')
+    -- Hovering with Shift already held follows the same lifecycle.
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History')
+    assert(not tip.visible,'hovering with Shift held showed the hidden hint')
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(tip.visible,'initially hidden tooltip did not restore on Shift release')
+    -- Explicit leave/dismissal and recycled/hidden rows must not resurrect.
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History');history:Hide()
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible,'Shift release resurrected a tooltip after leaving the row')
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History')
+    row.order={customerName='Other',responseID=2}
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible,'Shift release restored another customer on a recycled row')
+    row.order=order
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History')
+    row.order=nil
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible,'a cleared row regained its previous customer tooltip')
+    row.order=order
+    local visible=true
+    row.IsVisible=function() return visible end
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History')
+    visible=false
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible,'closing the scanner resurrected a suppressed tooltip')
+    visible=true
+    shift=true;history:Show('TestHistoryTooltip',row,order,'History')
+    local savedResponse=response
+    response=nil
+    shift=false;tip.scripts.OnEvent(tip,'MODIFIER_STATE_CHANGED')
+    assert(not tip.visible,'a dismissed request regained its suppressed tooltip')
+    response=savedResponse
+    -- Other tooltip owners and turning the option off retain old behaviour.
+    shift=true;history:Show('TestHistoryTooltip',anchor,order,'History')
+    assert(tip.visible and text():find('the history line',1,true),'suppression hid a non-row tooltip')
+    Scan.DB.settings.hide_explanation_shift_tooltip=false
+    history:Show('TestHistoryTooltip',row,order,'History')
+    assert(tip.visible and text():find('Quick phrase keys',1,true),'turning suppression off did not restore key hints')
     shift = false
 end
-print('Quick phrase key hints passed (Shift on a row, order of keys, long phrases, no keys, other tooltips).')
+print('Quick phrase key hints passed (Shift, optional hide/restore, leave/recycle/close, keys, long phrases and other tooltips).')

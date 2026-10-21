@@ -33,6 +33,11 @@ function Node:CreateRadio(text,selected,callback,data)
     child.selected=function() return selected(data) end
     return child
 end
+function Node:CreateCheckbox(text,selected,callback,data)
+    local child=self:CreateRadio(text,selected,callback,data)
+    child.kind='checkbox'
+    return child
+end
 function Node:EnumerateElementDescriptions() return ipairs(self.children) end
 function Node:SetTooltip(callback) self.tooltip=callback end
 function Node:SetScrollMode(height) self.scrollHeight=height end
@@ -183,11 +188,25 @@ assert(actions[#actions].kind=='native','Native responder changed')
 -- Native scrolling covers every submenu, including settings, not just top level.
 local settingsRoot=New(nil,'root')
 configure(nil,settingsRoot)
-assert(settingsRoot.scrollHeight==360 and #settingsRoot.children==41)
+assert(settingsRoot.scrollHeight==360 and #settingsRoot.children==43)
 for _,child in ipairs(settingsRoot.children) do AssertOwnedLayout(child) end
 local settingsTip={}
 Need(settingsRoot,longLabel).tooltip(settingsTip)
 assert(settingsTip[1]==longMessage)
+local suppression=Need(settingsRoot,'Hide tooltip while holding Shift')
+assert(suppression==settingsRoot.children[1] and suppression.kind=='checkbox' and not suppression.selected(),
+    'Shift tooltip option was not an immediately accessible, default-off checkbox')
+local savedExplanations=Scan.DB.settings.explanations
+suppression.click()
+assert(suppression.selected() and Scan.DB.settings.hide_explanation_shift_tooltip==true,
+    'Shift tooltip checkbox did not save its value')
+local reopened=New(nil,'root')
+configure(nil,reopened)
+local savedOption=Need(reopened,'Hide tooltip while holding Shift')
+assert(savedOption.selected(),'reopening the phrase menu lost the checkbox preference')
+savedOption.click()
+assert(not savedOption.selected() and Scan.DB.settings.hide_explanation_shift_tooltip==false
+    and Scan.DB.settings.explanations==savedExplanations,'changing tooltip visibility modified custom phrases')
 
 -- Re-evaluate logical screen bounds on reopening, without changing preferences.
 screen.width,screen.height=400,360
