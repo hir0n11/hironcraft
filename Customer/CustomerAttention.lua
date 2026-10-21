@@ -42,6 +42,35 @@ local IMMEDIATE_SEND = {}
 for _,object in ipairs({'','it ','the order ','order '}) do
     for _,when in ipairs({'now','right now','rn','r n','rightnow'}) do IMMEDIATE_SEND[object..when]=true end
 end
+-- Explicit spelling variants only. Build the lookup once, not
+-- edit-distance candidates on each whisper. It is applied only to the strict
+-- acknowledgement grammar below, never to chat history, names or user keywords.
+local CONFIRMATION_ALIASES = {}
+for canonical,variants in pairs({
+    done={'dnoe','doen','dne','donne','doone'},
+    listed={'litsed','litsted','lissted','listeed','listde','listedd'},
+    ordered={'orderde','oredered','odrered','orderred','ordereed','orderedd'},
+    placed={'palced','plcaed','plaecd','placde','placd','placedd','pleaced'},
+    posted={'psoted','posetd','postde','postd','postedd'},
+    submitted={'sumbitted','submtited','submittde','submtted','submittd','submmited','submittedd'},
+    mailed={'mialed','mailde','maild'},
+    delivered={'delivred','delievered','delviered','deliverd'},
+    dispatched={'dispached','dispathced','dispatchd'},
+    check={'cehck','chekc','chek','chec','chekk','checkk','checck','chcek'},
+    incoming={'incomign','incomng','incomimg','incoiming','incominng'},
+    onair={'oniar','onari','onairr'},
+    order={'ordr','ordrer','odrer','oreder'},
+    orders={'ordrs','ordrers','odrers','oreders','ordres'},
+    ['отправил']={'оптравил','отпраивл','отправли','отправилл'},
+    ['отправила']={'оптравила','отпраивла','отправлиа','отправилаа'},
+    ['отправлено']={'отправелно','оптравлено','отпралено','отправленно'},
+    ['кинул']={'киунл','кинлу'},
+    ['скинул']={'скиунл','скинлу'},
+    ['закинул']={'закиунл','закинлу'},
+    ['заказал']={'закаазал','заказалл'},
+}) do
+    for _,variant in ipairs(variants) do CONFIRMATION_ALIASES[variant]=canonical end
+end
 local function Courtesy(text)
     -- Only harmless conversational padding is removed. In particular, never
     -- strip negatives, modal verbs, conditions, material names or questions.
@@ -60,6 +89,7 @@ local function Courtesy(text)
     return text
 end
 local SHORT_SENT = {
+    ['all done']=true,
     ['on air']=true, ['onair']=true, ['on the air']=true, ['in the air']=true,
     ['on the way']=true, ['on its way']=true, ['on your way']=true, ['on ur way']=true,
     ['it s on the way']=true, ['its on the way']=true, ['it is on the way']=true,
@@ -82,18 +112,18 @@ local SHORT_SENT = {
     ['check your orders']=true, ['check ur orders']=true,
     ['заказ у тебя']=true, ['заказ отправлен']=true, ['заказ отправлен тебе']=true,
 }
-for _,phrase in ipairs({'check','chk','chck','check it','check order','check the order','check orders'}) do
+for _,phrase in ipairs({'check','chk','chck','check it','check order','check the order','check orders','check the orders'}) do
     for _,tail in ipairs({'',' now',' rn',' pls',' plz',' please'}) do SHORT_SENT[phrase..tail]=true end
 end
 for _,word in ipairs({'inc','incoming','incomming','incomin','otw'}) do
     for _,tail in ipairs({'',' now',' rn',' to you',' to u'}) do SHORT_SENT[word..tail]=true end
     SHORT_SENT['order '..word]=true
 end
-for _,phrase in ipairs({'on air','on the air','in the air','on the way','on its way','on it s way'}) do
+for _,phrase in ipairs({'on air','onair','on the air','in the air','on the way','on its way','on it s way'}) do
     for _,tail in ipairs({'',' now',' rn',' to you',' to u'}) do SHORT_SENT[phrase..tail]=true end
 end
 local SHORT_VERBS = {}
-for _,word in ipairs({'posted','submitted','submited','placed','mailed','delivered','dispatched',
+for _,word in ipairs({'done','posted','submitted','submited','placed','mailed','delivered','dispatched',
     'listed','listing','listin','listng','listd','lstd','lsted','lsited','lisetd','listted','listet',
     'ordered','orderd','ordred','ordrd','orded','odered','ordering','orderin','orderng',
     'sentit','sendit','sntit','sndit','sendedit','donezo'}) do SHORT_VERBS[word]=true end
@@ -109,7 +139,8 @@ for _,object in ipairs({'','it','order','the order','crafting order','the crafti
 end
 local RUSSIAN_SHORT = {}
 for _,word in ipairs({'кинул','кинула','закинул','закинула','скинул','скинула','ушло','улетело',
-    'отправляю','отсылаю','оформил','оформила','оформлено','заказал','заказала','заказано'}) do RUSSIAN_SHORT[word]=true end
+    'отправляю','отсылаю','оформил','оформила','оформлено','заказал','заказала','заказано',
+    'отправил','отправила','отправлено'}) do RUSSIAN_SHORT[word]=true end
 local ORDER_COUNTS = {a=true,an=true,one=true,two=true,three=true,four=true,five=true,
     six=true,seven=true,eight=true,nine=true,ten=true,both=true,all=true}
 local function OrderTail(text)
@@ -123,7 +154,8 @@ local function OrderTail(text)
     if noun=='order' or noun=='orders' then return tail end
 end
 local function ShortConfirmation(s)
-    local text=Courtesy(s:match('^%s*(.-)%s*$'))
+    local text=s:match('^%s*(.-)%s*$'):gsub('%S+',CONFIRMATION_ALIASES)
+    text=Courtesy(text)
     if SHORT_SENT[text] then return true end
     for _=1,3 do
         local previous=text
