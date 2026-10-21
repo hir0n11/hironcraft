@@ -27,7 +27,11 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'made the order','made an order',"I've made an order",'created the order','created an order',
     'order created','order is created','заказал','заказала','заказано',
     'check','CHECK','chk','chck','check now','check rn','check pls','check plz','check please',
-    'check it','check it now','check order','check the order','check orders','check the order pls'}
+    'check it','check it now','check order','check the order','check orders','check the order pls',
+    '2 order placed','2 orders placed','12 orders placed','two orders placed','both orders placed',
+    'orders placed','the orders have been placed','2 crafting orders are listed',
+    'I have just placed 2 orders','placed two orders now','submitted both orders for you',
+    'the two orders are up','both orders created','all orders submitted','an order placed'}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep '}) do
@@ -86,7 +90,13 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'check?','can you check','check price','price check','check quality','check skill','check r5',
     'check +10','check mats','check the materials','check the link','check this','please check quality',
     'check if I can send','check after getting mats','I will check','not check','check tomorrow',
-    'checking','checks','checker','checklist','unchecked'}) do
+    'checking','checks','checker','checklist','unchecked',
+    '2 order placed?','not 2 orders placed','2 orders not placed','2 orders have not been placed',
+    '2 orders will be placed','2 orders to be placed','need 2 orders placed','can you place 2 orders',
+    'placed 2 orders later','placed 2 orders if I can','2 orders placed after buying mats',
+    '0 orders placed','zero orders placed','no orders placed','placed 0 orders',
+    '2 mats placed','placed two mats','2 orders listed on the AH','placed 2 orders on auction',
+    'placed 2 orders it','2 orders','two orders','the orders'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end

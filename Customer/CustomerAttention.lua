@@ -109,11 +109,29 @@ end
 local RUSSIAN_SHORT = {}
 for _,word in ipairs({'кинул','кинула','закинул','закинула','скинул','скинула','ушло','улетело',
     'отправляю','отсылаю','оформил','оформила','оформлено','заказал','заказала','заказано'}) do RUSSIAN_SHORT[word]=true end
+local ORDER_COUNTS = {a=true,an=true,one=true,two=true,three=true,four=true,five=true,
+    six=true,seven=true,eight=true,nine=true,ten=true,both=true,all=true}
+local function OrderTail(text)
+    -- Recognize an order object only at the start, not a number or "placed"
+    -- anywhere in the message. Keep all remaining words for the exact guards.
+    text=text:gsub('^the ','')
+    local count,rest=text:match('^(%S+) (.+)$')
+    if ORDER_COUNTS[count] or (count and count:match('^[1-9]%d*$')) then text=rest end
+    text=text:gsub('^crafting ','')
+    local noun,tail=text:match('^(%S+)%s*(.-)$')
+    if noun=='order' or noun=='orders' then return tail end
+end
 local function ShortConfirmation(s)
     local text=Courtesy(s:match('^%s*(.-)%s*$'))
     if SHORT_SENT[text] then return true end
     for _=1,3 do
         local previous=text
+        local orderTail=OrderTail(text)
+        if orderTail then
+            -- "2 order placed", "both orders are up", "orders have been listed".
+            text='order '..orderTail:gsub('^have been ','has been '):gsub('^are ','is ')
+        end
+        if SHORT_SENT[text] then return true end
         for _,prefix in ipairs({'the order has been ','order has been ','the order is ','order is ',
             'the order ','order s ','order ','it has been ','it s ','its ','it is ','it ',
             'i ve ','ive ','i have ','i m ','im ','i am ','i ','just ','already ','уже '}) do
@@ -123,7 +141,11 @@ local function ShortConfirmation(s)
     end
     if SHORT_SENT[text] then return true end
     local word,tail=text:match('^(%S+)%s*(.-)$')
-    if SHORT_VERBS[word] and SHORT_TAILS[tail] then return true end
+    if SHORT_VERBS[word] then
+        local orderTail=OrderTail(tail)
+        if orderTail then tail=orderTail=='' and 'order' or 'order '..orderTail end
+        if SHORT_TAILS[tail] then return true end
+    end
     if RUSSIAN_SHORT[word] and (tail=='' or tail=='заказ' or tail=='тебе' or tail=='вам'
         or tail=='заказ тебе' or tail=='заказ вам' or tail=='сейчас') then return true end
     return false
