@@ -32,7 +32,9 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     '2 order placed','2 orders placed','12 orders placed','two orders placed','both orders placed',
     'orders placed','the orders have been placed','2 crafting orders are listed',
     'I have just placed 2 orders','placed two orders now','submitted both orders for you',
-    'the two orders are up','both orders created','all orders submitted','an order placed'}
+    'the two orders are up','both orders created','all orders submitted','an order placed',
+    'both should be there','both should be there now',
+    'both orders should be there','both orders should be there now'}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep '}) do

@@ -104,6 +104,8 @@ local SHORT_SENT = {
     ['created the order']=true, ['created an order']=true,
     ['order created']=true, ['order is created']=true,
     ['should be there']=true, ['should be there now']=true,
+    ['both should be there']=true, ['both should be there now']=true,
+    ['both orders should be there']=true, ['both orders should be there now']=true,
     ['you should have it now']=true, ['u should have it now']=true,
     ['in your orders']=true, ['in ur orders']=true,
     ['in your order list']=true, ['in ur order list']=true,
@@ -314,6 +316,54 @@ local function Members(info, entry)
     end
     return result
 end
+local function RejectionTime(entry)
+    local at=tonumber(entry.updatedAt)
+    if not at or at~=at or at<1 or at==math.huge then return time() end
+    local offset=tonumber(entry.clockOffset)
+    if offset and offset==offset and math.abs(offset)<=86400 and type(GetServerTime)=='function' then
+        local ok,server=pcall(GetServerTime)
+        if ok and type(server)=='number' and server==server then return at+offset-(server-time()) end
+    end
+    -- An unstamped older peer's clock is not comparable to local chat. Use
+    -- this receipt once, never a moving UI-refresh timestamp.
+    if entry.origin and Settings().my_uuid and entry.origin~=Settings().my_uuid then return time() end
+    return at
+end
+local function ObserveRejection(response,entry)
+    if type(response)~='table' then return end
+    if type(entry)=='table' and entry.requestToken and response.requestToken
+        and entry.requestToken~=response.requestToken then return end
+    if type(entry)~='table' or entry.status~='rejected' then
+        response.rejectedAttention=nil
+        return
+    end
+    -- Audit enrichment/replays of one game order are not a second decline.
+    -- A different game order (or a new manual mark without one) starts over.
+    local key=entry.craftingOrderID and ('order:'..tostring(entry.craftingOrderID))
+        or table.concat({'mark',tostring(entry.updatedAt or ''),tostring(entry.origin or ''),tostring(entry.rev or '')},':')
+    local marker=response.rejectedAttention
+    if type(marker)~='table' or marker.key~=key or marker.token~=response.requestToken
+        or type(marker.at)~='number' or marker.at~=marker.at or math.abs(marker.at)==math.huge then
+        marker={key=key,token=response.requestToken,at=RejectionTime(entry)}
+        response.rejectedAttention=marker
+        -- A linked decline can arrive after the customer's newer reply.
+        -- Keep actual status intact; only reopen attention to this inquiry.
+        local replyAt=tonumber(response.lastCustomerReplyAt)
+        if response.customer_answered and replyAt and replyAt>marker.at
+            and replyAt>=(tonumber(response.time) or 0) then
+            marker.replyAt=replyAt
+            response.firstAnsweredAt=replyAt
+            if (tonumber(response.customerStateAt) or 0)<=replyAt then
+                response.customerState=response.lastCustomerReplyState or 'attention'
+            end
+        end
+    end
+    return marker
+end
+function A.StatusChanged(order,entry)
+    local response=Scan.OrderToResponse and Scan.OrderToResponse(order)
+    ObserveRejection(response,entry)
+end
 function A.Record(info, entry, incoming)
     if type(info) ~= 'table' or type(entry) ~= 'table' then return end
     local at = Stamp(entry)
@@ -334,10 +384,22 @@ function A.Record(info, entry, incoming)
             if response.customer_answered and (eligible[response] or response.attentionReturned) then
                 local returned=response.attentionReturned
                 response.attentionReturned = nil
+                local rejection=response.rejectedAttention
+                local reopened=type(rejection)=='table' and rejection.token==response.requestToken
+                    and type(rejection.at)=='number' and not rejection.replyAt and at>rejection.at
+                    and at>=(tonumber(response.lastCustomerReplyAt) or 0)
+                    and at>=(tonumber(response.customerStateAt) or 0)
+                if reopened then
+                    rejection.replyAt=at
+                    -- A pre-decline green state must not leak into "why?" or
+                    -- another ordinary post-decline reply.
+                    response.customerState=nil
+                end
                 response.lastCustomerReplyAt=math.max(tonumber(response.lastCustomerReplyAt) or 0,at)
-                response.firstAnsweredAt = returned and at or tonumber(response.firstAnsweredAt) or at
+                response.firstAnsweredAt = (returned or reopened) and at or tonumber(response.firstAnsweredAt) or at
                 if at >= (tonumber(response.customerStateAt) or 0) then
                     local state=LoginRequest(text,response) and 'sent' or classified
+                    response.lastCustomerReplyState=state
                     -- Small talk cannot undo a confirmed send. An explicit
                     -- return to getting materials, or a new request, can.
                     if state ~= 'attention' or response.customerState ~= 'sent' then
@@ -354,7 +416,9 @@ function A.State(order, response)
     local ok,entry=true,nil
     if f and f.GetStatus then ok,entry=pcall(f.GetStatus,f,order) end
     local status = ok and type(entry)=='table' and entry.status or nil
-    if status == 'crafted' or status == 'fulfilled' or status == 'rejected' then return 'done' end
+    local rejection=ok and ObserveRejection(response,entry) or nil
+    if status == 'crafted' or status == 'fulfilled'
+        or (status == 'rejected' and not (rejection and rejection.replyAt)) then return 'done' end
     if not response or not response.customer_answered then return nil end
     if status == 'claimed' then return 'sent' end
     return response.customerState or 'attention'
@@ -562,6 +626,9 @@ function A.Tick()
     if previous > now then previous = 0 end
     if now-previous < interval then return end
     if Scan.Notifications and Scan.Notifications.Alert('reminder') then s.customer_reminder_last = now end
+end
+if Scan.Events and Scan.Events.Register then
+    Scan.Events:Register('ORDER_FULFILLMENT_UPDATED',A.StatusChanged)
 end
 if CreateFrame then
     local outgoing=CreateFrame('Frame')

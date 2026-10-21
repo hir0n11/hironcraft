@@ -1084,6 +1084,8 @@ function OrderFulfillment:GetStatus(order)
             reagentAudit = notice.reagentAudit,
             crafterFullName = notice.crafterFullName,
             updatedAt = notice.updatedAt,
+            clockOffset = notice.clockOffset,
+            origin = notice.origin,
             automatic = true,
             completionNotice = true,
             deliveryPending = entry
