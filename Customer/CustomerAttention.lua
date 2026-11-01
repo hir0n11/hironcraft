@@ -364,6 +364,59 @@ function A.StatusChanged(order,entry)
     local response=Scan.OrderToResponse and Scan.OrderToResponse(order)
     ObserveRejection(response,entry)
 end
+local function ReplyID(entry)
+    local id=entry and entry.syncID
+    return type(id)=='string' and #id<=256 and id or nil
+end
+local function ReplyAt(response)
+    return tonumber(response.lastCustomerReplyAt) or tonumber(response.time) or 0
+end
+local function ResolutionCovers(response,marker,at,id)
+    if type(marker)~='table' or marker.token~=response.requestToken or type(marker.replyAt)~='number' then return false end
+    at=at or ReplyAt(response)
+    if at~=marker.replyAt then return at<marker.replyAt end
+    return not id or not marker.replyID or id==marker.replyID
+end
+function A.ResetRequest(response)
+    -- Reusing a recipe row for a new request must not inherit its previous
+    -- acknowledgement, green state, reply identity, grace period or snooze.
+    for _,key in ipairs({'attentionResolved','rejectedAttention','customerState','customerStateAt',
+        'lastCustomerReplyAt','lastCustomerReplyState','lastCustomerReplyID','firstAnsweredAt',
+        'attentionReturned','awaitingReturn','answerResetAt','reminderSnoozeUntil',
+        'attentionRevision','attentionActor','attentionChangedAt'}) do response[key]=nil end
+end
+function A.ReplyContext(order,entry)
+    local response=Scan.OrderToResponse(order)
+    if not response then return end
+    return {responseID=order.responseID,token=response.requestToken,
+        replyAt=entry and tonumber(entry.receivedAt) or ReplyAt(response),
+        replyID=ReplyID(entry) or response.lastCustomerReplyID}
+end
+function A.Resolve(order,context,quickReply)
+    local response=Scan.OrderToResponse(order)
+    if not response or type(context)~='table' or context.token~=response.requestToken
+        or context.replyAt~=ReplyAt(response)
+        or (context.replyID and response.lastCustomerReplyID and context.replyID~=response.lastCustomerReplyID) then return end
+    local state=A.State(order,response)
+    if not state or state=='done' or state=='quiet' or (quickReply and state=='sent') then return end
+    local previous=response.attentionResolved
+    if not ResolutionCovers(response,previous,ReplyAt(response),response.lastCustomerReplyID) then previous=nil end
+    local marker={token=response.requestToken,at=time(),replyAt=context.replyAt,replyID=context.replyID}
+    response.attentionResolved=marker
+    A.Share(order,{handled=true,handledReplyAt=marker.replyAt,handledReplyID=marker.replyID})
+    return marker,previous
+end
+function A.Acknowledge(order)
+    return A.Resolve(order,A.ReplyContext(order),false)~=nil
+end
+function A.UndoResolution(order,marker,previous)
+    local response=Scan.OrderToResponse(order)
+    if not response or type(marker)~='table' or response.attentionResolved~=marker or marker.token~=response.requestToken then return false end
+    response.attentionResolved=previous
+    A.Share(order,{handled=previous~=nil,handledReplyAt=previous and previous.replyAt or marker.replyAt,
+        handledReplyID=previous and previous.replyID or marker.replyID})
+    return true
+end
 function A.Record(info, entry, incoming)
     if type(info) ~= 'table' or type(entry) ~= 'table' then return end
     local at = Stamp(entry)
@@ -384,6 +437,16 @@ function A.Record(info, entry, incoming)
             if response.customer_answered and (eligible[response] or response.attentionReturned) then
                 local returned=response.attentionReturned
                 response.attentionReturned = nil
+                local id=ReplyID(entry)
+                local rearmed=type(response.attentionResolved)=='table'
+                    and response.attentionResolved.token==response.requestToken
+                    and not ResolutionCovers(response,response.attentionResolved,at,id)
+                    and at>=(tonumber(response.lastCustomerReplyAt) or 0)
+                    and at>=(tonumber(response.customerStateAt) or 0)
+                if rearmed then
+                    response.attentionResolved=nil
+                    response.customerState=nil
+                end
                 local rejection=response.rejectedAttention
                 local reopened=type(rejection)=='table' and rejection.token==response.requestToken
                     and type(rejection.at)=='number' and not rejection.replyAt and at>rejection.at
@@ -395,8 +458,11 @@ function A.Record(info, entry, incoming)
                     -- another ordinary post-decline reply.
                     response.customerState=nil
                 end
+                if at>=(tonumber(response.lastCustomerReplyAt) or 0) then
+                    response.lastCustomerReplyID=id
+                end
                 response.lastCustomerReplyAt=math.max(tonumber(response.lastCustomerReplyAt) or 0,at)
-                response.firstAnsweredAt = (returned or reopened) and at or tonumber(response.firstAnsweredAt) or at
+                response.firstAnsweredAt = (returned or reopened or rearmed) and at or tonumber(response.firstAnsweredAt) or at
                 if at >= (tonumber(response.customerStateAt) or 0) then
                     local state=LoginRequest(text,response) and 'sent' or classified
                     response.lastCustomerReplyState=state
@@ -420,6 +486,7 @@ function A.State(order, response)
     if status == 'crafted' or status == 'fulfilled'
         or (status == 'rejected' and not (rejection and rejection.replyAt)) then return 'done' end
     if not response or not response.customer_answered then return nil end
+    if ResolutionCovers(response,response.attentionResolved,ReplyAt(response),response.lastCustomerReplyID) then return 'quiet' end
     if status == 'claimed' then return 'sent' end
     return response.customerState or 'attention'
 end
@@ -427,8 +494,11 @@ function A.SetState(order, state)
     if state ~= 'sent' and state ~= 'waiting' and state ~= 'attention' then return end
     local response = Scan.OrderToResponse(order)
     if not response then return end
+    response.attentionResolved=nil
+    response.firstAnsweredAt=time()
     response.customerState, response.customerStateAt = state, time()
-    A.Share(order, {state=state})
+    local context=A.ReplyContext(order)
+    A.Share(order, {state=state,handled=false,handledReplyAt=context.replyAt,handledReplyID=context.replyID})
     if HironCraftScanCraftingOrderPage then HironCraftScanCraftingOrderPage:ShowGeneric() end
 end
 function A.Share(order, change)
@@ -437,7 +507,8 @@ function A.Share(order, change)
     response.attentionRevision = (tonumber(response.attentionRevision) or 0) + 1
     local packet = {customer=order.customerName, responseID=order.responseID, token=response.requestToken,
         n=response.attentionRevision, by=Settings().my_uuid, at=time(), state=change.state, answered=change.answered,
-        snooze=change.snooze,stateAt=change.state and response.customerStateAt or nil}
+        snooze=change.snooze,stateAt=change.state and response.customerStateAt or nil,
+        handled=change.handled,handledReplyAt=change.handledReplyAt,handledReplyID=change.handledReplyID}
     response.attentionActor = packet.by
     response.attentionChangedAt = packet.at
     if not (Scan.BattleNet and Scan.BattleNet.IsCustomer(order.customerName))
@@ -455,6 +526,10 @@ function A.Receive(data)
         or type(data.at) ~= 'number' or data.at ~= data.at or data.at < 1 or data.at > time()+300
         or (data.state ~= nil and data.state ~= 'sent' and data.state ~= 'waiting' and data.state ~= 'attention')
         or (data.answered ~= nil and type(data.answered) ~= 'boolean') then return false end
+    if data.handled~=nil and (type(data.handled)~='boolean' or type(data.handledReplyAt)~='number'
+        or data.handledReplyAt~=data.handledReplyAt or data.handledReplyAt<0 or data.handledReplyAt>time()+300
+        or (data.handledReplyID~=nil and (type(data.handledReplyID)~='string' or #data.handledReplyID>256))) then return false end
+    if data.handled==nil and (data.handledReplyAt~=nil or data.handledReplyID~=nil) then return false end
     if (type(data.responseID)~='string' and type(data.responseID)~='number') or #tostring(data.responseID)>128 then return false end
     if type(data.responseID)=='number' and (data.responseID~=data.responseID or math.abs(data.responseID)>1e12) then return false end
     if data.stateAt~=nil and (type(data.stateAt)~='number' or data.stateAt~=data.stateAt or data.stateAt<1 or data.stateAt>time()+300) then return false end
@@ -470,7 +545,8 @@ function A.Receive(data)
         for _ in pairs(s.customer_attention_pending) do count=count+1 end
         if (previous or count<256) and (not previous or data.n>previous.n or (data.n==previous.n and data.by>previous.by)) then
             local clean={}
-            for _,k in ipairs({'customer','responseID','token','by','n','at','state','stateAt','answered','snooze'}) do clean[k]=data[k] end
+            for _,k in ipairs({'customer','responseID','token','by','n','at','state','stateAt','answered','snooze',
+                'handled','handledReplyAt','handledReplyID'}) do clean[k]=data[k] end
             s.customer_attention_pending[key]=clean
         end
         return false
@@ -481,6 +557,12 @@ function A.Receive(data)
     local stateAt=data.stateAt or data.at
     if data.state and stateAt >= (tonumber(response.customerStateAt) or 0) then
         response.customerState, response.customerStateAt = data.state, stateAt
+    end
+    if data.handled~=nil then
+        local marker={token=data.token,at=data.at,replyAt=data.handledReplyAt,replyID=data.handledReplyID}
+        if ResolutionCovers(response,marker,ReplyAt(response),response.lastCustomerReplyID) then
+            response.attentionResolved=data.handled and marker or nil
+        end
     end
     response.attentionChangedAt=data.at
     if data.answered ~= nil and data.at >= (tonumber(response.lastCustomerReplyAt) or 0) then
@@ -504,9 +586,12 @@ function A.Snapshot()
         local r = Scan.OrderToResponse(order)
         if r and r.attentionRevision and r.attentionActor and #result < 200
             and not (Scan.BattleNet and Scan.BattleNet.IsCustomer(order.customerName)) then
+            local marker=r.attentionResolved
+            local context=type(marker)=='table' and marker.token==r.requestToken and marker or A.ReplyContext(order)
             result[#result+1] = {customer=order.customerName,responseID=order.responseID,token=r.requestToken,
                 n=r.attentionRevision,by=r.attentionActor,at=r.attentionChangedAt or r.customerStateAt or r.firstAnsweredAt or time(),
-                state=r.customerState,stateAt=r.customerStateAt,answered=r.customer_answered == true}
+                state=r.customerState,stateAt=r.customerStateAt,answered=r.customer_answered == true,
+                handled=context==marker,handledReplyAt=context.replyAt,handledReplyID=context.replyID}
         end
         local info=Scan.OrderToCustomerInfo(order)
         local at=info and tonumber(info.lastCrafterReplyAt)
@@ -577,8 +662,14 @@ function A.Outgoing(customer)
     end
 end
 function A.KeepAlive(order,response)
+    -- Quiet means answered/acknowledged, not completed. Keep the row so a
+    -- customer who gathers materials for a while can still return with "sent".
     return response and response.customer_answered and A.State(order,response)~='done'
         and not (Scan.IsIgnored and Scan.IsIgnored(order.customerName))
+end
+function A.NeedsAttention(order,response)
+    local state=A.State(order,response)
+    return state=='sent' or state=='attention' or state=='waiting'
 end
 function A.Collect(now)
     local due, oldest, seen = 0, 0, {}
@@ -588,7 +679,7 @@ function A.Collect(now)
         local response = Scan.OrderToResponse(order)
         if response and not seen[response] and response.customer_answered
             and (tonumber(response.reminderSnoozeUntil) or 0)<=now
-            and not (Scan.IsIgnored and Scan.IsIgnored(order.customerName)) and A.State(order, response) ~= 'done' then
+            and not (Scan.IsIgnored and Scan.IsIgnored(order.customerName)) and A.NeedsAttention(order,response) then
             seen[response] = true
             local info = Scan.OrderToCustomerInfo(order)
             -- Persist the fallback once: refreshing the UI must not restart it.

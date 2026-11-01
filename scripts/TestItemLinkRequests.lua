@@ -862,25 +862,38 @@ Scan.DismissOrder(order(101))
 Scan.GreetCustomer('LeftButton', order(102))
 assert(#sent==1 and sent[1].message=='Hi! Send ' .. b .. ' to Tailor.', 'dismissed row was sent')
 
--- A right click on a row takes one mark at a time: the customer's answer,
--- then the order's status (a decline's cross or the delivered mark), and
--- only then the row.
+-- A right click resolves attention without removing the customer reply check;
+-- status clearing and row dismissal remain separate subsequent actions.
 do
     reset()
     scan(a)
     local statuses={}
     local previousFulfillment=Scan.OrderFulfillment
+    local previousAttention=Scan.CustomerAttention
+    local createFrame,onLoad=CreateFrame,Scan.Utils.onLoad
+    CreateFrame=nil;Scan.Utils.onLoad=noop
+    loadSource('Customer/CustomerAttention.lua')
+    CreateFrame,Scan.Utils.onLoad=createFrame,onLoad
     Scan.OrderFulfillment={
         Status={Unknown='unknown',Fulfilled='fulfilled',Rejected='rejected'},
         GetStatus=function(_,o) return statuses[o.responseID] end,
         SetStatus=function(_,o,status) statuses[o.responseID]={status=status} end,
     }
     response(101).customer_answered=true
+    assert(Scan.IsOrderInProgress(order(101)),'unresolved attention was not highlighted')
+    assert(Scan.PeelOrderMark(order(101))=='attention' and response(101).customer_answered
+        and Scan.CustomerAttention.State(order(101),response(101))=='quiet'
+        and not Scan.IsOrderInProgress(order(101)),
+        'right click did not resolve yellow attention independently of the reply check')
+    response(101).attentionResolved=nil
+    response(101).customerState='sent'
+    assert(Scan.PeelOrderMark(order(101))=='attention' and response(101).customer_answered
+        and Scan.CustomerAttention.State(order(101),response(101))=='quiet',
+        'right click could not resolve a false green confirmation without clearing the reply check')
     statuses[101]={status='rejected'}
-    assert(Scan.PeelOrderMark(order(101))=='answer' and not response(101).customer_answered,
-        'the first right click did not take the customer answer')
     assert(Scan.PeelOrderMark(order(101))=='status' and statuses[101].status=='unknown',
-        'the second right click did not take the decline cross')
+        'right click did not take a terminal decline cross')
+    assert(response(101).customer_answered,'clearing a status removed the reply check')
     assert(countRows()==1, 'the row went before its marks')
     statuses[101]={status='fulfilled'}
     Scan.GreetCustomer('RightButton',order(101))
@@ -888,6 +901,7 @@ do
     Scan.GreetCustomer('RightButton',order(101))
     assert(countRows()==0, 'with no marks left the row stayed')
     Scan.OrderFulfillment=previousFulfillment
+    Scan.CustomerAttention=previousAttention
 end
 
 reset()

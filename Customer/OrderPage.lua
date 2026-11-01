@@ -112,16 +112,15 @@ function HironCraftScan.GreetCustomer(button, order)
     end
 end
 
--- A right click on a row takes it apart one mark at a time: first the
--- customer's answer (the second mark), then the order's status - a decline's
--- cross or the delivered mark - and only when nothing is left, the row
--- itself. Returns what it took: 'answer', 'status' or 'row'.
+-- A right click first resolves visible attention, never the reply check.
+-- Subsequent clicks retain the existing status-clear / row-remove actions.
 function HironCraftScan.PeelOrderMark(order)
     local response = HironCraftScan.OrderToResponse(order)
-    if type(response) == 'table' and response.customer_answered and HironCraftScan.RequestTracking then
-        HironCraftScan.RequestTracking.ToggleAnswered(response, order)
+    local attention=HironCraftScan.CustomerAttention
+    if type(response)=='table' and attention and attention.NeedsAttention(order,response) then
+        attention.Acknowledge(order)
         HironCraftScanCraftingOrderPage:ShowGeneric()
-        return 'answer'
+        return 'attention'
     end
     local fulfillment = HironCraftScan.OrderFulfillment
     local entry = type(response) == 'table' and fulfillment and fulfillment.GetStatus and fulfillment:GetStatus(order)
@@ -150,7 +149,9 @@ function HironCraftScan.IsOrderInProgress(order)
     local response = order and HironCraftScan.OrderToResponse(order)
     if type(response) ~= 'table' or not response.customer_answered then return false end
     if HironCraftScan.IsIgnored and HironCraftScan.IsIgnored(order.customerName) then return false end
-    if HironCraftScan.CustomerAttention then return HironCraftScan.CustomerAttention.State(order,response) ~= 'done' end
+    if HironCraftScan.CustomerAttention then
+        return HironCraftScan.CustomerAttention.NeedsAttention(order,response)
+    end
     local fulfillment = HironCraftScan.OrderFulfillment
     local ok, entry = true, nil
     if fulfillment and fulfillment.GetStatus then ok, entry = pcall(fulfillment.GetStatus, fulfillment, order) end

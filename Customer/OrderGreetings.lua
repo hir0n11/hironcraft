@@ -170,7 +170,7 @@ function Scan.SendOrderGreeting(order, userInitiated, source)
         source = source,
         at = (GetTime and GetTime()) or (time and time()) or 0,
     }
-    return true
+    return true,pending
 end
 
 -- The server can swallow a whisper it considers too fast, and it says so a

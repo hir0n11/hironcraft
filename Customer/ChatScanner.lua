@@ -1741,6 +1741,7 @@ local function HandleGeneralRequest(message, customer, customerInfo, overrides, 
         response.previousGreeting = reoffer
             and { id = response.inquiryID or response.requestToken } or nil
         response.requestToken = requestToken
+        if HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.ResetRequest(response) end
         response.recraft = overrides and overrides.recraft == true or nil
         response.conversationCharacter = nil
         response.conversationFaction = nil
@@ -2045,6 +2046,7 @@ local function handleResponse(message, customer, crafterInfo, itemID, recipeInfo
         -- greeting is actually sent; do not mark this new row as greeted yet.
         response.previousGreeting = reoffer and {id=response.inquiryID or response.requestToken} or nil
         response.requestToken = requestToken
+        if HironCraftScan.CustomerAttention then HironCraftScan.CustomerAttention.ResetRequest(response) end
         -- A request for what was already delivered once (see Recrafts below).
         response.recraft = overrides and overrides.recraft == true or nil
         response.conversationCharacter = nil
@@ -2279,12 +2281,12 @@ local function OfferDeferredQuickReply(customer, message, customerInfo, override
     if #responses > 0 then
         if IsGreetingHeld(customer, overrides) then return end
         if HironCraftScan.QuickReplies.ShowOrderGreeting then
-            HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses)
+            HironCraftScan.QuickReplies:ShowOrderGreeting(customer, message, customerInfo, responses,overrides.chatEntry)
         end
     elseif HironCraftScan.QuickReplies.OnWhisper then
         -- Ordinary follow-up questions that are not new crafting requests keep
         -- using the configured keyword classifier.
-        HironCraftScan.QuickReplies:OnWhisper(customer, message, customerInfo)
+        HironCraftScan.QuickReplies:OnWhisper(customer, message, customerInfo,overrides.chatEntry)
     end
 end
 
@@ -2842,7 +2844,7 @@ function HironCraftScan.OnMessage(event, message, customer, customerGuid, overri
     -- whether or not the order's row is still listed.
     if incomingWhisper and not overrides.remoteRequest and not overrides.classRetry
         and HironCraftScan.QuickReplies and HironCraftScan.QuickReplies.OfferDeclineReason then
-        HironCraftScan.QuickReplies:OfferDeclineReason(customer, message, customerGuid)
+        HironCraftScan.QuickReplies:OfferDeclineReason(customer, message, customerGuid,overrides.chatEntry)
     end
 
     if (event == 'CHAT_MSG_WHISPER' or event == 'CHAT_MSG_BN_WHISPER') and not overrides.classRetry then

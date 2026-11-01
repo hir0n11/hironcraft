@@ -1,6 +1,7 @@
 -- Exercise actual OnWhisper -> toast -> click behavior, not only option counts.
 -- Mock the WoW UI/whisper boundary; no real messages are sent.
 local function noop() end
+local throttleCallbacks={}
 local Scan = {
     DB={settings={quick_replies={templates={
         CUSTOM_1={custom=true, enabled=true, label='Hello', keywords='yo,hello', response='hey hey'},
@@ -17,6 +18,7 @@ function Scan.Utils.saved(parent, key, default)
     return parent[key]
 end
 Scan.Utils.onLoad=function(callback) callback() end
+Scan.Utils.OnChatThrottled=function(callback) throttleCallbacks[#throttleCallbacks+1]=callback end
 Scan.Utils.GetSetting=function() return 1 end
 Scan.GetPlayerName=function() return 'Seller-Realm' end
 Scan.NameAndRealmToName=function(name) return name:match('^[^-]+') end
@@ -1071,3 +1073,89 @@ do
     dismissAll()
 end
 print('Decline reason passed (asked after the row is gone, several declines, clicks, listed rows, wording, switched off, by hand).')
+-- Attention integrates with actual toast creation/clicks, not merely a keyword
+-- match. Successful ready answers silence yellow, but never auto-silence green.
+dismissAll()
+time=function() return 100000+now end
+Scan.DB.settings.my_uuid='attention-test'
+Scan.OrderToCustomerInfo=function(order) return Scan.DB.customers[order.customerName] end
+assert(loadfile('ChatFilter/FilterEngine.lua'))('HironCraft',Scan)
+assert(loadfile('Customer/RequestTracking.lua'))('HironCraft',Scan)
+assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
+local A,M=Scan.CustomerAttention,Scan.RequestTracking
+local cfg=QuickReplies:GetConfig()
+cfg.enabled=true
+cfg.templates.CUSTOM_1={custom=true,enabled=true,label='Hello',keywords='hello',response='hey hey'}
+cfg.templates.CUSTOM_2={custom=true,enabled=true,label='Coming',keywords='sent',response='omw'}
+cfg.templates.CUSTOM_3.enabled=false
+local function attentionCustomer(name)
+    dismissAll()
+    Scan.DB.customers={};Scan.DB.listed_orders={};Scan.State.activeOrder=nil
+    local info,first,second=addCustomer(name)
+    for _,row in ipairs({first,second}) do
+        row.time=time();row.greeting_sent=true;row.greetingSentAt=time();row.inquiryID='attention-'..name
+    end
+    info.activeInquiryID,info.activeInquiryAt=first.inquiryID,time()
+    return info,first,second,{customerName=name,responseID=101},{customerName=name,responseID=102}
+end
+local function attentionWhisper(name,body)
+    now=now+10
+    local entry={body=body,receivedAt=time(),syncID=name..':'..now}
+    local info=Scan.DB.customers[name]
+    M.MarkReply(info,entry)
+    QuickReplies:OnWhisper(name,body,info,entry)
+    return entry
+end
+local ai,ar,ar2,ao,ao2=attentionCustomer('HandledBuyer')
+attentionWhisper('HandledBuyer','hello')
+assert(A.State(ao,ar)=='attention' and #visible('HandledBuyer')==1,
+    'merely offering a card silenced an unanswered question')
+click(visible('HandledBuyer')[1])
+assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_answered and ar2.customer_answered,
+    'merged ready answer did not resolve its exact yellow source rows')
+assert(A.Collect(time()+600)==0 and A.KeepAlive(ao,ar),'handled rows reminded or disappeared while still pending')
+attentionWhisper('HandledBuyer','unmatchedword?')
+assert(A.State(ao,ar)=='attention' and A.Collect(time()+59)==0 and A.Collect(time()+60)==2,
+    'a new personal question did not restore attention with a fresh minute')
+ai,ar,ar2,ao,ao2=attentionCustomer('GreenBuyer')
+attentionWhisper('GreenBuyer','sent')
+click(visible('GreenBuyer')[1])
+assert(A.State(ao,ar)=='sent' and A.State(ao2,ar2)=='sent' and A.Collect(time()+60)==2,
+    'omw quick reply disabled a green waiting-for-craft reminder')
+assert(A.Acknowledge(ao) and A.Acknowledge(ao2) and ar.customer_answered and ar2.customer_answered)
+assert(A.State(ao,ar)=='quiet' and A.Collect(time()+600)==0,'manual acknowledgement could not silence false sent claims')
+ai,ar,ar2,ao,ao2=attentionCustomer('FailedReadyAnswer')
+attentionWhisper('FailedReadyAnswer','hello')
+local realSender=Scan.Utils.SendResponses
+Scan.Utils.SendResponses=function() return false end
+click(visible('FailedReadyAnswer')[1])
+Scan.Utils.SendResponses=realSender
+assert(A.State(ao,ar)=='attention' and visible('FailedReadyAnswer')[1]:IsShown(),
+    'failed ready answer silenced the question or discarded its card')
+click(visible('FailedReadyAnswer')[1])
+assert(A.State(ao,ar)=='quiet')
+for _,callback in ipairs(throttleCallbacks) do callback() end
+assert(A.State(ao,ar)=='attention' and A.State(ao2,ar2)=='attention',
+    'server-throttled ready answer left the question falsely resolved')
+ai,ar,ar2,ao,ao2=attentionCustomer('OldReadyAnswer')
+attentionWhisper('OldReadyAnswer','hello')
+local oldCard=visible('OldReadyAnswer')[1]
+attentionWhisper('OldReadyAnswer','unmatchedword?')
+click(oldCard)
+assert(A.State(ao,ar)=='attention' and A.State(ao2,ar2)=='attention',
+    'answering an old card silenced a newer unrelated question')
+ai,ar,ar2,ao,ao2=attentionCustomer('GreetingReadyAnswer')
+local greetingEntry=attentionWhisper('GreetingReadyAnswer','unmatchedword?')
+ar.greeting_sent=false;ar2.greeting_sent=false
+local normalGreeting=Scan.SendOrderGreeting
+Scan.SendOrderGreeting=function(_,initiated)
+    assert(initiated==true)
+    ar.greeting_sent=true;ar2.greeting_sent=true
+    return true,{ar,ar2}
+end
+QuickReplies:ShowOrderGreeting('GreetingReadyAnswer','new request',ai,{ar,ar2},greetingEntry)
+click(visible('GreetingReadyAnswer')[1])
+Scan.SendOrderGreeting=normalGreeting
+assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_answered,
+    'a generated greeting quick reply left its answered request yellow')
+print('Ready-answer attention passed: actual clicks, merged rows, green protection, failures, server throttle, old cards and greeting groups.')
