@@ -41,7 +41,9 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'resending','resent','resend','resendin','resended','resending it now','resent the order',
     'I resent it','resent again','re sent','re sending','I re sent','reposted','resubmitted',
     'Thx you got it','thanks you got it','you got it','u got it','you have it now',
-    'you have got it','youve got it','you got both orders rn'}
+    'you have got it','youve got it','you got both orders rn',
+    'order out, ty','order out','the order is out','order is out now',"order's out",
+    'orders out','both orders are out','two orders out rn',"it's out",'it is out now','its out already'}
 local checks=0
 for _,message in ipairs(positives) do
     for _,prefix in ipairs({'','ok, ','aight ','yep ','yoo ','thx ','hey bro '}) do
@@ -115,7 +117,10 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     'if you got it','have you got it','you will have it','yoo check quality','pls check mats',
     'please check the price','yoo not posted','yoo not check it','yoo check it after buying mats',
     'not resending','resending later','I will resend','resent if I can','I resent you',
-    'got it','I got it','thx got it','didnt','I did not send','did you send it?'}) do
+    'got it','I got it','thx got it','didnt','I did not send','did you send it?',
+    'out','out ty','out of mats','order out of stock','order is out of mats',
+    "it's out of stock",'out of order','not order out','order is not out','order out?',
+    'order out later','order out if I can','order out after getting mats','0 orders out'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end

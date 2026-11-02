@@ -1161,8 +1161,8 @@ assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_ans
 print('Ready-answer attention passed: actual clicks, merged rows, green protection, failures, server throttle, old cards and greeting groups.')
 -- Screenshot acknowledgements must re-arm a row resolved by a ready answer,
 -- survive generic classifications from older peers, and stay green after omw.
-cfg.templates.CUSTOM_2.keywords='sent,did,posted,check,resending,resent,you got it'
-for index,body in ipairs({'I did','did','posted','yoo check it','check pls','Thx you got it','resending','resent'}) do
+cfg.templates.CUSTOM_2.keywords='sent,did,posted,check,resending,resent,you got it,order out'
+for index,body in ipairs({'I did','did','posted','yoo check it','check pls','Thx you got it','resending','resent','order out, ty'}) do
     local name='ScreenshotConfirmation'..index
     ai,ar,ar2,ao,ao2=attentionCustomer(name)
     attentionWhisper(name,'hello')
