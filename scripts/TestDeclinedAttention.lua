@@ -105,7 +105,7 @@ for _,peerOffset in ipairs({-90,90}) do
     assert(F:ApplyRemoteStatus(status))
     assert(A.State(co,cr)=='done','a peer clock mistook an older reply for a post-decline answer')
     now=3011;M.MarkReply(ci,{body='resent',receivedAt=now})
-    assert(A.State(co,cr)=='attention','post-decline reply was lost with a different peer clock')
+    assert(A.State(co,cr)=='sent','post-decline resent confirmation was lost with a different peer clock')
     now=3012;M.MarkReply(ci,{body='sent',receivedAt=now})
     assert(A.State(co,cr)=='sent')
 end
@@ -162,4 +162,19 @@ now=7105;A.SetState(go1,'waiting')
 now=7106;M.MarkReply(group,{body='sent',receivedAt=7102})
 assert(A.State(go1,gr1)=='done' and gr1.customerState=='waiting',
     'an older reply reopened attention ahead of a newer manual state')
+-- Screenshot: rejection explanation -> oops sec -> resending. An older peer's
+-- coarse attention classification must not hide the actual resend confirmation.
+now=8000
+local resend,rr,ro=Add('Zugsyroar-Realm',50)
+now=8001;M.MarkReply(resend,{body='sent',receivedAt=now,syncID='before-decline'})
+now=8010;F:SetStatus(ro,'rejected',{craftingOrderID=9500})
+now=8011;A.Record(resend,{body="I checked your order. You're missing materials.",receivedAt=now},false)
+assert(A.State(ro,rr)=='done')
+now=8012;M.MarkReply(resend,{body='oops sec',receivedAt=now,syncID='oops'})
+assert(A.State(ro,rr)=='attention')
+now=8013;M.MarkReply(resend,{body='resending',customerState='attention',receivedAt=now,syncID='resending'})
+assert(A.State(ro,rr)=='sent' and rr.firstAnsweredAt==8012 and rr.customer_answered,
+    'the screenshot resend stayed yellow or restarted its first-reply minute')
+assert(F:GetStatus(ro).status=='rejected' and F:GetStatus(ro).craftingOrderID==9500,
+    'a customer resend claim changed the actual game-order rejection')
 print('Declined attention passed: new replies, colours, preserved rejection, minute delay, repeated declines, replay, reload, identities, completions and peer clocks.')

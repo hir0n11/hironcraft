@@ -12,6 +12,9 @@ assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
 local A,M=Scan.CustomerAttention,Scan.RequestTracking
 local groups={
     done={'dnoe','doen','dne','donne','doone'},
+    did={'ddid','didd','diid'},
+    resending={'resenidng','resendign','resedning','resendng','resnding'},
+    resent={'resentt','ressent'},
     listed={'litsed','litsted','lissted','listeed','listde','listedd'},
     ordered={'orderde','oredered','odrered','orderred','ordereed','orderedd'},
     placed={'palced','plcaed','plaecd','placde','placd','placedd','pleaced'},
@@ -51,7 +54,7 @@ for canonical,words in pairs(groups) do
         IsSent(phrase:upper()..'!',true)
         for _,prefix in ipairs({'not ','not yet ','never ','I will ','I havent ',
             "I haven't ",'please ','where can I ','need '}) do
-            IsSent(prefix..phrase,false)
+            IsSent(prefix..phrase,prefix=='please ' and canonical=='check')
         end
         for _,suffix in ipairs({'?',' later',' tomorrow',' after getting mats',' if I can',' but not yet',
             ' the mats',' on the AH'}) do

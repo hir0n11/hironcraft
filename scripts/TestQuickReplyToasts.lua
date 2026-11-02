@@ -1098,9 +1098,9 @@ local function attentionCustomer(name)
     info.activeInquiryID,info.activeInquiryAt=first.inquiryID,time()
     return info,first,second,{customerName=name,responseID=101},{customerName=name,responseID=102}
 end
-local function attentionWhisper(name,body)
+local function attentionWhisper(name,body,classification)
     now=now+10
-    local entry={body=body,receivedAt=time(),syncID=name..':'..now}
+    local entry={body=body,receivedAt=time(),syncID=name..':'..now,customerState=classification}
     local info=Scan.DB.customers[name]
     M.MarkReply(info,entry)
     QuickReplies:OnWhisper(name,body,info,entry)
@@ -1159,3 +1159,27 @@ Scan.SendOrderGreeting=normalGreeting
 assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_answered,
     'a generated greeting quick reply left its answered request yellow')
 print('Ready-answer attention passed: actual clicks, merged rows, green protection, failures, server throttle, old cards and greeting groups.')
+-- Screenshot acknowledgements must re-arm a row resolved by a ready answer,
+-- survive generic classifications from older peers, and stay green after omw.
+cfg.templates.CUSTOM_2.keywords='sent,did,posted,check,resending,resent,you got it'
+for index,body in ipairs({'I did','did','posted','yoo check it','check pls','Thx you got it','resending','resent'}) do
+    local name='ScreenshotConfirmation'..index
+    ai,ar,ar2,ao,ao2=attentionCustomer(name)
+    attentionWhisper(name,'hello')
+    click(visible(name)[1])
+    assert(A.State(ao,ar)=='quiet')
+    attentionWhisper(name,body,'attention')
+    assert(A.State(ao,ar)=='sent' and A.State(ao2,ar2)=='sent',
+        'new screenshot acknowledgement stayed quiet/yellow: '..body)
+    A.Record(ai,{body='<3',receivedAt=time()},false)
+    assert(A.State(ao,ar)=='sent','the outgoing screenshot heart cleared green')
+    assert(#visible(name)>0,'test confirmation had no omw card: '..body)
+    click(visible(name)[1])
+    assert(A.State(ao,ar)=='sent' and A.Collect(time()+60)==2,
+        'omw answered a new confirmation but silenced the craft reminder: '..body)
+    assert(A.Acknowledge(ao) and A.Acknowledge(ao2))
+    attentionWhisper(name,'posted','attention')
+    assert(A.State(ao,ar)=='sent' and A.State(ao2,ar2)=='sent' and ar.customer_answered,
+        'posted did not restore green after a manual acknowledgement')
+end
+print('Screenshot acknowledgements passed through ready answers, older peer classifications, heart/omw replies and manual acknowledgement.')

@@ -48,6 +48,9 @@ end
 local CONFIRMATION_ALIASES = {}
 for canonical,variants in pairs({
     done={'dnoe','doen','dne','donne','doone'},
+    did={'ddid','didd','diid'},
+    resending={'resenidng','resendign','resedning','resendng','resnding'},
+    resent={'resentt','ressent'},
     listed={'litsed','litsted','lissted','listeed','listde','listedd'},
     ordered={'orderde','oredered','odrered','orderred','ordereed','orderedd'},
     placed={'palced','plcaed','plaecd','placde','placd','placedd','pleaced'},
@@ -71,17 +74,19 @@ for canonical,variants in pairs({
 }) do
     for _,variant in ipairs(variants) do CONFIRMATION_ALIASES[variant]=canonical end
 end
+local COURTESY_STARTS={'ok ','okay ','alright ','aight ','sure ','yes ','yep ','yup ','yeah ',
+    'hey ','heyy ','heyyy ','hi ','hii ','hello ','yo ','yoo ','yooo ','yoooo ',
+    'bro ','mate ','m8 ','dude ','man ','buddy ','thanks ','thank you ','thx ','ty '}
+local COURTESY_ENDS={' thank you',' thanks',' thx',' ty',' cheers',' mate',' bro',' m8',' dude',' спс',' спасибо'}
 local function Courtesy(text)
     -- Only harmless conversational padding is removed. In particular, never
     -- strip negatives, modal verbs, conditions, material names or questions.
-    local starts={'ok ','okay ','alright ','aight ','sure ','yes ','yep ','yup ','yeah ','hey ','yo '}
-    local ends={' thank you',' thanks',' thx',' ty',' cheers',' mate',' bro',' m8',' dude',' спс',' спасибо'}
     for _=1,4 do
         local previous=text
-        for _,prefix in ipairs(starts) do
+        for _,prefix in ipairs(COURTESY_STARTS) do
             if text:sub(1,#prefix)==prefix then text=text:sub(#prefix+1);break end
         end
-        for _,suffix in ipairs(ends) do
+        for _,suffix in ipairs(COURTESY_ENDS) do
             if text:sub(-#suffix)==suffix then text=text:sub(1,-#suffix-1);break end
         end
         if text==previous then break end
@@ -90,6 +95,7 @@ local function Courtesy(text)
 end
 local SHORT_SENT = {
     ['all done']=true,
+    ['re sent']=true, ['re send']=true, ['re sending']=true,
     ['on air']=true, ['onair']=true, ['on the air']=true, ['in the air']=true,
     ['on the way']=true, ['on its way']=true, ['on your way']=true, ['on ur way']=true,
     ['it s on the way']=true, ['its on the way']=true, ['it is on the way']=true,
@@ -114,8 +120,19 @@ local SHORT_SENT = {
     ['check your orders']=true, ['check ur orders']=true,
     ['заказ у тебя']=true, ['заказ отправлен']=true, ['заказ отправлен тебе']=true,
 }
-for _,phrase in ipairs({'check','chk','chck','check it','check order','check the order','check orders','check the orders'}) do
-    for _,tail in ipairs({'',' now',' rn',' pls',' plz',' please'}) do SHORT_SENT[phrase..tail]=true end
+for _,phrase in ipairs({'check','chk','chck','check it','check order','check the order','check orders','check the orders',
+    'check my order','check my orders','check your orders','check ur orders'}) do
+    for _,tail in ipairs({'',' now',' rn',' pls',' plz',' please'}) do
+        SHORT_SENT[phrase..tail]=true
+        -- Politeness is allowed only for an exact check acknowledgement,
+        -- never stripped from arbitrary requests such as "please post it".
+        for _,prefix in ipairs({'pls ','plz ','please '}) do SHORT_SENT[prefix..phrase..tail]=true end
+    end
+end
+for _,prefix in ipairs({'you got ','u got ','you have ','u have ','you have got ','you ve got ','youve got '}) do
+    for _,object in ipairs({'it','order','orders','the order','the orders','both orders'}) do
+        for _,tail in ipairs({'',' now',' rn'}) do SHORT_SENT[prefix..object..tail]=true end
+    end
 end
 for _,word in ipairs({'inc','incoming','incomming','incomin','otw'}) do
     for _,tail in ipairs({'',' now',' rn',' to you',' to u'}) do SHORT_SENT[word..tail]=true end
@@ -125,13 +142,14 @@ for _,phrase in ipairs({'on air','onair','on the air','in the air','on the way',
     for _,tail in ipairs({'',' now',' rn',' to you',' to u'}) do SHORT_SENT[phrase..tail]=true end
 end
 local SHORT_VERBS = {}
-for _,word in ipairs({'done','posted','submitted','submited','placed','mailed','delivered','dispatched',
+for _,word in ipairs({'done','did','posted','submitted','submited','placed','mailed','delivered','dispatched',
+    'resent','resend','resending','resendin','resended','reposted','resubmitted',
     'listed','listing','listin','listng','listd','lstd','lsted','lsited','lisetd','listted','listet',
     'ordered','orderd','ordred','ordrd','orded','odered','ordering','orderin','orderng',
     'sentit','sendit','sntit','sndit','sendedit','donezo'}) do SHORT_VERBS[word]=true end
 local SHORT_TAILS = {}
 for _,object in ipairs({'','it','order','the order','crafting order','the crafting order','request','the request'}) do
-    for _,when in ipairs({'','now','rn','already','just now'}) do
+    for _,when in ipairs({'','now','rn','already','just now','again','again now'}) do
         local tail=object~='' and when~='' and object..' '..when or object..when
         SHORT_TAILS[tail]=true
         for _,recipient in ipairs({'to you','to u','for you','for u'}) do
@@ -235,6 +253,7 @@ local function SendContext(s,first,last)
         if #recent>4 then table.remove(recent,1) end
     end
     local before=' '..table.concat(recent,' ')..' '
+    if before:find(' did you ',1,true) or before:find(' did u ',1,true) then return 'attention' end
     for _,word in ipairs({'not','never','havent','haven','hasnt','hasn','didnt','didn','dont','don',
         'isnt','isn','wasnt','wasn','werent','weren','arent','aren','wont','won',
         'couldnt','couldn','wouldnt','wouldn','shouldnt','shouldn',
@@ -427,7 +446,10 @@ function A.Record(info, entry, incoming)
     local eligible = Members(info, entry)
     local classified = entry.customerState
     local text=entry.body or tostring(entry.message or ''):match(':%s+(.+)$') or entry.message
-    if classified~='sent' and classified~='waiting' and classified~='attention' then
+    -- An older peer may not know a newer acknowledgement and send a generic
+    -- attention classification. Recheck that coarse fallback against this
+    -- version's grammar; keep explicit sent/waiting classifications compatible.
+    if classified=='attention' or (classified~='sent' and classified~='waiting') then
         classified=A.Classify(text)
     end
     local seen = {}

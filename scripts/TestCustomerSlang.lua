@@ -34,10 +34,17 @@ local positives={'on air','onair','in the air','inc','incoming','incomming','inc
     'I have just placed 2 orders','placed two orders now','submitted both orders for you',
     'the two orders are up','both orders created','all orders submitted','an order placed',
     'both should be there','both should be there now',
-    'both orders should be there','both orders should be there now'}
+    'both orders should be there','both orders should be there now',
+    'did','I did','did it','I did it','I already did','did the order','I did already',
+    'posted again','yoo posted','thx I posted it','yoo check it','hey bro check pls',
+    'pls check','plz check it','please check the orders','check my orders pls',
+    'resending','resent','resend','resendin','resended','resending it now','resent the order',
+    'I resent it','resent again','re sent','re sending','I re sent','reposted','resubmitted',
+    'Thx you got it','thanks you got it','you got it','u got it','you have it now',
+    'you have got it','youve got it','you got both orders rn'}
 local checks=0
 for _,message in ipairs(positives) do
-    for _,prefix in ipairs({'','ok, ','aight ','yep '}) do
+    for _,prefix in ipairs({'','ok, ','aight ','yep ','yoo ','thx ','hey bro '}) do
         for _,suffix in ipairs({'','!',' ty',' thanks bro'}) do
             local sample=prefix..message..suffix
             assert(A.Classify(sample)=='sent','missed customer slang: '..sample)
@@ -46,7 +53,9 @@ for _,message in ipairs(positives) do
     end
     for _,prefix in ipairs({'not ','not yet ','I will ','I havent ','please ','where can I '}) do
         local sample=prefix..message
-        assert(A.Classify(sample)~='sent','negative/request became sent: '..sample)
+        local first=message:lower():match('^(%S+)')
+        local politeCheck=prefix=='please ' and (first=='check' or first=='chk' or first=='chck')
+        assert((A.Classify(sample)=='sent')==politeCheck,'negative/request or polite check classified wrong: '..sample)
         checks=checks+1
     end
     for _,suffix in ipairs({'?',' later',' tomorrow',' after getting mats',' if I can',' but not yet'}) do
@@ -100,7 +109,13 @@ for _,message in ipairs({'omw','on my way','on my way to the table','otw to the 
     '0 orders placed','zero orders placed','no orders placed','placed 0 orders',
     '2 mats placed','placed two mats','2 orders listed on the AH','placed 2 orders on auction',
     'placed 2 orders it','2 orders','two orders','the orders',
-    'senidngly','resenidng','unsenidng','sendigner'}) do
+    'senidngly','unsenidng','sendigner','did?','I did not','not did','did you','did u',
+    'did you send it','did you post it','I did the quest','I did buy mats','did you get it',
+    'you got it?','Thx you got it?','you got it wrong','you have it wrong','you got the mats',
+    'if you got it','have you got it','you will have it','yoo check quality','pls check mats',
+    'please check the price','yoo not posted','yoo not check it','yoo check it after buying mats',
+    'not resending','resending later','I will resend','resent if I can','I resent you',
+    'got it','I got it','thx got it','didnt','I did not send','did you send it?'}) do
     assert(A.Classify(message)~='sent','ambiguous/unrelated message turned green: '..message)
     checks=checks+1
 end

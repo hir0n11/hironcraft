@@ -14,7 +14,8 @@ assert(loadfile('Customer/RequestTracking.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
 local A,M=Scan.CustomerAttention,Scan.RequestTracking
 A.Tick() -- First enable starts the saved grace period, before any rows exist.
-for _,s in ipairs({'sent','SENT!','order sent','send','отправил','Заказ отправила','отправлено'}) do
+for _,s in ipairs({'sent','SENT!','order sent','send','отправил','Заказ отправила','отправлено',
+    'I did','did','posted','yoo check it','check pls','Thx you got it','resending','resent'}) do
     assert(A.Classify(s)=='sent',s)
 end
 for _,s in ipairs({'not sent yet',"haven't sent",'not send','will send soon','can I send','getting mats',
@@ -60,7 +61,7 @@ for _,message in ipairs({'I will send','I will send soon',"I'll send later",'I w
     'I will send now, getting mats','I will send now, buying mats'}) do
     assert(A.Classify(message)~='sent','non-confirmation became immediate sending: '..message)
 end
-for _,message in ipairs({'sender','sendingly','resent','unsent','present','undone','redone','ready','okay'}) do
+for _,message in ipairs({'sender','sendingly','resentment','unsent','present','undone','redone','ready','okay'}) do
     assert(A.Classify(message)~='sent','unrelated word became a confirmation: '..message)
 end
 for _,message in ipairs({"done'",'DONE!','done’','all done',"I'm done",'done, thanks'}) do
