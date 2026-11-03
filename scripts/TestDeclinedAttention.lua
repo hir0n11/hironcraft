@@ -23,6 +23,17 @@ assert(loadfile('Customer/RequestTracking.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/OrderFulfillment.lua'))('HironCraft',Scan)
 local A,M,F=Scan.CustomerAttention,Scan.RequestTracking,Scan.OrderFulfillment
+for _,invalid in ipairs({{status='rejected',customerName=''},
+    {status='rejected',customerName='-'},{status='rejected',customerName={}}}) do
+    Scan.Events:Emit('ORDER_COMPLETION_NOTICE_UPDATED',invalid)
+end
+local function Due(order,at)
+    local listed=Scan.DB.listed_orders
+    Scan.DB.listed_orders={test=order}
+    local result=A.Collect(at)
+    Scan.DB.listed_orders=listed
+    return result
+end
 local function Add(name,id)
     local info=Scan.DB.customers[name] or {responses={}}
     Scan.DB.customers[name]=info
@@ -177,4 +188,103 @@ assert(A.State(ro,rr)=='sent' and rr.firstAnsweredAt==8012 and rr.customer_answe
     'the screenshot resend stayed yellow or restarted its first-reply minute')
 assert(F:GetStatus(ro).status=='rejected' and F:GetStatus(ro).craftingOrderID==9500,
     'a customer resend claim changed the actual game-order rejection')
-print('Declined attention passed: new replies, colours, preserved rejection, minute delay, repeated declines, replay, reload, identities, completions and peer clocks.')
+-- Cancellation is the current conversation even when another item had the
+-- latest greeting. A subsequent reply must reach the item actually declined.
+now=9000
+local switched,sr,so=Add('Switched-Realm',60)
+now=9001;M.MarkReply(switched,{body='sent',receivedAt=now,syncID='switch-sent'})
+assert(A.Acknowledge(so))
+now=9010
+local _,another,anotherOrder=Add('Switched-Realm',61)
+now=9020;F:SetStatus(so,'rejected',{craftingOrderID=9600})
+assert(A.State(so,sr)=='done')
+now=9021;M.MarkReply(switched,{body='I will fix it now',receivedAt=now,syncID='switch-fix'})
+assert(A.State(so,sr)=='attention' and sr.customer_answered,
+    'reply after decline stayed bound to a different item instead of the rejected request')
+assert(not another.customer_answered and A.State(anotherOrder,another)==nil,
+    'a reply to the decline checked an unrelated item')
+assert(Due(so,9080)==0 and Due(so,9081)==1,'a correction reply lost its full reminder minute')
+-- Opening a new conversation after that decline must still take precedence.
+now=9030
+local _,newest,newestOrder=Add('Switched-Realm',62)
+now=9031;M.MarkReply(switched,{body='sent',receivedAt=now,syncID='switch-new'})
+assert(A.State(newestOrder,newest)=='sent' and A.State(so,sr)=='attention')
+-- A new message and the decline can share WoW's integer-second timestamp.
+now=10000
+local fast,fr,fo=Add('Fast-Realm',70)
+now=10001;M.MarkReply(fast,{body='sent',receivedAt=now,syncID='fast-before'})
+local oldContext=M.GetReplyContext(fast)
+now=10010;F:SetStatus(fo,'rejected',{craftingOrderID=9700})
+M.MarkReply(fast,{body='I will fix it',receivedAt=now,syncID='fast-after'})
+assert(A.State(fo,fr)=='attention' and fr.firstAnsweredAt==10010,
+    'same-second post-decline reply did not restore yellow')
+assert(Due(fo,10069)==0 and Due(fo,10070)==1 and A.NeedsAttention(fo,fr))
+assert(A.Acknowledge(fo))
+M.MarkReply(fast,{body='I will fix it',receivedAt=now,syncID='fast-after'})
+assert(A.State(fo,fr)=='quiet','replayed same-second reply undid manual acknowledgement')
+-- A genuinely older message, with the context captured before cancellation,
+-- does not provide evidence of a reply after that cancellation.
+now=10020;F:SetStatus(fo,'rejected',{craftingOrderID=9701})
+M.MarkReply(fast,{body='sent',receivedAt=10020,syncID='old-delayed',replyContext=oldContext})
+assert(A.State(fo,fr)=='done','an old context reopened a same-second decline')
+now=10021;M.MarkReply(fast,{body='сейчас исправлю',receivedAt=now,syncID='fix-ru'})
+assert(A.State(fo,fr)=='attention' and F:GetStatus(fo).craftingOrderID==9701,
+    'ordinary Russian correction reply failed to restore yellow or changed the actual rejection')
+-- Notice-only delivery must focus the decline before any UI reads its status.
+now=11000
+local noticeInfo,noticeRow,noticeOrder=Add('NoticeFocus-Realm',80)
+noticeRow.recipeID,noticeRow.itemID=180,280
+now=11001;M.MarkReply(noticeInfo,{body='sent',receivedAt=now,syncID='notice-before'})
+now=11010
+local _,noticeOther=Add('NoticeFocus-Realm',81)
+noticeOther.recipeID,noticeOther.itemID=181,281
+now=11020
+local note={customerName='NoticeFocus',spellID=180,itemID=280,crafterFullName='Crafter-Realm',
+    orderID=9800,updatedAt=now,clockOffset=0,origin='peer',status='rejected',
+    requestToken=noticeRow.requestToken,requestTime=noticeRow.time}
+Scan.DB.settings.order_completion_notices.focus=note
+Scan.Events:Emit('ORDER_COMPLETION_NOTICE_UPDATED',note)
+M.MarkReply(noticeInfo,{body='fixing now',receivedAt=now,syncID='notice-after'})
+assert(A.State(noticeOrder,noticeRow)=='attention' and not noticeOther.customer_answered,
+    'notice-only cancellation waited for a UI read or targeted another item')
+assert(Due(noticeOrder,now+59)==0 and Due(noticeOrder,now+60)==1)
+-- The chat packet can beat the status packet to the linked computer. Its
+-- captured exact-decline context must retain same-second event ordering.
+now=12000
+local linked,linkedRow,linkedOrder=Add('Linked-Realm',90)
+now=12010
+M.MarkReply(linked,{body='will fix it',receivedAt=now,syncID='linked-fix',
+    replyContext={id=linkedRow.inquiryID,at=12010,members={{responseID=90,
+        requestToken=linkedRow.requestToken,greetingSentAt=12000,declineKey='order:9900'}}}})
+assert(F:ApplyRemoteStatus({customerName=linkedOrder.customerName,responseID=90,
+    requestToken=linkedRow.requestToken,requestTime=12000,status='rejected',craftingOrderID=9900,
+    updatedAt=12010,clockOffset=0,origin='peer',rev=1}))
+assert(A.State(linkedOrder,linkedRow)=='attention' and Due(linkedOrder,12070)==1,
+    'a late same-second linked decline hid its newer correction reply')
+-- Persisted rejection context survives reload and cannot steal a newer inquiry
+-- on a repeated status/audit notification.
+assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
+A=Scan.CustomerAttention
+now=12011
+local _,linkedNew,linkedNewOrder=Add('Linked-Realm',91)
+F:NotifyDeliveryUpdated(F:GetStatus(linkedOrder))
+now=12012;M.MarkReply(linked,{body='sent',receivedAt=now,syncID='linked-new'})
+assert(A.State(linkedNewOrder,linkedNew)=='sent' and A.State(linkedOrder,linkedRow)=='attention',
+    'reload/repeated decline redirected a newer inquiry')
+-- A rejection already saved by the prior build has no focus marker. Repair
+-- its eligible conversation once on reload, without waiting for a new decline.
+now=13000
+local saved,savedRow,savedOrder=Add('Saved-Realm',100)
+now=13001;M.MarkReply(saved,{body='sent',receivedAt=now,syncID='saved-before'})
+now=13010
+local _,savedOther=Add('Saved-Realm',101)
+now=13020;F:SetStatus(savedOrder,'rejected',{craftingOrderID=9910})
+savedRow.rejectedAttention.focusChecked=nil
+saved.activeInquiryID,saved.activeInquiryAt=savedOther.inquiryID,13010
+assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
+A=Scan.CustomerAttention
+assert(A.State(savedOrder,savedRow)=='done')
+now=13021;M.MarkReply(saved,{body='сейчас исправлю',receivedAt=now,syncID='saved-fix'})
+assert(A.State(savedOrder,savedRow)=='attention' and not savedOther.customer_answered,
+    'a cancellation saved by the previous version retained its broken reply focus')
+print('Declined attention passed: replies, cancellation focus, same-second order, manual acknowledgement, replay, colours, minute delay, reload, identities, completions and peer clocks.')

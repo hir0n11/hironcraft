@@ -332,7 +332,7 @@ local function Members(info, entry)
             if index>64 then break end
             if type(member)=='table' then
                 local r = info.responses and info.responses[member.responseID]
-                if r and r.requestToken == member.requestToken then result[r] = true end
+                if r and r.requestToken == member.requestToken then result[r] = member end
             end
         end
     end
@@ -351,7 +351,7 @@ local function RejectionTime(entry)
     if entry.origin and Settings().my_uuid and entry.origin~=Settings().my_uuid then return time() end
     return at
 end
-local function ObserveRejection(response,entry)
+local function ObserveRejection(response,entry,info)
     if type(response)~='table' then return end
     if type(entry)=='table' and entry.requestToken and response.requestToken
         and entry.requestToken~=response.requestToken then return end
@@ -366,12 +366,14 @@ local function ObserveRejection(response,entry)
     local marker=response.rejectedAttention
     if type(marker)~='table' or marker.key~=key or marker.token~=response.requestToken
         or type(marker.at)~='number' or marker.at~=marker.at or math.abs(marker.at)==math.huge then
-        marker={key=key,token=response.requestToken,at=RejectionTime(entry)}
+        marker={key=key,token=response.requestToken,at=RejectionTime(entry),
+            beforeReplyID=response.lastCustomerReplyID}
         response.rejectedAttention=marker
         -- A linked decline can arrive after the customer's newer reply.
         -- Keep actual status intact; only reopen attention to this inquiry.
         local replyAt=tonumber(response.lastCustomerReplyAt)
-        if response.customer_answered and replyAt and replyAt>marker.at
+        if response.customer_answered and replyAt and (replyAt>marker.at
+            or (replyAt==marker.at and response.lastCustomerReplyDeclineKey==key))
             and replyAt>=(tonumber(response.time) or 0) then
             marker.replyAt=replyAt
             response.firstAnsweredAt=replyAt
@@ -380,11 +382,40 @@ local function ObserveRejection(response,entry)
             end
         end
     end
+    -- Also repair markers persisted by earlier builds. Check focus once per
+    -- cancellation, never on every UI read or repeated audit notification.
+    if info and not marker.focusChecked then
+        marker.focusChecked=true
+        if response.greeting_sent and response.requestToken
+            and marker.at>=(tonumber(info.activeInquiryAt) or 0) then
+            response.inquiryID=response.inquiryID or response.requestToken
+            info.activeInquiryID,info.activeInquiryAt=response.inquiryID,marker.at
+        end
+    end
     return marker
 end
 function A.StatusChanged(order,entry)
     local response=Scan.OrderToResponse and Scan.OrderToResponse(order)
-    ObserveRejection(response,entry)
+    local info=Scan.OrderToCustomerInfo and Scan.OrderToCustomerInfo(order)
+    ObserveRejection(response,entry,info)
+end
+function A.CompletionChanged(notice)
+    -- Notice-only declines can arrive without a row-status event. Observe the
+    -- effective status before the next message, without waiting for a hover.
+    if type(notice)~='table' or notice.status~='rejected' or type(notice.customerName)~='string' then return end
+    local f=Scan.OrderFulfillment
+    if not f or not f.GetStatus then return end
+    local name=notice.customerName:match('^[^-]+')
+    if not name then return end
+    name=name:lower()
+    for _,order in pairs(Scan.DB and Scan.DB.listed_orders or {}) do
+        local candidate=type(order)=='table' and type(order.customerName)=='string'
+            and order.customerName:match('^[^-]+')
+        if candidate and candidate:lower()==name then
+            local ok,entry=pcall(f.GetStatus,f,order)
+            if ok then A.StatusChanged(order,entry) end
+        end
+    end
 end
 local function ReplyID(entry)
     local id=entry and entry.syncID
@@ -406,7 +437,7 @@ function A.ResetRequest(response)
     -- Reusing a recipe row for a new request must not inherit its previous
     -- acknowledgement, green state, reply identity, grace period or snooze.
     for _,key in ipairs({'attentionResolved','rejectedAttention','customerState','customerStateAt',
-        'lastCustomerReplyAt','lastCustomerReplyState','lastCustomerReplyID','firstAnsweredAt',
+        'lastCustomerReplyAt','lastCustomerReplyState','lastCustomerReplyID','lastCustomerReplyDeclineKey','firstAnsweredAt',
         'attentionReturned','awaitingReturn','answerResetAt','reminderSnoozeUntil',
         'attentionRevision','attentionActor','attentionChangedAt'}) do response[key]=nil end
 end
@@ -477,8 +508,12 @@ function A.Record(info, entry, incoming)
                     response.customerState=nil
                 end
                 local rejection=response.rejectedAttention
+                local member=eligible[response]
+                local declineKey=type(member)=='table' and member.declineKey
+                local sameSecond=type(rejection)=='table' and at==rejection.at
+                    and declineKey==rejection.key and id and id~=rejection.beforeReplyID
                 local reopened=type(rejection)=='table' and rejection.token==response.requestToken
-                    and type(rejection.at)=='number' and not rejection.replyAt and at>rejection.at
+                    and type(rejection.at)=='number' and not rejection.replyAt and (at>rejection.at or sameSecond)
                     and at>=(tonumber(response.lastCustomerReplyAt) or 0)
                     and at>=(tonumber(response.customerStateAt) or 0)
                 if reopened then
@@ -489,6 +524,7 @@ function A.Record(info, entry, incoming)
                 end
                 if at>=(tonumber(response.lastCustomerReplyAt) or 0) then
                     response.lastCustomerReplyID=id
+                    response.lastCustomerReplyDeclineKey=type(declineKey)=='string' and declineKey or nil
                 end
                 response.lastCustomerReplyAt=math.max(tonumber(response.lastCustomerReplyAt) or 0,at)
                 response.firstAnsweredAt = (returned or reopened or rearmed) and at or tonumber(response.firstAnsweredAt) or at
@@ -511,7 +547,8 @@ function A.State(order, response)
     local ok,entry=true,nil
     if f and f.GetStatus then ok,entry=pcall(f.GetStatus,f,order) end
     local status = ok and type(entry)=='table' and entry.status or nil
-    local rejection=ok and ObserveRejection(response,entry) or nil
+    local info=Scan.OrderToCustomerInfo and Scan.OrderToCustomerInfo(order)
+    local rejection=ok and ObserveRejection(response,entry,info) or nil
     if status == 'crafted' or status == 'fulfilled'
         or (status == 'rejected' and not (rejection and rejection.replyAt)) then return 'done' end
     if not response or not response.customer_answered then return nil end
@@ -757,6 +794,7 @@ function A.Tick()
 end
 if Scan.Events and Scan.Events.Register then
     Scan.Events:Register('ORDER_FULFILLMENT_UPDATED',A.StatusChanged)
+    Scan.Events:Register('ORDER_COMPLETION_NOTICE_UPDATED',A.CompletionChanged)
 end
 if CreateFrame then
     local outgoing=CreateFrame('Frame')

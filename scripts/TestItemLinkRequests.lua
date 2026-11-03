@@ -2417,3 +2417,40 @@ do
     reset()
 end
 print('Item links without the old global item functions passed.')
+
+-- The real incoming-whisper path must restore the cancelled item's colour,
+-- even after a manual acknowledgement and a different item's later greeting.
+do
+    reset()
+    local previousFulfillment,previousAttention=Scan.OrderFulfillment,Scan.CustomerAttention
+    local createFrame,onLoad=CreateFrame,Scan.Utils.onLoad
+    CreateFrame=nil;Scan.Utils.onLoad=noop
+    loadSource('Customer/CustomerAttention.lua')
+    CreateFrame,Scan.Utils.onLoad=createFrame,onLoad
+    local statuses={}
+    Scan.OrderFulfillment={Status={Unknown='unknown',Rejected='rejected'},
+        GetStatus=function(_,o) return statuses[o.responseID] end}
+    scan(a)
+    Scan.GreetCustomer('LeftButton',order(101))
+    Scan.OnMessage('CHAT_MSG_WHISPER','sent','Buyer','Buyer-GUID')
+    assert(Scan.CustomerAttention.Acknowledge(order(101)))
+    now=now+31
+    scan(b)
+    Scan.GreetCustomer('LeftButton',order(102))
+    now=now+1
+    statuses[101]={status='rejected',craftingOrderID=10001,updatedAt=now,
+        requestToken=response(101).requestToken}
+    Scan.CustomerAttention.StatusChanged(order(101),statuses[101])
+    assert(not Scan.IsOrderInProgress(order(101)))
+    Scan.OnMessage('CHAT_MSG_WHISPER','I will fix it now','Buyer','Buyer-GUID')
+    assert(Scan.IsOrderInProgress(order(101)) and response(101).customer_answered
+        and Scan.CustomerAttention.State(order(101),response(101))=='attention',
+        'actual same-second correction whisper did not restore the declined item')
+    assert(not response(102).customer_answered and statuses[101].status=='rejected',
+        'correction changed an unrelated reply check or the actual rejection')
+    assert(Scan.PeelOrderMark(order(101))=='attention' and response(101).customer_answered
+        and not Scan.IsOrderInProgress(order(101)), 'manual background dismissal regressed after a decline')
+    Scan.OrderFulfillment,Scan.CustomerAttention=previousFulfillment,previousAttention
+    reset()
+end
+print('Decline correction through actual scanner whispers passed.')

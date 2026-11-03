@@ -85,8 +85,12 @@ function M.GetReplyContext(info)
         local pendingPrevious = not response.greeting_sent and type(response.previousGreeting) == 'table'
             and response.previousGreeting.id == activeID
         if (response.greeting_sent and response.inquiryID == activeID) or pendingPrevious then
+            local rejection=response.rejectedAttention
             members[#members + 1] = {responseID=candidate.responseID, requestToken=response.requestToken,
-                greetingSentAt=tonumber(response.greetingSentAt) or activeAt}
+                greetingSentAt=tonumber(response.greetingSentAt) or activeAt,
+                -- The exact decline was already known when this message
+                -- arrived. This disambiguates replies in the same second.
+                declineKey=type(rejection)=='table' and rejection.token==response.requestToken and rejection.key or nil}
         end
     end
     if #members == 0 then return nil end
