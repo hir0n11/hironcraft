@@ -368,8 +368,10 @@ local function PurgeOldOrders()
     local timeout = HironCraftScan.Utils.GetSetting('customer_timeout') * 60;
     for orderID, order in pairs(orders) do
         local response = HironCraftScan.OrderToResponse(order)
-        if not response or type(response.time) ~= 'number' or (now - response.time > timeout
-            and not (HironCraftScan.CustomerAttention and HironCraftScan.CustomerAttention.KeepAlive(order,response))) then
+        local attention = HironCraftScan.CustomerAttention
+        if not response or type(response.time) ~= 'number' or response.time~=response.time
+            or math.abs(response.time)==math.huge or (attention and attention.IsExpired(response,now))
+            or (now - response.time > timeout and not (attention and attention.KeepAlive(order,response,now))) then
             table.insert(old, { id = orderID, order = order })
         end
     end
@@ -1945,6 +1947,10 @@ HironCraftScan.Utils.onLoad(function()
     end
 
     PurgeOldOrders()
+
+    -- The hour limit also applies before the scanner has first been opened.
+    -- Reuse its existing age/cleanup timer; opening the page cannot add one.
+    ScheduleUpdateCells()
 
     local initialized = false;
     ProfessionsFrame:HookScript("OnShow", function()

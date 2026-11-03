@@ -1074,7 +1074,7 @@ do
 end
 print('Decline reason passed (asked after the row is gone, several declines, clicks, listed rows, wording, switched off, by hand).')
 -- Attention integrates with actual toast creation/clicks, not merely a keyword
--- match. Successful ready answers silence yellow, but never auto-silence green.
+-- match. Quick replies preserve both colours and never silence reminders.
 dismissAll()
 time=function() return 100000+now end
 Scan.DB.settings.my_uuid='attention-test'
@@ -1083,6 +1083,12 @@ assert(loadfile('ChatFilter/FilterEngine.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/RequestTracking.lua'))('HironCraft',Scan)
 assert(loadfile('Customer/CustomerAttention.lua'))('HironCraft',Scan)
 local A,M=Scan.CustomerAttention,Scan.RequestTracking
+local sendWithBoundary=Scan.Utils.SendResponses
+Scan.Utils.SendResponses=function(messages,customer,...)
+    local result=sendWithBoundary(messages,customer,...)
+    if result~=false then A.Outgoing(customer) end -- real outgoing whisper event
+    return result
+end
 local cfg=QuickReplies:GetConfig()
 cfg.enabled=true
 cfg.templates.CUSTOM_1={custom=true,enabled=true,label='Hello',keywords='hello',response='hey hey'}
@@ -1111,12 +1117,13 @@ attentionWhisper('HandledBuyer','hello')
 assert(A.State(ao,ar)=='attention' and #visible('HandledBuyer')==1,
     'merely offering a card silenced an unanswered question')
 click(visible('HandledBuyer')[1])
-assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_answered and ar2.customer_answered,
-    'merged ready answer did not resolve its exact yellow source rows')
-assert(A.Collect(time()+600)==0 and A.KeepAlive(ao,ar),'handled rows reminded or disappeared while still pending')
+assert(A.State(ao,ar)=='attention' and A.State(ao2,ar2)=='attention' and ar.customer_answered and ar2.customer_answered,
+    'merged ready answer removed yellow attention or the second check')
+assert(A.Collect(time()+59)==0 and A.Collect(time()+60)==2 and A.KeepAlive(ao,ar),
+    'ready answer disabled a pending reminder or lost the full minute after sending')
 attentionWhisper('HandledBuyer','unmatchedword?')
-assert(A.State(ao,ar)=='attention' and A.Collect(time()+59)==0 and A.Collect(time()+60)==2,
-    'a new personal question did not restore attention with a fresh minute')
+assert(A.State(ao,ar)=='attention' and A.Collect(time()+60)==2,
+    'a new personal question lost its existing attention')
 ai,ar,ar2,ao,ao2=attentionCustomer('GreenBuyer')
 attentionWhisper('GreenBuyer','sent')
 click(visible('GreenBuyer')[1])
@@ -1133,7 +1140,7 @@ Scan.Utils.SendResponses=realSender
 assert(A.State(ao,ar)=='attention' and visible('FailedReadyAnswer')[1]:IsShown(),
     'failed ready answer silenced the question or discarded its card')
 click(visible('FailedReadyAnswer')[1])
-assert(A.State(ao,ar)=='quiet')
+assert(A.State(ao,ar)=='attention')
 for _,callback in ipairs(throttleCallbacks) do callback() end
 assert(A.State(ao,ar)=='attention' and A.State(ao2,ar2)=='attention',
     'server-throttled ready answer left the question falsely resolved')
@@ -1156,10 +1163,10 @@ end
 QuickReplies:ShowOrderGreeting('GreetingReadyAnswer','new request',ai,{ar,ar2},greetingEntry)
 click(visible('GreetingReadyAnswer')[1])
 Scan.SendOrderGreeting=normalGreeting
-assert(A.State(ao,ar)=='quiet' and A.State(ao2,ar2)=='quiet' and ar.customer_answered,
-    'a generated greeting quick reply left its answered request yellow')
-print('Ready-answer attention passed: actual clicks, merged rows, green protection, failures, server throttle, old cards and greeting groups.')
--- Screenshot acknowledgements must re-arm a row resolved by a ready answer,
+assert(A.State(ao,ar)=='attention' and A.State(ao2,ar2)=='attention' and ar.customer_answered,
+    'a generated greeting quick reply silenced its answered request')
+print('Ready-answer attention passed: actual clicks preserve both colours/reminders, merged rows, failures, old cards and greeting groups.')
+-- Screenshot acknowledgements must turn a row green after a ready answer,
 -- survive generic classifications from older peers, and stay green after omw.
 cfg.templates.CUSTOM_2.keywords='sent,did,posted,check,resending,resent,you got it,order out'
 for index,body in ipairs({'I did','did','posted','yoo check it','check pls','Thx you got it','resending','resent','order out, ty'}) do
@@ -1167,7 +1174,7 @@ for index,body in ipairs({'I did','did','posted','yoo check it','check pls','Thx
     ai,ar,ar2,ao,ao2=attentionCustomer(name)
     attentionWhisper(name,'hello')
     click(visible(name)[1])
-    assert(A.State(ao,ar)=='quiet')
+    assert(A.State(ao,ar)=='attention')
     attentionWhisper(name,body,'attention')
     assert(A.State(ao,ar)=='sent' and A.State(ao2,ar2)=='sent',
         'new screenshot acknowledgement stayed quiet/yellow: '..body)

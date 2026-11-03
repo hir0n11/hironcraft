@@ -44,21 +44,23 @@ assert(A.State(o,r)=='quiet')
 Incoming('where do I send it?',1001,'question-2')
 assert(A.State(o,r)=='attention' and r.firstAnsweredAt==1001)
 local context=A.ReplyContext(o)
-local marker=A.Resolve(o,context,true)
+assert(not A.Resolve(o,context,true) and A.State(o,r)=='attention',
+    'a quick reply still silenced a yellow reminder')
+local marker=A.Resolve(o,context,false)
 assert(marker and r.customer_answered and A.State(o,r)=='quiet')
 assert(A.Collect(1500)==0 and A.KeepAlive(o,r))
 Incoming('is the quality guaranteed?',1200,'question-3')
 assert(A.State(o,r)=='attention' and r.firstAnsweredAt==1200)
 assert(A.Collect(1259)==0 and A.Collect(1260)==1,'a new unresolved question rang before its minute')
-assert(not A.Resolve(o,context,true),'an old quick-reply context silenced a newer question')
+assert(not A.Resolve(o,context,false),'an old context silenced a newer question')
 -- No future/stale completion/duplicate resolution may mark a replacement row.
 local stale=A.ReplyContext(o)
 r.requestToken='replacement'
-assert(not A.Resolve(o,stale,true))
+assert(not A.Resolve(o,stale,false))
 r.requestToken='job-1'
 local obsolete={token='old-token',replyAt=1000}
 r.attentionResolved=obsolete
-local corrected,previous=A.Resolve(o,A.ReplyContext(o),true)
+local corrected,previous=A.Resolve(o,A.ReplyContext(o),false)
 assert(corrected and previous==nil and A.UndoResolution(o,corrected,previous)
     and A.State(o,r)=='attention','rollback restored obsolete request metadata')
 Incoming('sent',1201,'send-1')
@@ -89,21 +91,22 @@ local stalePacket={}
 for key,value in pairs(snapshot) do stalePacket[key]=value end
 stalePacket.n=(r.attentionRevision or 0)+1;stalePacket.by='peer';stalePacket.at=now
 assert(A.Receive(stalePacket) and A.State(o,r)=='attention','delayed remote acknowledgement hid a newer question')
--- A successful-send assumption rolled back by server throttling must restore
--- the yellow row, but cannot override a later manual decision or new request.
-local rollback=A.Resolve(o,A.ReplyContext(o),true)
+-- Undo is bound to one exact manual marker and cannot override a later
+-- manual decision or new request.
+local rollback=A.Resolve(o,A.ReplyContext(o),false)
 assert(rollback and A.State(o,r)=='quiet')
 assert(A.UndoResolution(o,rollback,nil) and A.State(o,r)=='attention')
-rollback=A.Resolve(o,A.ReplyContext(o),true)
+rollback=A.Resolve(o,A.ReplyContext(o),false)
 Incoming('sent',1401,'new-send')
 assert(A.Acknowledge(o))
-assert(not A.UndoResolution(o,rollback,nil) and A.State(o,r)=='quiet','old throttle rollback undid a later manual decision')
+assert(not A.UndoResolution(o,rollback,nil) and A.State(o,r)=='quiet','old undo affected a later manual decision')
 A.SetState(o,'attention')
 assert(A.State(o,r)=='attention' and A.Collect(1460)==0 and A.Collect(1461)==1)
 -- Bad metadata is rejected without touching the second check or resolution.
 for _,invalid in ipairs({{handled=true},{handled='yes',handledReplyAt=0},
     {handled=true,handledReplyAt=0/0},{handled=true,handledReplyAt=math.huge},
-    {handled=true,handledReplyAt=now,handledReplyID={}},{handledReplyID='without-a-flag'}}) do
+    {handled=true,handledReplyAt=now,handledReplyID={}},{handledReplyID='without-a-flag'},
+    {handledManually=true},{handled=true,handledReplyAt=now,handledManually='yes'}}) do
     local packet={customer='Buyer',responseID=1,token='job-1',by='peer',n=999,at=now}
     for key,value in pairs(invalid) do packet[key]=value end
     assert(not A.Receive(packet),'invalid handled metadata was accepted')
@@ -113,7 +116,7 @@ assert(r.customer_answered)
 -- old message remains quiet; the next message with a different identity wakes.
 now=1500
 local pending={customer='Late',responseID=3,token='job-3',by='peer',n=1,at=1500,
-    handled=true,handledReplyAt=1500,handledReplyID='late-message'}
+    handled=true,handledManually=true,handledReplyAt=1500,handledReplyID='late-message'}
 assert(not A.Receive(pending))
 local late,lr,lo=Add('Late',3)
 A.ProcessPending()
@@ -136,4 +139,24 @@ assert(r.customer_answered and r.greeting_sent and not r.attentionResolved and n
 now=1701;M.MarkReply(info,{body='where?',receivedAt=now,syncID='next-request-question'})
 assert(A.State(o,r)=='attention' and A.Collect(1760)==1 and A.Collect(1761)==2,
     'replacement request inherited old attention or an old reminder clock')
-print('Attention resolution passed: checks retained, yellow/green acknowledgement, quick-reply green protection, pending rows, fresh minute, stale contexts, sync, reload and throttle rollback.')
+-- Legacy auto-handled state and packets must no longer hide reminders. A
+-- current manual acknowledgement survives legacy peer snapshots/rollbacks.
+local legacy={token=r.requestToken,at=now,replyAt=r.lastCustomerReplyAt,replyID=r.lastCustomerReplyID}
+r.attentionResolved=legacy
+assert(A.State(o,r)=='attention' and A.Collect(1761)==2,'legacy auto-handled state still muted reminders')
+assert(A.Acknowledge(o) and r.attentionResolved.manual)
+local function LegacyPacket(handled,n)
+    return {customer='Buyer',responseID=1,token=r.requestToken,by='old-peer',n=n,at=now,
+        handled=handled,handledReplyAt=r.lastCustomerReplyAt,handledReplyID=r.lastCustomerReplyID}
+end
+assert(A.Receive(LegacyPacket(false,999)) and A.State(o,r)=='quiet','old peer rollback undid manual acknowledgement')
+Incoming('where now?',1702,'after-legacy-rollback')
+assert(A.Receive(LegacyPacket(true,1000)) and A.State(o,r)=='attention',
+    'old peer automatic handling silenced a new question')
+assert(A.Acknowledge(o))
+for _,packet in ipairs(A.Snapshot()) do
+    if packet.customer=='Buyer' and not packet.reply then
+        assert(packet.handled and packet.handledManually,'manual origin was lost in a linked snapshot')
+    end
+end
+print('Attention resolution passed: manual yellow/green acknowledgement, second check retained, quick replies ignored, stale contexts, exact sync, reload and legacy automatic markers.')

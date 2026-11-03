@@ -10,33 +10,6 @@ end
 
 local QuickReplies = {}
 HironCraftScan.QuickReplies = QuickReplies
-local function AttentionContext(customer,responseID,entry)
-    local attention=HironCraftScan.CustomerAttention
-    return attention and attention.ReplyContext
-        and attention.ReplyContext({customerName=customer,responseID=responseID},entry) or nil
-end
-local recentAttentionResolutions
-local function ResolveAttention(customer,contexts,refresh)
-    local attention=HironCraftScan.CustomerAttention
-    if not attention or not attention.Resolve then return end
-    local changed={}
-    for _,context in ipairs(contexts or {}) do
-        local order={customerName=customer,responseID=context.responseID}
-        local marker,previous=attention.Resolve(order,context,true)
-        if marker then changed[#changed+1]={order=order,marker=marker,previous=previous} end
-    end
-    recentAttentionResolutions={at=GetTime(),changes=changed}
-    if #changed>0 and refresh~=false and HironCraftScanCraftingOrderPage
-        and HironCraftScanCraftingOrderPage.ShowGeneric then HironCraftScanCraftingOrderPage:ShowGeneric() end
-end
-local function OptionAttentionContexts(option)
-    if option.attentionContexts then return option.attentionContexts end
-    local contexts={}
-    for _,source in ipairs(option.sources or {option}) do
-        if source.attentionContext then contexts[#contexts+1]=source.attentionContext end
-    end
-    return contexts
-end
 
 local MAX_MESSAGE_BYTES = 160
 local MAX_MESSAGE_WORDS = 12
@@ -1271,7 +1244,6 @@ function QuickReplies:BuildOrderStatusOption(order, entry)
         requestToken = response.requestToken,
         requestTime = response.time,
         templateKey = statusOption.template,
-        attentionContext = AttentionContext(order.customerName,order.responseID),
         statusEntry = entry,
         rejectionOrderID = entry.status == 'rejected' and entry.craftingOrderID or nil,
         templateLabel = self:GetTemplateLabel(statusOption.template),
@@ -1589,7 +1561,7 @@ local function SendOption(toast, option)
     if option.action == DECLINE_REASON_ACTION then
         -- The decline as it stands now: a new order may have answered it since.
         local decline = QuickReplies:FindDecline(option.customer, option.responseID, option.declineOrderID)
-        local result = decline and QuickReplies:SendDeclineReason(decline,OptionAttentionContexts(option))
+        local result = decline and QuickReplies:SendDeclineReason(decline)
         -- Not now (the server holds messages back): the card stays for another click.
         if result == false then return end
         if not result then
@@ -1609,20 +1581,13 @@ local function SendOption(toast, option)
             DismissEquivalentToasts(option)
             return
         end
-        local sent,greeted=HironCraftScan.SendOrderGreeting({
+        local sent=HironCraftScan.SendOrderGreeting({
             customerName = option.customer,
             responseID = option.responseID,
         }, true, 'card')
         if sent == false then
             return
         end
-        local sentTokens={}
-        for _,row in ipairs(greeted or {response}) do sentTokens[row.requestToken or row]=true end
-        local contexts={}
-        for _,context in ipairs(OptionAttentionContexts(option)) do
-            if sentTokens[context.token] then contexts[#contexts+1]=context end
-        end
-        ResolveAttention(option.customer,contexts,false)
         -- The normal row-click path refreshes the table after greeting. The
         -- toast is a separate click path, so do the same here or its first
         -- status icon remains a stale red X until another UI event arrives.
@@ -1675,7 +1640,6 @@ local function SendOption(toast, option)
     if HironCraftScan.Utils.SendResponses(messages, option.customer, true) == false then return end
     QuickReplies:RememberSentReply(option.customer, reply)
     QuickReplies:RememberSentTemplate(option.customer, templateKey or option.templateKey)
-    ResolveAttention(option.customer,OptionAttentionContexts(option))
     if option.statusEntry then
         local statusOrder = { customerName = option.customer, responseID = option.responseID }
         QuickReplies:RememberSentStatusReply(statusOrder, option.statusEntry)
@@ -1892,7 +1856,7 @@ end
 
 -- Sends the reason, on the crafter's click (a card or the chat menu). Returns
 -- the text, false when it could not be sent now, nil when there is none.
-function QuickReplies:SendDeclineReason(decline,contexts)
+function QuickReplies:SendDeclineReason(decline)
     local reply = self:BuildDeclineReason(decline)
     if not reply then return nil end
     local customer = decline.order.customerName
@@ -1901,7 +1865,6 @@ function QuickReplies:SendDeclineReason(decline,contexts)
     if HironCraftScan.Utils.SendResponses(messages, customer, true) == false then return false end
     self:RememberSentReply(customer, reply)
     self:RememberSentTemplate(customer, DECLINE_REASON_TEMPLATE_KEY)
-    ResolveAttention(customer,contexts or {AttentionContext(customer,decline.order.responseID)})
     return reply
 end
 
@@ -1933,7 +1896,6 @@ function QuickReplies:OfferDeclineReason(customer, message, customerGuid,replyEn
                 -- Only for the card's portrait: there may be no row behind it.
                 response = { professionID = described and described.profID or nil },
                 responseID = decline.order.responseID,
-                attentionContext = AttentionContext(customer,decline.order.responseID,replyEntry),
                 declineOrderID = decline.entry.craftingOrderID,
                 templateKey = DECLINE_REASON_TEMPLATE_KEY,
                 templateLabel = self:GetTemplateLabel(DECLINE_REASON_TEMPLATE_KEY),
@@ -1967,7 +1929,6 @@ function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, respons
     end
 
     local selected
-    local attentionContexts={}
     local contextLabels = {}
     local seenLabels = {}
     for _, response in ipairs(responses or {}) do
@@ -1977,8 +1938,6 @@ function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, respons
             and IsListedOrder(customer, response.responseID)
         then
             selected = selected or response
-            local context=AttentionContext(customer,response.responseID,replyEntry)
-            if context then attentionContexts[#attentionContexts+1]=context end
             local label = ResponseLabel(response)
             if label and not seenLabels[label] then
                 seenLabels[label] = true
@@ -2004,7 +1963,6 @@ function QuickReplies:ShowOrderGreeting(customer, message, customerInfo, respons
     end
     local option = {
         action = ORDER_GREETING_ACTION,
-        attentionContexts=attentionContexts,
         customer = customer,
         message = message,
         response = selected,
@@ -2068,7 +2026,6 @@ function QuickReplies:BuildPopupOptions(customer, message, responses, templateKe
                     responseID = candidate.responseID,
                     requestToken = candidate.response.requestToken,
                     requestTime = candidate.response.time,
-                    attentionContext = AttentionContext(customer,candidate.responseID,replyEntry),
                     templateKey = templateKey,
                     templateLabel = self:GetTemplateLabel(templateKey),
                     reply = reply,
@@ -2421,21 +2378,6 @@ function QuickReplies:OfferPendingOrderStatusReplies()
     return offered
 end
 
-if HironCraftScan.Utils.OnChatThrottled then
-    HironCraftScan.Utils.OnChatThrottled(function()
-        local recent=recentAttentionResolutions
-        recentAttentionResolutions=nil
-        local attention=HironCraftScan.CustomerAttention
-        if not recent or GetTime()-recent.at>2 or not attention or not attention.UndoResolution then return end
-        local changed=false
-        for _,item in ipairs(recent.changes) do
-            changed=attention.UndoResolution(item.order,item.marker,item.previous) or changed
-        end
-        if changed and HironCraftScanCraftingOrderPage and HironCraftScanCraftingOrderPage.ShowGeneric then
-            HironCraftScanCraftingOrderPage:ShowGeneric()
-        end
-    end)
-end
 HironCraftScan.Utils.onLoad(function()
     EnsureConfig()
 
